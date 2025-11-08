@@ -43,7 +43,7 @@ public class AuthController {
             @Valid @RequestBody LogoutRequestDto requestDto) {
 
         authService.logout(requestDto.userId());
-        ResponseDTO<Void> response = ResponseDTO.ok("로그아웃되었습니다.");
+        ResponseDTO<Void> response = ResponseDTO.okWithMessage("로그아웃되었습니다.");
         return ResponseEntity
                 .status(response.getCode())
                 .body(response);
