@@ -3,9 +3,13 @@ package com.pawbridge.userservice.filter;
 import com.pawbridge.userservice.dto.request.LoginRequestDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.userservice.dto.respone.LoginResponseDto;
+import com.pawbridge.userservice.entity.RefreshToken;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.jwt.JwtProvider;
+import com.pawbridge.userservice.repository.RefreshTokenRepository;
 import com.pawbridge.userservice.security.PrincipalDetails;
+import com.pawbridge.userservice.util.CustomResponseUtil;
+import com.pawbridge.userservice.util.ResponseDTO;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,7 +24,9 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 /**
  * JWT를 이용한 로그인 인증 필터
@@ -28,13 +34,16 @@ import java.util.ArrayList;
 public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilter {
 
     private final JwtProvider jwtProvider;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     public JwtAuthenticationFilter(
             AuthenticationManager authenticationManager,
-            JwtProvider jwtProvider
+            JwtProvider jwtProvider,
+            RefreshTokenRepository refreshTokenRepository
     ) {
         super.setAuthenticationManager(authenticationManager);
         this.jwtProvider = jwtProvider;
+        this.refreshTokenRepository = refreshTokenRepository;
         // 로그인 엔드포인트 설정
         setFilterProcessesUrl("/api/user/login");
     }
@@ -86,15 +95,47 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
         // 인증된 사용자 정보 추출
         User user = ((PrincipalDetails) authResult.getPrincipal()).getUser();
 
-        // JWT 토큰 생성
-        String token = jwtProvider.createToken(user);
+        // Access Token 생성
+        String accessToken = jwtProvider.createAccessToken(user);
 
-        // 응답 생성
-        LoginResponseDto loginResponseDto = LoginResponseDto.fromEntity(user, token);
+        // Refresh Token 생성
+        String refreshToken = jwtProvider.createRefreshToken();
+
+        // Refresh Token을 DB에 저장 (기존 토큰이 있으면 업데이트, 없으면 새로 생성)
+        long refreshTokenExpirationMs = jwtProvider.getRefreshTokenExpiration();
+        LocalDateTime expiresAt = LocalDateTime.now()
+                .plusSeconds(TimeUnit.MILLISECONDS.toSeconds(refreshTokenExpirationMs));
+
+        refreshTokenRepository.findByUserId(user.getUserId())
+                .ifPresentOrElse(
+                        // 기존 토큰이 있으면 업데이트
+                        existingToken -> {
+                            existingToken.updateToken(refreshToken, expiresAt);
+                            refreshTokenRepository.save(existingToken);
+                        },
+                        // 없으면 새로 생성
+                        () -> {
+                            RefreshToken newRefreshToken = RefreshToken.builder()
+                                    .token(refreshToken)
+                                    .userId(user.getUserId())
+                                    .expiresAt(expiresAt)
+                                    .build();
+                            refreshTokenRepository.save(newRefreshToken);
+                        }
+                );
+
+        // 응답 데이터 생성
+        LoginResponseDto loginResponseDto = LoginResponseDto.fromEntity(user, accessToken, refreshToken);
+
+        // ResponseDTO로 감싸기
+        ResponseDTO<LoginResponseDto> responseDTO = ResponseDTO.okWithData(
+                loginResponseDto,
+                "로그인에 성공했습니다."
+        );
 
         // JSON 응답 전송
         ObjectMapper objectMapper = new ObjectMapper();
-        String jsonResponse = objectMapper.writeValueAsString(loginResponseDto);
+        String jsonResponse = objectMapper.writeValueAsString(responseDTO);
 
         response.setStatus(HttpStatus.OK.value());
         response.setContentType("application/json");
@@ -113,10 +154,8 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
     ) throws IOException, ServletException {
         String errorMessage = getAuthenticationErrorMessage(exception);
 
-        response.setStatus(HttpStatus.UNAUTHORIZED.value());
-        response.setContentType("application/json");
-        response.setCharacterEncoding("UTF-8");
-        response.getWriter().write("{\"error\": \"" + errorMessage + "\"}");
+        // CustomResponseUtil 사용하여 통일된 에러 응답
+        CustomResponseUtil.fail(response, errorMessage, HttpStatus.UNAUTHORIZED);
     }
 
     /**

@@ -2,6 +2,7 @@ package com.pawbridge.userservice.config;
 
 import com.pawbridge.userservice.filter.JwtAuthenticationFilter;
 import com.pawbridge.userservice.jwt.JwtProvider;
+import com.pawbridge.userservice.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +22,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtProvider jwtProvider;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     /**
      * BCryptPasswordEncoder Bean 등록
@@ -44,7 +46,7 @@ public class SecurityConfig {
 
         // JwtAuthenticationFilter 생성
         JwtAuthenticationFilter jwtAuthenticationFilter =
-                new JwtAuthenticationFilter(authenticationManager, jwtProvider);
+                new JwtAuthenticationFilter(authenticationManager, jwtProvider, refreshTokenRepository);
 
         http
                 // CSRF 비활성화 (JWT 사용)

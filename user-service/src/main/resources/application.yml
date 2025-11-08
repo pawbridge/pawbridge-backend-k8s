@@ -23,4 +23,5 @@ spring:
 
 jwt:
   secret: pawbridge-secret-key-for-jwt-token-generation-minimum-256-bits
-  access-token-expiration: 86400000  # 24시간 (밀리초)
+  access-token-expiration: 900000      # 15분 (밀리초)
+  refresh-token-expiration: 604800000  # 7일 (밀리초)

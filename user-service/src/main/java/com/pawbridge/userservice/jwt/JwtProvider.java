@@ -16,19 +16,22 @@ public class JwtProvider {
 
     private final SecretKey secretKey;
     private final long accessTokenExpiration;
+    private final long refreshTokenExpiration;
 
     public JwtProvider(
             @Value("${jwt.secret}") String secret,
-            @Value("${jwt.access-token-expiration}") long accessTokenExpiration
+            @Value("${jwt.access-token-expiration}") long accessTokenExpiration,
+            @Value("${jwt.refresh-token-expiration}") long refreshTokenExpiration
     ) {
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTokenExpiration = accessTokenExpiration;
+        this.refreshTokenExpiration = refreshTokenExpiration;
     }
 
     /**
-     * JWT 토큰 생성
+     * Access Token 생성
      */
-    public String createToken(User user) {
+    public String createAccessToken(User user) {
         Date now = new Date();
         Date expiration = new Date(now.getTime() + accessTokenExpiration);
 
@@ -43,22 +46,36 @@ public class JwtProvider {
     }
 
     /**
-     * JWT 토큰에서 이메일 추출
+     * Refresh Token 생성
      */
-    public String getEmail(String token) {
-        return getClaims(token).getSubject();
+    public String createRefreshToken() {
+        Date now = new Date();
+        Date expiration = new Date(now.getTime() + refreshTokenExpiration);
+
+        return Jwts.builder()
+                .issuedAt(now)
+                .expiration(expiration)
+                .signWith(secretKey)
+                .compact();
     }
 
     /**
-     * JWT 토큰 검증
+     * Refresh Token 검증
      */
-    public boolean validateToken(String token) {
+    public boolean validateRefreshToken(String token) {
         try {
             getClaims(token);
             return true;
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * Refresh Token 만료 시간 반환
+     */
+    public long getRefreshTokenExpiration() {
+        return refreshTokenExpiration;
     }
 
     /**

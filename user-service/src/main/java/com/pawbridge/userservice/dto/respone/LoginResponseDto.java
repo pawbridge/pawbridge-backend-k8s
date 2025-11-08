@@ -6,14 +6,16 @@ public record LoginResponseDto(
         Long userId,
         String email,
         String name,
-        String token
+        String accessToken,
+        String refreshToken
 ) {
-    public static LoginResponseDto fromEntity(User user, String token) {
+    public static LoginResponseDto fromEntity(User user, String accessToken, String refreshToken) {
         return new LoginResponseDto(
                 user.getUserId(),
                 user.getEmail(),
                 user.getName(),
-                token
+                accessToken,
+                refreshToken
         );
     }
 }
