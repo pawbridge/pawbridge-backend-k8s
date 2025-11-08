@@ -3,6 +3,7 @@ package com.pawbridge.userservice.controller;
 import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.respone.SignUpResponseDto;
 import com.pawbridge.userservice.service.UserService;
+import com.pawbridge.userservice.util.ResponseDTO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -20,12 +21,14 @@ public class UserController {
 
     // 회원가입
     @PostMapping("/sign-up")
-    public ResponseEntity<SignUpResponseDto> signup(
+    public ResponseEntity<ResponseDTO<SignUpResponseDto>> signup(
             @Valid @RequestBody SignUpRequestDto signUpRequestDto) {
 
         SignUpResponseDto signUpResponseDto = userService.signUp(signUpRequestDto);
-        return ResponseEntity.ok(signUpResponseDto);
-
+        ResponseDTO<SignUpResponseDto> response = ResponseDTO.okWithData(signUpResponseDto);
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
     }
 
 }
