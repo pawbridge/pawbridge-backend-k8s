@@ -6,9 +6,9 @@ spring:
     name: user-service
 
   datasource:
-    url: jdbc:mysql://localhost:9011/userdb?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
-    username: root
-    password: root
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -22,6 +22,6 @@ spring:
     show-sql: true
 
 jwt:
-  secret: pawbridge-secret-key-for-jwt-token-generation-minimum-256-bits
-  access-token-expiration: 900000      # 15분 (밀리초)
-  refresh-token-expiration: 604800000  # 7일 (밀리초)
+  secret: ${JWT_SECRET}
+  access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION}      # 15분 (밀리초)
+  refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION}  # 7일 (밀리초)

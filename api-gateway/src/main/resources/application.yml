@@ -53,4 +53,4 @@ eureka:
 
 # JWT
 jwt:
-  secret: pawbridge-secret-key-for-jwt-token-generation-minimum-256-bits
+  secret: ${JWT_SECRET}
