@@ -18,8 +18,9 @@ public class PrincipalDetails implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // 기본 권한 설정 (추후 User 엔티티에 Role 필드 추가 시 변경)
-        return List.of(new SimpleGrantedAuthority("ROLE_USER"));
+        // User 엔티티의 role 필드를 GrantedAuthority로 변환
+        // user.getRole().name() → "ROLE_USER" 또는 "ROLE_ADMIN"
+        return List.of(new SimpleGrantedAuthority(user.getRole().name()));
     }
 
     @Override

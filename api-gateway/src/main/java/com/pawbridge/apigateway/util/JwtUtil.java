@@ -57,6 +57,13 @@ public class JwtUtil {
     }
 
     /**
+     * JWT 토큰에서 role 추출
+     */
+    public String getRoleFromToken(String token) {
+        return getClaims(token).get("role", String.class);
+    }
+
+    /**
      * JWT 토큰에서 Claims 추출
      */
     private Claims getClaims(String token) {

@@ -42,8 +42,7 @@ public class UserServiceImpl implements UserService {
         User newUser = signUpRequestDto.toEntity(
                 signUpRequestDto.email(),
                 signUpRequestDto.name(),
-                encodingPassword,
-                signUpRequestDto.phoneNumber());
+                encodingPassword);
 
         userRepository.save(newUser);
 

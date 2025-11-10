@@ -70,6 +70,7 @@ public class JwtAuthorizationGatewayFilterFactory
                 Long userId = jwtUtil.getUserIdFromToken(token);
                 String email = jwtUtil.getEmailFromToken(token);
                 String name = jwtUtil.getNameFromToken(token);
+                String role = jwtUtil.getRoleFromToken(token);
 
                 // Authorization 헤더는 유지하고, X-User-* 헤더 추가
                 // (외부 서비스 호출 시 원본 토큰 필요할 수 있음)
@@ -77,9 +78,10 @@ public class JwtAuthorizationGatewayFilterFactory
                         .header("X-User-Id", userId.toString())
                         .header("X-User-Email", email)
                         .header("X-User-Name", name)
+                        .header("X-User-Role", role)
                         .build();
 
-                log.info("JWT 검증 성공 - userId: {}, email: {}, path: {}", userId, email, path);
+                log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
 
                 return chain.filter(exchange.mutate().request(modifiedRequest).build());
 

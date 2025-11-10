@@ -35,8 +35,9 @@ public class User {
     @Column(nullable = false)
     private String password;
 
-    @Column(name = "phone_number", length = 20)
-    private String phoneNumber;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Role role;
 
     @CreatedDate
     private LocalDateTime createdAt;

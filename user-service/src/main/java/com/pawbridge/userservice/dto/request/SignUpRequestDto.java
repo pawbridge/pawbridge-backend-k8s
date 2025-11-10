@@ -1,5 +1,6 @@
 package com.pawbridge.userservice.dto.request;
 
+import com.pawbridge.userservice.entity.Role;
 import com.pawbridge.userservice.entity.User;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -18,16 +19,15 @@ public record SignUpRequestDto(
         @Size(min = 6, message = "비밀번호는 최소 6자 이상이어야 합니다.")
         String password,
         @Size(min = 6, message = "비밀번호는 최소 6자 이상이어야 합니다.")
-        String rePassword,
-        String phoneNumber
+        String rePassword
 ) {
 
-    public User toEntity(String email, String name, String password, String phoneNumber) {
+    public User toEntity(String email, String name, String password) {
         return User.builder()
                 .email(email)
                 .name(name)
                 .password(password)
-                .phoneNumber(phoneNumber)
+                .role(Role.ROLE_USER)  // 회원가입 시 기본 권한: 일반 사용자
                 .build();
     }
 
