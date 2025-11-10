@@ -7,7 +7,7 @@ spring:
 
   cloud:
     gateway:
-      # 모든 route에 기본으로 적용되는 필터
+      # 모든 route에 기본으로 적용되는 필터 JwtAuthorizationGatewayFilterFactory에서  GatewayFilterFactory를 제외함(정해진 규칙).
       default-filters:
         - JwtAuthorization
 
