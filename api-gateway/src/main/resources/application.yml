@@ -1,0 +1,56 @@
+server:
+  port: 8000
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      # 모든 route에 기본으로 적용되는 필터
+      default-filters:
+        - JwtAuthorization
+
+      routes:
+        # User Service
+        - id: user-service
+          uri: http://localhost:8080
+          predicates:
+            - Path=/api/user/**, /api/auth/**
+
+      # CORS - 굳이 코드로 cors 설정할 필요는 없다.
+#      나중에 실제 배포할 때는:
+#
+#      allowedOriginPatterns:
+#        - "https://pawbridge.com"
+#        - "https://www.pawbridge.com"
+#        - "https://admin.pawbridge.com"
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns:
+              - "http://localhost:[*]"     # 로컬 개발 (모든 포트)
+              - "http://127.0.0.1:[*]"     # 로컬 개발
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders:
+              - Authorization              # JWT 토큰
+              - Content-Type               # 요청 본문 타입
+              - Accept                     # 응답 타입
+            exposedHeaders:
+              - Authorization              # 응답 헤더 노출
+            allowCredentials: false        # 개발 단계에서는 false
+
+# Eureka (현재 사용 안 함)
+eureka:
+  client:
+    enabled: false
+
+# JWT
+jwt:
+  secret: pawbridge-secret-key-for-jwt-token-generation-minimum-256-bits

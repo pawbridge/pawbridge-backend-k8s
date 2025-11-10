@@ -1,6 +1,5 @@
 package com.pawbridge.userservice.controller;
 
-import com.pawbridge.userservice.dto.request.LogoutRequestDto;
 import com.pawbridge.userservice.dto.request.RefreshTokenRequestDto;
 import com.pawbridge.userservice.dto.respone.RefreshTokenResponseDto;
 import com.pawbridge.userservice.service.AuthService;
@@ -8,10 +7,7 @@ import com.pawbridge.userservice.util.ResponseDTO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -40,9 +36,9 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public ResponseEntity<ResponseDTO<Void>> logout(
-            @Valid @RequestBody LogoutRequestDto requestDto) {
+            @RequestHeader("X-User-Id") Long userId) {
 
-        authService.logout(requestDto.userId());
+        authService.logout(userId);
         ResponseDTO<Void> response = ResponseDTO.okWithMessage("로그아웃되었습니다.");
         return ResponseEntity
                 .status(response.getCode())
