@@ -56,11 +56,8 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                // 엔드포인트 권한 설정
+                // 엔드포인트 권한 설정 (API Gateway에서 인증 처리)
                 .authorizeHttpRequests(auth -> auth
-                        // 회원가입, 로그인은 인증 불필요
-                        .requestMatchers("/api/user/sign-up", "/api/user/login").permitAll()
-                        // 나머지는 모두 허용 (API Gateway에서 인증 처리)
                         .anyRequest().permitAll()
                 )
 
