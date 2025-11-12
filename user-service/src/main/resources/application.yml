@@ -29,6 +29,7 @@ spring:
             client-id: ${GOOGLE_CLIENT_ID}
             client-secret: ${GOOGLE_SECRET_KEY}
             scope: email, profile
+            redirect-uri: ${REDIRECT_URI} # 이렇게 명시하지 않으면 Spring Security가 자동으로 자신의 주소(http://localhost:8081)를 사용
 
 jwt:
   secret: ${JWT_SECRET}

@@ -2,9 +2,11 @@ package com.pawbridge.userservice.service;
 
 import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.respone.SignUpResponseDto;
+import com.pawbridge.userservice.dto.respone.UserInfoResponseDto;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.exception.EmailDuplicateException;
 import com.pawbridge.userservice.exception.InconsistentPasswordException;
+import com.pawbridge.userservice.exception.UserNotFoundException;
 import com.pawbridge.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -25,8 +27,9 @@ public class UserServiceImpl implements UserService {
     // 회원가입
     public SignUpResponseDto signUp(SignUpRequestDto signUpRequestDto) {
 
-        // 이메일 중복 여부 검증
-        Optional<User> existedUser = userRepository.findByEmail(signUpRequestDto.email());
+        // 이메일 중복 여부 검증 (LOCAL provider만 확인)
+        Optional<User> existedUser = userRepository.findByEmailAndProvider(
+                signUpRequestDto.email(), "LOCAL");
         if (existedUser.isPresent()) {
             throw new EmailDuplicateException();
         }
@@ -47,6 +50,16 @@ public class UserServiceImpl implements UserService {
         userRepository.save(newUser);
 
         return SignUpResponseDto.fromEntity(newUser);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    // 내 정보 조회
+    public UserInfoResponseDto getUserInfo(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(UserNotFoundException::new);
+
+        return UserInfoResponseDto.fromEntity(user);
     }
 
 }

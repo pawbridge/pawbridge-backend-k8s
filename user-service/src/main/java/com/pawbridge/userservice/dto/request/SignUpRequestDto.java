@@ -23,12 +23,7 @@ public record SignUpRequestDto(
 ) {
 
     public User toEntity(String email, String name, String password) {
-        return User.builder()
-                .email(email)
-                .name(name)
-                .password(password)
-                .role(Role.ROLE_USER)  // 회원가입 시 기본 권한: 일반 사용자
-                .build();
+        return User.createLocalUser(email, name, password);
     }
 
 }
