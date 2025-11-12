@@ -45,15 +45,18 @@ public class Animal {
      * APMS 유기번호 (desertionNo)
      * - 예: "448567202501701"
      * - UNIQUE 제약: 중복 체크용
+     * - APMS 배치 전용 (수동 등록 시 null)
      */
-    @Column(nullable = false, unique = true, length = 50)
+    @Column(unique = true, length = 50)
     private String apmsDesertionNo;
 
     /**
-     * APMS 공고번호 (noticeNo)
-     * - 예: "경남-창원1-2025-00833"
+     * 공고번호 (noticeNo)
+     * - 예: "경남-창원1-2025-00833", "경기-양평-2025-00429"
+     * - APMS 배치 + 수동 등록 모두 사용
+     * - UNIQUE 제약: 중복 방지
      */
-    @Column(nullable = false, length = 100)
+    @Column(nullable = false, unique = true, length = 100)
     private String apmsNoticeNo;
 
     // ========== 동물 기본 정보 (9개) ==========
@@ -122,6 +125,7 @@ public class Animal {
      * APMS 진행상태 (processState)
      * - 예: "공고중", "보호중"
      * - APMS의 원본 상태 (자체 status와 분리)
+     * - APMS 배치 전용
      */
     @Column(length = 50)
     private String apmsProcessState;
@@ -129,14 +133,18 @@ public class Animal {
     /**
      * 공고 시작일 (noticeSdt)
      * - YYYYMMDD → LocalDate 변환
+     * - APMS 배치 + 수동 등록 모두 사용 (필수)
      */
+    @Column(nullable = false)
     private LocalDate noticeStartDate;
 
     /**
      * 공고 종료일 (noticeEdt)
      * - YYYYMMDD → LocalDate 변환
      * - 공고 종료 임박 정렬에 사용
+     * - APMS 배치 + 수동 등록 모두 사용 (필수)
      */
+    @Column(nullable = false)
     private LocalDate noticeEndDate;
 
     /**
