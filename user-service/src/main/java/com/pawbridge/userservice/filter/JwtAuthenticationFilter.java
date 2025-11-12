@@ -45,7 +45,7 @@ public class JwtAuthenticationFilter extends UsernamePasswordAuthenticationFilte
         this.jwtProvider = jwtProvider;
         this.refreshTokenRepository = refreshTokenRepository;
         // 로그인 엔드포인트 설정
-        setFilterProcessesUrl("/api/user/login");
+        setFilterProcessesUrl("/api/v1/auth/login");
     }
 
     /**

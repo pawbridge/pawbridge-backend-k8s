@@ -14,13 +14,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/user")
+@RequestMapping("/api/v1/user")
 public class UserController {
 
     private final UserService userService;
 
     // 회원가입
-    @PostMapping("/sign-up")
+    @PostMapping("/signup")
     public ResponseEntity<ResponseDTO<SignUpResponseDto>> signup(
             @Valid @RequestBody SignUpRequestDto signUpRequestDto) {
 

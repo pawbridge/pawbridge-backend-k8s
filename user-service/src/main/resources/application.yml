@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 8081
 
 spring:
   application:
@@ -21,7 +21,19 @@ spring:
         show_sql: true
     show-sql: true
 
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_SECRET_KEY}
+            scope: email, profile
+
 jwt:
   secret: ${JWT_SECRET}
   access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION}      # 15분 (밀리초)
   refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION}  # 7일 (밀리초)
+
+oauth2:
+  redirect-uri: ${OAUTH2_REDIRECT_URI}
