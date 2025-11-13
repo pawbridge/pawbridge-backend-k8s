@@ -1,6 +1,9 @@
 package com.pawbridge.animalservice.service;
 
+import com.pawbridge.animalservice.dto.response.ShelterDetailResponse;
+import com.pawbridge.animalservice.dto.response.ShelterResponse;
 import com.pawbridge.animalservice.entity.Shelter;
+import com.pawbridge.animalservice.mapper.ShelterMapper;
 import com.pawbridge.animalservice.repository.ShelterRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +18,7 @@ import java.util.List;
  * Shelter Query Service (R)
  * - 보호소 조회, 검색 담당
  * - 읽기 전용 트랜잭션
+ * - Response DTO 반환
  */
 @Service
 @Transactional(readOnly = true)
@@ -22,69 +26,71 @@ import java.util.List;
 public class ShelterQueryService {
 
     private final ShelterRepository shelterRepository;
-
-    // ========== 단건 조회 ==========
+    private final ShelterMapper mapper;
 
     /**
-     * ID로 보호소 조회
+     * ID로 보호소 상세 조회
      * @param id 보호소 ID
-     * @return Shelter
+     * @return ShelterDetailResponse
      * @throws EntityNotFoundException 보호소가 없을 때
      */
-    public Shelter findById(Long id) {
-        return shelterRepository.findById(id)
+    public ShelterDetailResponse findById(Long id) {
+        Shelter shelter = shelterRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Shelter not found: " + id));
+        return mapper.toDetailResponse(shelter);
     }
 
     /**
      * APMS 보호소 등록번호로 조회
      * @param careRegNo APMS 보호소 등록번호
-     * @return Shelter
+     * @return ShelterDetailResponse
      * @throws EntityNotFoundException 보호소가 없을 때
      */
-    public Shelter findByCareRegNo(String careRegNo) {
-        return shelterRepository.findByCareRegNo(careRegNo)
+    public ShelterDetailResponse findByCareRegNo(String careRegNo) {
+        Shelter shelter = shelterRepository.findByCareRegNo(careRegNo)
                 .orElseThrow(() -> new EntityNotFoundException("Shelter not found: " + careRegNo));
+        return mapper.toDetailResponse(shelter);
     }
-
-    // ========== 목록 조회 ==========
 
     /**
      * 전체 보호소 조회
      */
-    public Page<Shelter> findAll(Pageable pageable) {
-        return shelterRepository.findAll(pageable);
+    public Page<ShelterResponse> findAll(Pageable pageable) {
+        Page<Shelter> shelters = shelterRepository.findAll(pageable);
+        return shelters.map(mapper::toResponse);
     }
 
     /**
      * 보호소 이름으로 검색
      */
-    public Page<Shelter> searchByName(String name, Pageable pageable) {
-        return shelterRepository.findByNameContaining(name, pageable);
+    public Page<ShelterResponse> searchByName(String name, Pageable pageable) {
+        Page<Shelter> shelters = shelterRepository.findByNameContaining(name, pageable);
+        return shelters.map(mapper::toResponse);
     }
 
     /**
      * 보호소 주소로 검색
      */
-    public Page<Shelter> searchByAddress(String address, Pageable pageable) {
-        return shelterRepository.findByAddressContaining(address, pageable);
+    public Page<ShelterResponse> searchByAddress(String address, Pageable pageable) {
+        Page<Shelter> shelters = shelterRepository.findByAddressContaining(address, pageable);
+        return shelters.map(mapper::toResponse);
     }
 
     /**
      * 관할 기관으로 검색
      */
-    public Page<Shelter> searchByOrganizationName(String organizationName, Pageable pageable) {
-        return shelterRepository.findByOrganizationNameContaining(organizationName, pageable);
+    public Page<ShelterResponse> searchByOrganizationName(String organizationName, Pageable pageable) {
+        Page<Shelter> shelters = shelterRepository.findByOrganizationNameContaining(organizationName, pageable);
+        return shelters.map(mapper::toResponse);
     }
 
     /**
      * 이름 또는 주소로 검색
      */
-    public Page<Shelter> searchByNameOrAddress(String keyword, Pageable pageable) {
-        return shelterRepository.findByNameOrAddress(keyword, keyword, pageable);
+    public Page<ShelterResponse> searchByNameOrAddress(String keyword, Pageable pageable) {
+        Page<Shelter> shelters = shelterRepository.findByNameOrAddress(keyword, keyword, pageable);
+        return shelters.map(mapper::toResponse);
     }
-
-    // ========== 배치 작업용 ==========
 
     /**
      * 여러 개의 careRegNo로 Shelter 조회
@@ -93,8 +99,6 @@ public class ShelterQueryService {
     public List<Shelter> findByCareRegNoIn(List<String> careRegNos) {
         return shelterRepository.findByCareRegNoIn(careRegNos);
     }
-
-    // ========== 통계 ==========
 
     /**
      * 전체 보호소 수 카운트

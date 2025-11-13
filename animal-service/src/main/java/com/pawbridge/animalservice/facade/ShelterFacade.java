@@ -1,5 +1,9 @@
 package com.pawbridge.animalservice.facade;
 
+import com.pawbridge.animalservice.dto.request.CreateShelterRequest;
+import com.pawbridge.animalservice.dto.request.UpdateShelterRequest;
+import com.pawbridge.animalservice.dto.response.ShelterDetailResponse;
+import com.pawbridge.animalservice.dto.response.ShelterResponse;
 import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.service.ShelterCommandService;
 import com.pawbridge.animalservice.service.ShelterQueryService;
@@ -16,6 +20,7 @@ import java.util.List;
  * - Command + Query 통합
  * - Controller의 단일 진입점
  * - CQRS 내부 구조를 외부로부터 숨김
+ * - DTO 기반 처리
  */
 @Service
 @RequiredArgsConstructor
@@ -24,18 +29,17 @@ public class ShelterFacade {
     private final ShelterCommandService commandService;
     private final ShelterQueryService queryService;
 
-    // ========== Command 위임 (CUD) ==========
-
     /**
      * 보호소 생성
      */
     @Transactional
-    public Shelter create(Shelter shelter) {
-        return commandService.create(shelter);
+    public ShelterDetailResponse create(CreateShelterRequest request) {
+        return commandService.create(request);
     }
 
     /**
      * APMS 데이터로부터 보호소 생성 (배치 전용)
+     * - Entity를 직접 받음 (ApmsShelterMapper에서 생성)
      */
     @Transactional
     public Shelter createFromApms(Shelter shelter) {
@@ -46,9 +50,8 @@ public class ShelterFacade {
      * 보호소 정보 수정
      */
     @Transactional
-    public Shelter update(Long id, String phone, String email,
-                         String introduction, String adoptionProcedure, String operatingHours) {
-        return commandService.update(id, phone, email, introduction, adoptionProcedure, operatingHours);
+    public ShelterDetailResponse update(Long id, UpdateShelterRequest request) {
+        return commandService.update(id, request);
     }
 
     /**
@@ -59,13 +62,11 @@ public class ShelterFacade {
         commandService.delete(id);
     }
 
-    // ========== Query 위임 (R) ==========
-
     /**
-     * ID로 보호소 조회
+     * ID로 보호소 상세 조회
      */
     @Transactional(readOnly = true)
-    public Shelter findById(Long id) {
+    public ShelterDetailResponse findById(Long id) {
         return queryService.findById(id);
     }
 
@@ -73,7 +74,7 @@ public class ShelterFacade {
      * APMS 보호소 등록번호로 조회
      */
     @Transactional(readOnly = true)
-    public Shelter findByCareRegNo(String careRegNo) {
+    public ShelterDetailResponse findByCareRegNo(String careRegNo) {
         return queryService.findByCareRegNo(careRegNo);
     }
 
@@ -81,7 +82,7 @@ public class ShelterFacade {
      * 전체 보호소 조회
      */
     @Transactional(readOnly = true)
-    public Page<Shelter> findAll(Pageable pageable) {
+    public Page<ShelterResponse> findAll(Pageable pageable) {
         return queryService.findAll(pageable);
     }
 
@@ -89,7 +90,7 @@ public class ShelterFacade {
      * 보호소 이름으로 검색
      */
     @Transactional(readOnly = true)
-    public Page<Shelter> searchByName(String name, Pageable pageable) {
+    public Page<ShelterResponse> searchByName(String name, Pageable pageable) {
         return queryService.searchByName(name, pageable);
     }
 
@@ -97,7 +98,7 @@ public class ShelterFacade {
      * 보호소 주소로 검색
      */
     @Transactional(readOnly = true)
-    public Page<Shelter> searchByAddress(String address, Pageable pageable) {
+    public Page<ShelterResponse> searchByAddress(String address, Pageable pageable) {
         return queryService.searchByAddress(address, pageable);
     }
 
@@ -105,7 +106,7 @@ public class ShelterFacade {
      * 관할 기관으로 검색
      */
     @Transactional(readOnly = true)
-    public Page<Shelter> searchByOrganizationName(String organizationName, Pageable pageable) {
+    public Page<ShelterResponse> searchByOrganizationName(String organizationName, Pageable pageable) {
         return queryService.searchByOrganizationName(organizationName, pageable);
     }
 
@@ -113,12 +114,13 @@ public class ShelterFacade {
      * 이름 또는 주소로 검색
      */
     @Transactional(readOnly = true)
-    public Page<Shelter> searchByNameOrAddress(String keyword, Pageable pageable) {
+    public Page<ShelterResponse> searchByNameOrAddress(String keyword, Pageable pageable) {
         return queryService.searchByNameOrAddress(keyword, pageable);
     }
 
     /**
      * 여러 개의 careRegNo로 Shelter 조회 (배치)
+     * - Entity 반환 (배치 작업에서 사용)
      */
     @Transactional(readOnly = true)
     public List<Shelter> findByCareRegNoIn(List<String> careRegNos) {

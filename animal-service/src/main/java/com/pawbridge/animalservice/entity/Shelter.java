@@ -1,9 +1,7 @@
 package com.pawbridge.animalservice.entity;
 
 import jakarta.persistence.*;
-import lombok.AccessLevel;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -23,15 +21,17 @@ import java.util.List;
         })
 @EntityListeners(AuditingEntityListener.class)
 @Getter
+@Builder
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Shelter {
+public class Shelter extends BaseTimeEntity {
 
-    // ========== 기본 PK ==========
+    // 기본 PK
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // ========== APMS 보호소 식별 ==========
+    // APMS 보호소 식별
     /**
      * 보호소 등록번호 (careRegNo)
      * - 예: "348527200900001"
@@ -41,7 +41,7 @@ public class Shelter {
     @Column(nullable = false, unique = true, length = 50)
     private String careRegNo;
 
-    // ========== 보호소 기본 정보 ==========
+    // 보호소 기본 정보
     /**
      * 보호소 이름 (careNm)
      * - 예: "창원동물보호센터"
@@ -77,7 +77,7 @@ public class Shelter {
     @Column(length = 200)
     private String organizationName;
 
-    // ========== 자체 추가 정보 (보호소 회원이 직접 입력) ==========
+    // 자체 추가 정보 (보호소 회원이 직접 입력)
     /**
      * 보호소 이메일 (자체 관리)
      * - APMS에는 없지만 우리 시스템에서 관리
@@ -104,7 +104,7 @@ public class Shelter {
     @Column(length = 200)
     private String operatingHours;
 
-    // ========== 관계 ==========
+    // 관계
     /**
      * 보호 중인 동물 목록
      * - mappedBy: Animal.shelter 필드와 연결
@@ -112,18 +112,11 @@ public class Shelter {
      * - orphanRemoval = false: Animal에서 shelter 참조 제거해도 Shelter는 유지
      *   (같은 Shelter를 여러 Animal이 참조할 수 있으므로)
      */
+    @Builder.Default
     @OneToMany(mappedBy = "shelter", cascade = CascadeType.PERSIST, orphanRemoval = false)
     private List<Animal> animals = new ArrayList<>();
 
-    // ========== Audit ==========
-    @CreatedDate
-    @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-
-    @LastModifiedDate
-    private LocalDateTime updatedAt;
-
-    // ========== 비즈니스 메서드 ==========
+    // 비즈니스 메서드
 
     /**
      * 동물 추가
@@ -160,7 +153,7 @@ public class Shelter {
         this.operatingHours = operatingHours;
     }
 
-    // ========== 정적 팩토리 메서드 ==========
+    // 정적 팩토리 메서드
 
     /**
      * APMS 데이터로부터 Shelter 생성
@@ -173,55 +166,14 @@ public class Shelter {
             String ownerName,
             String organizationName
     ) {
-        Shelter shelter = new Shelter();
-        shelter.careRegNo = careRegNo;
-        shelter.name = name;
-        shelter.phone = phone;
-        shelter.address = address;
-        shelter.ownerName = ownerName;
-        shelter.organizationName = organizationName;
-        return shelter;
-    }
-
-    // ========== Setter 메서드 (필요 시) ==========
-
-    public void setCareRegNo(String careRegNo) {
-        this.careRegNo = careRegNo;
-    }
-
-    public void setName(String name) {
-        this.name = name;
-    }
-
-    public void setPhone(String phone) {
-        this.phone = phone;
-    }
-
-    public void setAddress(String address) {
-        this.address = address;
-    }
-
-    public void setOwnerName(String ownerName) {
-        this.ownerName = ownerName;
-    }
-
-    public void setOrganizationName(String organizationName) {
-        this.organizationName = organizationName;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
-    }
-
-    public void setIntroduction(String introduction) {
-        this.introduction = introduction;
-    }
-
-    public void setAdoptionProcedure(String adoptionProcedure) {
-        this.adoptionProcedure = adoptionProcedure;
-    }
-
-    public void setOperatingHours(String operatingHours) {
-        this.operatingHours = operatingHours;
+        return Shelter.builder()
+                .careRegNo(careRegNo)
+                .name(name)
+                .phone(phone)
+                .address(address)
+                .ownerName(ownerName)
+                .organizationName(organizationName)
+                .animals(new ArrayList<>())
+                .build();
     }
 }

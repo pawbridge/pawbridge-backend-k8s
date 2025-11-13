@@ -18,8 +18,7 @@ import java.util.Optional;
 @Repository
 public interface ShelterRepository extends JpaRepository<Shelter, Long> {
 
-    // ========== 기본 조회 (UNIQUE KEY) ==========
-
+    // 기본 조회 (UNIQUE KEY)
     /**
      * APMS 보호소 등록번호로 조회 (UNIQUE)
      * - 배치 작업에서 Shelter 조회/생성 시 사용
@@ -35,8 +34,7 @@ public interface ShelterRepository extends JpaRepository<Shelter, Long> {
      */
     boolean existsByCareRegNo(String careRegNo);
 
-    // ========== 텍스트 검색 (페이징) ==========
-
+    // 텍스트 검색 (페이징)
     /**
      * 보호소 이름으로 검색 (부분 일치)
      * - 사용자가 보호소 검색 시 사용
@@ -63,8 +61,7 @@ public interface ShelterRepository extends JpaRepository<Shelter, Long> {
      */
     Page<Shelter> findByOrganizationNameContaining(String organizationName, Pageable pageable);
 
-    // ========== 복합 검색 ==========
-
+    // 복합 검색
     /**
      * 이름 또는 주소로 검색
      * - 통합 검색용
@@ -80,8 +77,7 @@ public interface ShelterRepository extends JpaRepository<Shelter, Long> {
             Pageable pageable
     );
 
-    // ========== 배치 작업용 ==========
-
+    // 배치 작업용
     /**
      * 여러 개의 careRegNo로 Shelter 조회
      * - 배치 작업에서 대량의 Shelter를 한 번에 조회
@@ -92,8 +88,7 @@ public interface ShelterRepository extends JpaRepository<Shelter, Long> {
     @Query("SELECT s FROM Shelter s WHERE s.careRegNo IN :careRegNos")
     List<Shelter> findByCareRegNoIn(@Param("careRegNos") List<String> careRegNos);
 
-    // ========== 통계 쿼리 ==========
-
+    // 통계 쿼리
     /**
      * 전체 보호소 수 카운트
      * @return 보호소 개수

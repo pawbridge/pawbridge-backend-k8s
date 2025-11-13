@@ -6,9 +6,7 @@ import com.pawbridge.animalservice.enums.Gender;
 import com.pawbridge.animalservice.enums.NeuterStatus;
 import com.pawbridge.animalservice.enums.Species;
 import jakarta.persistence.*;
-import lombok.AccessLevel;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -32,15 +30,16 @@ import java.time.Year;
         })
 @EntityListeners(AuditingEntityListener.class)
 @Getter
+@Builder
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Animal {
+public class Animal extends BaseTimeEntity {
 
-    // ========== 기본 PK ==========
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // ========== APMS 핵심 식별 (2개) ==========
+    // APMS 핵심 식별 (2개)
     /**
      * APMS 유기번호 (desertionNo)
      * - 예: "448567202501701"
@@ -59,7 +58,7 @@ public class Animal {
     @Column(nullable = false, unique = true, length = 100)
     private String apmsNoticeNo;
 
-    // ========== 동물 기본 정보 (9개) ==========
+    // 동물 기본 정보 (9개)
     /**
      * 축종 (upKindCd)
      * - 417000 → DOG, 422400 → CAT, 429900 → ETC
@@ -120,7 +119,7 @@ public class Animal {
     @Column(length = 1000)
     private String specialMark;
 
-    // ========== APMS 공고 정보 (4개) ==========
+    // APMS 공고 정보 (4개)
     /**
      * APMS 진행상태 (processState)
      * - 예: "공고중", "보호중"
@@ -154,7 +153,7 @@ public class Animal {
      */
     private LocalDateTime apmsUpdatedAt;
 
-    // ========== 발견 정보 (2개) ==========
+    // 발견 정보 (2개)
     /**
      * 접수일 (happenDt)
      * - YYYYMMDD → LocalDate 변환
@@ -168,7 +167,7 @@ public class Animal {
     @Column(length = 200)
     private String happenPlace;
 
-    // ========== 이미지 (2개) ==========
+    // 이미지 (2개)
     /**
      * 대표 이미지 (popfile1)
      * - URL 형태
@@ -183,7 +182,6 @@ public class Animal {
     @Column(length = 500)
     private String imageUrl2;
 
-    // ========== 보호소 연결 ==========
     /**
      * 보호소 FK
      * - careRegNo로 Shelter 조회 후 연결
@@ -192,7 +190,7 @@ public class Animal {
     @JoinColumn(name = "shelter_id", nullable = false)
     private Shelter shelter;
 
-    // ========== 자체 관리 필드 (4개) ==========
+    // 자체 관리 필드 (4개)
     /**
      * 자체 관리 상태 (AnimalStatus)
      * - NOTICE, PROTECT, ADOPTION_PENDING, ADOPTED 등
@@ -215,6 +213,7 @@ public class Animal {
      * 찜 횟수 (캐시)
      * - user-service의 favorite 이벤트로 업데이트
      */
+    @Builder.Default
     @Column(nullable = false)
     private Integer favoriteCount = 0;
 
@@ -225,22 +224,21 @@ public class Animal {
     @Column(length = 2000)
     private String description;
 
-    // ========== Audit (2개) ==========
-    @CreatedDate
-    @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-
-    @LastModifiedDate
-    private LocalDateTime updatedAt;
-
-    // ========== 비즈니스 메서드 ==========
-
+    // 비즈니스 메서드
     /**
      * 상태 변경
      * @param newStatus 새로운 상태
      */
     public void updateStatus(AnimalStatus newStatus) {
         this.status = newStatus;
+    }
+
+    /**
+     * 설명 수정
+     * @param description 새로운 설명
+     */
+    public void updateDescription(String description) {
+        this.description = description;
     }
 
     /**
@@ -277,128 +275,13 @@ public class Animal {
         return LocalDate.now().plusDays(3).isAfter(noticeEndDate);
     }
 
+    // 연관관계 메서드
     /**
      * Shelter 설정
      * @param shelter 보호소
      */
-    public void setShelter(Shelter shelter) {
+    void setShelter(Shelter shelter) {
         this.shelter = shelter;
     }
 
-    // ========== 정적 팩토리 메서드 ==========
-
-    /**
-     * APMS 데이터로부터 Animal 생성 (기본값 설정)
-     */
-    public static Animal createFromApms(
-            String apmsDesertionNo,
-            String apmsNoticeNo,
-            Species species,
-            Gender gender,
-            NeuterStatus neuterStatus,
-            ApiSource apiSource,
-            Shelter shelter
-    ) {
-        Animal animal = new Animal();
-        animal.apmsDesertionNo = apmsDesertionNo;
-        animal.apmsNoticeNo = apmsNoticeNo;
-        animal.species = species;
-        animal.gender = gender;
-        animal.neuterStatus = neuterStatus;
-        animal.apiSource = apiSource;
-        animal.shelter = shelter;
-        animal.status = AnimalStatus.NOTICE; // 초기 상태
-        animal.favoriteCount = 0;
-        return animal;
-    }
-
-    // ========== Setter 메서드 (ApmsDataMapper에서 사용) ==========
-
-    public void setApmsDesertionNo(String apmsDesertionNo) {
-        this.apmsDesertionNo = apmsDesertionNo;
-    }
-
-    public void setApmsNoticeNo(String apmsNoticeNo) {
-        this.apmsNoticeNo = apmsNoticeNo;
-    }
-
-    public void setSpecies(Species species) {
-        this.species = species;
-    }
-
-    public void setBreed(String breed) {
-        this.breed = breed;
-    }
-
-    public void setBirthYear(Integer birthYear) {
-        this.birthYear = birthYear;
-    }
-
-    public void setWeight(String weight) {
-        this.weight = weight;
-    }
-
-    public void setColor(String color) {
-        this.color = color;
-    }
-
-    public void setGender(Gender gender) {
-        this.gender = gender;
-    }
-
-    public void setNeuterStatus(NeuterStatus neuterStatus) {
-        this.neuterStatus = neuterStatus;
-    }
-
-    public void setSpecialMark(String specialMark) {
-        this.specialMark = specialMark;
-    }
-
-    public void setApmsProcessState(String apmsProcessState) {
-        this.apmsProcessState = apmsProcessState;
-    }
-
-    public void setNoticeStartDate(LocalDate noticeStartDate) {
-        this.noticeStartDate = noticeStartDate;
-    }
-
-    public void setNoticeEndDate(LocalDate noticeEndDate) {
-        this.noticeEndDate = noticeEndDate;
-    }
-
-    public void setApmsUpdatedAt(LocalDateTime apmsUpdatedAt) {
-        this.apmsUpdatedAt = apmsUpdatedAt;
-    }
-
-    public void setHappenDate(LocalDate happenDate) {
-        this.happenDate = happenDate;
-    }
-
-    public void setHappenPlace(String happenPlace) {
-        this.happenPlace = happenPlace;
-    }
-
-    public void setImageUrl(String imageUrl) {
-        this.imageUrl = imageUrl;
-    }
-
-    public void setImageUrl2(String imageUrl2) {
-        this.imageUrl2 = imageUrl2;
-    }
-
-    public void setStatus(AnimalStatus status) {
-        this.status = status;
-    }
-
-    public void setApiSource(ApiSource apiSource) {
-        this.apiSource = apiSource;
-    }
-
-    public void setFavoriteCount(Integer favoriteCount) {
-        this.favoriteCount = favoriteCount;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
 }

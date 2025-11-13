@@ -1,5 +1,10 @@
 package com.pawbridge.animalservice.facade;
 
+import com.pawbridge.animalservice.dto.request.CreateAnimalRequest;
+import com.pawbridge.animalservice.dto.request.UpdateAnimalDescriptionRequest;
+import com.pawbridge.animalservice.dto.request.UpdateAnimalStatusRequest;
+import com.pawbridge.animalservice.dto.response.AnimalDetailResponse;
+import com.pawbridge.animalservice.dto.response.AnimalResponse;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.enums.Gender;
@@ -21,6 +26,7 @@ import java.util.List;
  * - Command + Query 통합
  * - Controller의 단일 진입점
  * - CQRS 내부 구조를 외부로부터 숨김
+ * - DTO 기반 처리
  */
 @Service
 @RequiredArgsConstructor
@@ -29,30 +35,28 @@ public class AnimalFacade {
     private final AnimalCommandService commandService;
     private final AnimalQueryService queryService;
 
-    // ========== Command 위임 (CUD) ==========
-
     /**
      * 동물 생성
      */
     @Transactional
-    public Animal create(Animal animal) {
-        return commandService.create(animal);
+    public AnimalDetailResponse create(CreateAnimalRequest request) {
+        return commandService.create(request);
     }
 
     /**
      * 동물 상태 변경
      */
     @Transactional
-    public Animal updateStatus(Long id, AnimalStatus newStatus) {
-        return commandService.updateStatus(id, newStatus);
+    public AnimalDetailResponse updateStatus(Long id, UpdateAnimalStatusRequest request) {
+        return commandService.updateStatus(id, request);
     }
 
     /**
      * 보호소 설명 수정
      */
     @Transactional
-    public Animal updateDescription(Long id, String description) {
-        return commandService.updateDescription(id, description);
+    public AnimalDetailResponse updateDescription(Long id, UpdateAnimalDescriptionRequest request) {
+        return commandService.updateDescription(id, request);
     }
 
     /**
@@ -81,6 +85,7 @@ public class AnimalFacade {
 
     /**
      * APMS 데이터로부터 동물 생성 (배치 전용)
+     * - Entity를 직접 받음 (ApmsDataMapper에서 생성)
      */
     @Transactional
     public Animal createFromApms(Animal animal) {
@@ -95,45 +100,27 @@ public class AnimalFacade {
         return commandService.updateExpiredNoticeAnimals();
     }
 
-    // ========== Query 위임 (R) ==========
-
     /**
-     * ID로 동물 조회 (Shelter 없음)
+     * ID로 동물 상세 조회
      */
     @Transactional(readOnly = true)
-    public Animal findById(Long id) {
+    public AnimalDetailResponse findById(Long id) {
         return queryService.findById(id);
     }
 
     /**
-     * ID로 동물 조회 (Shelter 포함)
+     * APMS 유기번호로 상세 조회
      */
     @Transactional(readOnly = true)
-    public Animal findByIdWithShelter(Long id) {
-        return queryService.findByIdWithShelter(id);
-    }
-
-    /**
-     * APMS 유기번호로 조회
-     */
-    @Transactional(readOnly = true)
-    public Animal findByApmsDesertionNo(String apmsDesertionNo) {
+    public AnimalDetailResponse findByApmsDesertionNo(String apmsDesertionNo) {
         return queryService.findByApmsDesertionNo(apmsDesertionNo);
-    }
-
-    /**
-     * APMS 유기번호로 조회 (Shelter 포함)
-     */
-    @Transactional(readOnly = true)
-    public Animal findByApmsDesertionNoWithShelter(String apmsDesertionNo) {
-        return queryService.findByApmsDesertionNoWithShelter(apmsDesertionNo);
     }
 
     /**
      * 축종별 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findBySpecies(Species species, Pageable pageable) {
+    public Page<AnimalResponse> findBySpecies(Species species, Pageable pageable) {
         return queryService.findBySpecies(species, pageable);
     }
 
@@ -141,7 +128,7 @@ public class AnimalFacade {
      * 상태별 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findByStatus(AnimalStatus status, Pageable pageable) {
+    public Page<AnimalResponse> findByStatus(AnimalStatus status, Pageable pageable) {
         return queryService.findByStatus(status, pageable);
     }
 
@@ -149,7 +136,7 @@ public class AnimalFacade {
      * 축종 + 성별 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findBySpeciesAndGender(Species species, Gender gender, Pageable pageable) {
+    public Page<AnimalResponse> findBySpeciesAndGender(Species species, Gender gender, Pageable pageable) {
         return queryService.findBySpeciesAndGender(species, gender, pageable);
     }
 
@@ -157,7 +144,7 @@ public class AnimalFacade {
      * 축종 + 상태 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findBySpeciesAndStatus(Species species, AnimalStatus status, Pageable pageable) {
+    public Page<AnimalResponse> findBySpeciesAndStatus(Species species, AnimalStatus status, Pageable pageable) {
         return queryService.findBySpeciesAndStatus(species, status, pageable);
     }
 
@@ -165,23 +152,15 @@ public class AnimalFacade {
      * 여러 상태 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findByStatusIn(List<AnimalStatus> statuses, Pageable pageable) {
+    public Page<AnimalResponse> findByStatusIn(List<AnimalStatus> statuses, Pageable pageable) {
         return queryService.findByStatusIn(statuses, pageable);
-    }
-
-    /**
-     * 축종 + 상태 조회 (Shelter 포함)
-     */
-    @Transactional(readOnly = true)
-    public Page<Animal> findBySpeciesAndStatusWithShelter(Species species, AnimalStatus status, Pageable pageable) {
-        return queryService.findBySpeciesAndStatusWithShelter(species, status, pageable);
     }
 
     /**
      * 공고 중인 동물 (공고 종료일 임박 순)
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findNoticeAnimalsOrderByNoticeEndDate(Pageable pageable) {
+    public Page<AnimalResponse> findNoticeAnimalsOrderByNoticeEndDate(Pageable pageable) {
         return queryService.findNoticeAnimalsOrderByNoticeEndDate(pageable);
     }
 
@@ -189,7 +168,7 @@ public class AnimalFacade {
      * 공고 종료 임박 동물 (D-3 이내)
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findExpiringSoonAnimals(Pageable pageable) {
+    public Page<AnimalResponse> findExpiringSoonAnimals(Pageable pageable) {
         return queryService.findExpiringSoonAnimals(pageable);
     }
 
@@ -197,7 +176,7 @@ public class AnimalFacade {
      * 공고 종료일 범위 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findByNoticeEndDateBetween(LocalDate startDate, LocalDate endDate, Pageable pageable) {
+    public Page<AnimalResponse> findByNoticeEndDateBetween(LocalDate startDate, LocalDate endDate, Pageable pageable) {
         return queryService.findByNoticeEndDateBetween(startDate, endDate, pageable);
     }
 
@@ -205,7 +184,7 @@ public class AnimalFacade {
      * 출생 연도 범위 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findByBirthYearBetween(Integer startYear, Integer endYear, Pageable pageable) {
+    public Page<AnimalResponse> findByBirthYearBetween(Integer startYear, Integer endYear, Pageable pageable) {
         return queryService.findByBirthYearBetween(startYear, endYear, pageable);
     }
 
@@ -213,7 +192,7 @@ public class AnimalFacade {
      * 축종 + 출생 연도 범위 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findBySpeciesAndBirthYearBetween(
+    public Page<AnimalResponse> findBySpeciesAndBirthYearBetween(
             Species species, Integer startYear, Integer endYear, Pageable pageable) {
         return queryService.findBySpeciesAndBirthYearBetween(species, startYear, endYear, pageable);
     }
@@ -222,7 +201,7 @@ public class AnimalFacade {
      * 품종명 검색
      */
     @Transactional(readOnly = true)
-    public Page<Animal> searchByBreed(String breed, Pageable pageable) {
+    public Page<AnimalResponse> searchByBreed(String breed, Pageable pageable) {
         return queryService.searchByBreed(breed, pageable);
     }
 
@@ -230,7 +209,7 @@ public class AnimalFacade {
      * 특징 검색
      */
     @Transactional(readOnly = true)
-    public Page<Animal> searchBySpecialMark(String keyword, Pageable pageable) {
+    public Page<AnimalResponse> searchBySpecialMark(String keyword, Pageable pageable) {
         return queryService.searchBySpecialMark(keyword, pageable);
     }
 
@@ -238,7 +217,7 @@ public class AnimalFacade {
      * 발견 장소 검색
      */
     @Transactional(readOnly = true)
-    public Page<Animal> searchByHappenPlace(String place, Pageable pageable) {
+    public Page<AnimalResponse> searchByHappenPlace(String place, Pageable pageable) {
         return queryService.searchByHappenPlace(place, pageable);
     }
 
@@ -246,7 +225,7 @@ public class AnimalFacade {
      * 축종 + 품종 검색
      */
     @Transactional(readOnly = true)
-    public Page<Animal> searchBySpeciesAndBreed(Species species, String breed, Pageable pageable) {
+    public Page<AnimalResponse> searchBySpeciesAndBreed(Species species, String breed, Pageable pageable) {
         return queryService.searchBySpeciesAndBreed(species, breed, pageable);
     }
 
@@ -254,7 +233,7 @@ public class AnimalFacade {
      * 보호소 ID로 동물 목록 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findByShelterId(Long shelterId, Pageable pageable) {
+    public Page<AnimalResponse> findByShelterId(Long shelterId, Pageable pageable) {
         return queryService.findByShelterId(shelterId, pageable);
     }
 
@@ -262,7 +241,7 @@ public class AnimalFacade {
      * 보호소 ID + 축종 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findByShelterIdAndSpecies(Long shelterId, Species species, Pageable pageable) {
+    public Page<AnimalResponse> findByShelterIdAndSpecies(Long shelterId, Species species, Pageable pageable) {
         return queryService.findByShelterIdAndSpecies(shelterId, species, pageable);
     }
 
@@ -270,7 +249,7 @@ public class AnimalFacade {
      * 보호소 ID + 상태 조회
      */
     @Transactional(readOnly = true)
-    public Page<Animal> findByShelterIdAndStatus(Long shelterId, AnimalStatus status, Pageable pageable) {
+    public Page<AnimalResponse> findByShelterIdAndStatus(Long shelterId, AnimalStatus status, Pageable pageable) {
         return queryService.findByShelterIdAndStatus(shelterId, status, pageable);
     }
 
@@ -308,6 +287,7 @@ public class AnimalFacade {
 
     /**
      * APMS 수정 이후 동물 조회 (배치)
+     * - Entity 반환 (배치 작업에서 사용)
      */
     @Transactional(readOnly = true)
     public List<Animal> findByApmsUpdatedAtAfter(LocalDateTime dateTime) {

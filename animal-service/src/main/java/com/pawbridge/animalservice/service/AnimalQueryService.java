@@ -1,9 +1,12 @@
 package com.pawbridge.animalservice.service;
 
+import com.pawbridge.animalservice.dto.response.AnimalDetailResponse;
+import com.pawbridge.animalservice.dto.response.AnimalResponse;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.enums.Gender;
 import com.pawbridge.animalservice.enums.Species;
+import com.pawbridge.animalservice.mapper.AnimalMapper;
 import com.pawbridge.animalservice.repository.AnimalRepository;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
@@ -20,202 +23,179 @@ import java.util.List;
  * Animal Query Service (R)
  * - 동물 조회, 검색 담당
  * - 읽기 전용 트랜잭션
+ * - Response DTO 반환
  */
 @Service
-@Transactional(readOnly = true)  // 클래스 레벨: 읽기 전용
+@Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class AnimalQueryService {
 
     private final AnimalRepository animalRepository;
-
-    // ========== 단건 조회 ==========
+    private final AnimalMapper mapper;
 
     /**
-     * ID로 동물 조회 (Shelter 없음)
+     * ID로 동물 상세 조회
      * @param id 동물 ID
-     * @return Animal
+     * @return AnimalDetailResponse
      * @throws EntityNotFoundException 동물이 없을 때
      */
-    public Animal findById(Long id) {
-        return animalRepository.findById(id)
+    public AnimalDetailResponse findById(Long id) {
+        Animal animal = animalRepository.findWithShelterById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + id));
+        return mapper.toDetailResponse(animal);
     }
 
     /**
-     * ID로 동물 조회 (Shelter 포함)
-     * - @EntityGraph로 N+1 방지
-     * @param id 동물 ID
-     * @return Animal with Shelter
-     * @throws EntityNotFoundException 동물이 없을 때
-     */
-    public Animal findByIdWithShelter(Long id) {
-        return animalRepository.findWithShelterById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + id));
-    }
-
-    /**
-     * APMS 유기번호로 조회
+     * APMS 유기번호로 상세 조회
      * @param apmsDesertionNo APMS 유기번호
-     * @return Animal
+     * @return AnimalDetailResponse
      * @throws EntityNotFoundException 동물이 없을 때
      */
-    public Animal findByApmsDesertionNo(String apmsDesertionNo) {
-        return animalRepository.findByApmsDesertionNo(apmsDesertionNo)
+    public AnimalDetailResponse findByApmsDesertionNo(String apmsDesertionNo) {
+        Animal animal = animalRepository.findWithShelterByApmsDesertionNo(apmsDesertionNo)
                 .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + apmsDesertionNo));
+        return mapper.toDetailResponse(animal);
     }
-
-    /**
-     * APMS 유기번호로 조회 (Shelter 포함)
-     * @param apmsDesertionNo APMS 유기번호
-     * @return Animal with Shelter
-     * @throws EntityNotFoundException 동물이 없을 때
-     */
-    public Animal findByApmsDesertionNoWithShelter(String apmsDesertionNo) {
-        return animalRepository.findWithShelterByApmsDesertionNo(apmsDesertionNo)
-                .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + apmsDesertionNo));
-    }
-
-    // ========== 목록 조회 (기본) ==========
 
     /**
      * 축종별 조회
      */
-    public Page<Animal> findBySpecies(Species species, Pageable pageable) {
-        return animalRepository.findBySpecies(species, pageable);
+    public Page<AnimalResponse> findBySpecies(Species species, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findBySpecies(species, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 상태별 조회
      */
-    public Page<Animal> findByStatus(AnimalStatus status, Pageable pageable) {
-        return animalRepository.findByStatus(status, pageable);
+    public Page<AnimalResponse> findByStatus(AnimalStatus status, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByStatus(status, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 축종 + 성별 조회
      */
-    public Page<Animal> findBySpeciesAndGender(Species species, Gender gender, Pageable pageable) {
-        return animalRepository.findBySpeciesAndGender(species, gender, pageable);
+    public Page<AnimalResponse> findBySpeciesAndGender(Species species, Gender gender, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findBySpeciesAndGender(species, gender, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 축종 + 상태 조회
      */
-    public Page<Animal> findBySpeciesAndStatus(Species species, AnimalStatus status, Pageable pageable) {
-        return animalRepository.findBySpeciesAndStatus(species, status, pageable);
+    public Page<AnimalResponse> findBySpeciesAndStatus(Species species, AnimalStatus status, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findBySpeciesAndStatusWithShelter(species, status, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 여러 상태 조회
      */
-    public Page<Animal> findByStatusIn(List<AnimalStatus> statuses, Pageable pageable) {
-        return animalRepository.findByStatusIn(statuses, pageable);
+    public Page<AnimalResponse> findByStatusIn(List<AnimalStatus> statuses, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByStatusIn(statuses, pageable);
+        return animals.map(mapper::toResponse);
     }
-
-    /**
-     * 축종 + 상태 조회 (Shelter 포함)
-     */
-    public Page<Animal> findBySpeciesAndStatusWithShelter(Species species, AnimalStatus status, Pageable pageable) {
-        return animalRepository.findBySpeciesAndStatusWithShelter(species, status, pageable);
-    }
-
-    // ========== 공고 관련 조회 ==========
 
     /**
      * 공고 중인 동물 (공고 종료일 임박 순)
      * - 메인 페이지용
      */
-    public Page<Animal> findNoticeAnimalsOrderByNoticeEndDate(Pageable pageable) {
-        return animalRepository.findNoticeAnimalsOrderByNoticeEndDate(pageable);
+    public Page<AnimalResponse> findNoticeAnimalsOrderByNoticeEndDate(Pageable pageable) {
+        Page<Animal> animals = animalRepository.findNoticeAnimalsOrderByNoticeEndDate(pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 공고 종료 임박 동물 (D-3 이내)
      */
-    public Page<Animal> findExpiringSoonAnimals(Pageable pageable) {
+    public Page<AnimalResponse> findExpiringSoonAnimals(Pageable pageable) {
         LocalDate today = LocalDate.now();
         LocalDate deadline = today.plusDays(3);
-        return animalRepository.findExpiringSoonAnimals(today, deadline, pageable);
+        Page<Animal> animals = animalRepository.findExpiringSoonAnimals(today, deadline, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 공고 종료일 범위 조회
      */
-    public Page<Animal> findByNoticeEndDateBetween(LocalDate startDate, LocalDate endDate, Pageable pageable) {
-        return animalRepository.findByNoticeEndDateBetween(startDate, endDate, pageable);
+    public Page<AnimalResponse> findByNoticeEndDateBetween(LocalDate startDate, LocalDate endDate, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByNoticeEndDateBetween(startDate, endDate, pageable);
+        return animals.map(mapper::toResponse);
     }
-
-    // ========== 나이 범위 검색 ==========
 
     /**
      * 출생 연도 범위 조회
      */
-    public Page<Animal> findByBirthYearBetween(Integer startYear, Integer endYear, Pageable pageable) {
-        return animalRepository.findByBirthYearBetween(startYear, endYear, pageable);
+    public Page<AnimalResponse> findByBirthYearBetween(Integer startYear, Integer endYear, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByBirthYearBetween(startYear, endYear, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 축종 + 출생 연도 범위 조회
      */
-    public Page<Animal> findBySpeciesAndBirthYearBetween(
+    public Page<AnimalResponse> findBySpeciesAndBirthYearBetween(
             Species species, Integer startYear, Integer endYear, Pageable pageable) {
-        return animalRepository.findBySpeciesAndBirthYearBetween(species, startYear, endYear, pageable);
+        Page<Animal> animals = animalRepository.findBySpeciesAndBirthYearBetween(species, startYear, endYear, pageable);
+        return animals.map(mapper::toResponse);
     }
-
-    // ========== 텍스트 검색 ==========
 
     /**
      * 품종명 검색
      */
-    public Page<Animal> searchByBreed(String breed, Pageable pageable) {
-        return animalRepository.findByBreedContaining(breed, pageable);
+    public Page<AnimalResponse> searchByBreed(String breed, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByBreedContaining(breed, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 특징 검색
      */
-    public Page<Animal> searchBySpecialMark(String keyword, Pageable pageable) {
-        return animalRepository.findBySpecialMarkContaining(keyword, pageable);
+    public Page<AnimalResponse> searchBySpecialMark(String keyword, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findBySpecialMarkContaining(keyword, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 발견 장소 검색
      */
-    public Page<Animal> searchByHappenPlace(String place, Pageable pageable) {
-        return animalRepository.findByHappenPlaceContaining(place, pageable);
+    public Page<AnimalResponse> searchByHappenPlace(String place, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByHappenPlaceContaining(place, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 축종 + 품종 검색
      */
-    public Page<Animal> searchBySpeciesAndBreed(Species species, String breed, Pageable pageable) {
-        return animalRepository.findBySpeciesAndBreedContaining(species, breed, pageable);
+    public Page<AnimalResponse> searchBySpeciesAndBreed(Species species, String breed, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findBySpeciesAndBreedContaining(species, breed, pageable);
+        return animals.map(mapper::toResponse);
     }
-
-    // ========== 보호소별 조회 ==========
 
     /**
      * 보호소 ID로 동물 목록 조회
      */
-    public Page<Animal> findByShelterId(Long shelterId, Pageable pageable) {
-        return animalRepository.findByShelterId(shelterId, pageable);
+    public Page<AnimalResponse> findByShelterId(Long shelterId, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByShelterId(shelterId, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 보호소 ID + 축종 조회
      */
-    public Page<Animal> findByShelterIdAndSpecies(Long shelterId, Species species, Pageable pageable) {
-        return animalRepository.findByShelterIdAndSpecies(shelterId, species, pageable);
+    public Page<AnimalResponse> findByShelterIdAndSpecies(Long shelterId, Species species, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByShelterIdAndSpecies(shelterId, species, pageable);
+        return animals.map(mapper::toResponse);
     }
 
     /**
      * 보호소 ID + 상태 조회
      */
-    public Page<Animal> findByShelterIdAndStatus(Long shelterId, AnimalStatus status, Pageable pageable) {
-        return animalRepository.findByShelterIdAndStatus(shelterId, status, pageable);
+    public Page<AnimalResponse> findByShelterIdAndStatus(Long shelterId, AnimalStatus status, Pageable pageable) {
+        Page<Animal> animals = animalRepository.findByShelterIdAndStatus(shelterId, status, pageable);
+        return animals.map(mapper::toResponse);
     }
-
-    // ========== 통계 ==========
 
     /**
      * 축종별 카운트
@@ -244,8 +224,6 @@ public class AnimalQueryService {
     public long countBySpeciesAndStatus(Species species, AnimalStatus status) {
         return animalRepository.countBySpeciesAndStatus(species, status);
     }
-
-    // ========== 배치 작업용 ==========
 
     /**
      * APMS 수정 이후 동물 조회

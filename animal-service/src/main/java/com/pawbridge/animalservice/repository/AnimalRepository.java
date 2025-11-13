@@ -25,8 +25,7 @@ import java.util.Optional;
 @Repository
 public interface AnimalRepository extends JpaRepository<Animal, Long> {
 
-    // ========== 기본 조회 (UNIQUE KEY) ==========
-
+    //기본 조회 (UNIQUE KEY)
     /**
      * APMS 유기번호로 조회 (UNIQUE)
      * - 배치 작업에서 중복 체크용
@@ -42,8 +41,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
      */
     boolean existsByApmsDesertionNo(String apmsDesertionNo);
 
-    // ========== 단건 상세 조회 (Shelter 정보 포함) ==========
-
+    //단건 상세 조회 (Shelter 정보 포함)
     /**
      * ID로 동물 조회 (Shelter fetch join)
      * - 상세 페이지용
@@ -62,8 +60,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
     @EntityGraph(attributePaths = {"shelter"})
     Optional<Animal> findWithShelterByApmsDesertionNo(String apmsDesertionNo);
 
-    // ========== 목록 조회 (페이징) - Shelter 불필요 ==========
-
+    // 목록 조회 (페이징) - Shelter 불필요
     /**
      * 축종별 조회
      * - Shelter 정보 불필요 시 사용
@@ -108,7 +105,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
      */
     Page<Animal> findByStatusIn(List<AnimalStatus> statuses, Pageable pageable);
 
-    // ========== 목록 조회 (Shelter 정보 필요) ==========
+    // 목록 조회 (Shelter 정보 필요)
     // TODO: DTO 생성 후 프로젝션 방식으로 변경 권장
     //  @Query("SELECT new com.pawbridge.animalservice.dto.AnimalListDto(...) FROM Animal a JOIN a.shelter s")
     //  현재는 @EntityGraph 방식 사용 (Hibernate 경고 발생 가능)
@@ -130,7 +127,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
             Pageable pageable
     );
 
-    // ========== 보호소별 조회 ==========
+    // 보호소별 조회
 
     /**
      * 보호소 ID로 동물 목록 조회
@@ -158,8 +155,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
      */
     Page<Animal> findByShelterIdAndStatus(Long shelterId, AnimalStatus status, Pageable pageable);
 
-    // ========== 공고 관련 조회 ==========
-
+    // 공고 관련 조회
     /**
      * 공고 중인 동물 (공고 종료일 임박 순)
      * - 메인 페이지용
@@ -197,8 +193,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
             Pageable pageable
     );
 
-    // ========== 나이 범위 검색 ==========
-
+    // 나이 범위 검색
     /**
      * 출생 연도 범위로 조회
      * - 나이 필터용: 사용자가 "1~3살" 선택 → birthYear BETWEEN (현재-3) AND (현재-1)
@@ -230,8 +225,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
             Pageable pageable
     );
 
-    // ========== 텍스트 검색 ==========
-
+    // 텍스트 검색
     /**
      * 품종명으로 검색 (부분 일치)
      * @param breed 품종명 (예: "리트리버")
@@ -256,9 +250,8 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
      */
     Page<Animal> findByHappenPlaceContaining(String place, Pageable pageable);
 
-    // ========== 복합 검색 ==========
-    // TODO: 복잡한 동적 쿼리는 Querydsl로 구현 예정
-
+    // 복합 검색
+    // TODO: 복잡한 동적 쿼리는 Querydsl로 구현 예정 -> 미정 엘라스틱 서치로 바꿀 수 있음
     /**
      * 축종 + 품종 검색
      * @param species 축종
@@ -272,8 +265,6 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
             @Param("breed") String breed,
             Pageable pageable
     );
-
-    // ========== 통계 쿼리 ==========
 
     /**
      * 축종별 동물 수 카운트
@@ -303,8 +294,6 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
      * @return 개수
      */
     long countBySpeciesAndStatus(Species species, AnimalStatus status);
-
-    // ========== 배치 작업용 ==========
 
     /**
      * 특정 날짜 이후 APMS에서 수정된 동물 조회
