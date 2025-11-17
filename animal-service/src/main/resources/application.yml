@@ -27,6 +27,12 @@ spring:
         use_sql_comments: true
     open-in-view: false
 
+  # Spring Batch Settings
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false
   # Kafka Settings (Phase 3)
   # kafka:
   #   bootstrap-servers: localhost:9092
@@ -69,3 +75,9 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+# APMS API Settings
+apms:
+  api:
+    base-url: https://apis.data.go.kr/1543061/abandonmentPublicService_v2
+    service-key: ${APMS_SERVICE_KEY:your-service-key-here}
