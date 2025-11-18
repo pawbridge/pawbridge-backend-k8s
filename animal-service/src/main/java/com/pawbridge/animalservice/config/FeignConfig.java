@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.config;
 
 import feign.Logger.Level;
+import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -8,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
  * FeignClient 설정
  */
 @Configuration
+@EnableFeignClients(basePackages = "com.pawbridge.animalservice.client")
 public class FeignConfig {
 
     /**
