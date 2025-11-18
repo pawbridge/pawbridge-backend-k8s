@@ -1,0 +1,40 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+        show_sql: true
+    show-sql: true
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_SECRET_KEY}
+            scope: email, profile
+            redirect-uri: ${REDIRECT_URI} # 이렇게 명시하지 않으면 Spring Security가 자동으로 자신의 주소(http://localhost:8081)를 사용
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION}      # 15분 (밀리초)
+  refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION}  # 7일 (밀리초)
+
+oauth2:
+  redirect-uri: ${OAUTH2_REDIRECT_URI}
