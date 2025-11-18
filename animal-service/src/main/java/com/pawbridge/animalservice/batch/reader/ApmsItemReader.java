@@ -2,9 +2,11 @@ package com.pawbridge.animalservice.batch.reader;
 
 import com.pawbridge.animalservice.client.ApmsApiClient;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
-import com.pawbridge.animalservice.dto.apms.ApmsApiResponse;
+import com.pawbridge.animalservice.dto.apms.ApmsResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -15,11 +17,12 @@ import java.util.List;
 /**
  * APMS API로부터 유기동물 데이터를 읽어오는 ItemReader
  * - 페이징 처리를 통해 전체 데이터를 순차적으로 읽음
+ * - StepExecutionListener를 구현하여 Step 실행마다 상태 초기화
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class ApmsItemReader implements ItemReader<ApmsAnimal> {
+public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionListener {
 
     private final ApmsApiClient apmsApiClient;
 
@@ -63,7 +66,8 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal> {
         try {
             log.info("APMS API 호출 - 페이지: {}, 페이지 크기: {}", currentPage, PAGE_SIZE);
 
-            ApmsApiResponse<ApmsAnimal> response = apmsApiClient.getAbandonmentAnimals(
+            // APMS API 호출 (response 필드로 감싸진 응답)
+            var rootResponse = apmsApiClient.getAbandonmentAnimals(
                     serviceKey,
                     currentPage,
                     PAGE_SIZE,
@@ -73,6 +77,9 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal> {
                     null, // state
                     "json"
             );
+
+            // "response" 필드에서 실제 응답 추출
+            var response = rootResponse != null ? rootResponse.getResponse() : null;
 
             // 응답 검증
             if (response == null || response.getBody() == null || response.getBody().getItems() == null) {
@@ -104,13 +111,14 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal> {
     }
 
     /**
-     * Reader 상태 초기화 (Job 재실행 시 사용)
+     * Step 실행 전 호출 - Reader 상태 초기화
      */
-    public void reset() {
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
         currentPage = 1;
         currentItems = new ArrayList<>();
         currentIndex = 0;
         isExhausted = false;
-        log.info("ApmsItemReader 상태 초기화");
+        log.info("ApmsItemReader 상태 초기화 - Step 실행 전");
     }
 }

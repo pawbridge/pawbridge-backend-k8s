@@ -5,6 +5,7 @@ import com.pawbridge.animalservice.batch.reader.ApmsItemReader;
 import com.pawbridge.animalservice.batch.writer.AnimalItemWriter;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Animal;
+import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -14,6 +15,7 @@ import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.dao.DataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
@@ -49,6 +51,7 @@ public class ApmsAnimalBatchJob {
      * - Reader: APMS API 호출
      * - Processor: DTO → Entity 변환
      * - Writer: DB 저장
+     * - FaultTolerant: 에러 발생 시 Skip/Retry 정책
      */
     @Bean
     public Step apmsAnimalSyncStep() {
@@ -57,6 +60,12 @@ public class ApmsAnimalBatchJob {
                 .reader(apmsItemReader)
                 .processor(animalItemProcessor)
                 .writer(animalItemWriter)
+                .faultTolerant() // FaultTolerant 설정
+                .skipLimit(100) // Skip 정책: 최대 100개 아이템까지 스킵 허용
+                .skip(FeignException.class) // API 호출 실패 시 해당 아이템 스킵 (예: 401, 500 등)
+                .skip(IllegalArgumentException.class) // 데이터 파싱/변환 오류 시 스킵
+                .skip(DataAccessException.class) // DB 저장 오류 시 스킵 (예: 제약조건 위반)
+                .skip(Exception.class) // 일반 예외도 스킵 (NPE 등)
                 .build();
     }
 }

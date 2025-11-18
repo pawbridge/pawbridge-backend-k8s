@@ -275,6 +275,67 @@ public class Animal extends BaseTimeEntity {
         return LocalDate.now().plusDays(3).isAfter(noticeEndDate);
     }
 
+    /**
+     * APMS 배치 데이터로 업데이트
+     * - APMS에서 변경될 수 있는 필드만 업데이트
+     * - ID, desertionNo, noticeNo, apiSource, favoriteCount, description 등은 유지
+     *
+     * @param breed 품종
+     * @param birthYear 출생 연도
+     * @param weight 체중
+     * @param color 색상
+     * @param gender 성별
+     * @param neuterStatus 중성화 여부
+     * @param specialMark 특징
+     * @param apmsProcessState APMS 진행상태
+     * @param noticeStartDate 공고 시작일
+     * @param noticeEndDate 공고 종료일
+     * @param apmsUpdatedAt APMS 마지막 수정 시각
+     * @param happenDate 접수일
+     * @param happenPlace 발견 장소
+     * @param imageUrl 대표 이미지
+     * @param imageUrl2 추가 이미지
+     * @param shelter 보호소
+     * @param status 자체 관리 상태
+     */
+    public void updateFromApms(
+            String breed,
+            Integer birthYear,
+            String weight,
+            String color,
+            Gender gender,
+            NeuterStatus neuterStatus,
+            String specialMark,
+            String apmsProcessState,
+            LocalDate noticeStartDate,
+            LocalDate noticeEndDate,
+            LocalDateTime apmsUpdatedAt,
+            LocalDate happenDate,
+            String happenPlace,
+            String imageUrl,
+            String imageUrl2,
+            Shelter shelter,
+            AnimalStatus status
+    ) {
+        this.breed = breed;
+        this.birthYear = birthYear;
+        this.weight = weight;
+        this.color = color;
+        this.gender = gender;
+        this.neuterStatus = neuterStatus;
+        this.specialMark = specialMark;
+        this.apmsProcessState = apmsProcessState;
+        this.noticeStartDate = noticeStartDate;
+        this.noticeEndDate = noticeEndDate;
+        this.apmsUpdatedAt = apmsUpdatedAt;
+        this.happenDate = happenDate;
+        this.happenPlace = happenPlace;
+        this.imageUrl = imageUrl;
+        this.imageUrl2 = imageUrl2;
+        this.shelter = shelter;
+        this.status = status;
+    }
+
     // 연관관계 메서드
     /**
      * Shelter 설정

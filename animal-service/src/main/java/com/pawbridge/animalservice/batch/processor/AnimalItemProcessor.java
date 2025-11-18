@@ -133,20 +133,25 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal> {
      * - APMS에서 변경될 수 있는 필드만 업데이트
      */
     private void updateExistingAnimal(Animal animal, ApmsAnimal apmsAnimal, Shelter shelter) {
-        // 주의: Entity의 setter가 없으므로 Builder를 이용한 재생성은 불가능
-        // 대신 reflection이나 직접 필드 접근 필요
-        // 하지만 현재 Animal Entity는 setter가 제한적이므로, 변경 가능한 필드만 업데이트
-
-        // 현재 Animal Entity에는 public setter가 없으므로
-        // 기존 데이터를 유지하고 새로운 Animal을 생성하여 반환
-        // (ItemWriter에서 save()시 merge로 처리됨)
-
-        // 실제로는 Animal entity에 update 메서드를 추가하는 것이 바람직하지만,
-        // 현재는 Builder를 통해 기존 ID를 유지하면서 재생성
-        // 참고: Builder 패턴은 immutable 객체이므로 이 방식은 비권장
-
-        // 임시로 새 객체 생성 후 반환 (ID는 유지되지 않음 - 문제 발생 가능)
-        log.warn("Animal 업데이트는 현재 구조상 제한적입니다. Entity에 update 메서드 추가 필요");
+        animal.updateFromApms(
+                extractBreedName(apmsAnimal.getKindNm()),
+                extractBirthYear(apmsAnimal.getAge()),
+                apmsAnimal.getWeight(),
+                apmsAnimal.getColorCd(),
+                Gender.fromCode(apmsAnimal.getSexCd()),
+                NeuterStatus.fromCode(apmsAnimal.getNeuterYn()),
+                apmsAnimal.getSpecialMark(),
+                apmsAnimal.getProcessState(),
+                parseDate(apmsAnimal.getNoticeSdt()),
+                parseDate(apmsAnimal.getNoticeEdt()),
+                parseDateTime(apmsAnimal.getUpdTm()),
+                parseDate(apmsAnimal.getHappenDt()),
+                apmsAnimal.getHappenPlace(),
+                apmsAnimal.getPopfile1(),
+                apmsAnimal.getPopfile2(),
+                shelter,
+                AnimalStatus.fromCode(apmsAnimal.getProcessState())
+        );
     }
 
     /**

@@ -18,7 +18,7 @@ spring:
   # JPA Settings
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
@@ -63,6 +63,8 @@ logging:
     com.pawbridge.animalservice: DEBUG
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.springframework.batch: DEBUG
+    org.springframework.boot.autoconfigure.batch: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
@@ -81,3 +83,13 @@ apms:
   api:
     base-url: https://apis.data.go.kr/1543061/abandonmentPublicService_v2
     service-key: ${APMS_SERVICE_KEY:your-service-key-here}
+
+# Batch Scheduler Settings
+batch:
+  apms:
+    sync:
+      # Cron 표현식: 매일 새벽 2시 실행 (초 분 시 일 월 요일)
+      # 0 0 2 * * ? : 매일 새벽 2시
+      # 0 0 */6 * * ? : 6시간마다
+      # 0 */30 * * * ? : 30분마다 (테스트용)
+      cron: "0 0 2 * * ?"

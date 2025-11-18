@@ -2,7 +2,7 @@ package com.pawbridge.animalservice.client;
 
 import com.pawbridge.animalservice.config.FeignConfig;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
-import com.pawbridge.animalservice.dto.apms.ApmsApiResponse;
+import com.pawbridge.animalservice.dto.apms.ApmsRootResponse;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -29,8 +29,8 @@ public interface ApmsApiClient {
      * @param state 상태 (notice:공고중, protect:보호중, 선택)
      * @return APMS API 응답
      */
-    @GetMapping("/abandonmentPublic")
-    ApmsApiResponse<ApmsAnimal> getAbandonmentAnimals(
+    @GetMapping("/abandonmentPublic_v2")
+    ApmsRootResponse<ApmsAnimal> getAbandonmentAnimals(
             @RequestParam("serviceKey") String serviceKey,
             @RequestParam("pageNo") int pageNo,
             @RequestParam("numOfRows") int numOfRows,

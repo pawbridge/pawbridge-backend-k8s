@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * APMS API 전체 응답
+ * APMS API 응답 (response 필드 내부)
  *
  * @param <T> item 타입 (ApmsAnimal 등)
  */
@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ApmsApiResponse<T> {
+public class ApmsResponse<T> {
 
     /**
      * 헤더
