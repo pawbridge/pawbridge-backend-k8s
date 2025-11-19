@@ -2,11 +2,7 @@ package com.pawbridge.animalservice.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.springframework.data.annotation.CreatedDate;
-import org.springframework.data.annotation.LastModifiedDate;
-import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,7 +15,6 @@ import java.util.List;
         indexes = {
                 @Index(name = "idx_care_reg_no", columnList = "careRegNo", unique = true)
         })
-@EntityListeners(AuditingEntityListener.class)
 @Getter
 @Builder
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
@@ -110,7 +105,7 @@ public class Shelter extends BaseTimeEntity {
      * - mappedBy: Animal.shelter 필드와 연결
      * - cascade = PERSIST: Animal 저장 시 새로운 Shelter도 함께 저장 (배치 작업에서 유용)
      * - orphanRemoval = false: Animal에서 shelter 참조 제거해도 Shelter는 유지
-     *   (같은 Shelter를 여러 Animal이 참조할 수 있으므로)
+     * (같은 Shelter를 여러 Animal이 참조할 수 있으므로)
      */
     @Builder.Default
     @OneToMany(mappedBy = "shelter", cascade = CascadeType.PERSIST, orphanRemoval = false)
@@ -120,6 +115,7 @@ public class Shelter extends BaseTimeEntity {
 
     /**
      * 동물 추가
+     *
      * @param animal 동물
      */
     public void addAnimal(Animal animal) {
@@ -129,6 +125,7 @@ public class Shelter extends BaseTimeEntity {
 
     /**
      * 동물 제거
+     *
      * @param animal 동물
      */
     public void removeAnimal(Animal animal) {
