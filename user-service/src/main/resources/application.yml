@@ -38,3 +38,7 @@ jwt:
 
 oauth2:
   redirect-uri: ${OAUTH2_REDIRECT_URI}
+
+# Email Service 설정
+email-service:
+  url: ${EMAIL_SERVICE_URL:http://localhost:8088}
