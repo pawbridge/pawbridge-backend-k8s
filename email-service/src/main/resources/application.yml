@@ -1,0 +1,29 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: email-service
+
+  # Redis 설정 ( 임시로 localhost 사용)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+
+  # 메일 설정
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${GOOGLE_EMAIL}
+    password: ${GOOGLE_EMAIL_SECRET_KEY}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
