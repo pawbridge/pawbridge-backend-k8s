@@ -18,7 +18,7 @@ spring:
   # JPA Settings
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
@@ -27,6 +27,12 @@ spring:
         use_sql_comments: true
     open-in-view: false
 
+  # Spring Batch Settings
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false
   # Kafka Settings (Phase 3)
   # kafka:
   #   bootstrap-servers: localhost:9092
@@ -43,7 +49,7 @@ spring:
 
 # Server Settings
 server:
-  port: 8082
+  port: 9020
   servlet:
     context-path: /
     encoding:
@@ -57,6 +63,8 @@ logging:
     com.pawbridge.animalservice: DEBUG
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.springframework.batch: DEBUG
+    org.springframework.boot.autoconfigure.batch: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
@@ -69,3 +77,19 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+# APMS API Settings
+apms:
+  api:
+    base-url: https://apis.data.go.kr/1543061/abandonmentPublicService_v2
+    service-key: ${APMS_SERVICE_KEY:your-service-key-here}
+
+# Batch Scheduler Settings
+batch:
+  apms:
+    sync:
+      # Cron 표현식: 매일 새벽 2시 실행 (초 분 시 일 월 요일)
+      # 0 0 2 * * ? : 매일 새벽 2시
+      # 0 0 */6 * * ? : 6시간마다
+      # 0 */30 * * * ? : 30분마다 (테스트용)
+      cron: "0 0 2 * * ?"

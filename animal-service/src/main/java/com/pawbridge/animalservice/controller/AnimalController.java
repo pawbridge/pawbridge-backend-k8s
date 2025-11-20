@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.controller;
 
+import com.pawbridge.animalservice.dto.request.AnimalSearchRequest;
 import com.pawbridge.animalservice.dto.request.CreateAnimalRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalDescriptionRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalStatusRequest;
@@ -44,44 +45,39 @@ public class AnimalController {
     }
 
     /**
-     * 동물 목록 조회 (필터링 + 페이징)
+     * 동물 목록 조회 및 검색 (통합 엔드포인트)
      * - GET /api/animals
+     * - Phase 1: MySQL Specification 기반
+     * - Phase 4: OpenSearch로 전환 예정
+     *
+     * 쿼리 파라미터:
+     * - species: 축종 (DOG, CAT, ETC)
+     * - breed: 품종 (부분 검색)
+     * - gender: 성별 (MALE, FEMALE, UNKNOWN)
+     * - neuterStatus: 중성화 여부 (YES, NO, UNKNOWN)
+     * - status: 상태 (PROTECT, ADOPTED 등)
+     * - minAge: 최소 나이
+     * - maxAge: 최대 나이
+     * - region: 지역(시도)
+     * - city: 지역(시군구)
+     * - keyword: 통합 검색 (품종+특징+발견장소)
+     *
+     * 정렬:
+     * - createdAt,desc: 최신 등록순 (기본값)
+     * - noticeEndDate,asc: 공고 종료 임박순
+     * - createdAt,asc: 오래된 순
+     *
+     * 예시:
+     * - /api/animals?status=PROTECT&species=DOG (보호중인 강아지)
+     * - /api/animals (전체 조회)
+     * - /api/animals?species=DOG&gender=MALE&minAge=1&maxAge=5&region=서울
      */
     @GetMapping
     public ResponseEntity<Page<AnimalResponse>> listAnimals(
-            @RequestParam(required = false) Species species,
-            @RequestParam(required = false) Gender gender,
-            @RequestParam(required = false) AnimalStatus status,
-            @RequestParam(required = false) String breed,
-            @RequestParam(required = false) Long shelterId,
-            @PageableDefault(size = 20, sort = "noticeEndDate", direction = Sort.Direction.ASC) Pageable pageable
+            @ModelAttribute AnimalSearchRequest request,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        Page<AnimalResponse> response;
-
-        // 필터 조건에 따라 적절한 Facade 메서드 호출
-        if (shelterId != null && status != null) {
-            response = animalFacade.findByShelterIdAndStatus(shelterId, status, pageable);
-        } else if (shelterId != null && species != null) {
-            response = animalFacade.findByShelterIdAndSpecies(shelterId, species, pageable);
-        } else if (shelterId != null) {
-            response = animalFacade.findByShelterId(shelterId, pageable);
-        } else if (species != null && status != null) {
-            response = animalFacade.findBySpeciesAndStatus(species, status, pageable);
-        } else if (species != null && gender != null) {
-            response = animalFacade.findBySpeciesAndGender(species, gender, pageable);
-        } else if (species != null && breed != null) {
-            response = animalFacade.searchBySpeciesAndBreed(species, breed, pageable);
-        } else if (species != null) {
-            response = animalFacade.findBySpecies(species, pageable);
-        } else if (status != null) {
-            response = animalFacade.findByStatus(status, pageable);
-        } else if (breed != null) {
-            response = animalFacade.searchByBreed(breed, pageable);
-        } else {
-            // 기본: 공고 종료 임박순 (메인 페이지)
-            response = animalFacade.findNoticeAnimalsOrderByNoticeEndDate(pageable);
-        }
-
+        Page<AnimalResponse> response = animalFacade.searchAnimals(request, pageable);
         return ResponseEntity.ok(response);
     }
 
@@ -92,6 +88,16 @@ public class AnimalController {
     @GetMapping("/{id}")
     public ResponseEntity<AnimalDetailResponse> getAnimal(@PathVariable Long id) {
         AnimalDetailResponse response = animalFacade.findById(id);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * APMS 유기번호로 동물 조회
+     * - GET /api/animals/apms/{apmsDesertionNo}
+     */
+    @GetMapping("/apms/{apmsDesertionNo}")
+    public ResponseEntity<AnimalDetailResponse> getAnimalByApmsNo(@PathVariable String apmsDesertionNo) {
+        AnimalDetailResponse response = animalFacade.findByApmsDesertionNo(apmsDesertionNo);
         return ResponseEntity.ok(response);
     }
 
@@ -144,28 +150,27 @@ public class AnimalController {
     }
 
     /**
-     * 특징 키워드 검색
-     * - GET /api/animals/search/special-mark?keyword=순함
+     * 찜 횟수 증가
+     * - POST /api/animals/{id}/favorite/increment
+     * - user-service에서 Kafka 이벤트로 호출 예정
+     * - 현재는 테스트용 엔드포인트
      */
-    @GetMapping("/search/special-mark")
-    public ResponseEntity<Page<AnimalResponse>> searchBySpecialMark(
-            @RequestParam String keyword,
-            @PageableDefault(size = 20) Pageable pageable
-    ) {
-        Page<AnimalResponse> response = animalFacade.searchBySpecialMark(keyword, pageable);
-        return ResponseEntity.ok(response);
+    @PostMapping("/{id}/favorite/increment")
+    public ResponseEntity<Void> incrementFavoriteCount(@PathVariable Long id) {
+        animalFacade.incrementFavoriteCount(id);
+        return ResponseEntity.ok().build();
     }
 
     /**
-     * 발견 장소 검색
-     * - GET /api/animals/search/happen-place?place=서울
+     * 찜 횟수 감소
+     * - POST /api/animals/{id}/favorite/decrement
+     * - user-service에서 Kafka 이벤트로 호출 예정
+     * - 현재는 테스트용 엔드포인트
      */
-    @GetMapping("/search/happen-place")
-    public ResponseEntity<Page<AnimalResponse>> searchByHappenPlace(
-            @RequestParam String place,
-            @PageableDefault(size = 20) Pageable pageable
-    ) {
-        Page<AnimalResponse> response = animalFacade.searchByHappenPlace(place, pageable);
-        return ResponseEntity.ok(response);
+    @PostMapping("/{id}/favorite/decrement")
+    public ResponseEntity<Void> decrementFavoriteCount(@PathVariable Long id) {
+        animalFacade.decrementFavoriteCount(id);
+        return ResponseEntity.ok().build();
     }
+
 }

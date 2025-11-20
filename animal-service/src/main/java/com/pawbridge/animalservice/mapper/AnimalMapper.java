@@ -62,6 +62,7 @@ public class AnimalMapper {
                 .gender(animal.getGender())
                 .birthYear(animal.getBirthYear())
                 .age(calculateAge(animal.getBirthYear()))
+                .specialMark(animal.getSpecialMark())
                 .status(animal.getStatus())
                 .noticeEndDate(animal.getNoticeEndDate())
                 .imageUrl(animal.getImageUrl())
