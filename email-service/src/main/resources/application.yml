@@ -5,7 +5,7 @@ spring:
   application:
     name: email-service
 
-  # Redis 설정
+  # Redis 설정 ( 임시로 localhost 사용)
   data:
     redis:
       host: ${REDIS_HOST:localhost}
