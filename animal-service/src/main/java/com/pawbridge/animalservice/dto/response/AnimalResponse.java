@@ -60,6 +60,11 @@ public class AnimalResponse {
     private Integer age;
 
     /**
+     * 특징
+     */
+    private String specialMark;
+
+    /**
      * 동물 상태
      */
     private AnimalStatus status;

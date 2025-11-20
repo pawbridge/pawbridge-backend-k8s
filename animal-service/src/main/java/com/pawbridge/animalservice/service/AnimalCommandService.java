@@ -149,14 +149,16 @@ public class AnimalCommandService {
 
     /**
      * 공고 종료된 동물 상태 일괄 업데이트
-     * - 배치 작업용: NOTICE → PROTECT
+     * - 배치 작업용: 공고 종료일이 지난 보호 중인 동물 처리
+     * - 현재는 PROTECT 상태 유지 (향후 다른 로직 추가 가능)
      * @return 업데이트된 개수
      */
     @Transactional
-    public int updateExpiredNoticeAnimals() {
-        List<Animal> expiredAnimals = animalRepository.findExpiredNoticeAnimals(LocalDate.now());
+    public int updateExpiredProtectAnimals() {
+        List<Animal> expiredAnimals = animalRepository.findExpiredProtectAnimals(LocalDate.now());
 
-        expiredAnimals.forEach(animal -> animal.updateStatus(AnimalStatus.PROTECT));
+        // 향후 필요 시 상태 변경 로직 추가
+        // 예: expiredAnimals.forEach(animal -> animal.updateStatus(AnimalStatus.UNKNOWN));
 
         return expiredAnimals.size();
     }

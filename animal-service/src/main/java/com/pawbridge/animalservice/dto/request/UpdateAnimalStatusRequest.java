@@ -20,7 +20,7 @@ public class UpdateAnimalStatusRequest {
 
     /**
      * 새로운 상태
-     * - NOTICE, PROTECT, ADOPTION_PENDING, ADOPTED, RETURNED_TO_OWNER, EUTHANIZED 등
+     * - PROTECT, ADOPTION_PENDING, ADOPTED, RETURNED_TO_OWNER, EUTHANIZED 등
      */
     @NotNull(message = "새로운 상태는 필수입니다")
     private AnimalStatus newStatus;

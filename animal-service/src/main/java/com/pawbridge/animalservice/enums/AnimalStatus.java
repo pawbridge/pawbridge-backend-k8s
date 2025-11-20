@@ -6,7 +6,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @Getter
 public enum AnimalStatus {
-    NOTICE("공고중"),
     PROTECT("보호중"),
     ADOPTION_PENDING("입양대기중"),    // 입양 절차 진행 중
     ADOPTED("종료(입양)"),

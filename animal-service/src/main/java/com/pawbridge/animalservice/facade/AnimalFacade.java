@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.facade;
 
+import com.pawbridge.animalservice.dto.request.AnimalSearchRequest;
 import com.pawbridge.animalservice.dto.request.CreateAnimalRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalDescriptionRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalStatusRequest;
@@ -96,8 +97,8 @@ public class AnimalFacade {
      * 공고 종료된 동물 상태 일괄 업데이트 (배치)
      */
     @Transactional
-    public int updateExpiredNoticeAnimals() {
-        return commandService.updateExpiredNoticeAnimals();
+    public int updateExpiredProtectAnimals() {
+        return commandService.updateExpiredProtectAnimals();
     }
 
     /**
@@ -116,53 +117,6 @@ public class AnimalFacade {
         return queryService.findByApmsDesertionNo(apmsDesertionNo);
     }
 
-    /**
-     * 축종별 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findBySpecies(Species species, Pageable pageable) {
-        return queryService.findBySpecies(species, pageable);
-    }
-
-    /**
-     * 상태별 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findByStatus(AnimalStatus status, Pageable pageable) {
-        return queryService.findByStatus(status, pageable);
-    }
-
-    /**
-     * 축종 + 성별 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findBySpeciesAndGender(Species species, Gender gender, Pageable pageable) {
-        return queryService.findBySpeciesAndGender(species, gender, pageable);
-    }
-
-    /**
-     * 축종 + 상태 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findBySpeciesAndStatus(Species species, AnimalStatus status, Pageable pageable) {
-        return queryService.findBySpeciesAndStatus(species, status, pageable);
-    }
-
-    /**
-     * 여러 상태 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findByStatusIn(List<AnimalStatus> statuses, Pageable pageable) {
-        return queryService.findByStatusIn(statuses, pageable);
-    }
-
-    /**
-     * 공고 중인 동물 (공고 종료일 임박 순)
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findNoticeAnimalsOrderByNoticeEndDate(Pageable pageable) {
-        return queryService.findNoticeAnimalsOrderByNoticeEndDate(pageable);
-    }
 
     /**
      * 공고 종료 임박 동물 (D-3 이내)
@@ -172,62 +126,6 @@ public class AnimalFacade {
         return queryService.findExpiringSoonAnimals(pageable);
     }
 
-    /**
-     * 공고 종료일 범위 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findByNoticeEndDateBetween(LocalDate startDate, LocalDate endDate, Pageable pageable) {
-        return queryService.findByNoticeEndDateBetween(startDate, endDate, pageable);
-    }
-
-    /**
-     * 출생 연도 범위 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findByBirthYearBetween(Integer startYear, Integer endYear, Pageable pageable) {
-        return queryService.findByBirthYearBetween(startYear, endYear, pageable);
-    }
-
-    /**
-     * 축종 + 출생 연도 범위 조회
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> findBySpeciesAndBirthYearBetween(
-            Species species, Integer startYear, Integer endYear, Pageable pageable) {
-        return queryService.findBySpeciesAndBirthYearBetween(species, startYear, endYear, pageable);
-    }
-
-    /**
-     * 품종명 검색
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> searchByBreed(String breed, Pageable pageable) {
-        return queryService.searchByBreed(breed, pageable);
-    }
-
-    /**
-     * 특징 검색
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> searchBySpecialMark(String keyword, Pageable pageable) {
-        return queryService.searchBySpecialMark(keyword, pageable);
-    }
-
-    /**
-     * 발견 장소 검색
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> searchByHappenPlace(String place, Pageable pageable) {
-        return queryService.searchByHappenPlace(place, pageable);
-    }
-
-    /**
-     * 축종 + 품종 검색
-     */
-    @Transactional(readOnly = true)
-    public Page<AnimalResponse> searchBySpeciesAndBreed(Species species, String breed, Pageable pageable) {
-        return queryService.searchBySpeciesAndBreed(species, breed, pageable);
-    }
 
     /**
      * 보호소 ID로 동물 목록 조회
@@ -292,5 +190,19 @@ public class AnimalFacade {
     @Transactional(readOnly = true)
     public List<Animal> findByApmsUpdatedAtAfter(LocalDateTime dateTime) {
         return queryService.findByApmsUpdatedAtAfter(dateTime);
+    }
+
+    /**
+     * 동물 통합 검색 (동적 쿼리)
+     * - Phase 1: MySQL Specification 기반
+     * - Phase 4: OpenSearch로 전환 예정
+     *
+     * @param request 검색 조건
+     * @param pageable 페이징 정보
+     * @return Page<AnimalResponse>
+     */
+    @Transactional(readOnly = true)
+    public Page<AnimalResponse> searchAnimals(AnimalSearchRequest request, Pageable pageable) {
+        return queryService.searchAnimals(request, pageable);
     }
 }
