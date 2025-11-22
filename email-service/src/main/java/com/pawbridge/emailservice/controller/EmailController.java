@@ -67,4 +67,35 @@ public class EmailController {
         emailVerificationService.clearVerification(email);
         return ResponseEntity.ok().build();
     }
+
+    // ========== 비밀번호 재설정 관련 API ==========
+
+    /**
+     * 비밀번호 재설정 인증코드 발송 (내부 API - user-service에서 호출)
+     */
+    @PostMapping("/internal/email/password-reset/send")
+    public ResponseEntity<Void> sendPasswordResetCode(@RequestParam String email) {
+        emailVerificationService.sendPasswordResetCode(email);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * 비밀번호 재설정 인증코드 검증 (내부 API - user-service에서 호출)
+     */
+    @PostMapping("/internal/email/password-reset/verify")
+    public ResponseEntity<Boolean> verifyPasswordResetCode(
+            @RequestParam String email,
+            @RequestParam String code) {
+        boolean verified = emailVerificationService.verifyPasswordResetCode(email, code);
+        return ResponseEntity.ok(verified);
+    }
+
+    /**
+     * 비밀번호 재설정 인증 정보 삭제 (내부 API - user-service에서 호출)
+     */
+    @DeleteMapping("/internal/email/password-reset/clear")
+    public ResponseEntity<Void> clearPasswordResetVerification(@RequestParam String email) {
+        emailVerificationService.clearPasswordResetVerification(email);
+        return ResponseEntity.ok().build();
+    }
 }

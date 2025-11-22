@@ -27,18 +27,32 @@ public class EmailSenderService {
     private String fromEmail;
 
     /**
-     * 인증 이메일 발송
+     * 회원가입 인증 이메일 발송
      */
     public void sendVerificationEmail(String to, String code) {
+        sendEmail(to, "[PawBridge] 이메일 인증 코드", "templates/email_verification.html", code);
+    }
+
+    /**
+     * 비밀번호 재설정 인증 이메일 발송
+     */
+    public void sendPasswordResetEmail(String to, String code) {
+        sendEmail(to, "[PawBridge] 비밀번호 재설정 인증 코드", "templates/password_reset.html", code);
+    }
+
+    /**
+     * 이메일 발송 공통 로직
+     */
+    private void sendEmail(String to, String subject, String templatePath, String code) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
             helper.setFrom(new InternetAddress(fromEmail, "PawBridge"));
             helper.setTo(to);
-            helper.setSubject("[PawBridge] 이메일 인증 코드");
+            helper.setSubject(subject);
 
-            String emailContent = loadEmailTemplate(code);
+            String emailContent = loadEmailTemplate(templatePath, code);
             helper.setText(emailContent, true);
 
             mailSender.send(message);
@@ -51,9 +65,9 @@ public class EmailSenderService {
     /**
      * 이메일 템플릿 로드
      */
-    private String loadEmailTemplate(String code) {
+    private String loadEmailTemplate(String templatePath, String code) {
         try {
-            Resource resource = new ClassPathResource("templates/email_verification.html");
+            Resource resource = new ClassPathResource(templatePath);
             String template = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             return template.replace("{{code}}", code);
         } catch (IOException e) {
