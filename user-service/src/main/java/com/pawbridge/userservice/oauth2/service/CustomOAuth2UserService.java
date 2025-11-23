@@ -6,8 +6,10 @@ import com.pawbridge.userservice.oauth2.dto.OAuth2UserInfo;
 import com.pawbridge.userservice.oauth2.exception.OAuth2ProcessingException;
 import com.pawbridge.userservice.repository.UserRepository;
 import com.pawbridge.userservice.security.PrincipalDetails;
+import com.pawbridge.userservice.service.NicknameGeneratorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
     private final UserRepository userRepository;
+    private final NicknameGeneratorService nicknameGeneratorService;
 
     /**
      * OAuth2 인증 후 사용자 정보 로드
@@ -74,8 +77,22 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
 
                         // 새 Google 사용자 생성
                         log.info("새 Google 사용자 생성: email={}", email);
-                        User newUser = User.createSocialUser(email, name, "GOOGLE", providerId);
-                        return userRepository.save(newUser);
+
+                        // 닉네임 자동 생성
+                        String nickname = nicknameGeneratorService.generateUniqueNickname();
+                        log.info("OAuth2 신규 사용자 닉네임 생성: {}", nickname);
+
+                        User newUser = User.createSocialUser(email, name, "GOOGLE", providerId, nickname);
+
+                        // DB 저장 (닉네임 중복 시 재시도)
+                        try {
+                            return userRepository.save(newUser);
+                        } catch (DataIntegrityViolationException e) {
+                            log.warn("OAuth2 닉네임 중복 발생, 재생성 시도");
+                            String newNickname = nicknameGeneratorService.generateUniqueNickname();
+                            newUser = User.createSocialUser(email, name, "GOOGLE", providerId, newNickname);
+                            return userRepository.save(newUser);
+                        }
                     });
 
             log.info("OAuth2 사용자 로드 완료: userId={}, email={}", user.getUserId(), user.getEmail());

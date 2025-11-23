@@ -29,9 +29,11 @@ public class JwtAuthorizationGatewayFilterFactory
 
     // 토큰 검증이 필요 없는 경로 (화이트리스트)
     private static final List<String> WHITELIST = List.of(
-            "/api/v1/user/signup",    // 회원가입
-            "/api/v1/auth/login",      // 로그인
-            "/api/v1/auth/refresh"     // 토큰 재발급 (Access Token 만료 시 사용)
+            "/api/v1/users/signup",              // 회원가입
+            "/api/v1/auth/login",                 // 로그인
+            "/api/v1/auth/refresh",               // 토큰 재발급 (Access Token 만료 시 사용)
+            "/api/v1/auth/password/reset-request", // 비밀번호 재설정 요청
+            "/api/v1/auth/password/reset"         // 비밀번호 재설정
     );
 
     public JwtAuthorizationGatewayFilterFactory(JwtUtil jwtUtil) {

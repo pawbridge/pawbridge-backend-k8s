@@ -22,8 +22,8 @@ public record SignUpRequestDto(
         String rePassword
 ) {
 
-    public User toEntity(String email, String name, String password) {
-        return User.createLocalUser(email, name, password);
+    public User toEntity(String email, String name, String password, String nickname) {
+        return User.createLocalUser(email, name, password, nickname);
     }
 
 }

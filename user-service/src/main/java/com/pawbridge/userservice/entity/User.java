@@ -18,7 +18,8 @@ import java.time.LocalDateTime;
 @Builder
 @Table(name = "users",
     uniqueConstraints = {
-        @UniqueConstraint(columnNames = {"email", "provider"})
+        @UniqueConstraint(columnNames = {"email", "provider"}),
+        @UniqueConstraint(columnNames = {"nickname"})
     }
 )
 // Auditing 기능을 활성화
@@ -35,6 +36,9 @@ public class User {
 
     @Column(nullable = false, length = 20)
     private String name;
+
+    @Column(nullable = false, unique = true, length = 30)
+    private String nickname;
 
     @Column(nullable = true)
     private String password;
@@ -59,10 +63,11 @@ public class User {
     /**
      * 일반 회원가입 사용자 생성 (LOCAL)
      */
-    public static User createLocalUser(String email, String name, String password) {
+    public static User createLocalUser(String email, String name, String password, String nickname) {
         return User.builder()
                 .email(email)
                 .name(name)
+                .nickname(nickname)
                 .password(password)
                 .provider("LOCAL")
                 .role(Role.ROLE_USER)
@@ -72,14 +77,36 @@ public class User {
     /**
      * 소셜 로그인 사용자 생성 (GOOGLE 등)
      */
-    public static User createSocialUser(String email, String name, String provider, String providerId) {
+    public static User createSocialUser(String email, String name, String provider, String providerId, String nickname) {
         return User.builder()
                 .email(email)
                 .name(name)
+                .nickname(nickname)
                 .password("OAuth2")  // OAuth2 사용자는 비밀번호 불필요, 더미 값 설정
                 .provider(provider)
                 .providerId(providerId)
                 .role(Role.ROLE_USER)
                 .build();
+    }
+
+    /**
+     * 닉네임 변경
+     */
+    public void updateNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
+    /**
+     * 비밀번호 변경
+     */
+    public void updatePassword(String newPassword) {
+        this.password = newPassword;
+    }
+
+    /**
+     * LOCAL 사용자인지 확인
+     */
+    public boolean isLocalUser() {
+        return "LOCAL".equals(this.provider);
     }
 }
