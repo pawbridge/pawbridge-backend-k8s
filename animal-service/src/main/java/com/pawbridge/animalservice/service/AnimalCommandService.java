@@ -7,6 +7,9 @@ import com.pawbridge.animalservice.dto.response.AnimalDetailResponse;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.enums.AnimalStatus;
+import com.pawbridge.animalservice.event.AnimalCreatedEvent;
+import com.pawbridge.animalservice.event.AnimalStatusChangedEvent;
+import com.pawbridge.animalservice.event.AnimalUpdatedEvent;
 import com.pawbridge.animalservice.mapper.AnimalMapper;
 import com.pawbridge.animalservice.repository.AnimalRepository;
 import com.pawbridge.animalservice.repository.ShelterRepository;
@@ -16,7 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Animal Command Service (CUD)
@@ -28,9 +35,15 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AnimalCommandService {
 
+    // Kafka 토픽 상수
+    private static final String TOPIC_ANIMAL_CREATED = "animal.created";
+    private static final String TOPIC_ANIMAL_UPDATED = "animal.updated";
+    private static final String TOPIC_ANIMAL_STATUS_CHANGED = "animal.status.changed";
+
     private final AnimalRepository animalRepository;
     private final ShelterRepository shelterRepository;
     private final AnimalMapper mapper;
+    private final OutboxService outboxService;
 
     /**
      * 동물 생성 (보호소 직접 등록)
@@ -50,6 +63,20 @@ public class AnimalCommandService {
         // 저장
         Animal saved = animalRepository.save(animal);
 
+        // Outbox에 이벤트 저장 (같은 트랜잭션)
+        AnimalCreatedEvent event = AnimalCreatedEvent.builder()
+                .eventId(UUID.randomUUID().toString())
+                .eventType("ANIMAL_CREATED")
+                .timestamp(LocalDateTime.now())
+                .animalId(saved.getId())
+                .species(saved.getSpecies().name())
+                .breed(saved.getBreed())
+                .status(saved.getStatus().name())
+                .shelterId(saved.getShelter().getId())
+                .build();
+        outboxService.saveEvent("Animal", String.valueOf(saved.getId()),
+                "ANIMAL_CREATED", TOPIC_ANIMAL_CREATED, event);
+
         // Entity → Response DTO
         return mapper.toDetailResponse(saved);
     }
@@ -66,7 +93,22 @@ public class AnimalCommandService {
         Animal animal = animalRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + id));
 
+        AnimalStatus oldStatus = animal.getStatus();
         animal.updateStatus(request.getNewStatus());
+
+        // Outbox에 이벤트 저장 (같은 트랜잭션)
+        AnimalStatusChangedEvent event = AnimalStatusChangedEvent.builder()
+                .eventId(UUID.randomUUID().toString())
+                .eventType("ANIMAL_STATUS_CHANGED")
+                .timestamp(LocalDateTime.now())
+                .animalId(animal.getId())
+                .oldStatus(oldStatus.name())
+                .newStatus(animal.getStatus().name())
+                .animalName(animal.getApmsNoticeNo())
+                .species(animal.getSpecies().name())
+                .build();
+        outboxService.saveEvent("Animal", String.valueOf(animal.getId()),
+                "ANIMAL_STATUS_CHANGED", TOPIC_ANIMAL_STATUS_CHANGED, event);
 
         return mapper.toDetailResponse(animal);
     }
@@ -84,6 +126,20 @@ public class AnimalCommandService {
                 .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + id));
 
         animal.updateDescription(request.getDescription());
+
+        // Outbox에 이벤트 저장 (같은 트랜잭션)
+        Map<String, Object> updatedFields = new HashMap<>();
+        updatedFields.put("description", request.getDescription());
+
+        AnimalUpdatedEvent event = AnimalUpdatedEvent.builder()
+                .eventId(UUID.randomUUID().toString())
+                .eventType("ANIMAL_UPDATED")
+                .timestamp(LocalDateTime.now())
+                .animalId(animal.getId())
+                .updatedFields(updatedFields)
+                .build();
+        outboxService.saveEvent("Animal", String.valueOf(animal.getId()),
+                "ANIMAL_UPDATED", TOPIC_ANIMAL_UPDATED, event);
 
         return mapper.toDetailResponse(animal);
     }
