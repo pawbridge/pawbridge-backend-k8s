@@ -109,9 +109,11 @@ public class KafkaConsumerConfig {
 
                                 // Outbox 패턴으로 보상 이벤트 발행
                                 outboxService.saveEvent(
-                                        "user.compensation.events",
-                                        userId.toString(),
-                                        compensationEvent
+                                        "FavoriteCompensation",              // aggregateType
+                                        userId.toString(),                    // aggregateId
+                                        "FAVORITE_COMPENSATION_REQUIRED",    // eventType
+                                        "user.compensation.events",          // topic
+                                        compensationEvent                     // payload
                                 );
 
                                 log.warn("[RECOVERER] Compensation event published for FAVORITE_ADDED: " +
