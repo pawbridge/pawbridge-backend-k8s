@@ -49,8 +49,17 @@ jobs:
             cd ~/deploy
             # 환경변수 주입 (필요한 경우)
             echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
+
+            # Database Settings (Node-2의 MySQL로 연결)
+            echo "DB_URL=jdbc:mysql://${{ secrets.NODE2_PRIVATE_IP }}:3306/pawbridge_animal?serverTimezone=Asia/Seoul&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true" >> .env
+            echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> .env
             echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-            echo "APMS_KEY=${{ secrets.APMS_KEY }}" >> .env
+
+            # APMS API Key
+            echo "APMS_SERVICE_KEY=${{ secrets.APMS_SERVICE_KEY }}" >> .env
+
+            # Kafka Settings (Node-3의 Kafka)
+            echo "KAFKA_BOOTSTRAP_SERVERS=localhost:9092" >> .env
             
             # 프라이빗 IP 주입
             echo "NODE1_PRIVATE_IP=${{ secrets.NODE1_PRIVATE_IP }}" >> .env
