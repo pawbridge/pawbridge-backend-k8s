@@ -4,12 +4,12 @@ spring:
 
   # Database Settings
   datasource:
-    url: jdbc:mysql://localhost:3306/pawbridge_animal?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
-    username: root
-    password: root
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
-      maximum-pool-size: 10
+      maximum-pool-size: 20
       minimum-idle: 5
       connection-timeout: 30000
       idle-timeout: 600000
@@ -36,7 +36,7 @@ spring:
   # Kafka Settings
   # Producer/Consumer 상세 설정은 Config 클래스에서 관리
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
 # Server Settings
 server:

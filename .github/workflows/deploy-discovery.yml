@@ -1,4 +1,4 @@
-name: Deploy Animal Service
+name: Deploy Discovery Service
 
 on:
   push:
