@@ -24,10 +24,20 @@ services:
       - zookeeper
     ports:
       - "9092:9092"
+      - "29092:29092"  # 내부 통신용 포트 추가
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+
+      # [기존 설정 - 팀원] 외부 접속만 고려
+      # KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+
+      # [수정 설정] 내부/외부 리스너 분리 (Kafka Connect 연결 위해)
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -38,6 +48,81 @@ services:
       default:
         aliases:
           - kafka-broker
+
+  kafka-connect:
+    image: debezium/connect:2.4
+    container_name: kafka-connect
+    depends_on:
+      - kafka
+      - zookeeper
+    ports:
+      - "8083:8083"
+    environment:
+      # [수정] 내부 리스너로 연결 (kafka-broker:29092)
+      BOOTSTRAP_SERVERS: kafka-broker:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      default:
+        aliases:
+          - kafka-connect
+
+  # Debezium Connector 자동 등록
+  connector-init:
+    image: curlimages/curl:latest
+    container_name: debezium-connector-init
+    depends_on:
+      - kafka-connect
+    command:
+      - sh
+      - -c
+      - |
+        echo "⏳ Waiting for Kafka Connect to be ready..."
+
+        # Kafka Connect가 준비될 때까지 대기 (최대 3분)
+        for i in $$(seq 1 36); do
+          if curl -f -s http://kafka-connect:8083/connectors > /dev/null 2>&1; then
+            echo "✅ Kafka Connect is ready!"
+            break
+          fi
+          echo "Attempt $$i/36: Kafka Connect not ready yet, waiting 5 seconds..."
+          sleep 5
+        done
+
+        echo "📡 Registering Debezium Connector..."
+        RESPONSE=$$(curl -s -w "\n%{http_code}" -X POST http://kafka-connect:8083/connectors \
+          -H "Content-Type: application/json" \
+          -d @/connectors/community-outbox-connector.json)
+
+        HTTP_CODE=$$(echo "$$RESPONSE" | tail -n1)
+        BODY=$$(echo "$$RESPONSE" | head -n-1)
+
+        if [ "$$HTTP_CODE" = "201" ] || [ "$$HTTP_CODE" = "409" ]; then
+          echo "✅ Connector registered successfully! (HTTP $$HTTP_CODE)"
+          echo "$$BODY"
+        else
+          echo "❌ Failed to register connector (HTTP $$HTTP_CODE)"
+          echo "$$BODY"
+          exit 1
+        fi
+    volumes:
+      - ./connectors:/connectors
+    networks:
+      default:
+        aliases:
+          - connector-init
+    restart: "no"
 
 volumes:
   zookeeper-data:
