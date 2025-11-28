@@ -33,7 +33,11 @@ public class JwtAuthorizationGatewayFilterFactory
             "/api/v1/auth/login",                 // 로그인
             "/api/v1/auth/refresh",               // 토큰 재발급 (Access Token 만료 시 사용)
             "/api/v1/auth/password/reset-request", // 비밀번호 재설정 요청
-            "/api/v1/auth/password/reset"         // 비밀번호 재설정
+            "/api/v1/auth/password/reset",         // 비밀번호 재설정
+            "/api/v1/posts/read/*",                // 게시글 단건 조회
+            "/api/v1/posts/read",                   // 게시글 목록 조회
+            "/api/v1/posts/search",                 // 검색
+            "/api/v1/comments/posts/read/*"              // 특정 게시글 댓글 목록 조회
     );
 
     public JwtAuthorizationGatewayFilterFactory(JwtUtil jwtUtil) {
