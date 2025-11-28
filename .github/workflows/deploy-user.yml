@@ -39,7 +39,7 @@ jobs:
           docker push ${{ secrets.DOCKER_USERNAME }}/user-service:latest
 
       # 3. 배포 (Node-2로 전송)
-      - name: Deploy to Node-3
+      - name: Deploy to Node-2
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST_2 }} # User는 Node-2
