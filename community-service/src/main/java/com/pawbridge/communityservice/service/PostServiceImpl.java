@@ -1,0 +1,196 @@
+package com.pawbridge.communityservice.service;
+
+import com.pawbridge.communityservice.domain.entity.Post;
+import com.pawbridge.communityservice.domain.repository.PostRepository;
+import com.pawbridge.communityservice.dto.request.CreatePostRequest;
+import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
+import com.pawbridge.communityservice.dto.response.PostResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 게시글 서비스 구현체
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class PostServiceImpl implements PostService {
+
+    private final PostRepository postRepository;
+    private final OutboxService outboxService;
+    private final S3Service s3Service;
+
+    /**
+     * 게시글 생성
+     *
+     * 동작 흐름:
+     * 1. 이미지 파일을 S3에 업로드
+     * 2. Post 엔티티 저장 (posts 테이블, 이미지 URL 포함)
+     * 3. Outbox 이벤트 저장 (outbox_events 테이블)
+     * 4. Debezium이 Kafka로 발행
+     * 5. Consumer가 Elasticsearch에 인덱싱
+     */
+    @Override
+    @Transactional
+    public PostResponse createPost(CreatePostRequest request, MultipartFile[] images, Long authorId) {
+        // 1. 이미지 S3 업로드
+        List<String> imageUrls = s3Service.uploadImages(images);
+
+        // 2. Post 저장
+        Post post = Post.builder()
+                .authorId(authorId)
+                .title(request.title())
+                .content(request.content())
+                .boardType(request.boardType())
+                .imageUrls(imageUrls)
+                .build();
+
+        Post saved = postRepository.save(post);
+
+        // 3. Outbox 이벤트 저장
+        Map<String, Object> payload = Map.of(
+                "postId", saved.getPostId(),
+                "authorId", saved.getAuthorId(),
+                "title", saved.getTitle(),
+                "content", saved.getContent(),
+                "boardType", saved.getBoardType().name(),
+                "imageUrls", saved.getImageUrls()
+        );
+
+        outboxService.saveEvent(
+                "Post",
+                saved.getPostId().toString(),
+                "POST_CREATED",
+                payload
+        );
+
+        log.info("✅ Post created: postId={}, imageCount={}", saved.getPostId(), imageUrls.size());
+        return PostResponse.fromEntity(saved);
+    }
+
+    /**
+     * 게시글 수정
+     *
+     * 동작 흐름:
+     * 1. 기존 이미지를 S3에서 삭제
+     * 2. 새로운 이미지를 S3에 업로드
+     * 3. Post 엔티티 수정
+     * 4. Outbox 이벤트 저장
+     */
+    @Override
+    @Transactional
+    public PostResponse updatePost(Long postId, UpdatePostRequest request, MultipartFile[] images, Long authorId) {
+        Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
+                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다"));
+
+        // 권한 체크
+        if (!post.getAuthorId().equals(authorId)) {
+            throw new IllegalArgumentException("수정 권한이 없습니다");
+        }
+
+        // 기존 이미지 삭제
+        List<String> oldImageUrls = post.getImageUrls();
+        if (oldImageUrls != null && !oldImageUrls.isEmpty()) {
+            oldImageUrls.forEach(s3Service::deleteFile);
+        }
+
+        // 새로운 이미지 업로드
+        List<String> newImageUrls = s3Service.uploadImages(images);
+
+        // 수정
+        post.update(request.title(), request.content(), newImageUrls);
+        Post updated = postRepository.save(post);
+
+        // Outbox 이벤트 저장
+        Map<String, Object> payload = Map.of(
+                "postId", updated.getPostId(),
+                "authorId", updated.getAuthorId(),
+                "title", updated.getTitle(),
+                "content", updated.getContent(),
+                "boardType", updated.getBoardType().name(),
+                "imageUrls", updated.getImageUrls()
+        );
+
+        outboxService.saveEvent(
+                "Post",
+                updated.getPostId().toString(),
+                "POST_UPDATED",
+                payload
+        );
+
+        log.info("✅ Post updated: postId={}, imageCount={}", postId, newImageUrls.size());
+        return PostResponse.fromEntity(updated);
+    }
+
+    /**
+     * 게시글 삭제 (Soft Delete)
+     *
+     * 동작 흐름:
+     * 1. S3에서 이미지 삭제
+     * 2. Post의 deleted_at 설정 (Soft Delete)
+     * 3. Outbox 이벤트 저장 (Elasticsearch에서도 삭제)
+     */
+    @Override
+    @Transactional
+    public void deletePost(Long postId, Long authorId) {
+        Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
+                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다"));
+
+        // 권한 체크
+        if (!post.getAuthorId().equals(authorId)) {
+            throw new IllegalArgumentException("삭제 권한이 없습니다");
+        }
+
+        // S3에서 이미지 삭제
+        List<String> imageUrls = post.getImageUrls();
+        if (imageUrls != null && !imageUrls.isEmpty()) {
+            imageUrls.forEach(s3Service::deleteFile);
+        }
+
+        // Soft delete
+        post.delete();
+        postRepository.save(post);
+
+        // Outbox 이벤트 저장
+        Map<String, Object> payload = Map.of("postId", postId);
+
+        outboxService.saveEvent(
+                "Post",
+                postId.toString(),
+                "POST_DELETED",
+                payload
+        );
+
+        log.info("✅ Post deleted: postId={}", postId);
+    }
+
+    /**
+     * 게시글 단건 조회
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PostResponse getPost(Long postId) {
+        Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
+                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다"));
+
+        return PostResponse.fromEntity(post);
+    }
+
+    /**
+     * 게시글 목록 조회
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<PostResponse> getAllPosts() {
+        return postRepository.findByDeletedAtIsNull().stream()
+                .map(PostResponse::fromEntity)
+                .collect(Collectors.toList());
+    }
+}
