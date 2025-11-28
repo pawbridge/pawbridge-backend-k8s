@@ -49,7 +49,7 @@ jobs:
             cd ~/deploy
             echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
             echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> .env
-            echo "MYSQL_ROOT_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
             echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
             
             # JWT
