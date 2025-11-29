@@ -14,9 +14,9 @@ spring:
           predicates:
             - Path=/oauth2/authorization/**, /login/oauth2/code/**
 
-        # Email Service (JWT 필터 제외 - 회원가입 전)
-        - id: email-service
-          uri: ${EMAIL_SERVICE_URL:http://localhost:8088}
+        # Email 경로 (JWT 필터 제외 - 회원가입 전, user-service로 라우팅)
+        - id: user-service-email
+          uri: ${USER_SERVICE_URL:http://localhost:8081}
           predicates:
             - Path=/api/email/**
 

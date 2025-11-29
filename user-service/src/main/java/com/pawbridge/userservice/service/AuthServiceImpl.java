@@ -1,6 +1,6 @@
 package com.pawbridge.userservice.service;
 
-import com.pawbridge.userservice.client.EmailServiceClient;
+import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.PasswordResetRequestDto;
 import com.pawbridge.userservice.dto.request.PasswordResetVerifyDto;
 import com.pawbridge.userservice.dto.request.RefreshTokenRequestDto;
@@ -15,7 +15,6 @@ import com.pawbridge.userservice.exception.UserNotFoundException;
 import com.pawbridge.userservice.jwt.JwtProvider;
 import com.pawbridge.userservice.repository.RefreshTokenRepository;
 import com.pawbridge.userservice.repository.UserRepository;
-import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -36,7 +35,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserRepository userRepository;
     private final JwtProvider jwtProvider;
     private final PasswordEncoder passwordEncoder;
-    private final EmailServiceClient emailServiceClient;
+    private final EmailVerificationService emailVerificationService;
 
     /**
      * Refresh Token을 사용하여 새로운 Access Token과 Refresh Token 발급
@@ -105,9 +104,9 @@ public class AuthServiceImpl implements AuthService {
         if (userOpt.isPresent()) {
             try {
                 // 이메일 발송
-                emailServiceClient.sendPasswordResetCode(requestDto.getEmail());
+                emailVerificationService.sendPasswordResetCode(requestDto.getEmail());
                 log.info("비밀번호 재설정 이메일 발송 성공: {}", requestDto.getEmail());
-            } catch (FeignException e) {
+            } catch (Exception e) {
                 log.error("이메일 발송 실패: {}", e.getMessage());
                 // 보안상 실패해도 성공 응답 (계정 존재 여부 노출 방지)
             }
@@ -129,14 +128,14 @@ public class AuthServiceImpl implements AuthService {
 
         // 2. 인증코드 검증
         try {
-            Boolean verified = emailServiceClient.verifyPasswordResetCode(
+            boolean verified = emailVerificationService.verifyPasswordResetCode(
                     requestDto.getEmail(),
                     requestDto.getCode());
 
-            if (!Boolean.TRUE.equals(verified)) {
+            if (!verified) {
                 throw new PasswordResetCodeInvalidException();
             }
-        } catch (FeignException e) {
+        } catch (Exception e) {
             log.error("인증코드 검증 실패: {}", e.getMessage());
             throw new PasswordResetCodeInvalidException();
         }
@@ -148,8 +147,8 @@ public class AuthServiceImpl implements AuthService {
 
         // 4. 인증 정보 삭제 (실패해도 계속 진행)
         try {
-            emailServiceClient.clearPasswordResetVerification(requestDto.getEmail());
-        } catch (FeignException e) {
+            emailVerificationService.clearPasswordResetVerification(requestDto.getEmail());
+        } catch (Exception e) {
             log.warn("인증 정보 삭제 실패 (무시): {}", e.getMessage());
         }
 
