@@ -1,6 +1,6 @@
 package com.pawbridge.userservice.service;
 
-import com.pawbridge.userservice.client.EmailServiceClient;
+import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.PasswordUpdateRequestDto;
 import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
@@ -9,7 +9,6 @@ import com.pawbridge.userservice.dto.respone.UserInfoResponseDto;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.exception.*;
 import com.pawbridge.userservice.repository.UserRepository;
-import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -24,21 +23,16 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final EmailServiceClient emailServiceClient;
+    private final EmailVerificationService emailVerificationService;
     private final NicknameGeneratorService nicknameGeneratorService;
 
     @Override
     @Transactional
     public SignUpResponseDto signUp(SignUpRequestDto requestDto) {
-        // 1. 이메일 인증 확인 (FeignException 처리)
-        try {
-            Boolean verified = emailServiceClient.isEmailVerified(requestDto.email());
-            if (!Boolean.TRUE.equals(verified)) {
-                throw new EmailNotVerifiedException();
-            }
-        } catch (FeignException e) {
-            log.error("이메일 서비스 통신 실패: {}", e.getMessage());
-            throw new EmailServiceUnavailableException();
+        // 1. 이메일 인증 확인
+        boolean verified = emailVerificationService.isVerified(requestDto.email());
+        if (!verified) {
+            throw new EmailNotVerifiedException();
         }
 
         // 2. 이메일 중복 확인 (LOCAL provider)
@@ -84,10 +78,10 @@ public class UserServiceImpl implements UserService {
             log.info("재생성된 닉네임: {}", newNickname);
         }
 
-        // 8. 이메일 인증 정보 삭제 (실패해도 계속 진행)
+        // 8. 이메일 인증 정보 삭제
         try {
-            emailServiceClient.clearVerification(requestDto.email());
-        } catch (FeignException e) {
+            emailVerificationService.clearVerification(requestDto.email());
+        } catch (Exception e) {
             log.warn("이메일 인증 정보 삭제 실패 (무시): {}", e.getMessage());
         }
 

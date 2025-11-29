@@ -1,10 +1,10 @@
 package com.pawbridge.userservice.exception.common;
 
 import com.pawbridge.userservice.util.ResponseDTO;
-import feign.FeignException;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.TypeMismatchException;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -151,23 +151,15 @@ public class GlobalExceptionRestAdvice {
     }
 
     /**
-     * Feign Client 호출 시 발생하는 예외 처리
-     * (email-service 통신 장애)
+     * Redis 연결 실패 시 발생하는 예외 처리
+     * (email-service 통합 후 추가)
      */
-    @ExceptionHandler(FeignException.class)
-    public ResponseEntity<ResponseDTO<Void>> handleFeignException(FeignException e) {
-        log.error("Feign client error: {}", e.getMessage(), e);
-
-        if (e.status() == 404) {
-            return ResponseEntity
-                    .status(HttpStatus.BAD_REQUEST)
-                    .body(ResponseDTO.errorWithMessage(HttpStatus.BAD_REQUEST,
-                            "이메일 인증 정보를 찾을 수 없습니다."));
-        }
-
+    @ExceptionHandler(RedisConnectionFailureException.class)
+    public ResponseEntity<ResponseDTO<Void>> handleRedisConnectionFailure(RedisConnectionFailureException e) {
+        log.error("Redis connection failed: {}", e.getMessage(), e);
         return ResponseEntity
                 .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ResponseDTO.errorWithMessage(HttpStatus.SERVICE_UNAVAILABLE,
-                        "이메일 인증 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요."));
+                        "인증 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요."));
     }
 }
