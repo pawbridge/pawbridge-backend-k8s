@@ -100,22 +100,35 @@ services:
           sleep 5
         done
 
-        echo "📡 Registering Debezium Connector..."
-        RESPONSE=$$(curl -s -w "\n%{http_code}" -X POST http://kafka-connect:8083/connectors \
-          -H "Content-Type: application/json" \
-          -d @/connectors/community-outbox-connector.json)
+        echo "📡 Registering Debezium Connectors..."
 
-        HTTP_CODE=$$(echo "$$RESPONSE" | tail -n1)
-        BODY=$$(echo "$$RESPONSE" | head -n-1)
+        # 등록할 connector 목록
+        CONNECTORS="community-outbox-connector.json animal-outbox-connector.json animal-animals-connector.json"
 
-        if [ "$$HTTP_CODE" = "201" ] || [ "$$HTTP_CODE" = "409" ]; then
-          echo "✅ Connector registered successfully! (HTTP $$HTTP_CODE)"
-          echo "$$BODY"
-        else
-          echo "❌ Failed to register connector (HTTP $$HTTP_CODE)"
-          echo "$$BODY"
-          exit 1
-        fi
+        for CONNECTOR_FILE in $$CONNECTORS; do
+          echo ""
+          echo "🔄 Registering $$CONNECTOR_FILE..."
+
+          RESPONSE=$$(curl -s -w "\n%{http_code}" -X POST http://kafka-connect:8083/connectors \
+            -H "Content-Type: application/json" \
+            -d @/connectors/$$CONNECTOR_FILE)
+
+          HTTP_CODE=$$(echo "$$RESPONSE" | tail -n1)
+          BODY=$$(echo "$$RESPONSE" | head -n-1)
+
+          if [ "$$HTTP_CODE" = "201" ]; then
+            echo "✅ $$CONNECTOR_FILE registered successfully! (HTTP $$HTTP_CODE)"
+          elif [ "$$HTTP_CODE" = "409" ]; then
+            echo "ℹ️  $$CONNECTOR_FILE already exists (HTTP $$HTTP_CODE)"
+          else
+            echo "❌ Failed to register $$CONNECTOR_FILE (HTTP $$HTTP_CODE)"
+            echo "$$BODY"
+            # 계속 진행 (다른 connector도 시도)
+          fi
+        done
+
+        echo ""
+        echo "✅ All connectors registration completed!"
     volumes:
       - ./connectors:/connectors
     networks:
