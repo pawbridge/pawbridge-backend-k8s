@@ -3,6 +3,7 @@ package com.pawbridge.animalservice.batch.reader;
 import com.pawbridge.animalservice.client.ApmsApiClient;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.dto.apms.ApmsResponse;
+import com.pawbridge.animalservice.dto.apms.ApmsRootResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.StepExecution;
@@ -67,7 +68,7 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
             log.info("APMS API 호출 - 페이지: {}, 페이지 크기: {}", currentPage, PAGE_SIZE);
 
             // APMS API 호출 (response 필드로 감싸진 응답)
-            var rootResponse = apmsApiClient.getAbandonmentAnimals(
+            ApmsRootResponse<ApmsAnimal> rootResponse = apmsApiClient.getAbandonmentAnimals(
                     serviceKey,
                     currentPage,
                     PAGE_SIZE,
@@ -79,7 +80,7 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
             );
 
             // "response" 필드에서 실제 응답 추출
-            var response = rootResponse != null ? rootResponse.getResponse() : null;
+            ApmsResponse response = rootResponse != null ? rootResponse.getResponse() : null;
 
             // 응답 검증
             if (response == null || response.getBody() == null || response.getBody().getItems() == null) {

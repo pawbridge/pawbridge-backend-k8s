@@ -3,6 +3,7 @@ package com.pawbridge.animalservice.batch.scheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
@@ -37,7 +38,7 @@ public class ApmsAnimalSyncScheduler {
                     .toJobParameters();
 
             // Job 실행
-            var jobExecution = jobLauncher.run(apmsAnimalSyncJob, jobParameters);
+            JobExecution jobExecution = jobLauncher.run(apmsAnimalSyncJob, jobParameters);
 
             log.info("APMS 동물 데이터 동기화 스케줄 완료 - Status: {}, ExitCode: {}",
                     jobExecution.getStatus(), jobExecution.getExitStatus().getExitCode());
