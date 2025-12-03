@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: "optional:file:.env[.properties]"
   application:
     name: animal-service
 
@@ -37,6 +39,12 @@ spring:
   # Producer/Consumer 상세 설정은 Config 클래스에서 관리
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  # Elasticsearch Settings
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    connection-timeout: 5s
+    socket-timeout: 30s
 
 # Server Settings
 server:

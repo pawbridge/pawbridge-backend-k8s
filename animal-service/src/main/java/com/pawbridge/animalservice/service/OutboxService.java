@@ -3,7 +3,6 @@ package com.pawbridge.animalservice.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.animalservice.entity.OutboxEvent;
-import com.pawbridge.animalservice.entity.OutboxEvent.OutboxStatus;
 import com.pawbridge.animalservice.repository.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,9 +51,7 @@ public class OutboxService {
                     .eventType(eventType)
                     .topic(topic)
                     .payload(payloadJson)
-                    .status(OutboxStatus.PENDING)
                     .createdAt(LocalDateTime.now())
-                    .retryCount(0)
                     .build();
 
             outboxEventRepository.save(outboxEvent);
@@ -69,23 +66,5 @@ public class OutboxService {
                     aggregateType, aggregateId, e.getMessage());
             throw new RuntimeException("Failed to serialize event payload", e);
         }
-    }
-
-    /**
-     * 오래된 발행 완료 이벤트 정리
-     * - 7일 이상 지난 PUBLISHED 이벤트 삭제
-     */
-    @Transactional
-    public int cleanupOldEvents(int daysToKeep) {
-        LocalDateTime cutoffDate = LocalDateTime.now().minusDays(daysToKeep);
-        int deletedCount = outboxEventRepository.deleteByStatusAndPublishedAtBefore(
-                OutboxStatus.PUBLISHED, cutoffDate);
-
-        if (deletedCount > 0) {
-            log.info("[OUTBOX] Cleaned up {} old published events (older than {} days)",
-                    deletedCount, daysToKeep);
-        }
-
-        return deletedCount;
     }
 }

@@ -24,24 +24,18 @@ services:
       - zookeeper
     ports:
       - "9092:9092"
-      - "29092:29092"  # 내부 통신용 포트 추가
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-
-      # [기존 설정 - 팀원] 외부 접속만 고려
-      # KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-
-      # [수정 설정] 내부/외부 리스너 분리 (Kafka Connect 연결 위해)
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false" # 명시적으로 생성하므로 false로 변경
     volumes:
       - kafka-data:/var/lib/kafka/data
     networks:
@@ -49,25 +43,60 @@ services:
         aliases:
           - kafka-broker
 
-  kafka-connect:
-    image: debezium/connect:2.4
-    container_name: kafka-connect
+  # Kafka Topic을 명시적으로 생성하는 서비스
+  kafka-topic-creator:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-topic-creator
     depends_on:
       - kafka
-      - zookeeper
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka to be ready...' &&
+        cub kafka-ready -b kafka-broker:29092 1 30 &&
+        echo 'Kafka is ready!' &&
+        
+        echo 'Creating Kafka topics...' &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic connect_configs --config cleanup.policy=compact &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic connect_offsets --config cleanup.policy=compact &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic connect_statuses --config cleanup.policy=compact &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic schema-changes.animal &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic animal --config cleanup.policy=compact &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic animal.pawbridge_animal.animals &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic animal.animals &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic pawbridge.animal.outbox.events &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic pawbridge.community.outbox.events &&
+        
+        echo 'Topics created successfully! This container will now exit.'
+      "
+    networks:
+      default:
+        aliases:
+          - kafka-topic-creator
+    restart: "no"
+
+  kafka-connect:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pawbridge/kafka-connect:latest
+    container_name: kafka-connect
+    depends_on:
+      - kafka-topic-creator # 토픽이 생성된 후 실행되도록 의존성 추가
     ports:
       - "8083:8083"
     environment:
-      # [수정] 내부 리스너로 연결 (kafka-broker:29092)
-      BOOTSTRAP_SERVERS: kafka-broker:29092
-      GROUP_ID: 1
-      CONFIG_STORAGE_TOPIC: connect_configs
-      OFFSET_STORAGE_TOPIC: connect_offsets
-      STATUS_STORAGE_TOPIC: connect_statuses
-      CONFIG_STORAGE_REPLICATION_FACTOR: 1
-      OFFSET_STORAGE_REPLICATION_FACTOR: 1
-      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_BOOTSTRAP_SERVERS: kafka-broker:29092
+      CONNECT_GROUP_ID: 1
+      CONNECT_CONFIG_STORAGE_TOPIC: connect_configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect_offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect_statuses
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
       CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/"]
       interval: 10s
@@ -78,7 +107,6 @@ services:
         aliases:
           - kafka-connect
 
-  # Debezium Connector 자동 등록
   connector-init:
     image: curlimages/curl:latest
     container_name: debezium-connector-init
@@ -89,8 +117,6 @@ services:
       - -c
       - |
         echo "⏳ Waiting for Kafka Connect to be ready..."
-
-        # Kafka Connect가 준비될 때까지 대기 (최대 3분)
         for i in $$(seq 1 36); do
           if curl -f -s http://kafka-connect:8083/connectors > /dev/null 2>&1; then
             echo "✅ Kafka Connect is ready!"
@@ -99,23 +125,27 @@ services:
           echo "Attempt $$i/36: Kafka Connect not ready yet, waiting 5 seconds..."
           sleep 5
         done
-
-        echo "📡 Registering Debezium Connector..."
-        RESPONSE=$$(curl -s -w "\n%{http_code}" -X POST http://kafka-connect:8083/connectors \
-          -H "Content-Type: application/json" \
-          -d @/connectors/community-outbox-connector.json)
-
-        HTTP_CODE=$$(echo "$$RESPONSE" | tail -n1)
-        BODY=$$(echo "$$RESPONSE" | head -n-1)
-
-        if [ "$$HTTP_CODE" = "201" ] || [ "$$HTTP_CODE" = "409" ]; then
-          echo "✅ Connector registered successfully! (HTTP $$HTTP_CODE)"
-          echo "$$BODY"
-        else
-          echo "❌ Failed to register connector (HTTP $$HTTP_CODE)"
-          echo "$$BODY"
-          exit 1
-        fi
+        echo "📡 Registering Connectors..."
+        CONNECTORS="community-outbox-connector.json animal-outbox-connector.json animal-animals-connector.json elasticsearch-sink-connector.json"
+        for CONNECTOR_FILE in $$CONNECTORS; do
+          echo ""
+          echo "🔄 Registering $$CONNECTOR_FILE..."
+          RESPONSE=$$(curl -s -w "\n%{http_code}" -X POST http://kafka-connect:8083/connectors \
+            -H "Content-Type: application/json" \
+            -d @/connectors/$$CONNECTOR_FILE)
+          HTTP_CODE=$$(echo "$$RESPONSE" | tail -n1)
+          BODY=$$(echo "$$RESPONSE" | head -n-1)
+          if [ "$$HTTP_CODE" = "201" ]; then
+            echo "✅ $$CONNECTOR_FILE registered successfully! (HTTP $$HTTP_CODE)"
+          elif [ "$$HTTP_CODE" = "409" ]; then
+            echo "ℹ️  $$CONNECTOR_FILE already exists (HTTP $$HTTP_CODE)"
+          else
+            echo "❌ Failed to register $$CONNECTOR_FILE (HTTP $$HTTP_CODE)"
+            echo "$$BODY"
+          fi
+        done
+        echo ""
+        echo "✅ All connectors registration completed!"
     volumes:
       - ./connectors:/connectors
     networks:

@@ -2,33 +2,48 @@ version: '3.8'
 
 services:
   elasticsearch:
-    # [기존] 기본 이미지
-    # image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-
-    # [수정] nori 플러그인이 포함된 커스텀 이미지
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
     container_name: elasticsearch
-    ports:
-      - "9200:9200"
-      - "9300:9300"
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
     volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
+      - es-data:/usr/share/elasticsearch/data
     networks:
-      default:
-        aliases:
-          - elasticsearch
+      - pawbridge-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      NODE_OPTIONS: "--max-old-space-size=512"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - pawbridge-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 volumes:
-  elasticsearch-data:
+  es-data:
     driver: local
 
 networks:
-  default:
+  pawbridge-network:
     external: true
-    name: pawbridge-network

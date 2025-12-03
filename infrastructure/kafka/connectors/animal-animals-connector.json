@@ -1,0 +1,19 @@
+{
+  "name": "animal-animals-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+    "database.hostname": "db-server",
+    "database.port": "3306",
+    "database.user": "root",
+    "database.password": "root",
+    "database.server.id": "777777",
+    "topic.prefix": "animal",
+    "database.include.list": "pawbridge_animal",
+    "table.include.list": "pawbridge_animal.animals",
+    "database.connectionTimeZone": "Asia/Seoul",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka-broker:29092",
+    "schema.history.internal.kafka.topic": "schema-changes.animal",
+    "snapshot.mode": "initial"
+  }
+}
