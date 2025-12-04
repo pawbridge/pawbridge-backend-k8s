@@ -1,19 +1,21 @@
 {
-  "name": "animal-animals-connector",
-  "config": {
     "connector.class": "io.debezium.connector.mysql.MySqlConnector",
-    "tasks.max": "1",
-    "database.hostname": "db-server",
-    "database.port": "3306",
     "database.user": "root",
-    "database.password": "root",
     "database.server.id": "777777",
-    "topic.prefix": "animal",
-    "database.include.list": "pawbridge_animal",
-    "table.include.list": "pawbridge_animal.animals",
-    "database.connectionTimeZone": "Asia/Seoul",
+    "tasks.max": "1",
     "schema.history.internal.kafka.bootstrap.servers": "kafka-broker:29092",
+    "database.port": "3306",
+    "topic.prefix": "animal",
     "schema.history.internal.kafka.topic": "schema-changes.animal",
-    "snapshot.mode": "initial"
-  }
+    "database.hostname": "172.20.0.6",
+    "database.connectionTimeZone": "Asia/Seoul",
+    "database.password": "root",
+    "name": "animal-animals-connector",
+    "table.include.list": "pawbridge_animal.animals",
+    "database.include.list": "pawbridge_animal",
+    "snapshot.mode": "initial",
+    "transforms": "renameTopic",
+    "transforms.renameTopic.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.renameTopic.regex": "animal.pawbridge_animal.(.*)",
+    "transforms.renameTopic.replacement": "animal.$1"
 }

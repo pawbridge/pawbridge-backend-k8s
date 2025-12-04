@@ -80,7 +80,7 @@ public class AnimalElasticsearchService {
         // Term Query로 정확히 일치하는 문서 검색
         Query termQuery = Query.of(q -> q
             .term(t -> t
-                .field("apmsDesertionNo")
+                .field("apms_desertion_no")
                 .value(apmsDesertionNo)
             )
         );
@@ -114,7 +114,7 @@ public class AnimalElasticsearchService {
 
         Query termQuery = Query.of(q -> q
             .term(t -> t
-                .field("shelterId")
+                .field("shelter_id")
                 .value(shelterId)
             )
         );
@@ -133,7 +133,7 @@ public class AnimalElasticsearchService {
         log.debug("[ELASTICSEARCH] 보호소 ID + 축종 조회: {}, {}", shelterId, species);
 
         BoolQuery boolQuery = BoolQuery.of(b -> b
-            .must(Query.of(q -> q.term(t -> t.field("shelterId").value(shelterId))))
+            .must(Query.of(q -> q.term(t -> t.field("shelter_id").value(shelterId))))
             .must(Query.of(q -> q.term(t -> t.field("species").value(species.name()))))
         );
 
@@ -151,7 +151,7 @@ public class AnimalElasticsearchService {
         log.debug("[ELASTICSEARCH] 보호소 ID + 상태 조회: {}, {}", shelterId, status);
 
         BoolQuery boolQuery = BoolQuery.of(b -> b
-            .must(Query.of(q -> q.term(t -> t.field("shelterId").value(shelterId))))
+            .must(Query.of(q -> q.term(t -> t.field("shelter_id").value(shelterId))))
             .must(Query.of(q -> q.term(t -> t.field("status").value(status.name()))))
         );
 
@@ -173,7 +173,7 @@ public class AnimalElasticsearchService {
             .must(Query.of(q -> q.term(t -> t.field("status").value(AnimalStatus.PROTECT.name()))))
             .must(Query.of(q -> q.range(r -> r
                 .date(d -> d
-                    .field("noticeEndDate")
+                    .field("notice_end_date")
                     .gte(today.toString())
                     .lte(threeDaysLater.toString())
                 )
@@ -184,7 +184,7 @@ public class AnimalElasticsearchService {
         Pageable sortedPageable = PageRequest.of(
             pageable.getPageNumber(),
             pageable.getPageSize(),
-            Sort.by(Sort.Direction.ASC, "noticeEndDate")
+            Sort.by(Sort.Direction.ASC, "notice_end_date")
         );
 
         return executePagedQuery(Query.of(q -> q.bool(boolQuery)), sortedPageable);
@@ -242,7 +242,7 @@ public class AnimalElasticsearchService {
             Query multiMatchQuery = Query.of(q -> q
                 .multiMatch(m -> m
                     .query(keyword)
-                    .fields("breed", "specialMark", "happenPlace", "description", "shelterName", "shelterAddress")
+                    .fields("breed", "special_mark", "happen_place", "description", "shelter_name", "shelter_address")
                     .fuzziness("AUTO")  // 오타 허용
                 )
             );
@@ -297,7 +297,7 @@ public class AnimalElasticsearchService {
         if (condition.getNeuterStatus() != null && !condition.getNeuterStatus().trim().isEmpty()) {
             Query neuterQuery = Query.of(q -> q
                 .term(t -> t
-                    .field("neuterStatus")
+                    .field("neuter_status")
                     .value(condition.getNeuterStatus().trim())
                 )
             );
@@ -308,7 +308,7 @@ public class AnimalElasticsearchService {
         if (condition.getShelterId() != null) {
             Query shelterQuery = Query.of(q -> q
                 .term(t -> t
-                    .field("shelterId")
+                    .field("shelter_id")
                     .value(condition.getShelterId())
                 )
             );
@@ -319,7 +319,7 @@ public class AnimalElasticsearchService {
         if (condition.getShelterAddress() != null && !condition.getShelterAddress().trim().isEmpty()) {
             Query addressQuery = Query.of(q -> q
                 .match(m -> m
-                    .field("shelterAddress")
+                    .field("shelter_address")
                     .query(condition.getShelterAddress().trim())
                 )
             );
@@ -332,7 +332,7 @@ public class AnimalElasticsearchService {
             Query ageRangeQuery = Query.of(q -> q
                 .range(r -> r
                     .number(n -> n
-                        .field("birthYear")
+                        .field("birth_year")
                         .gte(condition.getMinBirthYear().doubleValue())
                         .lte(condition.getMaxBirthYear().doubleValue())
                     )
@@ -344,7 +344,7 @@ public class AnimalElasticsearchService {
             Query ageRangeQuery = Query.of(q -> q
                 .range(r -> r
                     .number(n -> n
-                        .field("birthYear")
+                        .field("birth_year")
                         .gte(condition.getMinBirthYear().doubleValue())
                     )
                 )
@@ -355,7 +355,7 @@ public class AnimalElasticsearchService {
             Query ageRangeQuery = Query.of(q -> q
                 .range(r -> r
                     .number(n -> n
-                        .field("birthYear")
+                        .field("birth_year")
                         .lte(condition.getMaxBirthYear().doubleValue())
                     )
                 )
@@ -435,7 +435,7 @@ public class AnimalElasticsearchService {
 
         Query termQuery = Query.of(q -> q
             .term(t -> t
-                .field("shelterId")
+                .field("shelter_id")
                 .value(shelterId)
             )
         );
@@ -512,10 +512,16 @@ public class AnimalElasticsearchService {
                 ? Sort.Direction.DESC
                 : Sort.Direction.ASC;
 
-        // 정렬 기준
-        Sort sort = Sort.by(direction, condition.getSortBy());
+        // 정렬 기준 (snake_case로 변환)
+        String sortBy = condition.getSortBy();
+        if ("createdAt".equals(sortBy)) sortBy = "created_at";
+        else if ("updatedAt".equals(sortBy)) sortBy = "updated_at";
+        else if ("noticeEndDate".equals(sortBy)) sortBy = "notice_end_date";
+        else if ("birthYear".equals(sortBy)) sortBy = "birth_year";
+        else if ("apmsDesertionNo".equals(sortBy)) sortBy = "apms_desertion_no";
+        
+        Sort sort = Sort.by(direction, sortBy);
 
-        // 페이징
         return PageRequest.of(condition.getPage(), condition.getSize(), sort);
     }
 
