@@ -19,7 +19,7 @@ import java.time.LocalDateTime;
  * - Animal 엔티티와 동일한 구조 유지
  * - Shelter 정보는 비정규화하여 포함
  */
-@Document(indexName = "animal.animals")
+@Document(indexName = "animal.pawbridge_animal.animals")
 @Getter
 @Builder
 @NoArgsConstructor
