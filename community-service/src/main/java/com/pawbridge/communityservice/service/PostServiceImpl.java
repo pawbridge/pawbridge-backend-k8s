@@ -5,6 +5,8 @@ import com.pawbridge.communityservice.domain.repository.PostRepository;
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
 import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
 import com.pawbridge.communityservice.dto.response.PostResponse;
+import com.pawbridge.communityservice.exception.PostNotFoundException;
+import com.pawbridge.communityservice.exception.UnauthorizedPostAccessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,8 +33,8 @@ public class PostServiceImpl implements PostService {
      * 게시글 생성
      *
      * 동작 흐름:
-     * 1. 이미지 파일을 S3에 업로드
-     * 2. Post 엔티티 저장 (posts 테이블, 이미지 URL 포함)
+     * 1. 미디어 파일(이미지/영상)을 S3에 업로드
+     * 2. Post 엔티티 저장 (posts 테이블, 미디어 URL 포함)
      * 3. Outbox 이벤트 저장 (outbox_events 테이블)
      * 4. Debezium이 Kafka로 발행
      * 5. Consumer가 Elasticsearch에 인덱싱
@@ -40,7 +42,7 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional
     public PostResponse createPost(CreatePostRequest request, MultipartFile[] images, Long authorId) {
-        // 1. 이미지 S3 업로드
+        // 1. 미디어 파일 S3 업로드 (이미지 + 영상)
         List<String> imageUrls = s3Service.uploadImages(images);
 
         // 2. Post 저장
@@ -79,8 +81,8 @@ public class PostServiceImpl implements PostService {
      * 게시글 수정
      *
      * 동작 흐름:
-     * 1. 기존 이미지를 S3에서 삭제
-     * 2. 새로운 이미지를 S3에 업로드
+     * 1. 기존 미디어 파일을 S3에서 삭제
+     * 2. 새로운 미디어 파일을 S3에 업로드
      * 3. Post 엔티티 수정
      * 4. Outbox 이벤트 저장
      */
@@ -88,20 +90,20 @@ public class PostServiceImpl implements PostService {
     @Transactional
     public PostResponse updatePost(Long postId, UpdatePostRequest request, MultipartFile[] images, Long authorId) {
         Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(PostNotFoundException::new);
 
         // 권한 체크
         if (!post.getAuthorId().equals(authorId)) {
-            throw new IllegalArgumentException("수정 권한이 없습니다");
+            throw new UnauthorizedPostAccessException();
         }
 
-        // 기존 이미지 삭제
+        // 기존 미디어 파일 삭제
         List<String> oldImageUrls = post.getImageUrls();
         if (oldImageUrls != null && !oldImageUrls.isEmpty()) {
             oldImageUrls.forEach(s3Service::deleteFile);
         }
 
-        // 새로운 이미지 업로드
+        // 새로운 미디어 파일 업로드 (이미지 + 영상)
         List<String> newImageUrls = s3Service.uploadImages(images);
 
         // 수정
@@ -133,7 +135,7 @@ public class PostServiceImpl implements PostService {
      * 게시글 삭제 (Soft Delete)
      *
      * 동작 흐름:
-     * 1. S3에서 이미지 삭제
+     * 1. S3에서 미디어 파일 삭제
      * 2. Post의 deleted_at 설정 (Soft Delete)
      * 3. Outbox 이벤트 저장 (Elasticsearch에서도 삭제)
      */
@@ -141,14 +143,14 @@ public class PostServiceImpl implements PostService {
     @Transactional
     public void deletePost(Long postId, Long authorId) {
         Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(PostNotFoundException::new);
 
         // 권한 체크
         if (!post.getAuthorId().equals(authorId)) {
-            throw new IllegalArgumentException("삭제 권한이 없습니다");
+            throw new UnauthorizedPostAccessException();
         }
 
-        // S3에서 이미지 삭제
+        // S3에서 미디어 파일 삭제
         List<String> imageUrls = post.getImageUrls();
         if (imageUrls != null && !imageUrls.isEmpty()) {
             imageUrls.forEach(s3Service::deleteFile);
@@ -178,7 +180,7 @@ public class PostServiceImpl implements PostService {
     @Transactional(readOnly = true)
     public PostResponse getPost(Long postId) {
         Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(PostNotFoundException::new);
 
         return PostResponse.fromEntity(post);
     }

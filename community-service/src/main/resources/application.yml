@@ -5,6 +5,11 @@ spring:
   application:
     name: community-service
 
+  servlet:
+    multipart:
+      max-file-size: 100MB      # 단일 파일 최대 크기 (영상 지원)
+      max-request-size: 200MB   # 전체 요청 최대 크기
+
   datasource:
     url: ${DB_COMMUNITY_URL}
     username: ${DB_USERNAME}
