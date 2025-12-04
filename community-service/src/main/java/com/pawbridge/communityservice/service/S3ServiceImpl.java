@@ -1,5 +1,6 @@
 package com.pawbridge.communityservice.service;
 
+import com.pawbridge.communityservice.exception.InvalidImageFormatException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +13,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,8 +30,24 @@ public class S3ServiceImpl implements S3Service {
     @Value("${spring.cloud.aws.s3.bucket}")
     private String bucketName;
 
+    // 허용된 파일 타입 (이미지 + 영상)
+    private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
+            "image/jpeg",
+            "image/jpg",
+            "image/png",
+            "image/gif",
+            "image/webp"
+    );
+
+    private static final List<String> ALLOWED_VIDEO_TYPES = Arrays.asList(
+            "video/mp4",
+            "video/quicktime",    // .mov
+            "video/x-msvideo",    // .avi
+            "video/x-matroska"    // .mkv
+    );
+
     /**
-     * 여러 이미지 파일을 S3에 업로드
+     * 여러 이미지/영상 파일을 S3에 업로드
      */
     @Override
     public List<String> uploadImages(MultipartFile[] files) {
@@ -60,12 +78,19 @@ public class S3ServiceImpl implements S3Service {
      * 단일 파일을 S3에 업로드
      */
     private String uploadSingleFile(MultipartFile file) throws IOException {
-        // 고유한 파일명 생성 (UUID + 원본 파일명)
+        // 파일 타입 검증 (이미지 + 영상)
+        validateFileType(file);
+
+        // 고유한 파일명 생성 (파일 타입에 따라 경로 분리)
         String originalFilename = file.getOriginalFilename();
         String extension = originalFilename != null && originalFilename.contains(".")
                 ? originalFilename.substring(originalFilename.lastIndexOf("."))
                 : "";
-        String uniqueFilename = "posts/" + UUID.randomUUID() + extension;
+
+        // 이미지와 영상 저장 경로 분리
+        String contentType = file.getContentType();
+        String folder = isVideoType(contentType) ? "posts/videos/" : "posts/images/";
+        String uniqueFilename = folder + UUID.randomUUID() + extension;
 
         // S3에 업로드
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
@@ -82,6 +107,47 @@ public class S3ServiceImpl implements S3Service {
 
         log.info("파일 업로드 성공: {}", fileUrl);
         return fileUrl;
+    }
+
+    /**
+     * 파일 타입 검증 (이미지 + 영상)
+     */
+    private void validateFileType(MultipartFile file) {
+        String contentType = file.getContentType();
+
+        if (contentType == null) {
+            log.error("파일 타입을 확인할 수 없습니다. 파일명: {}", file.getOriginalFilename());
+            throw new InvalidImageFormatException(
+                    String.format("파일 타입을 확인할 수 없습니다. (파일: %s)",
+                            file.getOriginalFilename())
+            );
+        }
+
+        String lowerContentType = contentType.toLowerCase();
+        boolean isAllowedType = ALLOWED_IMAGE_TYPES.contains(lowerContentType)
+                || ALLOWED_VIDEO_TYPES.contains(lowerContentType);
+
+        if (!isAllowedType) {
+            log.error("지원하지 않는 파일 형식: {}, 파일명: {}",
+                    contentType, file.getOriginalFilename());
+            throw new InvalidImageFormatException(
+                    String.format("지원하지 않는 파일 형식입니다. (업로드한 파일: %s, 타입: %s). " +
+                                    "허용된 형식 - 이미지: jpg, jpeg, png, gif, webp / 영상: mp4, mov, avi, mkv",
+                            file.getOriginalFilename(), contentType)
+            );
+        }
+
+        log.debug("파일 타입 검증 성공: {}", contentType);
+    }
+
+    /**
+     * 영상 타입인지 확인
+     */
+    private boolean isVideoType(String contentType) {
+        if (contentType == null) {
+            return false;
+        }
+        return ALLOWED_VIDEO_TYPES.contains(contentType.toLowerCase());
     }
 
     /**

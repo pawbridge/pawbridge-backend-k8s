@@ -2,6 +2,7 @@ package com.pawbridge.communityservice.controller;
 
 import com.pawbridge.communityservice.dto.response.PostResponse;
 import com.pawbridge.communityservice.service.SearchService;
+import com.pawbridge.communityservice.util.ResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,8 +33,11 @@ public class SearchController {
      * 예시: GET /api/posts/search?keyword=강아지
      */
     @GetMapping
-    public ResponseEntity<List<PostResponse>> searchPosts(@RequestParam String keyword) {
-        List<PostResponse> response = searchService.searchPosts(keyword);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<ResponseDTO<List<PostResponse>>> searchPosts(@RequestParam String keyword) {
+        List<PostResponse> postResponses = searchService.searchPosts(keyword);
+        ResponseDTO<List<PostResponse>> response = ResponseDTO.okWithData(postResponses);
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
     }
 }

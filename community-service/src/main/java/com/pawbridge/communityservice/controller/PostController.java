@@ -1,10 +1,11 @@
 package com.pawbridge.communityservice.controller;
 
+import com.pawbridge.communityservice.domain.entity.BoardType;
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
 import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
 import com.pawbridge.communityservice.dto.response.PostResponse;
 import com.pawbridge.communityservice.service.PostService;
-import jakarta.validation.Valid;
+import com.pawbridge.communityservice.util.ResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -28,64 +29,87 @@ public class PostController {
 
     /**
      * 게시글 생성
-     * - multipart/form-data로 JSON + 이미지 파일 받음
-     * - request: JSON 형식의 게시글 정보
-     * - images: 이미지 파일 배열 (선택)
+     * - multipart/form-data로 개별 필드 + 미디어 파일 받음
+     * - title: 게시글 제목
+     * - content: 게시글 내용
+     * - boardType: 게시판 타입 (MISSING, PROTECTION, REPORT, ADOPTION)
+     * - files: 미디어 파일 배열 (이미지 + 영상, 선택)
      */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<PostResponse> createPost(
-            @Valid @RequestPart("request") CreatePostRequest request,
-            @RequestPart(value = "images", required = false) MultipartFile[] images,
+    public ResponseEntity<ResponseDTO<PostResponse>> createPost(
+            @RequestParam("title") String title,
+            @RequestParam("content") String content,
+            @RequestParam("boardType") BoardType boardType,
+            @RequestPart(value = "files", required = false) MultipartFile[] files,
             @RequestHeader("X-User-Id") Long userId) {
 
-        PostResponse response = postService.createPost(request, images, userId);
-        return ResponseEntity.ok(response);
+        CreatePostRequest request = new CreatePostRequest(title, content, boardType);
+        PostResponse postResponse = postService.createPost(request, files, userId);
+        ResponseDTO<PostResponse> response = ResponseDTO.okWithData(postResponse, "게시글이 생성되었습니다.");
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
     }
 
     /**
      * 게시글 수정
-     * - multipart/form-data로 JSON + 이미지 파일 받음
-     * - request: JSON 형식의 게시글 정보
-     * - images: 새로 업로드할 이미지 파일 배열 (선택, 기존 이미지는 모두 삭제됨)
+     * - multipart/form-data로 개별 필드 + 미디어 파일 받음
+     * - title: 게시글 제목
+     * - content: 게시글 내용
+     * - files: 새로 업로드할 미디어 파일 배열 (이미지 + 영상, 선택, 기존 파일은 모두 삭제됨)
      */
     @PutMapping(value = "/{postId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<PostResponse> updatePost(
+    public ResponseEntity<ResponseDTO<PostResponse>> updatePost(
             @PathVariable Long postId,
-            @Valid @RequestPart("request") UpdatePostRequest request,
-            @RequestPart(value = "images", required = false) MultipartFile[] images,
+            @RequestParam("title") String title,
+            @RequestParam("content") String content,
+            @RequestPart(value = "files", required = false) MultipartFile[] files,
             @RequestHeader("X-User-Id") Long userId) {
 
-        PostResponse response = postService.updatePost(postId, request, images, userId);
-        return ResponseEntity.ok(response);
+        UpdatePostRequest request = new UpdatePostRequest(title, content);
+        PostResponse postResponse = postService.updatePost(postId, request, files, userId);
+        ResponseDTO<PostResponse> response = ResponseDTO.okWithData(postResponse, "게시글이 수정되었습니다.");
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
     }
 
     /**
      * 게시글 삭제
      */
     @DeleteMapping("/{postId}")
-    public ResponseEntity<Void> deletePost(
+    public ResponseEntity<ResponseDTO<Void>> deletePost(
             @PathVariable Long postId,
             @RequestHeader("X-User-Id") Long userId) {
 
         postService.deletePost(postId, userId);
-        return ResponseEntity.noContent().build();
+        ResponseDTO<Void> response = ResponseDTO.okWithMessage("게시글이 삭제되었습니다.");
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
     }
 
     /**
      * 게시글 단건 조회
      */
     @GetMapping("read/{postId}")
-    public ResponseEntity<PostResponse> getPost(@PathVariable Long postId) {
-        PostResponse response = postService.getPost(postId);
-        return ResponseEntity.ok(response);
+    public ResponseEntity<ResponseDTO<PostResponse>> getPost(@PathVariable Long postId) {
+        PostResponse postResponse = postService.getPost(postId);
+        ResponseDTO<PostResponse> response = ResponseDTO.okWithData(postResponse);
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
     }
 
     /**
      * 게시글 목록 조회
      */
     @GetMapping("read")
-    public ResponseEntity<List<PostResponse>> getAllPosts() {
-        List<PostResponse> response = postService.getAllPosts();
-        return ResponseEntity.ok(response);
+    public ResponseEntity<ResponseDTO<List<PostResponse>>> getAllPosts() {
+        List<PostResponse> postResponses = postService.getAllPosts();
+        ResponseDTO<List<PostResponse>> response = ResponseDTO.okWithData(postResponses);
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
     }
 }

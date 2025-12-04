@@ -6,6 +6,9 @@ import com.pawbridge.communityservice.domain.repository.PostRepository;
 import com.pawbridge.communityservice.dto.request.CreateCommentRequest;
 import com.pawbridge.communityservice.dto.request.UpdateCommentRequest;
 import com.pawbridge.communityservice.dto.response.CommentResponse;
+import com.pawbridge.communityservice.exception.CommentNotFoundException;
+import com.pawbridge.communityservice.exception.PostNotFoundException;
+import com.pawbridge.communityservice.exception.UnauthorizedCommentAccessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,7 +40,7 @@ public class CommentServiceImpl implements CommentService {
     public CommentResponse createComment(Long postId, CreateCommentRequest request, Long authorId) {
         // 게시글 존재 확인
         postRepository.findByPostIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("게시글을 찾을 수 없습니다"));
+                .orElseThrow(PostNotFoundException::new);
 
         Comment comment = Comment.builder()
                 .postId(postId)
@@ -58,11 +61,11 @@ public class CommentServiceImpl implements CommentService {
     @Transactional
     public CommentResponse updateComment(Long commentId, UpdateCommentRequest request, Long authorId) {
         Comment comment = commentRepository.findByCommentIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("댓글을 찾을 수 없습니다"));
+                .orElseThrow(CommentNotFoundException::new);
 
         // 권한 체크
         if (!comment.getAuthorId().equals(authorId)) {
-            throw new IllegalArgumentException("수정 권한이 없습니다");
+            throw new UnauthorizedCommentAccessException();
         }
 
         comment.update(request.content());
@@ -79,11 +82,11 @@ public class CommentServiceImpl implements CommentService {
     @Transactional
     public void deleteComment(Long commentId, Long authorId) {
         Comment comment = commentRepository.findByCommentIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("댓글을 찾을 수 없습니다"));
+                .orElseThrow(CommentNotFoundException::new);
 
         // 권한 체크
         if (!comment.getAuthorId().equals(authorId)) {
-            throw new IllegalArgumentException("삭제 권한이 없습니다");
+            throw new UnauthorizedCommentAccessException();
         }
 
         comment.delete();
