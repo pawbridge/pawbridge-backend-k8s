@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.*;
  * - Controller는 요청 받고 Facade에 전달, 응답 반환만 담당
  */
 @RestController
-@RequestMapping("/api/shelters")
+@RequestMapping("/api/v1/shelters")
 @RequiredArgsConstructor
 public class ShelterController {
 

@@ -46,3 +46,14 @@ spring:
         static: ${S3_REGION:ap-northeast-2}
       s3:
         bucket: ${S3_BUCKET_NAME}
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}

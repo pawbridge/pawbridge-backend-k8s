@@ -61,3 +61,14 @@ jwt:
 
 oauth2:
   redirect-uri: ${OAUTH2_REDIRECT_URI}
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
