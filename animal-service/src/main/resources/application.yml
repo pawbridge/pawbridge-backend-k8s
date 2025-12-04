@@ -92,3 +92,14 @@ batch:
       # 0 0 */6 * * ? : 6시간마다
       # 0 */30 * * * ? : 30분마다 (테스트용)
       cron: "0 0 2 * * ?"
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}

@@ -22,7 +22,7 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/batch")
+@RequestMapping("/api/v1/batch")
 @RequiredArgsConstructor
 public class BatchController {
 
