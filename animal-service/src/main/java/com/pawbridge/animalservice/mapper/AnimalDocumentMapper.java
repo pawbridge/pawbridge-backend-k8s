@@ -10,6 +10,8 @@ import com.pawbridge.animalservice.enums.NeuterStatus;
 import com.pawbridge.animalservice.enums.Species;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.Year;
 
 /**
@@ -21,8 +23,6 @@ public class AnimalDocumentMapper {
 
     /**
      * AnimalDocument를 AnimalResponse로 변환
-     * @param document Elasticsearch 문서
-     * @return AnimalResponse
      */
     public AnimalResponse toResponse(AnimalDocument document) {
         if (document == null) {
@@ -30,7 +30,7 @@ public class AnimalDocumentMapper {
         }
 
         return AnimalResponse.builder()
-            .id(document.getId() != null ? Long.parseLong(document.getId()) : null)
+            .id(document.getId()) // Long 타입 그대로 사용 (답변3 B안)
             .apmsNoticeNo(document.getApmsNoticeNo())
             .species(document.getSpecies() != null ? Species.valueOf(document.getSpecies()) : null)
             .breed(document.getBreed())
@@ -39,19 +39,17 @@ public class AnimalDocumentMapper {
             .age(calculateAge(document.getBirthYear()))
             .specialMark(document.getSpecialMark())
             .status(document.getStatus() != null ? AnimalStatus.valueOf(document.getStatus()) : null)
-            .noticeEndDate(document.getNoticeEndDate())
+            .noticeEndDate(toLocalDate(document.getNoticeEndDate()))
             .imageUrl(document.getImageUrl())
             .favoriteCount(document.getFavoriteCount())
             .shelterId(document.getShelterId())
             .shelterName(document.getShelterName())
-            .createdAt(document.getCreatedAt())
+            .createdAt(toLocalDateTime(document.getCreatedAt()))
             .build();
     }
 
     /**
      * AnimalDocument를 AnimalDetailResponse로 변환
-     * @param document Elasticsearch 문서
-     * @return AnimalDetailResponse (전체 상세 정보)
      */
     public AnimalDetailResponse toDetailResponse(AnimalDocument document) {
         if (document == null) {
@@ -60,7 +58,7 @@ public class AnimalDocumentMapper {
 
         return AnimalDetailResponse.builder()
             // 기본 정보
-            .id(document.getId() != null ? Long.parseLong(document.getId()) : null)
+            .id(document.getId()) // Long 타입 그대로 사용
             .apmsNoticeNo(document.getApmsNoticeNo())
             .species(document.getSpecies() != null ? Species.valueOf(document.getSpecies()) : null)
             .breed(document.getBreed())
@@ -76,12 +74,12 @@ public class AnimalDocumentMapper {
 
             // 상태 및 공고 정보
             .status(document.getStatus() != null ? AnimalStatus.valueOf(document.getStatus()) : null)
-            .noticeStartDate(document.getNoticeStartDate())
-            .noticeEndDate(document.getNoticeEndDate())
+            .noticeStartDate(toLocalDate(document.getNoticeStartDate()))
+            .noticeEndDate(toLocalDate(document.getNoticeEndDate()))
 
             // 발견/접수 정보
             .happenPlace(document.getHappenPlace())
-            .happenDate(document.getHappenDate())
+            .happenDate(toLocalDate(document.getHappenDate()))
 
             // 이미지
             .imageUrl(document.getImageUrl())
@@ -100,24 +98,37 @@ public class AnimalDocumentMapper {
             // APMS 연동 정보
             .apmsDesertionNo(document.getApmsDesertionNo())
             .apmsProcessState(document.getApmsProcessState())
-            .apmsUpdatedAt(document.getApmsUpdatedAt())
+            .apmsUpdatedAt(toLocalDateTime(document.getApmsUpdatedAt()))
             .apiSource(document.getApiSource() != null ? ApiSource.valueOf(document.getApiSource()) : null)
 
             // 메타 정보
-            .createdAt(document.getCreatedAt())
-            .updatedAt(document.getUpdatedAt())
+            .createdAt(toLocalDateTime(document.getCreatedAt()))
+            .updatedAt(toLocalDateTime(document.getUpdatedAt()))
             .build();
     }
 
-    /**
-     * 나이 계산 (현재 연도 기준)
-     * @param birthYear 출생 연도
-     * @return 만 나이
-     */
     private Integer calculateAge(Integer birthYear) {
         if (birthYear == null) {
             return null;
         }
         return Year.now().getValue() - birthYear;
+    }
+
+    private LocalDate toLocalDate(String dateStr) {
+        if (dateStr == null) return null;
+        try {
+            return LocalDate.parse(dateStr);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private LocalDateTime toLocalDateTime(String dateTimeStr) {
+        if (dateTimeStr == null) return null;
+        try {
+            return LocalDateTime.parse(dateTimeStr);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "index.default_pipeline": "animal-date-converter",
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "id": { "type": "keyword" },
+      "apms_desertion_no": { "type": "keyword" },
+      "apms_notice_no": { "type": "keyword" },
+      "notice_start_date": { "type": "date" },
+      "notice_end_date": { "type": "date" },
+      "apms_updated_at": { "type": "date" },
+      "happen_date": { "type": "date" },
+      "created_at": { "type": "date" },
+      "updated_at": { "type": "date" }
+    }
+  }
+}

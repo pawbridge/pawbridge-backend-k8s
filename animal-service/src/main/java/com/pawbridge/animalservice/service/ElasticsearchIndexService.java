@@ -13,6 +13,8 @@ import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -34,17 +36,11 @@ public class ElasticsearchIndexService {
 
     /**
      * 전체 동물 데이터를 Elasticsearch에 배치 인덱싱
-     * - MySQL의 모든 동물 데이터를 배치로 나눠서 Elasticsearch에 저장
-     * - 메모리 효율을 위해 BATCH_SIZE(1000)건씩 처리
-     * - 기존 인덱스 데이터는 유지하고 새로운 데이터만 추가 (upsert)
-     *
-     * @return 인덱싱된 동물 수
      */
     @Transactional(readOnly = true)
     public long indexAllAnimals() {
         log.info("[ELASTICSEARCH] 배치 인덱싱 시작 (배치 크기: {})", BATCH_SIZE);
 
-        // 1. 전체 데이터 개수 확인
         long totalCount = animalRepository.count();
         log.info("[ELASTICSEARCH] 총 {} 건의 동물 데이터", totalCount);
 
@@ -53,25 +49,20 @@ public class ElasticsearchIndexService {
             return 0;
         }
 
-        // 2. 페이지 수 계산
         int totalPages = (int) Math.ceil((double) totalCount / BATCH_SIZE);
         long indexedCount = 0;
 
-        // 3. 배치 처리
         for (int page = 0; page < totalPages; page++) {
             try {
                 log.info("[ELASTICSEARCH] 배치 {}/{} 처리 중...", page + 1, totalPages);
 
-                // 페이지별로 조회 (BATCH_SIZE만큼)
                 Pageable pageable = PageRequest.of(page, BATCH_SIZE);
                 Page<Animal> animalPage = animalRepository.findAll(pageable);
 
-                // Animal → AnimalDocument 변환
                 List<AnimalDocument> documents = animalPage.getContent().stream()
                     .map(this::convertToDocument)
                     .collect(Collectors.toList());
 
-                // Elasticsearch에 저장 (Bulk API)
                 animalDocumentRepository.saveAll(documents);
 
                 indexedCount += documents.size();
@@ -79,12 +70,10 @@ public class ElasticsearchIndexService {
                 log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건",
                     page + 1, totalPages, documents.size());
 
-                // 메모리 정리
                 documents.clear();
 
             } catch (Exception e) {
                 log.error("[ELASTICSEARCH] 배치 {} 실패: {}", page + 1, e.getMessage(), e);
-                // 다음 배치 계속 진행
             }
         }
 
@@ -94,71 +83,47 @@ public class ElasticsearchIndexService {
 
     /**
      * Elasticsearch 인덱스 초기화 후 전체 재인덱싱
-     * - 기존 인덱스의 모든 데이터 삭제
-     * - MySQL 데이터로 재인덱싱
-     *
-     * @return 인덱싱된 동물 수
      */
     @Transactional(readOnly = true)
     public long reindexAllAnimals() {
         log.info("[ELASTICSEARCH] 전체 재인덱싱 시작 (기존 데이터 삭제)");
-
-        // 1. 기존 인덱스 데이터 삭제
         long deletedCount = deleteAllDocuments();
         log.info("[ELASTICSEARCH] 기존 데이터 {} 건 삭제 완료", deletedCount);
-
-        // 2. 전체 재인덱싱
         return indexAllAnimals();
     }
 
     /**
      * 특정 동물 한 건을 Elasticsearch에 인덱싱
-     * - 실시간 동기화에 사용 (생성/수정 시)
-     *
-     * @param animal 인덱싱할 동물 엔티티
      */
     public void indexAnimal(Animal animal) {
         log.debug("[ELASTICSEARCH] 동물 인덱싱: id={}", animal.getId());
-
         AnimalDocument document = convertToDocument(animal);
         animalDocumentRepository.save(document);
-
         log.debug("[ELASTICSEARCH] 동물 인덱싱 완료: id={}", animal.getId());
     }
 
     /**
      * 특정 동물을 Elasticsearch에서 삭제
-     * - 실시간 동기화에 사용 (삭제 시)
-     *
-     * @param animalId 삭제할 동물 ID
      */
     public void deleteAnimal(Long animalId) {
         log.debug("[ELASTICSEARCH] 동물 삭제: id={}", animalId);
-
         animalDocumentRepository.deleteById(String.valueOf(animalId));
-
         log.debug("[ELASTICSEARCH] 동물 삭제 완료: id={}", animalId);
     }
 
     /**
      * Elasticsearch 인덱스의 모든 문서 삭제
-     *
-     * @return 삭제된 문서 수
      */
     public long deleteAllDocuments() {
         log.info("[ELASTICSEARCH] 전체 문서 삭제 시작");
-
         long count = animalDocumentRepository.count();
         animalDocumentRepository.deleteAll();
-
         log.info("[ELASTICSEARCH] {} 건의 문서 삭제 완료", count);
         return count;
     }
 
     /**
      * Elasticsearch 인덱스 상태 조회
-     *
-     * @return 인덱스된 문서 수
      */
     public long getIndexedCount() {
         long count = animalDocumentRepository.count();
@@ -168,13 +133,11 @@ public class ElasticsearchIndexService {
 
     /**
      * Animal 엔티티를 AnimalDocument로 변환
-     *
-     * @param animal Animal 엔티티
-     * @return AnimalDocument
      */
     private AnimalDocument convertToDocument(Animal animal) {
         return AnimalDocument.builder()
-            .id(String.valueOf(animal.getId()))
+            .id(animal.getId()) // MySQL PK (Long) -> 'id' 필드에 매핑됨
+            // .esId(null) // ES _id는 자동 생성
             .apmsDesertionNo(animal.getApmsDesertionNo())
             .apmsNoticeNo(animal.getApmsNoticeNo())
             .species(animal.getSpecies() != null ? animal.getSpecies().name() : null)
@@ -186,10 +149,10 @@ public class ElasticsearchIndexService {
             .neuterStatus(animal.getNeuterStatus() != null ? animal.getNeuterStatus().name() : null)
             .specialMark(animal.getSpecialMark())
             .apmsProcessState(animal.getApmsProcessState())
-            .noticeStartDate(animal.getNoticeStartDate())
-            .noticeEndDate(animal.getNoticeEndDate())
-            .apmsUpdatedAt(animal.getApmsUpdatedAt())
-            .happenDate(animal.getHappenDate())
+            .noticeStartDate(toStringFormat(animal.getNoticeStartDate()))
+            .noticeEndDate(toStringFormat(animal.getNoticeEndDate()))
+            .apmsUpdatedAt(toStringFormat(animal.getApmsUpdatedAt()))
+            .happenDate(toStringFormat(animal.getHappenDate()))
             .happenPlace(animal.getHappenPlace())
             .imageUrl(animal.getImageUrl())
             .imageUrl2(animal.getImageUrl2())
@@ -201,8 +164,18 @@ public class ElasticsearchIndexService {
             .apiSource(animal.getApiSource() != null ? animal.getApiSource().name() : null)
             .favoriteCount(animal.getFavoriteCount())
             .description(animal.getDescription())
-            .createdAt(animal.getCreatedAt())
-            .updatedAt(animal.getUpdatedAt())
+            .createdAt(toStringFormat(animal.getCreatedAt()))
+            .updatedAt(toStringFormat(animal.getUpdatedAt()))
             .build();
+    }
+
+    private String toStringFormat(LocalDate date) {
+        if (date == null) return null;
+        return date.toString();
+    }
+
+    private String toStringFormat(LocalDateTime dateTime) {
+        if (dateTime == null) return null;
+        return dateTime.toString();
     }
 }

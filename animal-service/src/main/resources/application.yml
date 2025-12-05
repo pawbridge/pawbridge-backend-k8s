@@ -64,6 +64,7 @@ logging:
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
     org.springframework.batch: DEBUG
     org.springframework.boot.autoconfigure.batch: DEBUG
+    org.springframework.data.elasticsearch.client.elc: TRACE
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
