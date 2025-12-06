@@ -1,0 +1,50 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: payment-service
+  
+  # Database (MySQL)
+  datasource:
+    url: ${PAYMENT_DB_URL:jdbc:mysql://localhost:3306/pawbridge_payment?serverTimezone=Asia/Seoul&characterEncoding=UTF-8}
+    username: ${PAYMENT_DB_USERNAME:root}
+    password: ${PAYMENT_DB_PASSWORD:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+        show_sql: true
+  
+  # Kafka
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka}
+    register-with-eureka: true
+    fetch-registry: true
+
+# Toss Payments
+toss:
+  secret-key: ${TOSS_SECRET_KEY}
+
+# Monitoring
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus, metrics
+  tracing:
+    sampling:
+      probability: 1.0
