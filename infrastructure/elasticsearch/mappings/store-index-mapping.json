@@ -1,0 +1,42 @@
+{
+  "settings": {
+    "analysis": {
+      "tokenizer": {
+        "nori_user_dict": {
+          "type": "nori_tokenizer",
+          "decompound_mode": "mixed"
+        }
+      },
+      "analyzer": {
+        "korean": {
+          "type": "custom",
+          "tokenizer": "nori_user_dict"
+        }
+      }
+    },
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "skuId": { "type": "long" },
+      "productId": { "type": "long" },
+      "productName": { 
+        "type": "text", 
+        "analyzer": "korean",
+        "fields": {
+          "keyword": { "type": "keyword" }
+        }
+      },
+      "skuCode": { "type": "keyword" },
+      "optionName": { "type": "text", "analyzer": "korean" },
+      "price": { "type": "long" },
+      "stockQuantity": { "type": "integer" },
+      "isPrimarySku": { "type": "boolean" },
+      "status": { "type": "keyword" },
+      "imageUrl": { "type": "keyword" },
+      "createdAt": { "type": "date" },
+      "updatedAt": { "type": "date" }
+    }
+  }
+}
