@@ -19,11 +19,14 @@ public record SignUpRequestDto(
         @Size(min = 6, message = "비밀번호는 최소 6자 이상이어야 합니다.")
         String password,
         @Size(min = 6, message = "비밀번호는 최소 6자 이상이어야 합니다.")
-        String rePassword
+        String rePassword,
+        Role role
 ) {
 
     public User toEntity(String email, String name, String password, String nickname) {
-        return User.createLocalUser(email, name, password, nickname);
+        // role이 null이면 기본값으로 ROLE_USER 사용
+        Role userRole = (role != null) ? role : Role.ROLE_USER;
+        return User.createLocalUser(email, name, password, nickname, userRole);
     }
 
 }

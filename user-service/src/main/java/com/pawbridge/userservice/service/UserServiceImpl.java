@@ -4,8 +4,8 @@ import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.PasswordUpdateRequestDto;
 import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
-import com.pawbridge.userservice.dto.respone.SignUpResponseDto;
-import com.pawbridge.userservice.dto.respone.UserInfoResponseDto;
+import com.pawbridge.userservice.dto.response.SignUpResponseDto;
+import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.exception.*;
 import com.pawbridge.userservice.repository.UserRepository;
@@ -45,14 +45,19 @@ public class UserServiceImpl implements UserService {
             throw new InconsistentPasswordException();
         }
 
-        // 4. 닉네임 자동 생성
+        // 4. Role 검증 (ROLE_ADMIN은 회원가입으로 생성 불가)
+        if (requestDto.role() != null && requestDto.role() == com.pawbridge.userservice.entity.Role.ROLE_ADMIN) {
+            throw new IllegalArgumentException("관리자 계정은 회원가입으로 생성할 수 없습니다.");
+        }
+
+        // 5. 닉네임 자동 생성
         String nickname = nicknameGeneratorService.generateUniqueNickname();
         log.info("자동 생성된 닉네임: {}", nickname);
 
-        // 5. 비밀번호 암호화
+        // 6. 비밀번호 암호화
         String encodedPassword = passwordEncoder.encode(requestDto.password());
 
-        // 6. 사용자 생성
+        // 7. 사용자 생성
         User user = requestDto.toEntity(
                 requestDto.email(),
                 requestDto.name(),
@@ -60,7 +65,7 @@ public class UserServiceImpl implements UserService {
                 nickname
         );
 
-        // 7. DB 저장 (닉네임 중복 시 재시도)
+        // 8. DB 저장 (닉네임 중복 시 재시도)
         User savedUser;
         try {
             savedUser = userRepository.save(user);
@@ -78,7 +83,7 @@ public class UserServiceImpl implements UserService {
             log.info("재생성된 닉네임: {}", newNickname);
         }
 
-        // 8. 이메일 인증 정보 삭제
+        // 9. 이메일 인증 정보 삭제
         try {
             emailVerificationService.clearVerification(requestDto.email());
         } catch (Exception e) {

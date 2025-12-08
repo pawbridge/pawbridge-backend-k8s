@@ -63,14 +63,14 @@ public class User {
     /**
      * 일반 회원가입 사용자 생성 (LOCAL)
      */
-    public static User createLocalUser(String email, String name, String password, String nickname) {
+    public static User createLocalUser(String email, String name, String password, String nickname, Role role) {
         return User.builder()
                 .email(email)
                 .name(name)
                 .nickname(nickname)
                 .password(password)
                 .provider("LOCAL")
-                .role(Role.ROLE_USER)
+                .role(role)
                 .build();
     }
 
