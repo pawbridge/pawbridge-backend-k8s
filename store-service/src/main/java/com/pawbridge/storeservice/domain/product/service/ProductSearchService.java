@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -170,6 +171,8 @@ public class ProductSearchService {
             .price(getLongValue(source, "price"))
             .totalStock(getIntegerValue(source, "stockQuantity"))
             .status(getStringValue(source, "status"))
+            .createdAt(getLocalDateTimeValue(source, "createdAt"))
+            .updatedAt(getLocalDateTimeValue(source, "updatedAt"))
             .build();
     }
 
@@ -202,6 +205,17 @@ public class ProductSearchService {
             return Integer.parseInt(value.toString());
         } catch (NumberFormatException e) {
             log.warn("Failed to parse Integer value for key: {}, value: {}", key, value);
+            return null;
+        }
+    }
+
+    private LocalDateTime getLocalDateTimeValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        if (value == null) return null;
+        try {
+            return LocalDateTime.parse(value.toString());
+        } catch (Exception e) {
+            log.warn("Failed to parse LocalDateTime for key: {}, value: {}", key, value);
             return null;
         }
     }

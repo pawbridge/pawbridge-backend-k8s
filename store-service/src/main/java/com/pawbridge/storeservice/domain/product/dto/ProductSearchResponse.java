@@ -1,11 +1,13 @@
 package com.pawbridge.storeservice.domain.product.dto;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 @Getter
 @Builder
@@ -33,5 +35,10 @@ public class ProductSearchResponse {
         private Long price;         // SKU Price
         private Integer totalStock; // SKU Stock
         private String status;
+        @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+        private LocalDateTime createdAt;
+
+        @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+        private LocalDateTime updatedAt;
     }
 }

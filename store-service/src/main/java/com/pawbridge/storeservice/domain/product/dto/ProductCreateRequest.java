@@ -12,6 +12,7 @@ public class ProductCreateRequest {
     private String name;
     private String description;
     private String imageUrl;
+    private Long categoryId;
     private List<OptionGroupDto> optionGroups;
     private List<SkuDto> skus;
 

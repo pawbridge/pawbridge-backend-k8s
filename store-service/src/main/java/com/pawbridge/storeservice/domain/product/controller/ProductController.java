@@ -1,12 +1,11 @@
 package com.pawbridge.storeservice.domain.product.controller;
 
-import com.pawbridge.storeservice.domain.product.dto.ProductCreateRequest;
-import com.pawbridge.storeservice.domain.product.dto.ProductResponse;
-import com.pawbridge.storeservice.domain.product.dto.ProductSearchRequest;
-import com.pawbridge.storeservice.domain.product.dto.ProductSearchResponse;
+import com.pawbridge.storeservice.domain.product.dto.*;
 import com.pawbridge.storeservice.domain.product.service.ProductSearchService;
 import com.pawbridge.storeservice.domain.product.service.ProductService;
+import com.pawbridge.storeservice.domain.product.facade.ProductFacade;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,15 +13,29 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/products")
 @RequiredArgsConstructor
+@Slf4j
 public class ProductController {
 
     private final ProductService productService;
     private final ProductSearchService productSearchService;
+    private final ProductFacade productFacade;
 
     @PostMapping
     public ResponseEntity<ProductResponse> createProduct(@RequestBody ProductCreateRequest request) {
         ProductResponse response = productService.createProduct(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/{productId}")
+    public ResponseEntity<ProductDetailResponse> getProductDetails(@PathVariable Long productId) {
+        ProductDetailResponse response = productFacade.getProductDetails(productId);
+        return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/{productId}")
+    public ResponseEntity<ProductResponse> updateProduct(@PathVariable Long productId, @RequestBody ProductUpdateRequest request) {
+        ProductResponse response = productFacade.updateProduct(productId, request);
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping
@@ -37,7 +50,7 @@ public class ProductController {
         @RequestParam(required = false, defaultValue = "20") Integer size
     ) {
         // [DEBUG] Request Log
-        org.slf4j.LoggerFactory.getLogger(ProductController.class).info(">>> [Controller] Search Request - Keyword: {}, MinPrice: {}, InStock: {}", keyword, minPrice, inStockOnly);
+        log.info(">>> [Controller] Search Request - Keyword: {}, MinPrice: {}, InStock: {}", keyword, minPrice, inStockOnly);
 
         ProductSearchRequest searchRequest = ProductSearchRequest.builder()
             .keyword(keyword)
