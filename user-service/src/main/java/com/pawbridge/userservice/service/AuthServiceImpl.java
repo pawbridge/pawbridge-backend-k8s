@@ -4,7 +4,7 @@ import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.PasswordResetRequestDto;
 import com.pawbridge.userservice.dto.request.PasswordResetVerifyDto;
 import com.pawbridge.userservice.dto.request.RefreshTokenRequestDto;
-import com.pawbridge.userservice.dto.respone.RefreshTokenResponseDto;
+import com.pawbridge.userservice.dto.response.RefreshTokenResponseDto;
 import com.pawbridge.userservice.entity.RefreshToken;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.exception.PasswordResetCodeInvalidException;

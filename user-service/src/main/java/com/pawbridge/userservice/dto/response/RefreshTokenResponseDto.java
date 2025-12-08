@@ -1,4 +1,4 @@
-package com.pawbridge.userservice.dto.respone;
+package com.pawbridge.userservice.dto.response;
 
 public record RefreshTokenResponseDto(
         String accessToken,

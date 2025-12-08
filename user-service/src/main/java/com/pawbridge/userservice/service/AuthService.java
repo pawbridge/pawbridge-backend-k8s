@@ -3,7 +3,7 @@ package com.pawbridge.userservice.service;
 import com.pawbridge.userservice.dto.request.PasswordResetRequestDto;
 import com.pawbridge.userservice.dto.request.PasswordResetVerifyDto;
 import com.pawbridge.userservice.dto.request.RefreshTokenRequestDto;
-import com.pawbridge.userservice.dto.respone.RefreshTokenResponseDto;
+import com.pawbridge.userservice.dto.response.RefreshTokenResponseDto;
 
 public interface AuthService {
 

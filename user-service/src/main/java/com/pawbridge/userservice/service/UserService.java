@@ -3,8 +3,8 @@ package com.pawbridge.userservice.service;
 import com.pawbridge.userservice.dto.request.PasswordUpdateRequestDto;
 import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
-import com.pawbridge.userservice.dto.respone.SignUpResponseDto;
-import com.pawbridge.userservice.dto.respone.UserInfoResponseDto;
+import com.pawbridge.userservice.dto.response.SignUpResponseDto;
+import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
 
 public interface UserService {
 

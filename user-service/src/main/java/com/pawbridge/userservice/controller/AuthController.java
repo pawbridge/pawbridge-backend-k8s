@@ -3,7 +3,7 @@ package com.pawbridge.userservice.controller;
 import com.pawbridge.userservice.dto.request.PasswordResetRequestDto;
 import com.pawbridge.userservice.dto.request.PasswordResetVerifyDto;
 import com.pawbridge.userservice.dto.request.RefreshTokenRequestDto;
-import com.pawbridge.userservice.dto.respone.RefreshTokenResponseDto;
+import com.pawbridge.userservice.dto.response.RefreshTokenResponseDto;
 import com.pawbridge.userservice.service.AuthService;
 import com.pawbridge.userservice.util.ResponseDTO;
 import jakarta.validation.Valid;
