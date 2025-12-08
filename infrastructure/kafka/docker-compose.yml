@@ -65,6 +65,10 @@ services:
         kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic animal.animals &&
         kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic pawbridge.animal.outbox.events &&
         kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic pawbridge.community.outbox.events &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic schema-changes.store &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic schema-changes.payment &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic store.outbox.events &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka-broker:29092 --partitions 1 --replication-factor 1 --topic payment.events &&
         
         echo 'Topics created successfully! This container will now exit.'
       "
@@ -126,7 +130,7 @@ services:
           sleep 5
         done
         echo "📡 Registering Connectors..."
-        CONNECTORS="community-outbox-connector.json animal-outbox-connector.json animal-animals-connector.json elasticsearch-sink-connector.json"
+        CONNECTORS="community-outbox-connector.json animal-outbox-connector.json animal-animals-connector.json elasticsearch-sink-connector.json store-outbox-connector.json payment-outbox-connector.json store-es-sink-connector.json"
         for CONNECTOR_FILE in $$CONNECTORS; do
           echo ""
           echo "🔄 Registering $$CONNECTOR_FILE..."

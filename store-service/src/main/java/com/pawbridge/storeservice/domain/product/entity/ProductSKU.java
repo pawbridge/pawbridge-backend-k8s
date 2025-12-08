@@ -56,4 +56,23 @@ public class ProductSKU extends BaseEntity {
     public void increaseStock(int quantity) {
         this.stockQuantity += quantity;
     }
+
+    public String generateOptionName() {
+        if (this.skuValues.isEmpty()) {
+            return "";
+        }
+        return this.skuValues.stream()
+                .map(sv -> sv.getOptionValue().getOptionGroup().getName() + ": " + sv.getOptionValue().getName())
+                .sorted()
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("");
+    }
+
+    public void updatePrice(Long price) {
+        this.price = price;
+    }
+
+    public void updateStock(Integer stockQuantity) {
+        this.stockQuantity = stockQuantity;
+    }
 }

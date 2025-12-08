@@ -12,6 +12,8 @@ public class ProductResponse {
     private String description;
     private String imageUrl;
     private String status;
+    private Long categoryId;
+    private String categoryName;
 
     public static ProductResponse from(Product product) {
         return ProductResponse.builder()
@@ -20,6 +22,8 @@ public class ProductResponse {
                 .description(product.getDescription())
                 .imageUrl(product.getImageUrl())
                 .status(product.getStatus().name())
+                .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
+                .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .build();
     }
 }

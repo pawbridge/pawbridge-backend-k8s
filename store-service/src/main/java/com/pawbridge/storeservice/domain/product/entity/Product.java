@@ -3,6 +3,7 @@ package com.pawbridge.storeservice.domain.product.entity;
 import com.pawbridge.storeservice.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -12,6 +13,8 @@ import java.util.List;
 
 @Entity
 @Getter
+@Builder
+@AllArgsConstructor
 @Table(name = "products")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Product extends BaseEntity {
@@ -33,21 +36,38 @@ public class Product extends BaseEntity {
     @Column(nullable = false, length = 20)
     private ProductStatus status;
 
+    @Builder.Default
     @Column(nullable = false)
-    private Long viewCount;
+    private Long viewCount = 0L;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private Category category;
+
+    @Builder.Default
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OptionGroup> optionGroups = new ArrayList<>();
 
+    @Builder.Default
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ProductSKU> skus = new ArrayList<>();
-
-    @Builder
-    public Product(String name, String description, String imageUrl) {
+    public void updateName(String name) {
         this.name = name;
+    }
+
+    public void updateDescription(String description) {
         this.description = description;
+    }
+
+    public void updateImageUrl(String imageUrl) {
         this.imageUrl = imageUrl;
-        this.status = ProductStatus.ACTIVE;
-        this.viewCount = 0L;
+    }
+
+    public void updateStatus(ProductStatus status) {
+        this.status = status;
+    }
+
+    public void assignCategory(Category category) {
+        this.category = category;
     }
 }

@@ -4,6 +4,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.OffsetDateTime;
 
 @Getter
@@ -18,7 +19,9 @@ public class TossPaymentResponse {
     private Long totalAmount;
     private Long balanceAmount;
     private String status; // READY, DONE, CANCELED, ABORTED
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private OffsetDateTime requestedAt;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private OffsetDateTime approvedAt;
     private TossFailure failure; // 결제 실패 시 정보
 

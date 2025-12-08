@@ -19,7 +19,7 @@
     "write.method": "upsert",
     "errors.tolerance": "all",
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-    "connection.url": "http://172.20.0.7:9200",
+    "connection.url": "http://elasticsearch:9200",
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "topic.to.external.resource.mapping": "animal.animals:animals",
     "errors.log.enable": "true",
