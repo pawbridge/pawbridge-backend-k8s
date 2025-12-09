@@ -1,10 +1,16 @@
 package com.pawbridge.apigateway.filter;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.apigateway.util.ErrorResponse;
 import com.pawbridge.apigateway.util.JwtUtil;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
@@ -25,6 +31,7 @@ public class JwtAuthorizationGatewayFilterFactory
         extends AbstractGatewayFilterFactory<JwtAuthorizationGatewayFilterFactory.Config> {
 
     private final JwtUtil jwtUtil;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
     // 토큰 검증이 필요 없는 경로 (화이트리스트)
@@ -37,7 +44,24 @@ public class JwtAuthorizationGatewayFilterFactory
             "/api/v1/posts/read/*",                // 게시글 단건 조회
             "/api/v1/posts/read",                   // 게시글 목록 조회
             "/api/v1/posts/search",                 // 검색
-            "/api/v1/comments/posts/read/*"              // 특정 게시글 댓글 목록 조회
+            "/api/v1/comments/posts/read/*"        // 특정 게시글 댓글 목록 조회
+    );
+
+    // ROLE_ADMIN만 접근 가능한 경로
+    private static final List<String> ADMIN_ONLY_PATHS = List.of(
+            "POST:/api/v1/shelters",               // 보호소 등록
+            "DELETE:/api/v1/shelters/*"            // 보호소 삭제
+    );
+
+    // ROLE_USER가 아닐 때 접근 가능한 경로 (ROLE_ADMIN, ROLE_SHELTER)
+    private static final List<String> NON_USER_PATHS = List.of(
+            "PUT:/api/v1/shelters/*",              // 보호소 수정
+            "PATCH:/api/v1/shelters/*",            // 보호소 부분 수정
+            "POST:/api/v1/animals",                // 동물 등록
+            "POST:/api/v1/animals/*",              // 동물 등록 (하위 경로)
+            "PUT:/api/v1/animals/*",               // 동물 수정
+            "PATCH:/api/v1/animals/*",             // 동물 부분 수정
+            "DELETE:/api/v1/animals/*"             // 동물 삭제
     );
 
     public JwtAuthorizationGatewayFilterFactory(JwtUtil jwtUtil) {
@@ -62,13 +86,13 @@ public class JwtAuthorizationGatewayFilterFactory
 
             if (token == null) {
                 log.warn("Authorization 헤더 없음: {}", path);
-                return onError(exchange, "Missing Authorization header", HttpStatus.UNAUTHORIZED);
+                return onError(exchange, "인증 토큰이 필요합니다.", HttpStatus.UNAUTHORIZED);
             }
 
             // Access Token 검증
             if (!jwtUtil.validateAccessToken(token)) {
                 log.warn("유효하지 않은 토큰: {}", path);
-                return onError(exchange, "Invalid or expired token", HttpStatus.UNAUTHORIZED);
+                return onError(exchange, "유효하지 않거나 만료된 토큰입니다.", HttpStatus.UNAUTHORIZED);
             }
 
             // 토큰에서 사용자 정보 추출
@@ -77,23 +101,50 @@ public class JwtAuthorizationGatewayFilterFactory
                 String email = jwtUtil.getEmailFromToken(token);
                 String name = jwtUtil.getNameFromToken(token);
                 String role = jwtUtil.getRoleFromToken(token);
+                String method = request.getMethod().name();
+
+                // Role 기반 접근 제어
+                // 1. ADMIN만 접근 가능한 경로 체크
+                if (isAdminOnlyPath(method, path) && !role.equals("ROLE_ADMIN")) {
+                    log.warn("관리자 전용 경로 접근 거부 - role: {}, path: {}", role, path);
+                    return onError(exchange, "관리자 권한이 필요합니다.", HttpStatus.FORBIDDEN);
+                }
+
+                // 2. ROLE_USER가 아닐 때 접근 가능한 경로 체크 (ROLE_ADMIN, ROLE_SHELTER만 가능)
+                if (isNonUserPath(method, path) && role.equals("ROLE_USER")) {
+                    log.warn("권한 부족 - role: {}, path: {}", role, path);
+                    return onError(exchange, "권한이 부족합니다.", HttpStatus.FORBIDDEN);
+                }
 
                 // Authorization 헤더는 유지하고, X-User-* 헤더 추가
                 // (외부 서비스 호출 시 원본 토큰 필요할 수 있음)
-                ServerHttpRequest modifiedRequest = request.mutate()
+                var requestBuilder = request.mutate()
                         .header("X-User-Id", userId.toString())
                         .header("X-User-Email", email)
                         .header("X-User-Name", name)
-                        .header("X-User-Role", role)
-                        .build();
+                        .header("X-User-Role", role);
 
-                log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
+                // ROLE_SHELTER인 경우 careRegNo 헤더 추가
+                if ("ROLE_SHELTER".equals(role)) {
+                    String careRegNo = jwtUtil.getCareRegNoFromToken(token);
+                    if (careRegNo != null && !careRegNo.isBlank()) {
+                        requestBuilder.header("X-Care-Reg-No", careRegNo);
+                        log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, careRegNo: {}, path: {}",
+                                userId, email, role, careRegNo, path);
+                    } else {
+                        log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
+                    }
+                } else {
+                    log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
+                }
+
+                ServerHttpRequest modifiedRequest = requestBuilder.build();
 
                 return chain.filter(exchange.mutate().request(modifiedRequest).build());
 
             } catch (Exception e) {
                 log.error("토큰 파싱 실패: {}", e.getMessage());
-                return onError(exchange, "Failed to parse token", HttpStatus.UNAUTHORIZED);
+                return onError(exchange, "토큰 파싱에 실패했습니다.", HttpStatus.UNAUTHORIZED);
             }
         };
     }
@@ -120,16 +171,59 @@ public class JwtAuthorizationGatewayFilterFactory
     }
 
     /**
-     * 에러 응답
+     * ADMIN만 접근 가능한 경로인지 확인
+     */
+    private boolean isAdminOnlyPath(String method, String path) {
+        return ADMIN_ONLY_PATHS.stream()
+                .anyMatch(pattern -> matchesMethodAndPath(pattern, method, path));
+    }
+
+    /**
+     * ROLE_USER가 아닐 때 접근 가능한 경로인지 확인
+     */
+    private boolean isNonUserPath(String method, String path) {
+        return NON_USER_PATHS.stream()
+                .anyMatch(pattern -> matchesMethodAndPath(pattern, method, path));
+    }
+
+    /**
+     * HTTP 메서드와 경로를 함께 매칭 (와일드카드 지원)
+     * @param pattern "METHOD:/path/pattern" 형식
+     * @param method 요청 HTTP 메서드
+     * @param path 요청 경로
+     */
+    private boolean matchesMethodAndPath(String pattern, String method, String path) {
+        String[] parts = pattern.split(":", 2);
+        if (parts.length != 2) {
+            return false;
+        }
+        String patternMethod = parts[0];
+        String patternPath = parts[1];
+        return patternMethod.equals(method) && pathMatcher.match(patternPath, path);
+    }
+
+    /**
+     * 에러 응답 (JSON 형식)
      */
     private Mono<Void> onError(ServerWebExchange exchange, String message, HttpStatus status) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(status);
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
 
         log.error("JWT 인가 실패 - message: {}, status: {}, path: {}",
                 message, status, exchange.getRequest().getURI().getPath());
 
-        return response.setComplete();
+        // 다른 서비스의 ResponseDTO와 동일한 구조로 에러 응답 생성
+        ErrorResponse errorResponse = ErrorResponse.of(status.value(), message);
+
+        try {
+            byte[] bytes = objectMapper.writeValueAsBytes(errorResponse);
+            DataBuffer buffer = response.bufferFactory().wrap(bytes);
+            return response.writeWith(Mono.just(buffer));
+        } catch (JsonProcessingException e) {
+            log.error("JSON 변환 실패: {}", e.getMessage());
+            return response.setComplete();
+        }
     }
 
     /**

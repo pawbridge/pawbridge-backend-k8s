@@ -2,7 +2,7 @@ package com.pawbridge.userservice.filter;
 
 import com.pawbridge.userservice.dto.request.LoginRequestDto;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pawbridge.userservice.dto.respone.LoginResponseDto;
+import com.pawbridge.userservice.dto.response.LoginResponseDto;
 import com.pawbridge.userservice.entity.RefreshToken;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.jwt.JwtProvider;

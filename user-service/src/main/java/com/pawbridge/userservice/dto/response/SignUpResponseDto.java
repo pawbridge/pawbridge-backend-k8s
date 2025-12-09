@@ -1,4 +1,4 @@
-package com.pawbridge.userservice.dto.respone;
+package com.pawbridge.userservice.dto.response;
 
 import com.pawbridge.userservice.entity.User;
 import lombok.AllArgsConstructor;

@@ -1,11 +1,13 @@
 package com.pawbridge.userservice.service;
 
+import com.pawbridge.userservice.client.AnimalServiceClient;
 import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.PasswordUpdateRequestDto;
 import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
-import com.pawbridge.userservice.dto.respone.SignUpResponseDto;
-import com.pawbridge.userservice.dto.respone.UserInfoResponseDto;
+import com.pawbridge.userservice.dto.response.SignUpResponseDto;
+import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
+import com.pawbridge.userservice.entity.Role;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.exception.*;
 import com.pawbridge.userservice.repository.UserRepository;
@@ -25,6 +27,7 @@ public class UserServiceImpl implements UserService {
     private final PasswordEncoder passwordEncoder;
     private final EmailVerificationService emailVerificationService;
     private final NicknameGeneratorService nicknameGeneratorService;
+    private final AnimalServiceClient animalServiceClient;
 
     @Override
     @Transactional
@@ -45,14 +48,46 @@ public class UserServiceImpl implements UserService {
             throw new InconsistentPasswordException();
         }
 
-        // 4. 닉네임 자동 생성
+        // 4. Role 필수 검증
+        if (requestDto.role() == null) {
+            throw new RoleRequiredException();
+        }
+
+        // 5. ROLE_ADMIN은 회원가입으로 생성 불가
+        if (requestDto.role() == Role.ROLE_ADMIN) {
+            throw new AdminRoleNotAllowedException();
+        }
+
+        // 6. ROLE_SHELTER인 경우 careRegNo 검증
+        if (requestDto.role() == Role.ROLE_SHELTER) {
+            // careRegNo가 없으면 에러
+            if (requestDto.careRegNo() == null || requestDto.careRegNo().isBlank()) {
+                throw new ShelterCareRegNoRequiredException();
+            }
+
+            // animal-service에 보호소 존재 여부 확인
+            try {
+                Boolean exists = animalServiceClient.existsByCareRegNo(requestDto.careRegNo());
+                if (exists == null || !exists) {
+                    throw new ShelterNotFoundException();
+                }
+                log.info("보호소 등록번호 검증 완료: {}", requestDto.careRegNo());
+            } catch (ShelterNotFoundException e) {
+                throw e;
+            } catch (Exception e) {
+                log.error("보호소 존재 여부 확인 실패: {}", e.getMessage());
+                throw new ShelterServiceUnavailableException();
+            }
+        }
+
+        // 7. 닉네임 자동 생성
         String nickname = nicknameGeneratorService.generateUniqueNickname();
         log.info("자동 생성된 닉네임: {}", nickname);
 
-        // 5. 비밀번호 암호화
+        // 8. 비밀번호 암호화
         String encodedPassword = passwordEncoder.encode(requestDto.password());
 
-        // 6. 사용자 생성
+        // 9. 사용자 생성
         User user = requestDto.toEntity(
                 requestDto.email(),
                 requestDto.name(),
@@ -60,7 +95,7 @@ public class UserServiceImpl implements UserService {
                 nickname
         );
 
-        // 7. DB 저장 (닉네임 중복 시 재시도)
+        // 10. DB 저장 (닉네임 중복 시 재시도)
         User savedUser;
         try {
             savedUser = userRepository.save(user);
@@ -78,14 +113,15 @@ public class UserServiceImpl implements UserService {
             log.info("재생성된 닉네임: {}", newNickname);
         }
 
-        // 8. 이메일 인증 정보 삭제
+        // 11. 이메일 인증 정보 삭제
         try {
             emailVerificationService.clearVerification(requestDto.email());
         } catch (Exception e) {
             log.warn("이메일 인증 정보 삭제 실패 (무시): {}", e.getMessage());
         }
 
-        log.info("회원가입 완료: {}, 닉네임: {}", savedUser.getEmail(), savedUser.getNickname());
+        log.info("회원가입 완료: email={}, nickname={}, role={}, careRegNo={}",
+                savedUser.getEmail(), savedUser.getNickname(), savedUser.getRole(), savedUser.getCareRegNo());
 
         return SignUpResponseDto.fromEntity(savedUser);
     }
