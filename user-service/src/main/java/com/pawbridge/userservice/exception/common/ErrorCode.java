@@ -57,6 +57,15 @@ public enum ErrorCode {
     EMAIL_SENDING_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "이메일 발송에 실패했습니다."),
     EMAIL_TEMPLATE_LOAD_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "이메일 템플릿 로드에 실패했습니다."),
 
+    // ROLE
+    ROLE_REQUIRED(HttpStatus.BAD_REQUEST, "회원 유형을 선택해주세요."),
+    ADMIN_ROLE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "관리자 계정은 회원가입으로 생성할 수 없습니다."),
+
+    // SHELTER
+    SHELTER_CARE_REG_NO_REQUIRED(HttpStatus.BAD_REQUEST, "소속 보호소를 선택해주세요."),
+    SHELTER_NOT_FOUND(HttpStatus.BAD_REQUEST, "존재하지 않는 보호소 등록번호입니다."),
+    SHELTER_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "보호소 정보를 확인할 수 없습니다. 잠시 후 다시 시도해주세요."),
+
     // 5xx
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "서버 내부 에러");
 

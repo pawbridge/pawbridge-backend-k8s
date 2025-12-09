@@ -35,11 +35,18 @@ public class JwtProvider {
         Date now = new Date();
         Date expiration = new Date(now.getTime() + accessTokenExpiration);
 
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(user.getEmail())
                 .claim("userId", user.getUserId())
                 .claim("name", user.getName())
-                .claim("role", user.getRole().name())
+                .claim("role", user.getRole().name());
+
+        // ROLE_SHELTER인 경우 careRegNo 추가
+        if (user.getCareRegNo() != null && !user.getCareRegNo().isBlank()) {
+            builder.claim("careRegNo", user.getCareRegNo());
+        }
+
+        return builder
                 .issuedAt(now)
                 .expiration(expiration)
                 .signWith(secretKey)
@@ -77,6 +84,20 @@ public class JwtProvider {
      */
     public long getRefreshTokenExpiration() {
         return refreshTokenExpiration;
+    }
+
+    /**
+     * JWT 토큰에서 careRegNo 추출
+     * @param token JWT 토큰
+     * @return careRegNo (없으면 null)
+     */
+    public String getCareRegNoFromToken(String token) {
+        try {
+            Claims claims = getClaims(token);
+            return claims.get("careRegNo", String.class);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

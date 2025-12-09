@@ -118,14 +118,27 @@ public class JwtAuthorizationGatewayFilterFactory
 
                 // Authorization 헤더는 유지하고, X-User-* 헤더 추가
                 // (외부 서비스 호출 시 원본 토큰 필요할 수 있음)
-                ServerHttpRequest modifiedRequest = request.mutate()
+                var requestBuilder = request.mutate()
                         .header("X-User-Id", userId.toString())
                         .header("X-User-Email", email)
                         .header("X-User-Name", name)
-                        .header("X-User-Role", role)
-                        .build();
+                        .header("X-User-Role", role);
 
-                log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
+                // ROLE_SHELTER인 경우 careRegNo 헤더 추가
+                if ("ROLE_SHELTER".equals(role)) {
+                    String careRegNo = jwtUtil.getCareRegNoFromToken(token);
+                    if (careRegNo != null && !careRegNo.isBlank()) {
+                        requestBuilder.header("X-Care-Reg-No", careRegNo);
+                        log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, careRegNo: {}, path: {}",
+                                userId, email, role, careRegNo, path);
+                    } else {
+                        log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
+                    }
+                } else {
+                    log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
+                }
+
+                ServerHttpRequest modifiedRequest = requestBuilder.build();
 
                 return chain.filter(exchange.mutate().request(modifiedRequest).build());
 

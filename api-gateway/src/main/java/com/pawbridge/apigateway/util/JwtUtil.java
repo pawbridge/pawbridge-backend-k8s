@@ -64,6 +64,19 @@ public class JwtUtil {
     }
 
     /**
+     * JWT 토큰에서 careRegNo 추출
+     * - ROLE_SHELTER인 경우에만 존재
+     * @return careRegNo (없으면 null)
+     */
+    public String getCareRegNoFromToken(String token) {
+        try {
+            return getClaims(token).get("careRegNo", String.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * JWT 토큰에서 Claims 추출
      */
     private Claims getClaims(String token) {

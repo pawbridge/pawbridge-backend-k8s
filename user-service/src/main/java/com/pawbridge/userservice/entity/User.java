@@ -47,6 +47,15 @@ public class User {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    /**
+     * 보호소 등록번호 (careRegNo)
+     * - ROLE_SHELTER 회원만 가짐
+     * - 보호소 소속을 확인하기 위한 필드
+     * - 예: "348527200900001"
+     */
+    @Column(length = 50)
+    private String careRegNo;
+
     @Column(length = 20, nullable = false)
     @Builder.Default
     private String provider = "LOCAL";
@@ -63,7 +72,7 @@ public class User {
     /**
      * 일반 회원가입 사용자 생성 (LOCAL)
      */
-    public static User createLocalUser(String email, String name, String password, String nickname, Role role) {
+    public static User createLocalUser(String email, String name, String password, String nickname, Role role, String careRegNo) {
         return User.builder()
                 .email(email)
                 .name(name)
@@ -71,6 +80,7 @@ public class User {
                 .password(password)
                 .provider("LOCAL")
                 .role(role)
+                .careRegNo(careRegNo)
                 .build();
     }
 
