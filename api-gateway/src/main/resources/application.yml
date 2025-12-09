@@ -36,7 +36,15 @@ spring:
             - Method=GET
           # JWT 필터 없음 (로그인 없이 검색/조회 가능)
 
-        # Animal Service - CUD (POST/PUT/PATCH/DELETE, 인증 필요)
+        # Shelter Service - 조회 (GET, 공개)
+        - id: shelter-service-public
+          uri: lb://animal-service
+          predicates:
+            - Path=/api/v1/shelters/**
+            - Method=GET
+          # JWT 필터 없음 (로그인 없이 조회 가능)
+
+        # Animal/Shelter Service - CUD (POST/PUT/PATCH/DELETE, 인증 필요)
         - id: animal-service-protected
           uri: lb://animal-service
           predicates:
