@@ -16,7 +16,7 @@ public class CartController {
 
     private final CartService cartService;
 
-    @PostMapping
+    @PostMapping("/items")
     public ResponseEntity<Void> addToCart(
             @RequestHeader("X-User-Id") Long userId,
             @RequestBody CartAddRequest request) {
@@ -31,18 +31,20 @@ public class CartController {
         return ResponseEntity.ok(responses);
     }
 
-    @PatchMapping("/items/{itemId}")
+    @PatchMapping("/items/{skuId}")
     public ResponseEntity<Void> updateQuantity(
-            @PathVariable Long itemId,
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long skuId,
             @RequestParam int quantity) {
-        cartService.updateQuantity(itemId, quantity);
+        cartService.updateQuantity(userId, skuId, quantity);
         return ResponseEntity.ok().build();
     }
 
-    @DeleteMapping("/items/{itemId}")
+    @DeleteMapping("/items/{skuId}")
     public ResponseEntity<Void> removeCartItem(
-            @PathVariable Long itemId) {
-        cartService.removeCartItem(itemId);
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long skuId) {
+        cartService.removeCartItem(userId, skuId);
         return ResponseEntity.ok().build();
     }
 }

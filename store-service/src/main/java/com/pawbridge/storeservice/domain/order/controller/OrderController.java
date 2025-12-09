@@ -22,4 +22,16 @@ public class OrderController {
         OrderResponse response = orderService.createOrder(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
+
+    @GetMapping("/{orderId}")
+    public ResponseEntity<OrderResponse> getOrder(@PathVariable Long orderId) {
+        OrderResponse response = orderService.getOrder(orderId);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{orderId}/payment")
+    public ResponseEntity<Void> processPayment(@PathVariable Long orderId) {
+        orderService.processPayment(orderId);
+        return ResponseEntity.ok().build();
+    }
 }

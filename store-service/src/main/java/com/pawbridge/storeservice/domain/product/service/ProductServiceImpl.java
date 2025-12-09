@@ -251,4 +251,11 @@ public class ProductServiceImpl implements ProductService {
         return ProductResponse.from(product);
     }
 
+    @Override
+    @Transactional
+    public void decreaseStock(Long skuId, int quantity) {
+        ProductSKU sku = productSKURepository.findById(skuId)
+                .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
+        sku.decreaseStock(quantity);
+    }
 }
