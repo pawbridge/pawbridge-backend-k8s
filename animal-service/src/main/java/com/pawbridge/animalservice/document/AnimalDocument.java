@@ -8,16 +8,14 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
-import org.springframework.data.elasticsearch.annotations.DateFormat;
-
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 
 /**
  * Elasticsearch용 동물 문서
  * - Debezium CDC를 통해 자동 동기화
  * - Animal 엔티티와 동일한 구조 유지
  * - 인덱스 필드명은 snake_case (DB 컬럼명과 동일)
+ * - 날짜 필드는 String(Keyword)으로 매핑 (답변2 B안)
+ * - ID 필드는 esId(_id)와 id(PK) 분리 (답변3 B안)
  */
 @Document(indexName = "animals")
 @Getter
@@ -27,7 +25,10 @@ import java.time.LocalDateTime;
 public class AnimalDocument {
 
     @Id
-    private String id;
+    private String esId; // Elasticsearch Document ID (_id)
+
+    @Field(name = "id", type = FieldType.Long)
+    private Long id; // MySQL PK (id)
 
     // APMS 핵심 식별
     @Field(name = "apms_desertion_no", type = FieldType.Keyword)
@@ -65,18 +66,18 @@ public class AnimalDocument {
     @Field(name = "apms_process_state", type = FieldType.Keyword)
     private String apmsProcessState;
 
-    @Field(name = "notice_start_date", type = FieldType.Date)
-    private LocalDate noticeStartDate;
+    @Field(name = "notice_start_date", type = FieldType.Keyword)
+    private String noticeStartDate;
 
-    @Field(name = "notice_end_date", type = FieldType.Date)
-    private LocalDate noticeEndDate;
+    @Field(name = "notice_end_date", type = FieldType.Keyword)
+    private String noticeEndDate;
 
-    @Field(name = "apms_updated_at", type = FieldType.Date, format = DateFormat.date_hour_minute_second_millis)
-    private LocalDateTime apmsUpdatedAt;
+    @Field(name = "apms_updated_at", type = FieldType.Keyword)
+    private String apmsUpdatedAt;
 
     // 발견 정보
-    @Field(name = "happen_date", type = FieldType.Date)
-    private LocalDate happenDate;
+    @Field(name = "happen_date", type = FieldType.Keyword)
+    private String happenDate;
 
     @Field(name = "happen_place", type = FieldType.Text)
     private String happenPlace;
@@ -115,9 +116,9 @@ public class AnimalDocument {
     private String description;
 
     // 타임스탬프
-    @Field(name = "created_at", type = FieldType.Date, format = DateFormat.date_hour_minute_second_millis)
-    private LocalDateTime createdAt;
+    @Field(name = "created_at", type = FieldType.Keyword)
+    private String createdAt;
 
-    @Field(name = "updated_at", type = FieldType.Date, format = DateFormat.date_hour_minute_second_millis)
-    private LocalDateTime updatedAt;
+    @Field(name = "updated_at", type = FieldType.Keyword)
+    private String updatedAt;
 }

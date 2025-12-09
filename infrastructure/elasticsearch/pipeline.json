@@ -1,0 +1,35 @@
+{
+  "description": "Convert Debezium numeric dates to Elasticsearch date types",
+  "processors": [
+    {
+      "script": {
+        "source": "if (ctx.notice_start_date != null && ctx.notice_start_date instanceof Number) { ctx.notice_start_date = Instant.ofEpochMilli((long)ctx.notice_start_date * 86400000L).atZone(ZoneId.of('Asia/Seoul')).toLocalDate().toString(); }"
+      }
+    },
+    {
+      "script": {
+        "source": "if (ctx.notice_end_date != null && ctx.notice_end_date instanceof Number) { ctx.notice_end_date = Instant.ofEpochMilli((long)ctx.notice_end_date * 86400000L).atZone(ZoneId.of('Asia/Seoul')).toLocalDate().toString(); }"
+      }
+    },
+    {
+      "script": {
+        "source": "if (ctx.happen_date != null && ctx.happen_date instanceof Number) { ctx.happen_date = Instant.ofEpochMilli((long)ctx.happen_date * 86400000L).atZone(ZoneId.of('Asia/Seoul')).toLocalDate().toString(); }"
+      }
+    },
+    {
+      "script": {
+        "source": "if (ctx.apms_updated_at != null && ctx.apms_updated_at instanceof Number) { ctx.apms_updated_at = Instant.ofEpochMilli((long)ctx.apms_updated_at / 1000L).atZone(ZoneId.of('Asia/Seoul')).toLocalDateTime().toString(); }"
+      }
+    },
+    {
+      "script": {
+        "source": "if (ctx.created_at != null && ctx.created_at instanceof Number) { ctx.created_at = Instant.ofEpochMilli((long)ctx.created_at / 1000L).atZone(ZoneId.of('Asia/Seoul')).toLocalDateTime().toString(); }"
+      }
+    },
+    {
+      "script": {
+        "source": "if (ctx.updated_at != null && ctx.updated_at instanceof Number) { ctx.updated_at = Instant.ofEpochMilli((long)ctx.updated_at / 1000L).atZone(ZoneId.of('Asia/Seoul')).toLocalDateTime().toString(); }"
+      }
+    }
+  ]
+}
