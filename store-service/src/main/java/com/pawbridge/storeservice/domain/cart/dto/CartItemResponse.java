@@ -15,15 +15,15 @@ public class CartItemResponse {
     private Integer quantity;
     private Long totalPrice;
 
-    public static CartItemResponse from(CartItem item) {
+    public static CartItemResponse of(com.pawbridge.storeservice.domain.product.entity.ProductSKU sku, int quantity) {
         return CartItemResponse.builder()
-                .id(item.getId())
-                .skuId(item.getProductSKU().getId())
-                .skuCode(item.getProductSKU().getSkuCode())
-                .productName(item.getProductSKU().getProduct().getName()) // N+1 주의 (Fetch Join 권장)
-                .price(item.getProductSKU().getPrice())
-                .quantity(item.getQuantity())
-                .totalPrice(item.getProductSKU().getPrice() * item.getQuantity())
+                .id(null) // Redis Based Cart doesn't have a generated Item ID, or we use SkuId as ID
+                .skuId(sku.getId())
+                .skuCode(sku.getSkuCode())
+                .productName(sku.getProduct().getName())
+                .price(sku.getPrice())
+                .quantity(quantity)
+                .totalPrice(sku.getPrice() * quantity)
                 .build();
     }
 }

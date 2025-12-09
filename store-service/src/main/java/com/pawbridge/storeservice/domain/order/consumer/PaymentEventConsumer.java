@@ -52,13 +52,13 @@ public class PaymentEventConsumer {
         Order order = orderRepository.findByOrderUuid(orderUuid)
                 .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderUuid));
 
-        if (order.getStatus().name().equals("COMPLETED")) {
-            log.info("Order {} is already completed.", orderUuid);
+        if (order.getStatus() == com.pawbridge.storeservice.domain.order.entity.OrderStatus.PAID) {
+            log.info("Order {} is already paid.", orderUuid);
             return;
         }
 
-        order.completeOrder();
-        log.info("Order {} completed successfully.", orderUuid);
+        order.paid();
+        log.info("Order {} paid successfully.", orderUuid);
 
         // Update Ranking in Redis
         updateRanking(order);
