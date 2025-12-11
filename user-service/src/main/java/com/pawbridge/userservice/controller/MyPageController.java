@@ -1,6 +1,7 @@
 package com.pawbridge.userservice.controller;
 
 import com.pawbridge.userservice.dto.response.AnimalResponse;
+import com.pawbridge.userservice.dto.response.CartResponse;
 import com.pawbridge.userservice.dto.response.OrderResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
 import com.pawbridge.userservice.dto.response.WishlistResponse;
@@ -75,6 +76,27 @@ public class MyPageController {
         Page<OrderResponse> orders = myPageService.getOrders(userId, pageable);
         ResponseDTO<Page<OrderResponse>> response = ResponseDTO.okWithData(orders);
 
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 내 장바구니 조회
+     * - GET /api/v1/users/me/cart
+     */
+    @GetMapping("/cart")
+    public ResponseEntity<ResponseDTO<CartResponse>> getCart(
+            @RequestHeader(value = "X-User-Id", required = true) Long userId) {
+
+        CartResponse cart = myPageService.getCart(userId);
+
+        // 장바구니가 없으면 204 No Content
+        if (cart == null) {
+            return ResponseEntity.noContent().build();
+        }
+
+        ResponseDTO<CartResponse> response = ResponseDTO.okWithData(cart);
         return ResponseEntity
                 .status(response.getCode())
                 .body(response);

@@ -1,5 +1,6 @@
 package com.pawbridge.userservice.client;
 
+import com.pawbridge.userservice.dto.response.CartResponse;
 import com.pawbridge.userservice.dto.response.OrderResponse;
 import com.pawbridge.userservice.dto.response.WishlistResponse;
 import org.springframework.cloud.openfeign.FeignClient;
@@ -10,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 /**
  * Store Service Feign Client
  * - store-service와 통신
- * - 찜 목록, 주문 내역 조회에 사용
+ * - 찜 목록, 주문 내역, 장바구니 조회에 사용
  */
 @FeignClient(name = "store-service")
 public interface StoreServiceClient {
@@ -44,4 +45,12 @@ public interface StoreServiceClient {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt,desc") String sort);
+
+    /**
+     * 사용자별 장바구니 조회
+     * @param userId 사용자 ID
+     * @return 장바구니 (없으면 null)
+     */
+    @GetMapping("/api/v1/mypage/cart")
+    CartResponse getCartByUserId(@RequestParam("userId") Long userId);
 }

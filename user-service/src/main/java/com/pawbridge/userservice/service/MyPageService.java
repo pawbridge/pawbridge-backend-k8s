@@ -1,6 +1,7 @@
 package com.pawbridge.userservice.service;
 
 import com.pawbridge.userservice.dto.response.AnimalResponse;
+import com.pawbridge.userservice.dto.response.CartResponse;
 import com.pawbridge.userservice.dto.response.OrderResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
 import com.pawbridge.userservice.dto.response.WishlistResponse;
@@ -35,4 +36,11 @@ public interface MyPageService {
      * @return 주문 목록
      */
     Page<OrderResponse> getOrders(Long userId, Pageable pageable);
+
+    /**
+     * 내 장바구니 조회
+     * @param userId 사용자 ID
+     * @return 장바구니 (없으면 null)
+     */
+    CartResponse getCart(Long userId);
 }

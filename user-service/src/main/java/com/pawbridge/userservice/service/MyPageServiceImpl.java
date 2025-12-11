@@ -3,6 +3,7 @@ package com.pawbridge.userservice.service;
 import com.pawbridge.userservice.client.AnimalServiceClient;
 import com.pawbridge.userservice.client.StoreServiceClient;
 import com.pawbridge.userservice.dto.response.AnimalResponse;
+import com.pawbridge.userservice.dto.response.CartResponse;
 import com.pawbridge.userservice.dto.response.OrderResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
 import com.pawbridge.userservice.dto.response.ShelterResponse;
@@ -176,5 +177,36 @@ public class MyPageServiceImpl implements MyPageService {
         }
 
         return orders;
+    }
+
+    /**
+     * 내 장바구니 조회
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public CartResponse getCart(Long userId) {
+        log.info("Fetching cart for user: {}", userId);
+
+        // 1. User 존재 여부 확인
+        if (!userRepository.existsById(userId)) {
+            log.error("User not found: userId={}", userId);
+            throw new UserNotFoundException();
+        }
+
+        // 2. FeignClient로 store-service에서 장바구니 조회
+        CartResponse cart;
+        try {
+            cart = storeServiceClient.getCartByUserId(userId);
+            if (cart != null) {
+                log.info("Found cart for user: {}, items count: {}", userId, cart.getItems().size());
+            } else {
+                log.info("No cart found for user: {}", userId);
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch cart from store-service: userId={}", userId, e);
+            throw new RuntimeException("장바구니를 조회할 수 없습니다.", e);
+        }
+
+        return cart;
     }
 }
