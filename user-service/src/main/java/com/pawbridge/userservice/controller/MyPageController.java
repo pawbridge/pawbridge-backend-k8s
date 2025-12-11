@@ -2,9 +2,11 @@ package com.pawbridge.userservice.controller;
 
 import com.pawbridge.userservice.dto.response.AnimalResponse;
 import com.pawbridge.userservice.dto.response.CartResponse;
+import com.pawbridge.userservice.dto.response.FavoriteListResponseDto;
 import com.pawbridge.userservice.dto.response.OrderResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
 import com.pawbridge.userservice.dto.response.WishlistResponse;
+import com.pawbridge.userservice.service.FavoriteService;
 import com.pawbridge.userservice.service.MyPageService;
 import com.pawbridge.userservice.util.ResponseDTO;
 import lombok.RequiredArgsConstructor;
@@ -19,8 +21,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 마이페이지 컨트롤러
- * - 사용자 중심의 데이터 조회
+ * 마이페이지 컨트롤러 (조회 전용)
+ * - 사용자의 모든 마이페이지 데이터 조회
  */
 @RestController
 @RequiredArgsConstructor
@@ -28,6 +30,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class MyPageController {
 
     private final MyPageService myPageService;
+    private final FavoriteService favoriteService;
+
+    /**
+     * 내가 좋아요한 동물 목록 조회
+     * - GET /api/v1/users/me/favorites
+     */
+    @GetMapping("/favorite-animals")
+    public ResponseEntity<ResponseDTO<FavoriteListResponseDto>> getFavorites(
+            @RequestHeader(value = "X-User-Id", required = true) Long userId) {
+
+        FavoriteListResponseDto favoriteListResponseDto = favoriteService.getFavorites(userId);
+        ResponseDTO<FavoriteListResponseDto> response = ResponseDTO.okWithData(favoriteListResponseDto);
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
 
     /**
      * 내가 등록한 동물 조회 (보호소 직원용)
