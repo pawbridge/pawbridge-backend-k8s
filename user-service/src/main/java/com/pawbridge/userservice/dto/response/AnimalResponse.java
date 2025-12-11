@@ -10,6 +10,8 @@ import java.time.LocalDateTime;
 
 /**
  * animal-service에서 받아오는 동물 정보 DTO
+ * - animal-service의 AnimalResponse와 동일한 구조
+ * - Enum 타입은 Jackson이 자동으로 String으로 변환
  */
 @Data
 @Builder
@@ -19,13 +21,13 @@ public class AnimalResponse {
 
     private Long id;
     private String apmsNoticeNo;
-    private String species;  // DOG, CAT, ETC
+    private String species;  // Enum: DOG, CAT, ETC
     private String breed;
-    private String gender;  // MALE, FEMALE, UNKNOWN
+    private String gender;  // Enum: MALE, FEMALE, UNKNOWN
     private Integer birthYear;
     private Integer age;
     private String specialMark;
-    private String status;  // PROTECT, ADOPTED, etc
+    private String status;  // Enum: PROTECT, ADOPTED, etc
     private LocalDate noticeEndDate;
     private String imageUrl;
     private Integer favoriteCount;
