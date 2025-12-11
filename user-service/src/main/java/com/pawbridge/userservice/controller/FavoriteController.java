@@ -8,6 +8,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * 동물 좋아요 컨트롤러 (CUD 전용)
+ * - 좋아요 추가/제거/확인
+ * - 조회는 MyPageController에서 담당
+ */
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/favorites")
@@ -16,7 +21,7 @@ public class FavoriteController {
     private final FavoriteService favoriteService;
 
     /**
-     * 찜 추가
+     * 동물 좋아요 추가
      */
     @PostMapping("/{animalId}")
     public ResponseEntity<ResponseDTO<FavoriteResponseDto>> addFavorite(
@@ -24,14 +29,14 @@ public class FavoriteController {
             @PathVariable Long animalId) {
 
         FavoriteResponseDto favoriteResponseDto = favoriteService.addFavorite(userId, animalId);
-        ResponseDTO<FavoriteResponseDto> response = ResponseDTO.okWithData(favoriteResponseDto, "찜이 추가되었습니다.");
+        ResponseDTO<FavoriteResponseDto> response = ResponseDTO.okWithData(favoriteResponseDto, "좋아요가 추가되었습니다.");
         return ResponseEntity
                 .status(response.getCode())
                 .body(response);
     }
 
     /**
-     * 찜 제거
+     * 동물 좋아요 제거
      */
     @DeleteMapping("/{animalId}")
     public ResponseEntity<ResponseDTO<Void>> removeFavorite(
@@ -39,28 +44,14 @@ public class FavoriteController {
             @PathVariable Long animalId) {
 
         favoriteService.removeFavorite(userId, animalId);
-        ResponseDTO<Void> response = ResponseDTO.okWithMessage("찜이 제거되었습니다.");
+        ResponseDTO<Void> response = ResponseDTO.okWithMessage("좋아요가 제거되었습니다.");
         return ResponseEntity
                 .status(response.getCode())
                 .body(response);
     }
 
     /**
-     * 찜 목록 조회
-     */
-    @GetMapping
-    public ResponseEntity<ResponseDTO<FavoriteListResponseDto>> getFavorites(
-            @RequestHeader(value = "X-User-Id", required = true) Long userId) {
-
-        FavoriteListResponseDto favoriteListResponseDto = favoriteService.getFavorites(userId);
-        ResponseDTO<FavoriteListResponseDto> response = ResponseDTO.okWithData(favoriteListResponseDto);
-        return ResponseEntity
-                .status(response.getCode())
-                .body(response);
-    }
-
-    /**
-     * 찜 여부 확인
+     * 좋아요 여부 확인
      */
     @GetMapping("/{animalId}/check")
     public ResponseEntity<ResponseDTO<Boolean>> isFavorite(
