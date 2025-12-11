@@ -14,9 +14,10 @@ import java.time.LocalDateTime;
 public class ProductEventPayload {
     private Long skuId;
     private Long productId;
+    private Long categoryId; // 필터링을 위해 추가됨
     private String productName;
     private String skuCode;
-    private String optionName; // e.g., "Color:Red, Size:L"
+    private String optionName; // 예: "Color:Red, Size:L"
     private Long price;
     private Integer stockQuantity;
     private Boolean isPrimarySku; // 대표 SKU 여부

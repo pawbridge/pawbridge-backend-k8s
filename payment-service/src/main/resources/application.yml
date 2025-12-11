@@ -39,6 +39,19 @@ eureka:
 toss:
   secret-key: ${TOSS_SECRET_KEY}
 
+# Feign Client
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 5000
+
+# Service Destinations (for Feign)
+service:
+  store:
+    url: ${STORE_SERVICE_URL:http://localhost:8085}
+
 # Monitoring
 management:
   endpoints:

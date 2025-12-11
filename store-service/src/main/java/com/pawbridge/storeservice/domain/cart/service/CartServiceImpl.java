@@ -7,6 +7,7 @@ import com.pawbridge.storeservice.domain.product.repository.ProductSKURepository
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RMap;
+import org.redisson.api.RSet;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,14 +27,19 @@ public class CartServiceImpl implements CartService {
     private final ProductSKURepository productSKURepository;
 
     private static final String CART_KEY_PREFIX = "cart:";
+    private static final String DIRTY_USERS_KEY = "cart:dirty-users";
 
-    // Cart: Hash<SkuId (Long), Quantity (Integer)>
     private RMap<Long, Integer> getCartMap(Long userId) {
         return redissonClient.getMap(CART_KEY_PREFIX + userId);
     }
 
+    private void markAsDirty(Long userId) {
+        RSet<Long> dirtySet = redissonClient.getSet(DIRTY_USERS_KEY);
+        dirtySet.add(userId);
+    }
+
     @Override
-    @Transactional(readOnly = true) // Validates SKU from DB
+    @Transactional(readOnly = true)
     public void addToCart(Long userId, CartAddRequest request) {
         // 1. Validation
         ProductSKU sku = productSKURepository.findById(request.getSkuId())
@@ -43,27 +49,26 @@ public class CartServiceImpl implements CartService {
             throw new IllegalArgumentException("Not enough stock. Current: " + sku.getStockQuantity());
         }
 
-        // 2. Redis Update
-        RMap<Long, Integer> cart = getCartMap(userId);
+        // 2. Redis Update (Hot Data)
+        RMap<Long, Integer> cartMap = getCartMap(userId);
+        cartMap.addAndGet(request.getSkuId(), request.getQuantity());
+
+        // 3. Mark for Async Sync
+        markAsDirty(userId);
         
-        // Key: SkuId, Value: Quantity
-        // Add quantity if exists (Atomic)
-        cart.addAndGet(request.getSkuId(), request.getQuantity());
-        
-        log.info("Added to cart. UserId: {}, SkuId: {}, Qty: {}", userId, request.getSkuId(), request.getQuantity());
+        log.info("Added to cart (Redis only). UserId: {}, SkuId: {}", userId, request.getSkuId());
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<CartItemResponse> getMyCart(Long userId) {
-        RMap<Long, Integer> cart = getCartMap(userId);
-        Map<Long, Integer> itemMap = cart.readAllMap(); // Fetch all items
+        RMap<Long, Integer> cartMap = getCartMap(userId);
+        Map<Long, Integer> itemMap = cartMap.readAllMap();
 
         if (itemMap.isEmpty()) {
             return Collections.emptyList();
         }
 
-        // 3. Enrich with Product Info
         Set<Long> skuIds = itemMap.keySet();
         List<ProductSKU> skus = productSKURepository.findAllById(skuIds);
 
@@ -82,9 +87,10 @@ public class CartServiceImpl implements CartService {
             return;
         }
         
-        RMap<Long, Integer> cart = getCartMap(userId);
-        if (cart.containsKey(skuId)) {
-            cart.put(skuId, quantity); // Overwrite
+        RMap<Long, Integer> cartMap = getCartMap(userId);
+        if (cartMap.containsKey(skuId)) {
+            cartMap.put(skuId, quantity); 
+            markAsDirty(userId); // Mark
             log.info("Updated cart qty. UserId: {}, SkuId: {}, NewQty: {}", userId, skuId, quantity);
         } else {
              throw new IllegalArgumentException("Item not in cart");
@@ -93,15 +99,24 @@ public class CartServiceImpl implements CartService {
 
     @Override
     public void removeCartItem(Long userId, Long skuId) {
-        RMap<Long, Integer> cart = getCartMap(userId);
-        cart.remove(skuId);
+        RMap<Long, Integer> cartMap = getCartMap(userId);
+        cartMap.remove(skuId);
+        markAsDirty(userId); // Mark
         log.info("Removed from cart. UserId: {}, SkuId: {}", userId, skuId);
     }
 
     @Override
     public void clearCart(Long userId) {
-        RMap<Long, Integer> cart = getCartMap(userId);
-        cart.delete();
+        RMap<Long, Integer> cartMap = getCartMap(userId);
+        cartMap.delete();
+        markAsDirty(userId); // Mark (Sync will clear DB too)
         log.info("Cleared cart for UserId: {}", userId);
+    }
+
+    @Override
+    public void resetSystem() {
+        // [Admin] 장바구니 관련 모든 Redis 키 삭제 (데이터 포맷 변경 시 사용)
+        redissonClient.getKeys().deleteByPattern("cart:*");
+        log.info("Reset all cart data in Redis (System Reset)");
     }
 }

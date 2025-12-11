@@ -6,6 +6,7 @@ import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.json.JsonData;
 import com.pawbridge.storeservice.domain.product.dto.ProductSearchRequest;
 import com.pawbridge.storeservice.domain.product.dto.ProductSearchResponse;
+import com.pawbridge.storeservice.domain.product.dto.ProductSearchItem;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
@@ -33,13 +34,13 @@ public class ProductSearchService {
     public ProductSearchResponse searchProducts(ProductSearchRequest request) {
         log.info(">>> [Service] Building search query for: {}", request);
 
-        // 1. Build Elasticsearch Query
+        // 1. Elasticsearch 쿼리 생성
         NativeQuery searchQuery = buildSearchQuery(request);
 
-        // [DEBUG] Log the actual query DSL
+        // [DEBUG] 생성된 쿼리 DSL 로그
         log.info(">>> [Service] Generated Query DSL: {}", searchQuery.getQuery().toString());
 
-        // 2. Execute Search
+        // 2. 검색 실행
         log.info(">>> [Service] Executing Elasticsearch query...");
         SearchHits<Map> searchHits = elasticsearchOperations.search(
             searchQuery,
@@ -49,8 +50,8 @@ public class ProductSearchService {
 
         log.info(">>> [Service] Search completed. Total Hits: {}", searchHits.getTotalHits());
 
-        // 3. Convert to Response
-        List<ProductSearchResponse.ProductSearchItem> items = searchHits.getSearchHits().stream()
+        // 3. 응답 객체로 변환
+        List<ProductSearchItem> items = searchHits.getSearchHits().stream()
             .map(this::convertToSearchItem)
             .collect(Collectors.toList());
 
@@ -68,18 +69,23 @@ public class ProductSearchService {
 
     private NativeQuery buildSearchQuery(ProductSearchRequest request) {
 
-        // BoolQuery Builder
+        // BoolQuery 빌더
         BoolQuery.Builder boolQueryBuilder = new BoolQuery.Builder();
 
-        // 0. Primary SKU Filter (Default: True)
-        // Show only representative SKUs in the product list
+        // 0. 대표 SKU 필터 (기본값: True)
+        // 상품 목록에는 대표 SKU만 표시
         boolQueryBuilder.filter(f -> f.term(t -> t.field("isPrimarySku").value(true)));
 
-        // 1. Keyword Search (productName, optionName)
+        // 0.5 카테고리 필터
+        if (request.getCategoryId() != null) {
+            boolQueryBuilder.filter(f -> f.term(t -> t.field("categoryId").value(request.getCategoryId())));
+        }
+
+        // 1. 키워드 검색 (상품명, 옵션명)
         if (request.getKeyword() != null && !request.getKeyword().isBlank()) {
             String keyword = request.getKeyword();
 
-            // Multi-match query
+            // 다중 필드 검색 쿼리
             Query multiMatchQuery = Query.of(q -> q.multiMatch(mm -> mm
                 .query(keyword)
                 .fields("productName^2.0", "optionName") 
@@ -88,7 +94,7 @@ public class ProductSearchService {
             boolQueryBuilder.must(multiMatchQuery);
         }
 
-        // 2. Price Range Filter (Simple 'price' field)
+        // 2. 가격 범위 필터 (단순 'price' 필드)
         if (request.getMinPrice() != null || request.getMaxPrice() != null) {
             Query priceRangeQuery = Query.of(q -> q.range(r -> r
                 .number(n -> {
@@ -106,7 +112,7 @@ public class ProductSearchService {
             boolQueryBuilder.filter(priceRangeQuery);
         }
 
-        // 3. Stock Filter
+        // 3. 재고 필터
         if (request.getInStockOnly() != null && request.getInStockOnly()) {
             Query stockQuery = Query.of(q -> q.range(r -> r
                 .number(n -> n
@@ -118,30 +124,30 @@ public class ProductSearchService {
             boolQueryBuilder.filter(stockQuery);
         }
 
-        // 4. Status Filter (ACTIVE만)
+        // 4. 상태 필터 (ACTIVE만)
         Query statusQuery = Query.of(q -> q.term(t -> t
             .field("status")
             .value("ACTIVE")
         ));
         boolQueryBuilder.filter(statusQuery);
 
-        // 5. Build Final Query
+        // 5. 최종 쿼리 생성
         Query finalQuery = Query.of(q -> q.bool(boolQueryBuilder.build()));
 
-        // 6. Pagination
+        // 6. 페이징
         Pageable pageable = PageRequest.of(
             request.getPage() != null ? request.getPage() : 0,
             request.getSize() != null ? request.getSize() : 20
         );
 
-        // 7. NativeQuery Builder
+        // 7. NativeQuery 빌더
         NativeQueryBuilder queryBuilder = NativeQuery.builder()
             .withQuery(finalQuery)
             .withPageable(pageable);
 
-        // 8. Sorting (Use 'price' instead of 'minPrice')
+        // 8. 정렬 ('minPrice' 대신 'price' 사용)
         String sortBy = request.getSortBy() != null ? request.getSortBy() : "skuId";
-        if ("minPrice".equals(sortBy)) sortBy = "price"; // Map legacy param if needed
+        if ("minPrice".equals(sortBy)) sortBy = "price"; // 레거시 파라미터 매핑 필요 시 사용
 
         String finalSortBy = sortBy;
         SortOrder sortOrder = "asc".equalsIgnoreCase(request.getSortOrder())
@@ -153,20 +159,15 @@ public class ProductSearchService {
         return queryBuilder.build();
     }
 
-    private ProductSearchResponse.ProductSearchItem convertToSearchItem(SearchHit<Map> hit) {
+    private ProductSearchItem convertToSearchItem(SearchHit<Map> hit) {
         Map<String, Object> source = hit.getContent();
 
-        return ProductSearchResponse.ProductSearchItem.builder()
+        return ProductSearchItem.builder()
             .id(getLongValue(source, "productId"))
             .skuId(getLongValue(source, "skuId"))
             .name(getStringValue(source, "productName"))
             .optionName(getStringValue(source, "optionName"))
-            .description(getStringValue(source, "productName")) // Description might not be in SKU index, use name or fetch separately if needed. Or mapping stores it? Let's check mapping. Ah mapping doesn't have description. We used productName as description in previous logic? Let's check mapping again. 
-            // Mapping has "productName", "optionName". No description field in mapping.
-            // So description field in response might be empty or duplicate name.
-            // Wait, previous code used "description" field. Let's double check mapping.
-            // Mapping file has "description" removed? No, let's check.
-            // I will use safe mapping.
+            .description(getStringValue(source, "productName")) // SKU 인덱스에 description 필드가 없을 수 있어 상품명을 대신 사용
             .imageUrl(getStringValue(source, "imageUrl"))
             .price(getLongValue(source, "price"))
             .totalStock(getIntegerValue(source, "stockQuantity"))

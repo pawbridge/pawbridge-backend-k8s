@@ -25,7 +25,7 @@ public class ProductSKU extends BaseEntity {
     private Product product;
 
     @Column(nullable = false, unique = true, length = 50)
-    private String skuCode; // e.g., TSHIRT-RED-L
+    private String skuCode; // 예: TSHIRT-RED-L
 
     @Column(nullable = false)
     private Long price;
@@ -44,15 +44,15 @@ public class ProductSKU extends BaseEntity {
         this.stockQuantity = stockQuantity;
     }
 
-    // Business Logic: Decrease Stock
+    // 비즈니스 로직: 재고 감소
     public void decreaseStock(int quantity) {
         if (this.stockQuantity < quantity) {
-            throw new IllegalStateException("Out of stock"); // Custom Exception 처리 필요
+            throw new IllegalStateException("재고 부족"); // Custom Exception 처리 필요
         }
         this.stockQuantity -= quantity;
     }
 
-    // Business Logic: Increase Stock (Rollback)
+    // 비즈니스 로직: 재고 증가 (롤백용)
     public void increaseStock(int quantity) {
         this.stockQuantity += quantity;
     }

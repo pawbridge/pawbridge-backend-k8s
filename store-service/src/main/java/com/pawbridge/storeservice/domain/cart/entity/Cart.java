@@ -24,10 +24,19 @@ public class Cart extends BaseEntity {
     private Long userId;
 
     @OneToMany(mappedBy = "cart", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<CartItem> cartItems = new ArrayList<>();
+    private List<CartItem> items = new ArrayList<>();
 
     @Builder
     public Cart(Long userId) {
         this.userId = userId;
+    }
+    
+    public void addItem(CartItem item) {
+        this.items.add(item);
+        item.assignCart(this);
+    }
+    
+    public void clearItems() {
+        this.items.clear();
     }
 }

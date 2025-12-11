@@ -3,11 +3,11 @@ package com.pawbridge.storeservice.domain.order.dto;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
-
 @Getter
 @NoArgsConstructor
-public class OrderCreateRequest {
+public class DirectOrderCreateRequest {
+    private Long skuId;
+    private Integer quantity;
     private String receiverName;
     private String receiverPhone;
     private String deliveryAddress;

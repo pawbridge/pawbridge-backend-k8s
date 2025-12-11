@@ -47,4 +47,17 @@ public class CartController {
         cartService.removeCartItem(userId, skuId);
         return ResponseEntity.ok().build();
     }
+
+    @DeleteMapping
+    public ResponseEntity<Void> clearCart(
+            @RequestHeader("X-User-Id") Long userId) {
+        cartService.clearCart(userId);
+        return ResponseEntity.ok().build();
+    }
+
+    @DeleteMapping("/reset")
+    public ResponseEntity<Void> resetCartSystem() {
+        cartService.resetSystem();
+        return ResponseEntity.ok().build();
+    }
 }
