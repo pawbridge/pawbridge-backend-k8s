@@ -49,6 +49,9 @@ dependencies {
     // Elasticsearch (For Search Query - Read Only)
     implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
 
+	// AWS S3
+	implementation 'io.awspring.cloud:spring-cloud-aws-starter-s3:3.2.0'
+
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'com.mysql:mysql-connector-j'

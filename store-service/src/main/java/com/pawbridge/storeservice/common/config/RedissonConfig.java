@@ -21,6 +21,7 @@ public class RedissonConfig {
     @Bean
     public RedissonClient redissonClient() {
         Config config = new Config();
+        config.setCodec(new org.redisson.codec.JsonJacksonCodec());
         config.useSingleServer().setAddress(REDISSON_HOST_PREFIX + redisHost + ":" + redisPort);
         return Redisson.create(config);
     }

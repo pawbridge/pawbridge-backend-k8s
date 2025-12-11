@@ -19,13 +19,13 @@ public class Outbox {
     private Long id;
 
     @Column(nullable = false, length = 50)
-    private String aggregateType; // e.g., PAYMENT
+    private String aggregateType; // 예: PAYMENT
 
     @Column(nullable = false, length = 100)
-    private String aggregateId; // e.g., paymentKey
+    private String aggregateId; // 예: paymentKey (토스 결제 키)
 
     @Column(nullable = false, length = 50)
-    private String eventType; // e.g., PaymentCompleted
+    private String eventType; // 예: PaymentCompleted
 
     @Column(nullable = false, columnDefinition = "JSON")
     private String payload;

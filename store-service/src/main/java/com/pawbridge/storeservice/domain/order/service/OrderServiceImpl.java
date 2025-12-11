@@ -2,6 +2,7 @@ package com.pawbridge.storeservice.domain.order.service;
 
 import com.pawbridge.storeservice.domain.cart.dto.CartItemResponse;
 import com.pawbridge.storeservice.domain.cart.service.CartService;
+import com.pawbridge.storeservice.domain.order.dto.DirectOrderCreateRequest;
 import com.pawbridge.storeservice.domain.order.dto.OrderCreateRequest;
 import com.pawbridge.storeservice.domain.order.dto.OrderResponse;
 import com.pawbridge.storeservice.domain.order.entity.Order;
@@ -98,6 +99,9 @@ public class OrderServiceImpl implements OrderService {
                 .orderUuid(UUID.randomUUID().toString())
                 .totalAmount(totalAmount)
                 .deliveryAddress(request.getDeliveryAddress())
+                .receiverName(request.getReceiverName())
+                .receiverPhone(request.getReceiverPhone())
+                .deliveryMessage(request.getDeliveryMessage())
                 .build();
 
         // 5. Create Order Items
@@ -136,8 +140,81 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    @Transactional
+    public OrderResponse createDirectOrder(Long userId, DirectOrderCreateRequest request) {
+        Long skuId = request.getSkuId();
+        Integer quantity = request.getQuantity();
+
+        // 1. Lock & Stock Deduction
+        String lockKey = LOCK_KEY_PREFIX + skuId;
+        RLock lock = redissonClient.getLock(lockKey);
+
+        try {
+            boolean available = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
+            if (!available) {
+                throw new RuntimeException("System is busy. Please try again later. (Lock acquire failed for SKU " + skuId + ")");
+            }
+
+            // Deduct Stock
+            productService.decreaseStock(skuId, quantity);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Order processing interrupted", e);
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
+
+        // 2. Fetch Product Info for Snapshot
+        ProductSKU sku = productSKURepository.findById(skuId)
+                .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
+        
+        long totalAmount = sku.getPrice() * quantity;
+
+        // 3. Create Order Entity
+        Order order = Order.builder()
+                .userId(userId)
+                .orderUuid(UUID.randomUUID().toString())
+                .totalAmount(totalAmount)
+                .deliveryAddress(request.getDeliveryAddress())
+                .receiverName(request.getReceiverName())
+                .receiverPhone(request.getReceiverPhone())
+                .deliveryMessage(request.getDeliveryMessage())
+                .build();
+
+        // 4. Create Order Item
+        OrderItem orderItem = OrderItem.builder()
+                .order(order)
+                .productSKU(sku)
+                .productName(sku.getProduct().getName()) // Snapshot
+                .skuCode(sku.getSkuCode()) // Snapshot
+                .price(sku.getPrice()) // Snapshot
+                .quantity(quantity)
+                .build();
+        
+        order.getOrderItems().add(orderItem);
+
+        // 5. Save Order
+        orderRepository.save(order);
+
+        log.info("Direct Order created. OrderId: {}, UserId: {}", order.getId(), userId);
+
+        return OrderResponse.from(order);
+    }
+
+    @Override
     @Transactional(readOnly = true)
-    public OrderResponse getOrder(Long orderId) {
+    public OrderResponse getOrderByUuid(String orderUuid) {
+        Order order = orderRepository.findByOrderUuid(orderUuid)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderUuid));
+        return OrderResponse.from(order);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+     public OrderResponse getOrder(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
         return OrderResponse.from(order);
@@ -175,5 +252,44 @@ public class OrderServiceImpl implements OrderService {
              log.error("Failed to serialize order event", e);
              throw new RuntimeException("Failed to publish payment event", e);
         }
+    }
+    @Override
+    @Transactional
+    public void cancelOrder(String orderUuid) {
+        Order order = orderRepository.findByOrderUuid(orderUuid)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderUuid));
+
+        if (order.getStatus() == com.pawbridge.storeservice.domain.order.entity.OrderStatus.CANCELLED) {
+            log.warn("Order {} is already canceled.", orderUuid);
+            return;
+        }
+
+        order.cancelOrder(); // Status -> CANCELLED
+        
+        // Stock Rollback
+        for (OrderItem item : order.getOrderItems()) {
+             // Use Distributed Lock for safety
+            Long skuId = item.getProductSKU().getId();
+            String lockKey = LOCK_KEY_PREFIX + skuId;
+            RLock lock = redissonClient.getLock(lockKey);
+            
+            try {
+                boolean available = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
+                if (available) {
+                    try {
+                        productService.increaseStock(skuId, item.getQuantity());
+                    } finally {
+                         if (lock.isHeldByCurrentThread()) lock.unlock();
+                    }
+                } else {
+                    throw new RuntimeException("Could not acquire lock for stock rollback: " + skuId);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }
+        
+        log.info("Order {} canceled and stock restored.", orderUuid);
     }
 }

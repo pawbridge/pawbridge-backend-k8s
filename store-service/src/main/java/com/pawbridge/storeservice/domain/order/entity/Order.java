@@ -40,15 +40,28 @@ public class Order extends BaseEntity {
     @Column(nullable = false, length = 20)
     private DeliveryStatus deliveryStatus;
 
+    @Column(nullable = false, length = 50)
+    private String receiverName;
+
+    @Column(nullable = false, length = 20)
+    private String receiverPhone;
+
+    @Column(length = 200)
+    private String deliveryMessage;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
 
     @Builder
-    public Order(String orderUuid, Long userId, Long totalAmount, String deliveryAddress) {
+    public Order(String orderUuid, Long userId, Long totalAmount, String deliveryAddress, 
+                 String receiverName, String receiverPhone, String deliveryMessage) {
         this.orderUuid = orderUuid;
         this.userId = userId;
         this.totalAmount = totalAmount;
         this.deliveryAddress = deliveryAddress;
+        this.receiverName = receiverName;
+        this.receiverPhone = receiverPhone;
+        this.deliveryMessage = deliveryMessage;
         this.status = OrderStatus.PENDING;
         this.deliveryStatus = DeliveryStatus.READY;
     }

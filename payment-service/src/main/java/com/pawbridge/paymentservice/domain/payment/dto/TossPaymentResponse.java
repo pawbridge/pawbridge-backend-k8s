@@ -3,6 +3,8 @@ package com.pawbridge.paymentservice.domain.payment.dto;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.OffsetDateTime;
@@ -10,26 +12,18 @@ import java.time.OffsetDateTime;
 @Getter
 @ToString
 @NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class TossPaymentResponse {
     private String paymentKey;
     private String orderId;
     private String mId;
     private String currency;
-    private String method; // 카드, 간편결제 등
+    private String method; // 카드, 계좌이체 등
     private Long totalAmount;
     private Long balanceAmount;
     private String status; // READY, DONE, CANCELED, ABORTED
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private OffsetDateTime requestedAt;
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private OffsetDateTime approvedAt;
     private TossFailure failure; // 결제 실패 시 정보
-
-    @Getter
-    @NoArgsConstructor
-    @ToString
-    public static class TossFailure {
-        private String code;
-        private String message;
-    }
 }

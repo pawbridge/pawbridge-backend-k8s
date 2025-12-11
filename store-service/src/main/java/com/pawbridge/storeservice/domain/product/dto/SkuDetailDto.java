@@ -16,7 +16,7 @@ public class SkuDetailDto {
     private String skuCode;
     private Long price;
     private Integer stockQuantity;
-    private Map<String, String> options; // e.g. "Color" -> "Red"
+    private Map<String, String> options; // 예: "Color" -> "Red"
 
     public static SkuDetailDto from(ProductSKU sku) {
         Map<String, String> optionMap = new HashMap<>();
