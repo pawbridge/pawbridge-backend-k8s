@@ -5,9 +5,9 @@ import java.util.List;
 public record FavoriteListResponseDto(
         Long userId,
         int totalCount,
-        List<FavoriteResponseDto> favorites
+        List<FavoriteWithAnimalDto> favorites  // 타입 변경!
 ) {
-    public static FavoriteListResponseDto of(Long userId, List<FavoriteResponseDto> favorites) {
+    public static FavoriteListResponseDto of(Long userId, List<FavoriteWithAnimalDto> favorites) {
         return new FavoriteListResponseDto(
                 userId,
                 favorites.size(),

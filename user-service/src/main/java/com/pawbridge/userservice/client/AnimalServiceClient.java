@@ -1,8 +1,12 @@
 package com.pawbridge.userservice.client;
 
+import com.pawbridge.userservice.dto.response.AnimalResponse;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import java.util.List;
 
 /**
  * Animal Service Feign Client
@@ -19,4 +23,11 @@ public interface AnimalServiceClient {
      */
     @GetMapping("/api/v1/shelters/exists/{careRegNo}")
     Boolean existsByCareRegNo(@PathVariable("careRegNo") String careRegNo);
+
+    /**
+     * 여러 동물 ID로 일괄 조회
+     * - 찜 목록 조회 시 사용
+     */
+    @PostMapping("/api/v1/animals/batch")
+    List<AnimalResponse> getAnimalsByIds(@RequestBody List<Long> animalIds);
 }
