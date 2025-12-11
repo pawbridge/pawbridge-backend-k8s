@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
  * - 마이페이지용
  */
 @Repository
-public interface OrderRepository extends JpaRepository<Order, Long> {
+public interface MyOrderRepository extends JpaRepository<Order, Long> {
 
     /**
      * 사용자별 주문 목록 조회 (OrderItems fetch join)

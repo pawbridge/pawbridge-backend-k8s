@@ -12,7 +12,7 @@ import java.util.Optional;
  * - 마이페이지용
  */
 @Repository
-public interface CartRepository extends JpaRepository<Cart, Long> {
+public interface MyCartRepository extends JpaRepository<Cart, Long> {
 
     /**
      * 사용자별 장바구니 조회 (CartItems, ProductSKU, Product fetch join)

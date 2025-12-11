@@ -1,7 +1,7 @@
 package com.pawbridge.storeservice.domain.mypage.service;
 
 import com.pawbridge.storeservice.domain.mypage.dto.OrderResponse;
-import com.pawbridge.storeservice.domain.mypage.repository.OrderRepository;
+import com.pawbridge.storeservice.domain.mypage.repository.MyOrderRepository;
 import com.pawbridge.storeservice.domain.order.entity.Order;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class MyPageOrderServiceImpl implements MyPageOrderService {
 
-    private final OrderRepository orderRepository;
+    private final MyOrderRepository orderRepository;
 
     /**
      * 사용자별 주문 목록 조회 (MySQL)

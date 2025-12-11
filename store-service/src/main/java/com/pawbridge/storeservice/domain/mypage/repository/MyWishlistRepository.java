@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
  * - 마이페이지용
  */
 @Repository
-public interface WishlistRepository extends JpaRepository<Wishlist, Long> {
+public interface MyWishlistRepository extends JpaRepository<Wishlist, Long> {
 
     /**
      * 사용자별 찜 목록 조회 (Product fetch join)

@@ -2,7 +2,7 @@ package com.pawbridge.storeservice.domain.mypage.service;
 
 import com.pawbridge.storeservice.domain.product.entity.Wishlist;
 import com.pawbridge.storeservice.domain.mypage.dto.WishlistResponse;
-import com.pawbridge.storeservice.domain.mypage.repository.WishlistRepository;
+import com.pawbridge.storeservice.domain.mypage.repository.MyWishlistRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -20,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class MyPageWishlistServiceImpl implements MyPageWishlistService {
 
-    private final WishlistRepository wishlistRepository;
+    private final MyWishlistRepository wishlistRepository;
 
     /**
      * 사용자별 찜 목록 조회 (MySQL)

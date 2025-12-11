@@ -2,7 +2,7 @@ package com.pawbridge.storeservice.domain.mypage.service;
 
 import com.pawbridge.storeservice.domain.cart.entity.Cart;
 import com.pawbridge.storeservice.domain.mypage.dto.CartResponse;
-import com.pawbridge.storeservice.domain.mypage.repository.CartRepository;
+import com.pawbridge.storeservice.domain.mypage.repository.MyCartRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,7 +20,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class MyPageCartServiceImpl implements MyPageCartService {
 
-    private final CartRepository cartRepository;
+    private final MyCartRepository cartRepository;
 
     /**
      * 사용자별 장바구니 조회 (MySQL)
