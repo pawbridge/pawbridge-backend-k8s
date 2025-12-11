@@ -16,7 +16,10 @@ public class OrderResponse {
     private String orderUuid;
     private Long totalAmount;
     private String status;
+    private String receiverName;
+    private String receiverPhone;
     private String deliveryAddress;
+    private String deliveryMessage;
     private LocalDateTime createdAt;
     private List<OrderItemResponse> items;
 
@@ -27,28 +30,13 @@ public class OrderResponse {
                 .totalAmount(order.getTotalAmount())
                 .status(order.getStatus().name())
                 .deliveryAddress(order.getDeliveryAddress())
+                .receiverName(order.getReceiverName())
+                .receiverPhone(order.getReceiverPhone())
+                .deliveryMessage(order.getDeliveryMessage())
                 .createdAt(order.getCreatedAt())
                 .items(order.getOrderItems().stream()
                         .map(OrderItemResponse::from)
                         .collect(Collectors.toList()))
                 .build();
-    }
-
-    @Getter
-    @Builder
-    public static class OrderItemResponse {
-        private String productName;
-        private String skuCode;
-        private Long price;
-        private Integer quantity;
-
-        public static OrderItemResponse from(OrderItem item) {
-            return OrderItemResponse.builder()
-                    .productName(item.getProductName())
-                    .skuCode(item.getSkuCode())
-                    .price(item.getPrice())
-                    .quantity(item.getQuantity())
-                    .build();
-        }
     }
 }

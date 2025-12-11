@@ -1,4 +1,4 @@
-package com.pawbridge.storeservice.domain.order.consumer;
+ package com.pawbridge.storeservice.domain.order.consumer;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,30 +21,51 @@ import java.time.format.DateTimeFormatter;
 public class PaymentEventConsumer {
 
     private final OrderRepository orderRepository;
+    private final com.pawbridge.storeservice.domain.order.service.OrderService orderService;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
 
     @Transactional
-    @KafkaListener(topics = "payment.events", groupId = "store-service-group")
+    @KafkaListener(topics = {"payment.events", "payment"}, groupId = "payment-group", containerFactory = "kafkaListenerContainerFactory")
     public void handlePaymentEvents(String message) {
+        log.info("Received Payment Event: {}", message);
         try {
             JsonNode root = objectMapper.readTree(message);
-            // [Debezium 연동 시 주의사항]
-            // 현재는 Outbox 테이블의 payload(JSON 문자열)가 그대로 들어온다고 가정하고 구현했습니다.
-            // 추후 Debezium Connector를 실제로 연결하면, 메시지 구조가 Envelope 형태로 감싸져서 올 수 있습니다.
-            // 예: { "payload": { "before": null, "after": { "aggregateId": "...", "payload": "..." } } }
-            // 그때는 파싱 로직을 수정해야 합니다. 지금은 핵심 비즈니스 로직(주문 완료 처리)에 집중합니다.
             
-            // 메시지에서 orderId와 status 추출 (현재는 TossPaymentResponse JSON 구조 가정)
+            // 1. Debezium 'payload' Field Extraction (if wrapped)
+            // If the SMT is configured to unwrap, 'payload' might be the root.
+            // If 'payload' field contains a String (escaped JSON), parse it again.
+            if (root.has("payload") && root.get("payload").isTextual()) {
+                String payloadString = root.get("payload").asText();
+                root = objectMapper.readTree(payloadString);
+            } else if (root.has("payload") && root.get("payload").isObject()) {
+                root = root.get("payload");
+            }
+            
+            // 2. Extract Fields (TossPaymentResponse structure)
+            if (!root.has("orderId") || !root.has("status")) {
+                log.warn("Invalid Payment Event Format (missing orderId or status): {}", message);
+                return;
+            }
+
             String orderId = root.path("orderId").asText();
             String status = root.path("status").asText();
 
+            log.info("Processing Payment Event - OrderID: {}, Status: {}", orderId, status);
+
             if ("DONE".equals(status)) {
                 completeOrder(orderId);
+            } else if ("ABORTED".equals(status) || "CANCELED".equals(status)) {
+                log.warn("Payment Failed/Canceled for Order: {}. Triggering Rollback...", orderId);
+                orderService.cancelOrder(orderId);
+            } else {
+                log.info("Skipping payment event with status: {}", status);
             }
 
         } catch (JsonProcessingException e) {
-            log.error("결제 이벤트 파싱 실패", e);
+            log.error("Payment Event Parsing Failed", e);
+        } catch (Exception e) {
+            log.error("Payment Event Processing Failed", e);
         }
     }
 

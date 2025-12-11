@@ -36,14 +36,11 @@ public class CategoryService {
 
     @Transactional(readOnly = true)
     public List<CategoryResponse> getAllCategories() {
-        // Fetch only root categories (parent is null) and let recursion handle children
-        // Note: This requires a custom query or filtering. For MVP, we'll fetch all and filter roots
-        // Better efficient way: Repository method findByParentIsNull()
-        // But since we didn't add that to repo yet, let's filter in memory for now or adding simple method.
-        // Or simpler: just return all flat list? User wants hierarchy usually.
-        // Let's rely on standard findAll() and filter for roots if performance allows (small data).
-        // Actually, to avoid N+1, batch fetching is needed. 
-        // For now, simple implementation.
+        // 현재는 상위 카테고리가 없는(null) 루트 카테고리만 가져와서, 자식 카테고리는 재귀호출이나 지연 로딩으로 처리됨을 가정
+        // 참고: 이 방식은 커스텀 쿼리나 필터링이 필요할 수 있음
+        // 개선안: Repository에 findByParentIsNull() 메서드를 추가하는 것이 효율적임
+        // MVP 단계이므로 모든 카테고리를 가져와서 메모리에서 필터링하거나, 간단한 구현을 유지
+        // N+1 문제를 방지하기 위해 추후 Batch Fetching 적용 필요
         
         List<Category> all = categoryRepository.findAll();
         return all.stream()

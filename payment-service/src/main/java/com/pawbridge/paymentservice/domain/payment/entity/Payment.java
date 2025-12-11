@@ -20,10 +20,10 @@ public class Payment extends BaseEntity {
     private Long id;
 
     @Column(nullable = false, unique = true, length = 100)
-    private String paymentKey; // Toss Payments Key
+    private String paymentKey; // 토스 페이먼트 키
 
     @Column(nullable = false, length = 36)
-    private String orderId; // Store Service Order UUID
+    private String orderId; // 스토어 서비스 주문 UUID
 
     @Column(nullable = false)
     private Long userId;
@@ -36,7 +36,7 @@ public class Payment extends BaseEntity {
     private PaymentStatus status;
 
     @Column(length = 20)
-    private String method; // CARD, VIRTUAL_ACCOUNT etc.
+    private String method; // 카드, 가상계좌 등
 
     private LocalDateTime requestedAt;
     private LocalDateTime approvedAt;

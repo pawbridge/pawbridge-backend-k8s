@@ -43,6 +43,7 @@ public class ProductController {
         @RequestParam(required = false) String keyword,
         @RequestParam(required = false) Long minPrice,
         @RequestParam(required = false) Long maxPrice,
+        @RequestParam(required = false) Long categoryId, // 정렬 및 필터링을 위해 추가됨
         @RequestParam(required = false, defaultValue = "false") Boolean inStockOnly,
         @RequestParam(required = false) String sortBy,
         @RequestParam(required = false, defaultValue = "desc") String sortOrder,
@@ -50,12 +51,13 @@ public class ProductController {
         @RequestParam(required = false, defaultValue = "20") Integer size
     ) {
         // [DEBUG] Request Log
-        log.info(">>> [Controller] Search Request - Keyword: {}, MinPrice: {}, InStock: {}", keyword, minPrice, inStockOnly);
+        log.info(">>> [Controller] Search Request - Keyword: {}, Category: {}, MinPrice: {}", keyword, categoryId, minPrice);
 
         ProductSearchRequest searchRequest = ProductSearchRequest.builder()
             .keyword(keyword)
             .minPrice(minPrice)
             .maxPrice(maxPrice)
+            .categoryId(categoryId) // 정렬 및 필터링을 위해 추가됨
             .inStockOnly(inStockOnly)
             .sortBy(sortBy)
             .sortOrder(sortOrder)

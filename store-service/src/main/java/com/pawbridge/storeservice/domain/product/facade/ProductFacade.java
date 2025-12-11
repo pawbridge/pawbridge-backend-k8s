@@ -24,8 +24,8 @@ public class ProductFacade {
     private final ProductService productService;
     private final RedissonClient redissonClient;
     private final RedisTemplate<String, Object> redisTemplate;
-    private final ObjectMapper objectMapper; // If manual JSON parsing is needed, but RedisTemplate handles it via Config?
-    // Actually RedisTemplate<String, Object> configured in CacheConfig handles JSON.
+    private final ObjectMapper objectMapper;
+    // CacheConfig에서 설정한 RedisTemplate<String, Object>가 JSON 직렬화를 처리함
 
     private static final String LOCK_KEY_PREFIX = "lock:productDetails:";
     private static final String CACHE_KEY_PREFIX = "productDetails::";
@@ -63,7 +63,7 @@ public class ProductFacade {
             // 4. [DB Load] Call Service
             log.info(">>> [CACHE MISS] Loading from DB... ProductId: {}", productId);
             try {
-                // Thread.sleep(3000); // [TEST] Removed
+                // Thread.sleep(3000); // [테스트] 제거됨
             } catch (Exception e) {} 
             ProductDetailResponse response = productService.getProductDetails(productId);
 
@@ -86,16 +86,16 @@ public class ProductFacade {
         }
     }
     
-    // Helper to cast Object to DTO
+    // Object를 DTO로 변환하는 헬퍼 메서드
     private ProductDetailResponse getFromCache(String key) {
         try {
             Object data = redisTemplate.opsForValue().get(key);
             if (data instanceof ProductDetailResponse) {
                 return (ProductDetailResponse) data;
             } else if (data != null) {
-                // If using GenericJackson2JsonRedisSerializer, it might return LinkedHashMap if type info is missing
-                // But we configured ObjectMapper with TypeValidator? 
-                // Let's assume Type is preserved or ObjectMapper converts it.
+                // GenericJackson2JsonRedisSerializer 사용 시 타입 정보가 없으면 LinkedHashMap으로 반환될 수 있음
+                // 하지만 ObjectMapper에 TypeValidator가 설정되어 있다면 클래스 정보가 포함됨
+                // 여기서는 적절히 변환된다고 가정
                 return objectMapper.convertValue(data, ProductDetailResponse.class);
             }
         } catch (Exception e) {

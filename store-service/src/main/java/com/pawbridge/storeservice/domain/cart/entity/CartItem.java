@@ -1,7 +1,6 @@
 package com.pawbridge.storeservice.domain.cart.entity;
 
 import com.pawbridge.storeservice.common.entity.BaseEntity;
-import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -22,21 +21,27 @@ public class CartItem extends BaseEntity {
     @JoinColumn(name = "cart_id", nullable = false)
     private Cart cart;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_sku_id", nullable = false)
-    private ProductSKU productSKU;
+    @Column(name = "sku_id", nullable = false)
+    private Long skuId;
+
+    @Column(name = "product_sku_id", nullable = false)
+    private Long productSkuId;
 
     @Column(nullable = false)
     private Integer quantity;
 
     @Builder
-    public CartItem(Cart cart, ProductSKU productSKU, Integer quantity) {
-        this.cart = cart;
-        this.productSKU = productSKU;
+    public CartItem(Long skuId, Integer quantity) {
+        this.skuId = skuId;
+        this.productSkuId = skuId;
         this.quantity = quantity;
     }
-    
-    public void updateQuantity(int quantity) {
+
+    public void assignCart(Cart cart) {
+        this.cart = cart;
+    }
+
+    public void updateQuantity(Integer quantity) {
         this.quantity = quantity;
     }
 }

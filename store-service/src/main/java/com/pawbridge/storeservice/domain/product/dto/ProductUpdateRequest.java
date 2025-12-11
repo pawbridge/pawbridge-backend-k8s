@@ -13,15 +13,6 @@ public class ProductUpdateRequest {
     private ProductStatus status;
     private Long categoryId;
     
-    // Proper specific SKU update list
+    // 개별 SKU 업데이트 목록
     private java.util.List<SkuUpdateDto> skus;
-
-    @Getter
-    @NoArgsConstructor
-    public static class SkuUpdateDto {
-        private Long id; // SKU ID (Required to identify which SKU to update)
-        private Long price;
-        private Integer stockQuantity;
-        private String skuCode; // Optional update
-    }
 }

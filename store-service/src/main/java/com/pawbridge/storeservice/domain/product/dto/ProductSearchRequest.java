@@ -16,7 +16,8 @@ public class ProductSearchRequest {
     private String keyword;              // 검색어 (상품명, 설명)
     private Long minPrice;               // 최소 가격
     private Long maxPrice;               // 최대 가격
-    private List<String> categories;     // 카테고리 필터 (향후 확장용)
+    private Long categoryId;             // 카테고리 ID 필터
+    private List<String> categories;     // (Legacy)
     private Boolean inStockOnly;         // 재고 있는 상품만 (기본값: true)
     private String sortBy;               // 정렬 기준 (price, createdAt)
     private String sortOrder;            // 정렬 순서 (asc, desc)
