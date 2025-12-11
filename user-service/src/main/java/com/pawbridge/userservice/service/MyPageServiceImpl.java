@@ -3,6 +3,7 @@ package com.pawbridge.userservice.service;
 import com.pawbridge.userservice.client.AnimalServiceClient;
 import com.pawbridge.userservice.client.StoreServiceClient;
 import com.pawbridge.userservice.dto.response.AnimalResponse;
+import com.pawbridge.userservice.dto.response.OrderResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
 import com.pawbridge.userservice.dto.response.ShelterResponse;
 import com.pawbridge.userservice.dto.response.WishlistResponse;
@@ -134,5 +135,46 @@ public class MyPageServiceImpl implements MyPageService {
         }
 
         return wishlists;
+    }
+
+    /**
+     * 내 주문 내역 조회
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> getOrders(Long userId, Pageable pageable) {
+        log.info("Fetching orders for user: {}", userId);
+
+        // 1. User 존재 여부 확인
+        if (!userRepository.existsById(userId)) {
+            log.error("User not found: userId={}", userId);
+            throw new UserNotFoundException();
+        }
+
+        // 2. FeignClient로 store-service에서 주문 목록 조회
+        Page<OrderResponse> orders;
+        try {
+            // Sort를 "property,direction" 형식으로 변환
+            String sortParam = "createdAt,desc"; // 기본값
+            if (pageable.getSort().isSorted()) {
+                sortParam = pageable.getSort().stream()
+                        .map(order -> order.getProperty() + "," + order.getDirection().name().toLowerCase())
+                        .reduce((a, b) -> a + "," + b)
+                        .orElse("createdAt,desc");
+            }
+
+            orders = storeServiceClient.getOrdersByUserId(
+                    userId,
+                    pageable.getPageNumber(),
+                    pageable.getPageSize(),
+                    sortParam
+            );
+            log.info("Found {} orders for user: {}", orders.getTotalElements(), userId);
+        } catch (Exception e) {
+            log.error("Failed to fetch orders from store-service: userId={}", userId, e);
+            throw new RuntimeException("주문 내역을 조회할 수 없습니다.", e);
+        }
+
+        return orders;
     }
 }

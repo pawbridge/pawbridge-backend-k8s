@@ -1,6 +1,7 @@
 package com.pawbridge.userservice.controller;
 
 import com.pawbridge.userservice.dto.response.AnimalResponse;
+import com.pawbridge.userservice.dto.response.OrderResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
 import com.pawbridge.userservice.dto.response.WishlistResponse;
 import com.pawbridge.userservice.service.MyPageService;
@@ -56,6 +57,23 @@ public class MyPageController {
 
         Page<WishlistResponse> wishlists = myPageService.getWishlists(userId, pageable);
         ResponseDTO<Page<WishlistResponse>> response = ResponseDTO.okWithData(wishlists);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 내 주문 내역 조회
+     * - GET /api/v1/users/me/orders
+     */
+    @GetMapping("/orders")
+    public ResponseEntity<ResponseDTO<Page<OrderResponse>>> getOrders(
+            @RequestHeader(value = "X-User-Id", required = true) Long userId,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+
+        Page<OrderResponse> orders = myPageService.getOrders(userId, pageable);
+        ResponseDTO<Page<OrderResponse>> response = ResponseDTO.okWithData(orders);
 
         return ResponseEntity
                 .status(response.getCode())
