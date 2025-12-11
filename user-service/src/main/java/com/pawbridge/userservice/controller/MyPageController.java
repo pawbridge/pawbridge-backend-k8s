@@ -2,9 +2,11 @@ package com.pawbridge.userservice.controller;
 
 import com.pawbridge.userservice.dto.response.AnimalResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
+import com.pawbridge.userservice.dto.response.WishlistResponse;
 import com.pawbridge.userservice.service.MyPageService;
 import com.pawbridge.userservice.util.ResponseDTO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -37,6 +39,23 @@ public class MyPageController {
 
         PageResponse<AnimalResponse> animals = myPageService.getRegisteredAnimals(userId, pageable);
         ResponseDTO<PageResponse<AnimalResponse>> response = ResponseDTO.okWithData(animals);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 내 찜 목록 조회
+     * - GET /api/v1/users/me/wishlists
+     */
+    @GetMapping("/wishlists")
+    public ResponseEntity<ResponseDTO<Page<WishlistResponse>>> getWishlists(
+            @RequestHeader(value = "X-User-Id", required = true) Long userId,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+
+        Page<WishlistResponse> wishlists = myPageService.getWishlists(userId, pageable);
+        ResponseDTO<Page<WishlistResponse>> response = ResponseDTO.okWithData(wishlists);
 
         return ResponseEntity
                 .status(response.getCode())

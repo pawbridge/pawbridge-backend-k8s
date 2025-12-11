@@ -1,9 +1,11 @@
 package com.pawbridge.userservice.service;
 
 import com.pawbridge.userservice.client.AnimalServiceClient;
+import com.pawbridge.userservice.client.StoreServiceClient;
 import com.pawbridge.userservice.dto.response.AnimalResponse;
 import com.pawbridge.userservice.dto.response.PageResponse;
 import com.pawbridge.userservice.dto.response.ShelterResponse;
+import com.pawbridge.userservice.dto.response.WishlistResponse;
 import com.pawbridge.userservice.entity.Role;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.exception.UnauthorizedException;
@@ -11,6 +13,7 @@ import com.pawbridge.userservice.exception.UserNotFoundException;
 import com.pawbridge.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +28,7 @@ public class MyPageServiceImpl implements MyPageService {
 
     private final UserRepository userRepository;
     private final AnimalServiceClient animalServiceClient;
+    private final StoreServiceClient storeServiceClient;
 
     /**
      * 내가 등록한 동물 조회 (보호소 직원용)
@@ -89,5 +93,46 @@ public class MyPageServiceImpl implements MyPageService {
         }
 
         return animals;
+    }
+
+    /**
+     * 내 찜 목록 조회
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Page<WishlistResponse> getWishlists(Long userId, Pageable pageable) {
+        log.info("Fetching wishlists for user: {}", userId);
+
+        // 1. User 존재 여부 확인
+        if (!userRepository.existsById(userId)) {
+            log.error("User not found: userId={}", userId);
+            throw new UserNotFoundException();
+        }
+
+        // 2. FeignClient로 store-service에서 찜 목록 조회
+        Page<WishlistResponse> wishlists;
+        try {
+            // Sort를 "property,direction" 형식으로 변환
+            String sortParam = "createdAt,desc"; // 기본값
+            if (pageable.getSort().isSorted()) {
+                sortParam = pageable.getSort().stream()
+                        .map(order -> order.getProperty() + "," + order.getDirection().name().toLowerCase())
+                        .reduce((a, b) -> a + "," + b)
+                        .orElse("createdAt,desc");
+            }
+
+            wishlists = storeServiceClient.getWishlistsByUserId(
+                    userId,
+                    pageable.getPageNumber(),
+                    pageable.getPageSize(),
+                    sortParam
+            );
+            log.info("Found {} wishlists for user: {}", wishlists.getTotalElements(), userId);
+        } catch (Exception e) {
+            log.error("Failed to fetch wishlists from store-service: userId={}", userId, e);
+            throw new RuntimeException("찜 목록을 조회할 수 없습니다.", e);
+        }
+
+        return wishlists;
     }
 }
