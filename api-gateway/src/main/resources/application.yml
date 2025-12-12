@@ -18,7 +18,7 @@ spring:
         - id: user-service-email
           uri: lb://user-service
           predicates:
-            - Path=/api/email/**
+            - Path=/api/v1/email/**
 
         # User Service (JWT 필터 적용, 화이트리스트는 필터 내부에서 처리)
         - id: user-service
