@@ -1,5 +1,6 @@
 package com.pawbridge.communityservice.service;
 
+import com.pawbridge.communityservice.client.UserServiceClient;
 import com.pawbridge.communityservice.domain.entity.BoardType;
 import com.pawbridge.communityservice.domain.repository.PostRepository;
 import com.pawbridge.communityservice.dto.response.PostResponse;
@@ -29,6 +30,7 @@ public class SearchServiceImpl implements SearchService {
 
     private final ElasticsearchOperations elasticsearchOperations;
     private final PostRepository postRepository;
+    private final UserServiceClient userServiceClient;
 
     /**
      * 게시글 검색
@@ -77,7 +79,23 @@ public class SearchServiceImpl implements SearchService {
         // MySQL에서 실제 데이터 조회 (삭제되지 않은 것만)
         return postRepository.findAllById(postIds).stream()
                 .filter(post -> post.getDeletedAt() == null)
-                .map(PostResponse::fromEntity)
+                .map(post -> {
+                    String authorNickname = getUserNickname(post.getAuthorId());
+                    return PostResponse.fromEntity(post, authorNickname);
+                })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 사용자 닉네임 조회 헬퍼 메서드
+     * User Service가 다운되거나 사용자를 찾을 수 없을 경우 기본값 반환
+     */
+    private String getUserNickname(Long userId) {
+        try {
+            return userServiceClient.getUserNickname(userId);
+        } catch (Exception e) {
+            log.warn("Failed to fetch nickname for userId={}, using default. Error: {}", userId, e.getMessage());
+            return "사용자" + userId;
+        }
     }
 }

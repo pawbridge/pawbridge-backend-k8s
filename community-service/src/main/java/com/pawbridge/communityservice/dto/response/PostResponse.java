@@ -12,6 +12,7 @@ import java.util.List;
 public record PostResponse(
         Long postId,
         Long authorId,
+        String authorNickname,
         String title,
         String content,
         BoardType boardType,
@@ -19,10 +20,11 @@ public record PostResponse(
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
-    public static PostResponse fromEntity(Post post) {
+    public static PostResponse fromEntity(Post post, String authorNickname) {
         return new PostResponse(
                 post.getPostId(),
                 post.getAuthorId(),
+                authorNickname,
                 post.getTitle(),
                 post.getContent(),
                 post.getBoardType(),

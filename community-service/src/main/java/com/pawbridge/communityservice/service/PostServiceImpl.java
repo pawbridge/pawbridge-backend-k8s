@@ -1,5 +1,6 @@
 package com.pawbridge.communityservice.service;
 
+import com.pawbridge.communityservice.client.UserServiceClient;
 import com.pawbridge.communityservice.domain.entity.Post;
 import com.pawbridge.communityservice.domain.repository.PostRepository;
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
@@ -28,6 +29,7 @@ public class PostServiceImpl implements PostService {
     private final PostRepository postRepository;
     private final OutboxService outboxService;
     private final S3Service s3Service;
+    private final UserServiceClient userServiceClient;
 
     /**
      * 게시글 생성
@@ -74,7 +76,9 @@ public class PostServiceImpl implements PostService {
         );
 
         log.info("✅ Post created: postId={}, imageCount={}", saved.getPostId(), imageUrls.size());
-        return PostResponse.fromEntity(saved);
+
+        String authorNickname = getUserNickname(authorId);
+        return PostResponse.fromEntity(saved, authorNickname);
     }
 
     /**
@@ -128,7 +132,9 @@ public class PostServiceImpl implements PostService {
         );
 
         log.info("✅ Post updated: postId={}, imageCount={}", postId, newImageUrls.size());
-        return PostResponse.fromEntity(updated);
+
+        String authorNickname = getUserNickname(authorId);
+        return PostResponse.fromEntity(updated, authorNickname);
     }
 
     /**
@@ -182,7 +188,8 @@ public class PostServiceImpl implements PostService {
         Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
                 .orElseThrow(PostNotFoundException::new);
 
-        return PostResponse.fromEntity(post);
+        String authorNickname = getUserNickname(post.getAuthorId());
+        return PostResponse.fromEntity(post, authorNickname);
     }
 
     /**
@@ -192,7 +199,23 @@ public class PostServiceImpl implements PostService {
     @Transactional(readOnly = true)
     public List<PostResponse> getAllPosts() {
         return postRepository.findByDeletedAtIsNull().stream()
-                .map(PostResponse::fromEntity)
+                .map(post -> {
+                    String authorNickname = getUserNickname(post.getAuthorId());
+                    return PostResponse.fromEntity(post, authorNickname);
+                })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 사용자 닉네임 조회 헬퍼 메서드
+     * User Service가 다운되거나 사용자를 찾을 수 없을 경우 기본값 반환
+     */
+    private String getUserNickname(Long userId) {
+        try {
+            return userServiceClient.getUserNickname(userId);
+        } catch (Exception e) {
+            log.warn("Failed to fetch nickname for userId={}, using default. Error: {}", userId, e.getMessage());
+            return "사용자" + userId;
+        }
     }
 }

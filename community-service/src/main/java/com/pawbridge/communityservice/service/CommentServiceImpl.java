@@ -1,5 +1,6 @@
 package com.pawbridge.communityservice.service;
 
+import com.pawbridge.communityservice.client.UserServiceClient;
 import com.pawbridge.communityservice.domain.entity.Comment;
 import com.pawbridge.communityservice.domain.repository.CommentRepository;
 import com.pawbridge.communityservice.domain.repository.PostRepository;
@@ -31,6 +32,7 @@ public class CommentServiceImpl implements CommentService {
 
     private final CommentRepository commentRepository;
     private final PostRepository postRepository;
+    private final UserServiceClient userServiceClient;
 
     /**
      * 댓글 생성
@@ -51,7 +53,8 @@ public class CommentServiceImpl implements CommentService {
         Comment saved = commentRepository.save(comment);
         log.info("✅ Comment created: commentId={}", saved.getCommentId());
 
-        return CommentResponse.fromEntity(saved);
+        String authorNickname = getUserNickname(authorId);
+        return CommentResponse.fromEntity(saved, authorNickname);
     }
 
     /**
@@ -72,7 +75,9 @@ public class CommentServiceImpl implements CommentService {
         Comment updated = commentRepository.save(comment);
 
         log.info("✅ Comment updated: commentId={}", commentId);
-        return CommentResponse.fromEntity(updated);
+
+        String authorNickname = getUserNickname(authorId);
+        return CommentResponse.fromEntity(updated, authorNickname);
     }
 
     /**
@@ -102,7 +107,23 @@ public class CommentServiceImpl implements CommentService {
     @Transactional(readOnly = true)
     public List<CommentResponse> getCommentsByPostId(Long postId) {
         return commentRepository.findByPostIdAndDeletedAtIsNullOrderByCreatedAtAsc(postId).stream()
-                .map(CommentResponse::fromEntity)
+                .map(comment -> {
+                    String authorNickname = getUserNickname(comment.getAuthorId());
+                    return CommentResponse.fromEntity(comment, authorNickname);
+                })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 사용자 닉네임 조회 헬퍼 메서드
+     * User Service가 다운되거나 사용자를 찾을 수 없을 경우 기본값 반환
+     */
+    private String getUserNickname(Long userId) {
+        try {
+            return userServiceClient.getUserNickname(userId);
+        } catch (Exception e) {
+            log.warn("Failed to fetch nickname for userId={}, using default. Error: {}", userId, e.getMessage());
+            return "사용자" + userId;
+        }
     }
 }

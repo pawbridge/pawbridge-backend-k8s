@@ -196,4 +196,12 @@ public class UserServiceImpl implements UserService {
             throw new NicknameDuplicateException();
         }
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public String getUserNickname(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException());
+        return user.getNickname();
+    }
 }
