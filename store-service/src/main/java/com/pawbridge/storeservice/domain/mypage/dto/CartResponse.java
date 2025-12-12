@@ -2,6 +2,7 @@ package com.pawbridge.storeservice.domain.mypage.dto;
 
 import com.pawbridge.storeservice.domain.cart.entity.Cart;
 import com.pawbridge.storeservice.domain.cart.entity.CartItem;
+import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -9,6 +10,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -40,20 +42,26 @@ public class CartResponse {
         private String skuCode;
         private Long price;
         private Integer quantity;
-        private Long totalPrice;  // price * quantity
+        private Long totalPrice;
     }
 
-    public static CartResponse from(Cart cart) {
-        List<CartItemDto> itemDtos = cart.getCartItems().stream()
-                .map(item -> CartItemDto.builder()
-                        .cartItemId(item.getId())
-                        .productSkuId(item.getProductSKU().getId())
-                        .productName(item.getProductSKU().getProduct().getName())
-                        .skuCode(item.getProductSKU().getSkuCode())
-                        .price(item.getProductSKU().getPrice())
-                        .quantity(item.getQuantity())
-                        .totalPrice(item.getProductSKU().getPrice() * item.getQuantity())
-                        .build())
+    /**
+     * Cart와 ProductSKU 맵을 받아서 CartResponse 생성
+     */
+    public static CartResponse from(Cart cart, Map<Long, ProductSKU> skuMap) {
+        List<CartItemDto> itemDtos = cart.getItems().stream()
+                .map(item -> {
+                    ProductSKU sku = skuMap.get(item.getProductSkuId());
+                    return CartItemDto.builder()
+                            .cartItemId(item.getId())
+                            .productSkuId(item.getProductSkuId())
+                            .productName(sku != null ? sku.getProduct().getName() : null)
+                            .skuCode(sku != null ? sku.getSkuCode() : null)
+                            .price(sku != null ? sku.getPrice() : 0L)
+                            .quantity(item.getQuantity())
+                            .totalPrice(sku != null ? sku.getPrice() * item.getQuantity() : 0L)
+                            .build();
+                })
                 .collect(Collectors.toList());
 
         return CartResponse.builder()
