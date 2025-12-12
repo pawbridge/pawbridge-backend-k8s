@@ -63,7 +63,13 @@ spring:
             client-secret: ${GOOGLE_SECRET_KEY}
             scope: email, profile
             redirect-uri: ${REDIRECT_URI} # 이렇게 명시하지 않으면 Spring Security가 자동으로 자신의 주소(http://localhost:8081)를 사용
-
+        provider:
+          google:
+            authorization-uri: https://accounts.google.com/o/oauth2/v2/auth?prompt=select_account #매번 계정 선택 화면 표시
+        #매번 권한 승인 화면 표시
+#        provider:
+#          google:
+#            authorization-uri: https://accounts.google.com/o/oauth2/v2/auth?prompt=consent
 jwt:
   secret: ${JWT_SECRET}
   access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION}      # 15분 (밀리초)
