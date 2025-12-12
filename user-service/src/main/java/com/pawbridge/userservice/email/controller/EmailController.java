@@ -19,7 +19,7 @@ public class EmailController {
     /**
      * 인증 코드 발송
      */
-    @PostMapping("/api/email/send")
+    @PostMapping("/api/v1/email/send")
     public ResponseEntity<ResponseDTO<Void>> sendVerificationCode(
             @Valid @RequestBody SendVerificationCodeRequest request) {
 
@@ -33,7 +33,7 @@ public class EmailController {
     /**
      * 인증 코드 검증
      */
-    @PostMapping("/api/email/verify")
+    @PostMapping("/api/v1/email/verify")
     public ResponseEntity<ResponseDTO<EmailVerifiedResponse>> verifyCode(
             @Valid @RequestBody VerifyCodeRequest request) {
 
