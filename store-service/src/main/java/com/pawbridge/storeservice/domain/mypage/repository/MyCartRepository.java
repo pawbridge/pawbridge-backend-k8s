@@ -15,11 +15,11 @@ import java.util.Optional;
 public interface MyCartRepository extends JpaRepository<Cart, Long> {
 
     /**
-     * 사용자별 장바구니 조회 (CartItems, ProductSKU, Product fetch join)
+     * 사용자별 장바구니 조회 (CartItems fetch join)
      * - N+1 방지를 위해 @EntityGraph 사용
      * @param userId 사용자 ID
      * @return Optional<Cart>
      */
-    @EntityGraph(attributePaths = {"cartItems", "cartItems.productSKU", "cartItems.productSKU.product"})
+    @EntityGraph(attributePaths = {"items"})
     Optional<Cart> findByUserId(Long userId);
 }

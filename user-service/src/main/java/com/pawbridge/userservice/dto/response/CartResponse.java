@@ -25,6 +25,7 @@ public class CartResponse {
 
     /**
      * 장바구니 항목 DTO (내부 클래스)
+     * - store-service의 CartItemDto와 동일한 구조
      */
     @Data
     @Builder
