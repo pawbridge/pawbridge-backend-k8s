@@ -138,7 +138,7 @@ eureka:
 
 # JWT
 jwt:
-  secret: ${JWT_SECRET:your-secret-key-for-development-at-least-256-bits-long-secret-key-here}
+  secret: ${JWT_SECRET}
 
 # Actuator & Tracing
 management:
