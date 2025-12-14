@@ -49,6 +49,13 @@ spring:
             client-secret: ${GOOGLE_SECRET_KEY}
             scope: email, profile
             redirect-uri: ${REDIRECT_URI}
+        provider:
+          google:
+            authorization-uri: https://accounts.google.com/o/oauth2/v2/auth?prompt=select_account #매번 계정 선택 화면 표시
+        #매번 권한 승인 화면 표시
+#        provider:
+#          google:
+#            authorization-uri: https://accounts.google.com/o/oauth2/v2/auth?prompt=consent
 
 oauth2:
   redirect-uri: ${OAUTH2_REDIRECT_URI}

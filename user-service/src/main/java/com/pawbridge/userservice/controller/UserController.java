@@ -77,4 +77,13 @@ public class UserController {
                 .body(response);
     }
 
+    /**
+     * 닉네임 조회 (내부 API - 마이크로서비스 간 호출용)
+     */
+    @GetMapping("/internal/{userId}/nickname")
+    public ResponseEntity<String> getUserNickname(@PathVariable Long userId) {
+        String nickname = userService.getUserNickname(userId);
+        return ResponseEntity.ok(nickname);
+    }
+
 }

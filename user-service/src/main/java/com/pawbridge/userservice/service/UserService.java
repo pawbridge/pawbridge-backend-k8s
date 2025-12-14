@@ -20,4 +20,7 @@ public interface UserService {
     // 닉네임 수정
     void updateNickname(Long userId, UpdateNicknameRequestDto requestDto);
 
+    // 닉네임 조회 (내부 API용)
+    String getUserNickname(Long userId);
+
 }
