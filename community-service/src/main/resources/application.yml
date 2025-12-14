@@ -1,72 +1,36 @@
-server:
-  port: 8089
-
 spring:
   application:
     name: community-service
+
+  config:
+    import: "configserver:http://${CONFIG_SERVER_HOST}"
+  profiles:
+    active: local
+
+  cloud:
+    config:
+      username: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+      fail-fast: true
+      retry:
+        max-attempts: 6
+        initial-interval: 1000
+    aws:
+      credentials:
+        access-key: ${S3_ACCESS_KEY}
+        secret-key: ${S3_SECRET_KEY}
+      region:
+        static: ${S3_REGION}
+      s3:
+        bucket: ${S3_BUCKET_NAME}
 
   servlet:
     multipart:
       max-file-size: 100MB      # 단일 파일 최대 크기 (영상 지원)
       max-request-size: 200MB   # 전체 요청 최대 크기
 
-  datasource:
-    url: ${DB_COMMUNITY_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
-
-  jpa:
-    hibernate:
-      ddl-auto: update
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQL8Dialect
-        format_sql: true
-        show_sql: true
-    show-sql: true
-
+  # Kafka Consumer 상세 설정 (bootstrap-servers는 Config Repository에서)
   kafka:
     consumer:
-      bootstrap-servers: localhost:9092
       group-id: community-service-elasticsearch-group
       auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-
-  elasticsearch:
-    uris: http://localhost:9200
-
-  cloud:
-    aws:
-      credentials:
-        access-key: ${S3_ACCESS_KEY}
-        secret-key: ${S3_SECRET_KEY}
-      region:
-        static: ${S3_REGION:ap-northeast-2}
-      s3:
-        bucket: ${S3_BUCKET_NAME}
-
-# Eureka Client
-eureka:
-  client:
-    service-url:
-      defaultZone: http://localhost:8761/eureka/
-    register-with-eureka: true
-    fetch-registry: true
-  instance:
-    prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}
-
-# Actuator & Tracing
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health, info, prometheus
-  tracing:
-    sampling:
-      probability: 1.0
-  zipkin:
-    tracing:
-      endpoint: http://localhost:9411/api/v2/spans

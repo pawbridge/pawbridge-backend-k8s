@@ -1,31 +1,20 @@
-server:
-  port: 8081
-
 spring:
   application:
     name: user-service
 
-  datasource:
-    url: ${DB_USER_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+  config:
+    import: "configserver:http://${CONFIG_SERVER_HOST}"
+  profiles:
+    active: local
 
-  jpa:
-    hibernate:
-      ddl-auto: update
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQL8Dialect
-        format_sql: true
-        show_sql: true
-    show-sql: true
-
-  # Redis 설정 (email-service 통합)
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: 6379
+  cloud:
+    config:
+      username: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+      fail-fast: true
+      retry:
+        max-attempts: 6
+        initial-interval: 1000
 
   # Mail 설정 (email-service 통합)
   mail:
@@ -44,15 +33,12 @@ spring:
           timeout: 5000
           writetimeout: 5000
 
-  # Kafka 설정
+  # Kafka Consumer 상세 설정 (bootstrap-servers는 Config Repository에서)
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: user-service-group
       auto-offset-reset: earliest
       enable-auto-commit: false
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
   security:
     oauth2:
@@ -62,36 +48,7 @@ spring:
             client-id: ${GOOGLE_CLIENT_ID}
             client-secret: ${GOOGLE_SECRET_KEY}
             scope: email, profile
-            redirect-uri: ${REDIRECT_URI} # 이렇게 명시하지 않으면 Spring Security가 자동으로 자신의 주소(http://localhost:8081)를 사용
-
-jwt:
-  secret: ${JWT_SECRET}
-  access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION}      # 15분 (밀리초)
-  refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION}  # 7일 (밀리초)
+            redirect-uri: ${REDIRECT_URI}
 
 oauth2:
   redirect-uri: ${OAUTH2_REDIRECT_URI}
-
-# Eureka Client
-eureka:
-  client:
-    service-url:
-      defaultZone: http://localhost:8761/eureka/
-    register-with-eureka: true
-    fetch-registry: true
-  instance:
-    prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}
-
-# Actuator & Tracing
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health, info, prometheus
-  tracing:
-    sampling:
-      probability: 1.0
-  zipkin:
-    tracing:
-      endpoint: http://localhost:9411/api/v2/spans

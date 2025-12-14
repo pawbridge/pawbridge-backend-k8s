@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # 1. Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    restart: always
+
+  # 2. Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Listeners: Internal for Docker network, External for other nodes
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${NODE3_PRIVATE_IP}:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    restart: always
+
+  # 3. Animal Service
+  animal-service:
+    image: ${DOCKER_USERNAME}/animal-service:latest
+    container_name: animal-service
+    ports:
+      - "9020:9020"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST} # Node-2 IP:8888
+      - CONFIG_USERNAME=${CONFIG_USERNAME}
+      - CONFIG_PASSWORD=${CONFIG_PASSWORD}
+      - NODE1_PRIVATE_IP=${NODE1_PRIVATE_IP}
+      - NODE2_PRIVATE_IP=${NODE2_PRIVATE_IP}
+      - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
+      - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
+      - EC2_HOST_1=${EC2_HOST_1}
+    restart: always

@@ -1,11 +1,20 @@
-server:
-  port: 8080
-
 spring:
   application:
     name: api-gateway
 
+  config:
+    import: "configserver:http://${CONFIG_SERVER_HOST}"
+  profiles:
+    active: local
+
   cloud:
+    config:
+      username: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+      fail-fast: true
+      retry:
+        max-attempts: 6
+        initial-interval: 1000
     gateway:
       routes:
         # OAuth2 경로 (JWT 필터 제외, 우선순위 높음)
@@ -32,26 +41,31 @@ spring:
         - id: animal-service-public
           uri: lb://animal-service
           predicates:
-            - Path=/api/v1/animals/**
+            - Path=/api/animals/**, /api/v1/animals/**
             - Method=GET
+          filters:
+            - RewritePath=/api/animals(?<segment>/?.*), /api/v1/animals${segment}
           # JWT 필터 없음 (로그인 없이 검색/조회 가능)
 
         # Shelter Service - 조회 (GET, 공개)
         - id: shelter-service-public
           uri: lb://animal-service
           predicates:
-            - Path=/api/v1/shelters/**
+            - Path=/api/shelters/**, /api/v1/shelters/**
             - Method=GET
+          filters:
+            - RewritePath=/api/shelters(?<segment>/?.*), /api/v1/shelters${segment}
           # JWT 필터 없음 (로그인 없이 조회 가능)
 
         # Animal/Shelter Service - CUD (POST/PUT/PATCH/DELETE, 인증 필요)
         - id: animal-service-protected
           uri: lb://animal-service
           predicates:
-            - Path=/api/v1/animals/**, /api/v1/shelters/**, /api/v1/batch/**
+            - Path=/api/animals/**, /api/shelters/**, /api/v1/animals/**, /api/v1/shelters/**, /api/v1/batch/**
             - Method=POST,PUT,PATCH,DELETE
           filters:
             - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
         # Community Service (JWT 필터 적용)
         - id: community-service
@@ -109,6 +123,9 @@ spring:
               - "http://127.0.0.1:3000"
               - "http://localhost:5173"
               - "http://127.0.0.1:5173"
+              - "https://pawbridge.com"
+              - "https://www.pawbridge.com"
+              - "https://*.pawbridge.com"
             allowedMethods:
               - GET
               - POST
@@ -123,32 +140,3 @@ spring:
             exposedHeaders:
               - Authorization              # 응답 헤더 노출
             allowCredentials: false        # 개발 단계에서는 false
-
-# Eureka Client
-eureka:
-  client:
-    enabled: true
-    service-url:
-      defaultZone: http://localhost:8761/eureka/
-    register-with-eureka: true
-    fetch-registry: true
-  instance:
-    prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}
-
-# JWT
-jwt:
-  secret: ${JWT_SECRET}
-
-# Actuator & Tracing
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health, info, prometheus
-  tracing:
-    sampling:
-      probability: 1.0
-  zipkin:
-    tracing:
-      endpoint: http://localhost:9411/api/v2/spans

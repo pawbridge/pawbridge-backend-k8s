@@ -1,33 +1,20 @@
 spring:
-  config:
-    import: "optional:file:.env[.properties]"
   application:
     name: animal-service
 
-  # Database Settings
-  datasource:
-    url: ${DB_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
-      connection-timeout: 30000
-      idle-timeout: 600000
-      max-lifetime: 1800000
+  config:
+    import: "configserver:http://${CONFIG_SERVER_HOST}"
+  profiles:
+    active: local
 
-  # JPA Settings
-  jpa:
-    hibernate:
-      ddl-auto: update
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQL8Dialect
-        format_sql: true
-        show_sql: true
-        use_sql_comments: true
-    open-in-view: false
+  cloud:
+    config:
+      username: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+      fail-fast: true
+      retry:
+        max-attempts: 6
+        initial-interval: 1000
 
   # Spring Batch Settings
   batch:
@@ -35,20 +22,14 @@ spring:
       initialize-schema: always
     job:
       enabled: false
-  # Kafka Settings
-  # Producer/Consumer 상세 설정은 Config 클래스에서 관리
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
-  # Elasticsearch Settings
+  # Elasticsearch 연결 설정 (uris는 Config Repository에서)
   elasticsearch:
-    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
     connection-timeout: 5s
     socket-timeout: 30s
 
 # Server Settings
 server:
-  port: 9020
   servlet:
     context-path: /
     encoding:
@@ -68,28 +49,6 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
-# Actuator Settings
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics,prometheus
-  endpoint:
-    health:
-      show-details: when-authorized
-  tracing:
-    sampling:
-      probability: 1.0
-  zipkin:
-    tracing:
-      endpoint: http://localhost:9411/api/v2/spans
-
-# APMS API Settings
-apms:
-  api:
-    base-url: https://apis.data.go.kr/1543061/abandonmentPublicService_v2
-    service-key: ${APMS_SERVICE_KEY:your-service-key-here}
-
 # Batch Scheduler Settings
 batch:
   apms:
@@ -99,14 +58,3 @@ batch:
       # 0 0 */6 * * ? : 6시간마다
       # 0 */30 * * * ? : 30분마다 (테스트용)
       cron: "0 0 2 * * ?"
-
-# Eureka Client
-eureka:
-  client:
-    service-url:
-      defaultZone: http://localhost:8761/eureka/
-    register-with-eureka: true
-    fetch-registry: true
-  instance:
-    prefer-ip-address: true
-    instance-id: ${spring.application.name}:${server.port}

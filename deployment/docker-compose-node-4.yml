@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # 1. User Service
+  user-service:
+    image: ${DOCKER_USERNAME}/user-service:latest
+    container_name: user-service
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
+      - CONFIG_USERNAME=${CONFIG_USERNAME}
+      - CONFIG_PASSWORD=${CONFIG_PASSWORD}
+      - NODE1_PRIVATE_IP=${NODE1_PRIVATE_IP}
+      - NODE2_PRIVATE_IP=${NODE2_PRIVATE_IP}
+      - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
+      - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
+      - EC2_HOST_1=${EC2_HOST_1}
+    restart: always
+
+  # 2. Community Service
+  community-service:
+    image: ${DOCKER_USERNAME}/community-service:latest
+    container_name: community-service
+    ports:
+      - "8089:8089"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
+      - CONFIG_USERNAME=${CONFIG_USERNAME}
+      - CONFIG_PASSWORD=${CONFIG_PASSWORD}
+      - NODE1_PRIVATE_IP=${NODE1_PRIVATE_IP}
+      - NODE2_PRIVATE_IP=${NODE2_PRIVATE_IP}
+      - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
+      - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
+      - EC2_HOST_1=${EC2_HOST_1}
+    restart: always
+
+  # 3. Store Service
+  store-service:
+    image: ${DOCKER_USERNAME}/store-service:latest
+    container_name: store-service
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
+      - CONFIG_USERNAME=${CONFIG_USERNAME}
+      - CONFIG_PASSWORD=${CONFIG_PASSWORD}
+      - NODE1_PRIVATE_IP=${NODE1_PRIVATE_IP}
+      - NODE2_PRIVATE_IP=${NODE2_PRIVATE_IP}
+      - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
+      - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
+      - EC2_HOST_1=${EC2_HOST_1}
+    restart: always
+
+  # 4. Payment Service
+  payment-service:
+    image: ${DOCKER_USERNAME}/payment-service:latest
+    container_name: payment-service
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
+      - CONFIG_USERNAME=${CONFIG_USERNAME}
+      - CONFIG_PASSWORD=${CONFIG_PASSWORD}
+      - NODE1_PRIVATE_IP=${NODE1_PRIVATE_IP}
+      - NODE2_PRIVATE_IP=${NODE2_PRIVATE_IP}
+      - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
+      - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
+      - EC2_HOST_1=${EC2_HOST_1}
+    restart: always

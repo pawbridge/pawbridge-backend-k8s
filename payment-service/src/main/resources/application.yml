@@ -1,39 +1,20 @@
-server:
-  port: 8084
-
 spring:
   application:
     name: payment-service
-  
-  # Database (MySQL)
-  datasource:
-    url: ${PAYMENT_DB_URL:jdbc:mysql://localhost:3306/pawbridge_payment?serverTimezone=Asia/Seoul&characterEncoding=UTF-8}
-    username: ${PAYMENT_DB_USERNAME}
-    password: ${PAYMENT_DB_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
-  
-  jpa:
-    hibernate:
-      ddl-auto: update
-    properties:
-      hibernate:
-        format_sql: true
-        show_sql: true
-  
-  # Kafka
-  kafka:
-    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
-# Eureka Client
-eureka:
-  client:
-    service-url:
-      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka}
-    register-with-eureka: true
-    fetch-registry: true
+  config:
+    import: "configserver:http://${CONFIG_SERVER_HOST}"
+  profiles:
+    active: local
+
+  cloud:
+    config:
+      username: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+      fail-fast: true
+      retry:
+        max-attempts: 6
+        initial-interval: 1000
 
 # Toss Payments
 toss:
@@ -47,17 +28,7 @@ feign:
         connectTimeout: 5000
         readTimeout: 5000
 
-# Service Destinations (for Feign)
+# Service Destinations (for Feign) - Eureka 사용으로 변경 예정
 service:
   store:
-    url: ${STORE_SERVICE_URL:http://localhost:8085}
-
-# Monitoring
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health, info, prometheus, metrics
-  tracing:
-    sampling:
-      probability: 1.0
+    url: ${STORE_SERVICE_URL}
