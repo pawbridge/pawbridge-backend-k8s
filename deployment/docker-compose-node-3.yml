@@ -10,7 +10,10 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 2. Kafka
   kafka:
@@ -26,7 +29,10 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     depends_on:
       - zookeeper
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 3. Animal Service
   animal-service:
@@ -44,4 +50,7 @@ services:
       - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
       - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
       - EC2_HOST_1=${EC2_HOST_1}
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5

@@ -17,7 +17,10 @@ services:
       - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
       - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
       - EC2_HOST_1=${EC2_HOST_1}
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 2. Community Service
   community-service:
@@ -35,7 +38,10 @@ services:
       - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
       - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
       - EC2_HOST_1=${EC2_HOST_1}
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 3. Store Service
   store-service:
@@ -53,7 +59,10 @@ services:
       - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
       - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
       - EC2_HOST_1=${EC2_HOST_1}
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 4. Payment Service
   payment-service:
@@ -71,4 +80,7 @@ services:
       - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
       - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
       - EC2_HOST_1=${EC2_HOST_1}
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
