@@ -19,7 +19,10 @@ services:
       - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
       - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
       - EC2_HOST_1=${EC2_HOST_1}
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 2. MySQL (Main DB)
   mysql:
@@ -32,7 +35,10 @@ services:
       - MYSQL_DATABASE=pawbridge
     volumes:
       - mysql_data:/var/lib/mysql
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 3. Kibana (Logs/Monitoring)
   kibana:
@@ -42,7 +48,10 @@ services:
       - "5601:5601"
     environment:
       - ELASTICSEARCH_HOSTS=http://${NODE5_PRIVATE_IP}:9200
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
 volumes:
   mysql_data:

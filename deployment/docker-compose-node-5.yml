@@ -13,7 +13,10 @@ services:
       - "ES_JAVA_OPTS=-Xms512m -Xmx1000m"
     volumes:
       - es_data:/usr/share/elasticsearch/data
-    restart: always
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
   # 2. Kafka Connect (Optional - if needed for CDC)
   # kafka-connect:
