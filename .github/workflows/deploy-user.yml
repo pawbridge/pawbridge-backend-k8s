@@ -39,17 +39,29 @@ jobs:
           docker push ${{ secrets.DOCKER_USERNAME }}/user-service:latest
 
       # 3. 배포 (Node-2로 전송)
-      - name: Deploy to Node-2
+      # 3. 배포 (Node-4로 전송)
+      - name: Copy Docker Compose to Node-4
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST_4 }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          source: "deployment/docker-compose-node-4.yml"
+          target: "~/deploy"
+          strip_components: 1
+
+      - name: Deploy to Node-4
         uses: appleboy/ssh-action@v1.0.0
         with:
-          host: ${{ secrets.EC2_HOST_2 }} # User는 Node-2
+          host: ${{ secrets.EC2_HOST_4 }} # User는 Node-4
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
             cd ~/deploy
+            mv docker-compose-node-4.yml docker-compose.yml
+
             echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
             echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> .env
-            echo "MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}" >> .env
             echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
             
             # JWT
@@ -67,13 +79,25 @@ jobs:
             echo "GOOGLE_EMAIL=${{ secrets.MAIL_USERNAME }}" >> .env
             echo "GOOGLE_EMAIL_SECRET_KEY=${{ secrets.MAIL_PASSWORD }}" >> .env
             
-            # DB_USER_URL 정의: Node-2 내부 DB(mysql) 연결 주소
-            echo "DB_USER_URL=jdbc:mysql://mysql:3306/pawbridge_user?useSSL=false&allowPublicKeyRetrieval=true" >> .env
+            # DB_USER_URL: Node-2(Private IP)의 MySQL 연결
+            echo "DB_USER_URL=jdbc:mysql://${{ secrets.NODE2_PRIVATE_IP }}:3306/pawbridge_user?useSSL=false&allowPublicKeyRetrieval=true" >> .env
             
+            # Config Server (Node-2)
+            echo "CONFIG_SERVER_HOST=${{ secrets.NODE2_PRIVATE_IP }}:8888" >> .env
+            echo "CONFIG_USERNAME=${{ secrets.CONFIG_USERNAME }}" >> .env
+            echo "CONFIG_PASSWORD=${{ secrets.CONFIG_PASSWORD }}" >> .env
+            echo "NODE1_PRIVATE_IP=${{ secrets.NODE1_PRIVATE_IP }}" >> .env
+            echo "NODE2_PRIVATE_IP=${{ secrets.NODE2_PRIVATE_IP }}" >> .env
+            echo "NODE3_PRIVATE_IP=${{ secrets.NODE3_PRIVATE_IP }}" >> .env
+            echo "NODE5_PRIVATE_IP=${{ secrets.NODE5_PRIVATE_IP }}" >> .env
+            echo "EC2_HOST_1=${{ secrets.EC2_HOST_1 }}" >> .env
+
             # 프라이빗 IP 주입
             echo "NODE1_PRIVATE_IP=${{ secrets.NODE1_PRIVATE_IP }}" >> .env
             echo "NODE2_PRIVATE_IP=${{ secrets.NODE2_PRIVATE_IP }}" >> .env
             echo "NODE3_PRIVATE_IP=${{ secrets.NODE3_PRIVATE_IP }}" >> .env
+            echo "NODE4_PRIVATE_IP=${{ secrets.NODE4_PRIVATE_IP }}" >> .env
+            echo "NODE5_PRIVATE_IP=${{ secrets.NODE5_PRIVATE_IP }}" >> .env
             
             # 실행
             docker compose pull user-service

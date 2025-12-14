@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # 1. Config Server
+  config-service:
+    image: ${DOCKER_USERNAME}/config-service:latest
+    container_name: config-service
+    ports:
+      - "8888:8888"
+    environment:
+      - CONFIG_ENCRYPT_KEY=${CONFIG_ENCRYPT_KEY}
+      - CONFIG_REPO_URI=${CONFIG_REPO_URI}
+      - CONFIG_REPO_USERNAME=${CONFIG_REPO_USERNAME}
+      - CONFIG_REPO_TOKEN=${CONFIG_REPO_TOKEN}
+      - CONFIG_USERNAME=${CONFIG_USERNAME}
+      - CONFIG_PASSWORD=${CONFIG_PASSWORD}
+      - NODE1_PRIVATE_IP=${NODE1_PRIVATE_IP}
+      - NODE2_PRIVATE_IP=${NODE2_PRIVATE_IP}
+      - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
+      - NODE5_PRIVATE_IP=${NODE5_PRIVATE_IP}
+      - EC2_HOST_1=${EC2_HOST_1}
+    restart: always
+
+  # 2. MySQL (Main DB)
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=pawbridge
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: always
+
+  # 3. Kibana (Logs/Monitoring)
+  kibana:
+    image: kibana:7.17.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://${NODE5_PRIVATE_IP}:9200
+    restart: always
+
+volumes:
+  mysql_data:

@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: config-service
+
+  cloud:
+    config:
+      server:
+        git:
+          uri: ${CONFIG_REPO_URI}
+          default-label: main
+          username: ${CONFIG_REPO_USERNAME}
+          password: ${CONFIG_REPO_TOKEN}
+          clone-on-start: true
+          timeout: 10
+
+  security:
+    user:
+      name: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+
+server:
+  port: 8888
+
+# 암호화 키 설정
+encrypt:
+  key: ${CONFIG_ENCRYPT_KEY}
+
+# Actuator 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,refresh,env
+  endpoint:
+    health:
+      show-details: always
+
+# 로깅
+logging:
+  level:
+    root: INFO
+    org.springframework.cloud.config: DEBUG
+    org.springframework.security: DEBUG

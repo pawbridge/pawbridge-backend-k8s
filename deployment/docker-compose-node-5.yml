@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  # 1. Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
+    container_name: elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx1000m"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    restart: always
+
+  # 2. Kafka Connect (Optional - if needed for CDC)
+  # kafka-connect:
+  #   image: confluentinc/cp-kafka-connect:7.4.0
+  #   ...
+
+volumes:
+  es_data:

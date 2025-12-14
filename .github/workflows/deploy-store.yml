@@ -1,11 +1,11 @@
-name: Deploy Animal Service
+name: Deploy Store Service
 
 on:
   push:
     branches: [ "dev" ]
     paths:
-      - 'animal-service/**' # 이 폴더가 변했을 때만 실행!
-      - '.github/workflows/deploy-animal.yml'
+      - 'store-service/**'
+      - '.github/workflows/deploy-store.yml'
 
 jobs:
   build-and-deploy:
@@ -18,9 +18,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Build Animal Service
+      - name: Build Store Service
         run: |
-          cd animal-service  # 해당 서비스 폴더로 이동
+          cd store-service
           chmod +x gradlew
           ./gradlew clean build -x test
 
@@ -32,41 +32,40 @@ jobs:
 
       - name: Build & Push Docker Image
         run: |
-          cd animal-service
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/animal-service:latest .
-          docker push ${{ secrets.DOCKER_USERNAME }}/animal-service:latest
+          cd store-service
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/store-service:latest .
+          docker push ${{ secrets.DOCKER_USERNAME }}/store-service:latest
 
-      # 3. 배포 (Node-3로 전송)
-      - name: Copy Docker Compose to Node-3
+      - name: Copy Docker Compose to Node-4
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.EC2_HOST_3 }}
+          host: ${{ secrets.EC2_HOST_4 }}
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
-          source: "deployment/docker-compose-node-3.yml"
+          source: "deployment/docker-compose-node-4.yml"
           target: "~/deploy"
           strip_components: 1
 
-      - name: Deploy to Node-3
+      - name: Deploy to Node-4
         uses: appleboy/ssh-action@v1.0.0
         with:
-          host: ${{ secrets.EC2_HOST_3 }} # Animal은 Node-3
+          host: ${{ secrets.EC2_HOST_4 }}
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
           script: |
             cd ~/deploy
-            mv docker-compose-node-3.yml docker-compose.yml
+            mv docker-compose-node-4.yml docker-compose.yml
 
-            # 환경변수 주입 (필요한 경우)
             echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
-
-            # Database Settings (Node-2의 MySQL로 연결)
-            echo "DB_URL=jdbc:mysql://${{ secrets.NODE2_PRIVATE_IP }}:3306/pawbridge_animal?serverTimezone=Asia/Seoul&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true" >> .env
             echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> .env
             echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
 
-            # APMS API Key
-            echo "APMS_SERVICE_KEY=${{ secrets.APMS_SERVICE_KEY }}" >> .env
+            # DB URL (Node-2 MySQL)
+            echo "DB_STORE_URL=jdbc:mysql://${{ secrets.NODE2_PRIVATE_IP }}:3306/pawbridge_store?useSSL=false&allowPublicKeyRetrieval=true" >> .env
+            
+            # S3
+            echo "AWS_ACCESS_KEY=${{ secrets.AWS_ACCESS_KEY }}" >> .env
+            echo "AWS_SECRET_KEY=${{ secrets.AWS_SECRET_KEY }}" >> .env
 
             # Config Server (Node-2)
             echo "CONFIG_SERVER_HOST=${{ secrets.NODE2_PRIVATE_IP }}:8888" >> .env
@@ -77,16 +76,20 @@ jobs:
             echo "NODE3_PRIVATE_IP=${{ secrets.NODE3_PRIVATE_IP }}" >> .env
             echo "NODE5_PRIVATE_IP=${{ secrets.NODE5_PRIVATE_IP }}" >> .env
             echo "EC2_HOST_1=${{ secrets.EC2_HOST_1 }}" >> .env
-
-            # Kafka Settings (Node-3의 Kafka - localhost 가능)
-            echo "KAFKA_BOOTSTRAP_SERVERS=localhost:9092" >> .env
             
+            # Kafka (Node-3)
+            echo "KAFKA_BOOTSTRAP_SERVERS=${{ secrets.NODE3_PRIVATE_IP }}:9092" >> .env
+            
+            # ES (Node-5)
+            echo "ELASTICSEARCH_URIS=http://${{ secrets.NODE5_PRIVATE_IP }}:9200" >> .env
+
             # 프라이빗 IP 주입
             echo "NODE1_PRIVATE_IP=${{ secrets.NODE1_PRIVATE_IP }}" >> .env
             echo "NODE2_PRIVATE_IP=${{ secrets.NODE2_PRIVATE_IP }}" >> .env
             echo "NODE3_PRIVATE_IP=${{ secrets.NODE3_PRIVATE_IP }}" >> .env
-            
-            # 해당 서비스만 콕 집어서 재시작
-            docker compose pull animal-service
-            docker compose up -d --no-deps animal-service
+            echo "NODE4_PRIVATE_IP=${{ secrets.NODE4_PRIVATE_IP }}" >> .env
+            echo "NODE5_PRIVATE_IP=${{ secrets.NODE5_PRIVATE_IP }}" >> .env
+
+            docker compose pull store-service
+            docker compose up -d --no-deps store-service
             docker image prune -f

@@ -18,7 +18,6 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # 1. 빌드 (해당 폴더로 이동해서 실행)
       - name: Build Gateway Service
         run: |
           cd api-gateway  # 해당 서비스 폴더로 이동
@@ -31,7 +30,6 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # 2. 이미지 빌드 & 푸시
       - name: Build & Push Docker Image
         run: |
           cd api-gateway
@@ -39,6 +37,16 @@ jobs:
           docker push ${{ secrets.DOCKER_USERNAME }}/api-gateway:latest
 
       # 3. 배포 (Node-1로 전송)
+      - name: Copy Docker Compose to Node-1
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST_1 }}
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}
+          source: "deployment/docker-compose-node-1.yml"
+          target: "~/deploy"
+          strip_components: 1
+
       - name: Deploy to Node-1
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -47,6 +55,8 @@ jobs:
           key: ${{ secrets.EC2_KEY }}
           script: |
             cd ~/deploy
+            mv docker-compose-node-1.yml docker-compose.yml
+
             # 환경변수 주입 (필요한 경우)
             echo "DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}" > .env
             echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
@@ -54,6 +64,16 @@ jobs:
             # Service URLs (Node-2의 user-service로 라우팅)
             echo "USER_SERVICE_URL=http://${{ secrets.NODE2_PRIVATE_IP }}:8081" >> .env
             echo "EMAIL_SERVICE_URL=http://${{ secrets.NODE2_PRIVATE_IP }}:8088" >> .env
+
+            # Config Server (Node-2)
+            echo "CONFIG_SERVER_HOST=${{ secrets.NODE2_PRIVATE_IP }}:8888" >> .env
+            echo "CONFIG_USERNAME=${{ secrets.CONFIG_USERNAME }}" >> .env
+            echo "CONFIG_PASSWORD=${{ secrets.CONFIG_PASSWORD }}" >> .env
+            echo "NODE1_PRIVATE_IP=${{ secrets.NODE1_PRIVATE_IP }}" >> .env
+            echo "NODE2_PRIVATE_IP=${{ secrets.NODE2_PRIVATE_IP }}" >> .env
+            echo "NODE3_PRIVATE_IP=${{ secrets.NODE3_PRIVATE_IP }}" >> .env
+            echo "NODE5_PRIVATE_IP=${{ secrets.NODE5_PRIVATE_IP }}" >> .env
+            echo "EC2_HOST_1=${{ secrets.EC2_HOST_1 }}" >> .env
 
             # 프라이빗 IP 주입
             echo "NODE1_PRIVATE_IP=${{ secrets.NODE1_PRIVATE_IP }}" >> .env
