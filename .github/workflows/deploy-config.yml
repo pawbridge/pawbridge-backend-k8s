@@ -6,6 +6,7 @@ on:
     paths:
       - 'config-service/**'
       - '.github/workflows/deploy-config.yml'
+      - 'deployment/docker-compose-node-2.yml'
 
 jobs:
   build-and-deploy:
