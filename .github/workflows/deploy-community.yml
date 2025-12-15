@@ -5,6 +5,7 @@ on:
     branches: [ "dev" ]
     paths:
       - 'community-service/**'
+      - 'deployment/docker-compose-node-4.yml'
       - '.github/workflows/deploy-community.yml'
 
 jobs:

@@ -8,7 +8,7 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_PROFILES_ACTIVE=dev
       - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
       - CONFIG_USERNAME=${CONFIG_USERNAME}
       - CONFIG_PASSWORD=${CONFIG_PASSWORD}
@@ -29,7 +29,7 @@ services:
     ports:
       - "8089:8089"
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_PROFILES_ACTIVE=dev
       - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
       - CONFIG_USERNAME=${CONFIG_USERNAME}
       - CONFIG_PASSWORD=${CONFIG_PASSWORD}
@@ -50,7 +50,7 @@ services:
     ports:
       - "8085:8085"
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_PROFILES_ACTIVE=dev
       - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
       - CONFIG_USERNAME=${CONFIG_USERNAME}
       - CONFIG_PASSWORD=${CONFIG_PASSWORD}
@@ -71,7 +71,7 @@ services:
     ports:
       - "8084:8084"
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_PROFILES_ACTIVE=dev
       - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST}
       - CONFIG_USERNAME=${CONFIG_USERNAME}
       - CONFIG_PASSWORD=${CONFIG_PASSWORD}

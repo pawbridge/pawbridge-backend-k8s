@@ -5,6 +5,7 @@ on:
     branches: [ "dev" ]
     paths:
       - 'payment-service/**'
+      - 'deployment/docker-compose-node-4.yml'
       - '.github/workflows/deploy-payment.yml'
 
 jobs:

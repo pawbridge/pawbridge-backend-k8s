@@ -41,7 +41,7 @@ services:
     ports:
       - "9020:9020"
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_PROFILES_ACTIVE=dev
       - CONFIG_SERVER_HOST=${CONFIG_SERVER_HOST} # Node-2 IP:8888
       - CONFIG_USERNAME=${CONFIG_USERNAME}
       - CONFIG_PASSWORD=${CONFIG_PASSWORD}
