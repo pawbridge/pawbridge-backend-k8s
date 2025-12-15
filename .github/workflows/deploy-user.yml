@@ -4,7 +4,8 @@ on:
   push:
     branches: [ "dev" ]
     paths:
-      - 'user-service/**' # 이 폴더가 변했을 때만 실행!
+      - 'user-service/**'
+      - 'deployment/docker-compose-node-4.yml'
       - '.github/workflows/deploy-user.yml'
 
 jobs:

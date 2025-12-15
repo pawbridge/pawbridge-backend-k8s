@@ -5,6 +5,7 @@ on:
     branches: [ "dev" ]
     paths:
       - 'store-service/**'
+      - 'deployment/docker-compose-node-4.yml'
       - '.github/workflows/deploy-store.yml'
 
 jobs:
