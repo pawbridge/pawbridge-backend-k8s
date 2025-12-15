@@ -8,6 +8,7 @@ services:
     ports:
       - "8888:8888"
     environment:
+      - SPRING_PROFILES_ACTIVE=dev
       - CONFIG_ENCRYPT_KEY=${CONFIG_ENCRYPT_KEY}
       - CONFIG_REPO_URI=${CONFIG_REPO_URI}
       - CONFIG_REPO_USERNAME=${CONFIG_REPO_USERNAME}
