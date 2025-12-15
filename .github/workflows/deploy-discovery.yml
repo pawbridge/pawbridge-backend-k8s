@@ -38,13 +38,13 @@ jobs:
           docker push ${{ secrets.DOCKER_USERNAME }}/discovery-service:latest
 
       # 3. 배포 (Node-1로 전송)
-      - name: Copy Docker Compose to Node-1
+      - name: Copy Docker Compose and Nginx Config to Node-1
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST_1 }}
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
-          source: "deployment/docker-compose-node-1.yml"
+          source: "deployment/docker-compose-node-1.yml,deployment/nginx.conf"
           target: "~/deploy"
           strip_components: 1
 
