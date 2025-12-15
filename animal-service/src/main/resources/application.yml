@@ -2,17 +2,26 @@ spring:
   application:
     name: animal-service
 
+  config:
+    import: "configserver:http://${CONFIG_SERVER_HOST}"
   profiles:
-    active: local
+    active: dev
+
+  cloud:
+    config:
+      username: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+      fail-fast: true
+      retry:
+        max-attempts: 6
+        initial-interval: 1000
 
   # Spring Batch Settings
   batch:
     jdbc:
       initialize-schema: always
     job:
-      enabled: false
-
-  # Elasticsearch 연결 설정 (uris는 Config Repository에서)
+      enabled: false  # REST API로 수동 실행
   elasticsearch:
     connection-timeout: 5s
     socket-timeout: 30s
