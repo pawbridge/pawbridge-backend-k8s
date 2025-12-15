@@ -66,6 +66,9 @@ jobs:
             
             # Toss
             echo "TOSS_SECRET_KEY=${{ secrets.TOSS_SECRET_KEY }}" >> .env
+            
+            # Store Service
+            echo "STORE_SERVICE_URL=http://store-service:8085" >> .env
 
             # Config Server (Node-2)
             echo "CONFIG_SERVER_HOST=${{ secrets.NODE2_PRIVATE_IP }}:8888" >> .env
