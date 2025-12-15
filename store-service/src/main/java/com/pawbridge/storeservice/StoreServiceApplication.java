@@ -15,4 +15,5 @@ public class StoreServiceApplication {
 		SpringApplication.run(StoreServiceApplication.class, args);
 	}
 
+
 }

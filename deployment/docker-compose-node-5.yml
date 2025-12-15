@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # 1. Elasticsearch
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
+    image: ${DOCKER_USERNAME}/elasticsearch-nori:latest
     container_name: elasticsearch
     ports:
       - "9200:9200"
@@ -18,10 +18,32 @@ services:
         condition: on-failure
         max_attempts: 5
 
-  # 2. Kafka Connect (Optional - if needed for CDC)
-  # kafka-connect:
-  #   image: confluentinc/cp-kafka-connect:7.4.0
-  #   ...
+  # 2. Kafka Connect (CDC)
+  kafka-connect:
+    image: ${DOCKER_USERNAME}/kafka-connect:latest
+    container_name: kafka-connect
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "${NODE3_PRIVATE_IP}:9092"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      CONNECT_GROUP_ID: "compose-connect-group"
+      CONNECT_CONFIG_STORAGE_TOPIC: "docker-connect-configs"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+      CONNECT_OFFSET_STORAGE_TOPIC: "docker-connect-offsets"
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: "docker-connect-status"
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_REST_PORT: 8083
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
 
 volumes:
   es_data:

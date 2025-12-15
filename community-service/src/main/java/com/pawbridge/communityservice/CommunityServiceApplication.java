@@ -12,4 +12,5 @@ public class CommunityServiceApplication {
 		SpringApplication.run(CommunityServiceApplication.class, args);
 	}
 
+
 }
