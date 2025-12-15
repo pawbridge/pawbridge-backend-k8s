@@ -51,7 +51,6 @@ services:
       - SPRING_SQL_INIT_MODE=never
       - SPRING_BATCH_JDBC_INITIALIZE_SCHEMA=never
       - SPRING_BATCH_JOB_ENABLED=false
-      - SPRING_AUTOCONFIGURE_EXCLUDE=org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration
       - NODE1_PRIVATE_IP=${NODE1_PRIVATE_IP}
       - NODE2_PRIVATE_IP=${NODE2_PRIVATE_IP}
       - NODE3_PRIVATE_IP=${NODE3_PRIVATE_IP}
