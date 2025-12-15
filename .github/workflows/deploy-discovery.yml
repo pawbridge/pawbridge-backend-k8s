@@ -6,6 +6,7 @@ on:
     paths:
       - 'discovery-service/**' # 이 폴더가 변했을 때만 실행!
       - '.github/workflows/deploy-discovery.yml'
+      - 'deployment/docker-compose-node-1.yml'
 
 jobs:
   build-and-deploy:
