@@ -86,7 +86,7 @@ jobs:
             echo "NODE2_PRIVATE_IP=${{ secrets.NODE2_PRIVATE_IP }}" >> .env
             echo "NODE3_PRIVATE_IP=${{ secrets.NODE3_PRIVATE_IP }}" >> .env
             
-            # 해당 서비스만 콕 집어서 재시작
+            # Node 3 전체 서비스(Kafka, Zookeeper 포함) 상태 확인 및 재시작
             docker compose pull animal-service
-            docker compose up -d --no-deps animal-service
+            docker compose up -d
             docker image prune -f

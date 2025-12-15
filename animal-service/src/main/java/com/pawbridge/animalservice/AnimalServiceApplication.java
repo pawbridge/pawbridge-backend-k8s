@@ -10,4 +10,5 @@ public class AnimalServiceApplication {
 		SpringApplication.run(AnimalServiceApplication.class, args);
 	}
 
+
 }
