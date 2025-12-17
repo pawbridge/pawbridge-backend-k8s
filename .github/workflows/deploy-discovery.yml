@@ -44,7 +44,7 @@ jobs:
           host: ${{ secrets.EC2_HOST_1 }}
           username: ubuntu
           key: ${{ secrets.EC2_KEY }}
-          source: "deployment/docker-compose-node-1.yml,deployment/nginx.conf"
+          source: "deployment/docker-compose-node-1.yml,deployment/nginx.conf,deployment/prometheus.yml"
           target: "~/deploy"
           strip_components: 1
 
