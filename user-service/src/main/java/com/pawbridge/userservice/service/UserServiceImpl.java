@@ -2,9 +2,11 @@ package com.pawbridge.userservice.service;
 
 import com.pawbridge.userservice.client.AnimalServiceClient;
 import com.pawbridge.userservice.email.service.EmailVerificationService;
+import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
 import com.pawbridge.userservice.dto.request.PasswordUpdateRequestDto;
 import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
+import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
 import com.pawbridge.userservice.dto.response.SignUpResponseDto;
 import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
 import com.pawbridge.userservice.entity.Role;
@@ -14,9 +16,14 @@ import com.pawbridge.userservice.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -203,5 +210,82 @@ public class UserServiceImpl implements UserService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException());
         return user.getNickname();
+    }
+
+    // ========== 관리자 전용 메서드 ==========
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<UserInfoResponseDto> getAllUsers(Pageable pageable) {
+        log.info("전체 회원 조회 (관리자): page={}, size={}", pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<User> users = userRepository.findAll(pageable);
+        return users.map(UserInfoResponseDto::fromEntity);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserInfoResponseDto getUserById(Long userId) {
+        log.info("회원 ID로 조회 (관리자): userId={}", userId);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException());
+        return UserInfoResponseDto.fromEntity(user);
+    }
+
+    @Override
+    @Transactional
+    public void updateUserByAdmin(Long userId, AdminUserUpdateRequest request) {
+        log.info("회원 수정 (관리자): userId={}, request={}", userId, request);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException());
+
+        // 닉네임 수정
+        if (request.nickname() != null && !request.nickname().isBlank()) {
+            if (!user.getNickname().equals(request.nickname())) {
+                if (userRepository.existsByNickname(request.nickname())) {
+                    throw new NicknameDuplicateException();
+                }
+                user.updateNickname(request.nickname());
+            }
+        }
+
+        // Role 수정
+        if (request.role() != null) {
+            user.updateRole(request.role());
+        }
+
+        // careRegNo 수정 (ROLE_SHELTER인 경우)
+        if (request.careRegNo() != null && !request.careRegNo().isBlank()) {
+            user.updateCareRegNo(request.careRegNo());
+        }
+
+        userRepository.save(user);
+        log.info("회원 수정 완료 (관리자): userId={}", userId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteUserById(Long userId) {
+        log.info("회원 삭제 (관리자): userId={}", userId);
+
+        if (!userRepository.existsById(userId)) {
+            throw new UserNotFoundException();
+        }
+
+        userRepository.deleteById(userId);
+        log.info("회원 삭제 완료 (관리자): userId={}", userId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<DailySignupStatsResponse> getDailySignupStats(LocalDate startDate, LocalDate endDate) {
+        log.info("일별 가입자 수 통계 조회: startDate={}, endDate={}", startDate, endDate);
+
+        List<DailySignupStatsResponse> stats = userRepository.countDailySignups(startDate, endDate);
+        log.info("일별 가입자 수 통계 조회 완료: {} 건", stats.size());
+
+        return stats;
     }
 }

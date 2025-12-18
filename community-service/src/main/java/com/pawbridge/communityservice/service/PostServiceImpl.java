@@ -10,6 +10,8 @@ import com.pawbridge.communityservice.exception.PostNotFoundException;
 import com.pawbridge.communityservice.exception.UnauthorizedPostAccessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -217,5 +219,101 @@ public class PostServiceImpl implements PostService {
             log.warn("Failed to fetch nickname for userId={}, using default. Error: {}", userId, e.getMessage());
             return "사용자" + userId;
         }
+    }
+
+    // ========== 관리자 전용 메서드 ==========
+
+    /**
+     * 전체 게시글 조회 (페이징) - 관리자용
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getAllPostsForAdmin(Pageable pageable) {
+        log.info("전체 게시글 조회 (관리자): page={}, size={}", pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<Post> posts = postRepository.findByDeletedAtIsNull(pageable);
+        return posts.map(post -> {
+            String authorNickname = getUserNickname(post.getAuthorId());
+            return PostResponse.fromEntity(post, authorNickname);
+        });
+    }
+
+    /**
+     * 게시글 수정 (관리자용 - 작성자 체크 없음)
+     */
+    @Override
+    @Transactional
+    public PostResponse updatePostByAdmin(Long postId, UpdatePostRequest request, MultipartFile[] files) {
+        log.info("게시글 수정 (관리자): postId={}", postId);
+
+        // 1. 기존 게시글 조회
+        Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
+                .orElseThrow(PostNotFoundException::new);
+
+        // 2. 기존 미디어 파일 삭제 (S3)
+        if (post.getImageUrls() != null && !post.getImageUrls().isEmpty()) {
+            post.getImageUrls().forEach(s3Service::deleteFile);
+        }
+
+        // 3. 새 미디어 파일 업로드
+        List<String> newImageUrls = s3Service.uploadImages(files);
+
+        // 4. Post 수정
+        post.update(request.title(), request.content(), newImageUrls);
+        Post updatedPost = postRepository.save(post);
+
+        // 5. Outbox 이벤트 저장
+        Map<String, Object> payload = Map.of(
+                "postId", postId,
+                "title", request.title(),
+                "content", request.content(),
+                "imageUrls", newImageUrls
+        );
+
+        outboxService.saveEvent(
+                "Post",
+                postId.toString(),
+                "POST_UPDATED",
+                payload
+        );
+
+        String authorNickname = getUserNickname(post.getAuthorId());
+        log.info("✅ Post updated by admin: postId={}", postId);
+
+        return PostResponse.fromEntity(updatedPost, authorNickname);
+    }
+
+    /**
+     * 게시글 삭제 (관리자용 - 작성자 체크 없음)
+     */
+    @Override
+    @Transactional
+    public void deletePostByAdmin(Long postId) {
+        log.info("게시글 삭제 (관리자): postId={}", postId);
+
+        // 1. 게시글 조회
+        Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
+                .orElseThrow(PostNotFoundException::new);
+
+        // 2. Soft Delete
+        post.delete();
+        postRepository.save(post);
+
+        // 3. S3 미디어 파일 삭제
+        if (post.getImageUrls() != null && !post.getImageUrls().isEmpty()) {
+            post.getImageUrls().forEach(s3Service::deleteFile);
+        }
+
+        // 4. Outbox 이벤트 저장
+        Map<String, Object> payload = Map.of("postId", postId);
+
+        outboxService.saveEvent(
+                "Post",
+                postId.toString(),
+                "POST_DELETED",
+                payload
+        );
+
+        log.info("✅ Post deleted by admin: postId={}", postId);
     }
 }

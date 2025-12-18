@@ -1,9 +1,14 @@
 package com.pawbridge.userservice.repository;
 
+import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
 import com.pawbridge.userservice.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -37,5 +42,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
      * 닉네임으로 사용자 조회
      */
     Optional<User> findByNickname(String nickname);
+
+    /**
+     * 일별 가입자 수 통계 (관리자용)
+     * @param startDate 시작 날짜
+     * @param endDate 종료 날짜
+     * @return 일별 가입자 수 목록
+     */
+    @Query("SELECT new com.pawbridge.userservice.dto.response.DailySignupStatsResponse(" +
+           "CAST(u.createdAt AS LocalDate), COUNT(u)) " +
+           "FROM User u " +
+           "WHERE CAST(u.createdAt AS LocalDate) BETWEEN :startDate AND :endDate " +
+           "GROUP BY CAST(u.createdAt AS LocalDate) " +
+           "ORDER BY CAST(u.createdAt AS LocalDate)")
+    List<DailySignupStatsResponse> countDailySignups(
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 
 }
