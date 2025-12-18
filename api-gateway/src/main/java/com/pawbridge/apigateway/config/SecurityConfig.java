@@ -20,6 +20,9 @@ public class SecurityConfig {
         http
                 // CSRF 비활성화 (JWT 사용하므로 불필요)
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
+                
+                // CORS 활성화 (Spring Cloud Gateway CORS 설정 사용)
+                .cors(cors -> {})
 
                 // 모든 요청 허용 (JWT Filter에서 검증)
                 .authorizeExchange(exchange -> exchange
@@ -28,4 +31,5 @@ public class SecurityConfig {
 
         return http.build();
     }
+
 }
