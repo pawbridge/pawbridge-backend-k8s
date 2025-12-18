@@ -174,6 +174,12 @@ public class JwtAuthorizationGatewayFilterFactory
      * ADMIN만 접근 가능한 경로인지 확인
      */
     private boolean isAdminOnlyPath(String method, String path) {
+        // /api/v1/admin/** 패턴은 모든 HTTP 메서드에 대해 ADMIN 권한 필요
+        // (RewritePath 필터 후 변환된 경로를 체크)
+        if (pathMatcher.match("/api/v1/admin/**", path)) {
+            return true;
+        }
+
         return ADMIN_ONLY_PATHS.stream()
                 .anyMatch(pattern -> matchesMethodAndPath(pattern, method, path));
     }

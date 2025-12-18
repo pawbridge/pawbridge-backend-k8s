@@ -114,6 +114,20 @@ public class User {
     }
 
     /**
+     * 역할 변경 (관리자용)
+     */
+    public void updateRole(Role role) {
+        this.role = role;
+    }
+
+    /**
+     * 보호소 등록번호 변경 (관리자용)
+     */
+    public void updateCareRegNo(String careRegNo) {
+        this.careRegNo = careRegNo;
+    }
+
+    /**
      * LOCAL 사용자인지 확인
      */
     public boolean isLocalUser() {

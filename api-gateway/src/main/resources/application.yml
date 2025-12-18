@@ -106,6 +106,33 @@ spring:
           filters:
             - JwtAuthorization
 
+        # Admin - User Management & Stats (user-service)
+        - id: admin-users
+          uri: lb://user-service
+          predicates:
+            - Path=/api/admin/users, /api/admin/users/**, /api/admin/stats/daily-signups
+          filters:
+            - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
+            - JwtAuthorization
+
+        # Admin - Post Management (community-service)
+        - id: admin-posts
+          uri: lb://community-service
+          predicates:
+            - Path=/api/admin/posts, /api/admin/posts/**
+          filters:
+            - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
+            - JwtAuthorization
+
+        # Admin - Animal Stats (animal-service)
+        - id: admin-animal-stats
+          uri: lb://animal-service
+          predicates:
+            - Path=/api/admin/stats/daily-animals
+          filters:
+            - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
+            - JwtAuthorization
+
         # Community Service (JWT 필터 적용)
 
       # CORS - 굳이 코드로 cors 설정할 필요는 없다.
