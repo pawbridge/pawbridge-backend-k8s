@@ -41,6 +41,7 @@ services:
     ports:
       - "9020:9020"
     environment:
+      - TZ=Asia/Seoul
       - SPRING_PROFILES_ACTIVE=dev
       - EUREKA_INSTANCE_IP_ADDRESS=${NODE3_PRIVATE_IP}
       - EUREKA_INSTANCE_PREFER_IP_ADDRESS=true
