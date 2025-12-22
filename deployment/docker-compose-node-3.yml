@@ -27,6 +27,8 @@ services:
       # Listeners: Internal for Docker network, External for other nodes
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${NODE3_PRIVATE_IP}:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     depends_on:
       - zookeeper
     deploy:
@@ -63,3 +65,6 @@ services:
       restart_policy:
         condition: on-failure
         max_attempts: 5
+
+volumes:
+  kafka_data:
