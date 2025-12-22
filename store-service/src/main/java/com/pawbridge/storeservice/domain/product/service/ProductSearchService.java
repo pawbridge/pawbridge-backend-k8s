@@ -34,37 +34,50 @@ public class ProductSearchService {
     public ProductSearchResponse searchProducts(ProductSearchRequest request) {
         log.info(">>> [Service] Building search query for: {}", request);
 
-        // 1. Elasticsearch 쿼리 생성
-        NativeQuery searchQuery = buildSearchQuery(request);
+        try {
+            // 1. Elasticsearch 쿼리 생성
+            NativeQuery searchQuery = buildSearchQuery(request);
 
-        // [DEBUG] 생성된 쿼리 DSL 로그
-        log.info(">>> [Service] Generated Query DSL: {}", searchQuery.getQuery().toString());
+            // [DEBUG] 생성된 쿼리 DSL 로그
+            log.info(">>> [Service] Generated Query DSL: {}", searchQuery.getQuery().toString());
 
-        // 2. 검색 실행
-        log.info(">>> [Service] Executing Elasticsearch query...");
-        SearchHits<Map> searchHits = elasticsearchOperations.search(
-            searchQuery,
-            Map.class,
-            org.springframework.data.elasticsearch.core.mapping.IndexCoordinates.of("store.outbox.events")
-        );
+            // 2. 검색 실행
+            log.info(">>> [Service] Executing Elasticsearch query...");
+            SearchHits<Map> searchHits = elasticsearchOperations.search(
+                searchQuery,
+                Map.class,
+                org.springframework.data.elasticsearch.core.mapping.IndexCoordinates.of("store.outbox.events")
+            );
 
-        log.info(">>> [Service] Search completed. Total Hits: {}", searchHits.getTotalHits());
+            log.info(">>> [Service] Search completed. Total Hits: {}", searchHits.getTotalHits());
 
-        // 3. 응답 객체로 변환
-        List<ProductSearchItem> items = searchHits.getSearchHits().stream()
-            .map(this::convertToSearchItem)
-            .collect(Collectors.toList());
+            // 3. 응답 객체로 변환
+            List<ProductSearchItem> items = searchHits.getSearchHits().stream()
+                .map(this::convertToSearchItem)
+                .collect(Collectors.toList());
 
-        long totalCount = searchHits.getTotalHits();
-        int totalPages = (int) Math.ceil((double) totalCount / request.getSize());
+            long totalCount = searchHits.getTotalHits();
+            int totalPages = (int) Math.ceil((double) totalCount / request.getSize());
 
-        return ProductSearchResponse.builder()
-            .items(items)
-            .totalCount(totalCount)
-            .currentPage(request.getPage())
-            .totalPages(totalPages)
-            .hasNext(request.getPage() + 1 < totalPages)
-            .build();
+            return ProductSearchResponse.builder()
+                .items(items)
+                .totalCount(totalCount)
+                .currentPage(request.getPage())
+                .totalPages(totalPages)
+                .hasNext(request.getPage() + 1 < totalPages)
+                .build();
+
+        } catch (Exception e) {
+            // ES 인덱스가 없거나 검색 실패 시 빈 결과 반환
+            log.warn(">>> [Service] ES 검색 실패 (인덱스 미존재 가능): {}", e.getMessage());
+            return ProductSearchResponse.builder()
+                .items(List.of())
+                .totalCount(0L)
+                .currentPage(request.getPage() != null ? request.getPage() : 0)
+                .totalPages(0)
+                .hasNext(false)
+                .build();
+        }
     }
 
     private NativeQuery buildSearchQuery(ProductSearchRequest request) {
