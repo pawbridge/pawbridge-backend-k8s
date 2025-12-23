@@ -68,4 +68,10 @@ public class ProductController {
         ProductSearchResponse response = productSearchService.searchProducts(searchRequest);
         return ResponseEntity.ok(response);
     }
+
+    @DeleteMapping("/{productId}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable Long productId) {
+        productService.deleteProduct(productId);
+        return ResponseEntity.noContent().build();
+    }
 }

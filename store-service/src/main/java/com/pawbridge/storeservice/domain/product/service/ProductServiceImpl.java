@@ -1,15 +1,10 @@
 package com.pawbridge.storeservice.domain.product.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pawbridge.storeservice.common.entity.Outbox;
-import com.pawbridge.storeservice.common.repository.OutboxRepository;
 import com.pawbridge.storeservice.domain.product.dto.OptionGroupCreateDto;
 import com.pawbridge.storeservice.domain.product.dto.SkuCreateDto;
 import com.pawbridge.storeservice.domain.product.dto.SkuUpdateDto;
 import com.pawbridge.storeservice.domain.product.dto.ProductCreateRequest;
 import com.pawbridge.storeservice.domain.product.dto.ProductUpdateRequest;
-import com.pawbridge.storeservice.domain.product.dto.ProductEventPayload;
 import com.pawbridge.storeservice.domain.product.dto.ProductResponse;
 import com.pawbridge.storeservice.domain.product.entity.*;
 import com.pawbridge.storeservice.domain.product.repository.*;
@@ -18,14 +13,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.pawbridge.storeservice.domain.product.dto.ProductDetailResponse;
-import org.springframework.cache.annotation.Cacheable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.time.LocalDateTime;
-import org.springframework.data.redis.core.StringRedisTemplate;
 
 
 @Slf4j
@@ -33,17 +25,17 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 @RequiredArgsConstructor
 public class ProductServiceImpl implements ProductService {
 
+    // Repository 의존성 (6개)
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final OptionGroupRepository optionGroupRepository;
     private final OptionValueRepository optionValueRepository;
     private final ProductSKURepository productSKURepository;
     private final SKUValueRepository skuValueRepository;
-    private final OutboxRepository outboxRepository;
-    private final ObjectMapper objectMapper;
-    private final StringRedisTemplate redisTemplate;
-
-    private static final String CACHE_KEY_PREFIX = "productDetails::";
+    
+    // 분리된 서비스 의존성 (2개)
+    private final ProductOutboxService outboxService;
+    private final ProductCacheService cacheService;
 
     @Override
     @Transactional
@@ -130,52 +122,20 @@ public class ProductServiceImpl implements ProductService {
         ProductResponse response = ProductResponse.from(product);
 
         // 4. Outbox 이벤트 생성 (문서당 SKU 하나)
-        // 로컬에 수집된 SKU 사용
         if (!tempSavedSkus.isEmpty()) {
             // 대표 SKU 찾기 로직: 최저가 -> 동일하면 낮은 ID
             ProductSKU primarySku = tempSavedSkus.stream()
                 .min((s1, s2) -> {
                     int priceCompare = s1.getPrice().compareTo(s2.getPrice());
                     if (priceCompare != 0) return priceCompare;
-                    // 아직 flush가 안 되어 ID가 null일 수? 보통 save() 시점에 ID 할당됨. 안전하게 처리.
                     if (s1.getId() == null || s2.getId() == null) return 0; 
                     return s1.getId().compareTo(s2.getId());
                 })
                 .orElse(tempSavedSkus.get(0));
 
             for (ProductSKU sku : tempSavedSkus) {
-                boolean isPrimary = (sku == primarySku); // 같은 리스트 인스턴스를 사용하므로 객체 식별자 비교 안전함
-                
-                ProductEventPayload eventPayload = ProductEventPayload.builder()
-                        .skuId(sku.getId())
-                        .productId(product.getId())
-                        .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
-                        .productName(product.getName())
-                        .skuCode(sku.getSkuCode())
-                        // [Fix] 옵션명 생성 (예: "Color: Red, Size: L")
-                        .optionName(sku.generateOptionName()) 
-                        .price(sku.getPrice())
-                        .stockQuantity(sku.getStockQuantity())
-                        .isPrimarySku(isPrimary)
-                        .status(product.getStatus().name())
-                        .imageUrl(product.getImageUrl())
-                        .createdAt(product.getCreatedAt())
-                        .updatedAt(product.getUpdatedAt())
-                        .build();
-
-                try {
-                    String payload = objectMapper.writeValueAsString(eventPayload);
-                    Outbox outbox = Outbox.builder()
-                            .aggregateType("PRODUCT_SKU")
-                            .aggregateId(String.valueOf(sku.getId()))
-                            .eventType("SKU_UPDATED")
-                            .payload(payload)
-                            .build();
-                    outboxRepository.save(outbox);
-                } catch (JsonProcessingException e) {
-                    log.error("SKU 이벤트 페이로드 직렬화 실패", e);
-                    throw new RuntimeException("Outbox 이벤트 생성 실패", e);
-                }
+                boolean isPrimary = (sku == primarySku);
+                outboxService.publishSkuEvent(product, sku, isPrimary);
             }
         }
         
@@ -215,14 +175,13 @@ public class ProductServiceImpl implements ProductService {
             for (SkuUpdateDto skuDto : request.getSkus()) {
                if (skuDto.getId() == null) continue;
                
-               // 단순 리스트에서 매칭되는 SKU 찾기 (일반적으로 SKU 수가 적으므로 O(N) 허용)
+               // 단순 리스트에서 매칭되는 SKU 찾기
                product.getSkus().stream()
                    .filter(sku -> sku.getId().equals(skuDto.getId()))
                    .findFirst()
                    .ifPresent(sku -> {
                        if (skuDto.getPrice() != null) sku.updatePrice(skuDto.getPrice());
                        if (skuDto.getStockQuantity() != null) sku.updateStock(skuDto.getStockQuantity());
-                       // skuCode 변경은 드물지만 가능함
                    });
             }
         }
@@ -230,40 +189,12 @@ public class ProductServiceImpl implements ProductService {
         // Elasticsearch 동기화를 위해 모든 SKU에 대한 Outbox 이벤트 발행
         if (!product.getSkus().isEmpty()) {
             for (ProductSKU sku : product.getSkus()) {
-                ProductEventPayload eventPayload = ProductEventPayload.builder()
-                        .skuId(sku.getId())
-                        .productId(product.getId())
-                        .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
-                        .productName(product.getName())
-                        .skuCode(sku.getSkuCode())
-                        .optionName(sku.generateOptionName())
-                        .price(sku.getPrice())
-                        .stockQuantity(sku.getStockQuantity())
-                        .isPrimarySku(false) // Simplified for bulk update
-                        .status(product.getStatus().name())
-                        .imageUrl(product.getImageUrl())
-                        .createdAt(product.getCreatedAt())
-                        .updatedAt(product.getUpdatedAt())
-                        .build();
-
-                try {
-                    String payload = objectMapper.writeValueAsString(eventPayload);
-                    Outbox outbox = Outbox.builder()
-                            .aggregateType("PRODUCT_SKU")
-                            .aggregateId(String.valueOf(sku.getId()))
-                            .eventType("SKU_UPDATED")
-                            .payload(payload)
-                            .build();
-                    outboxRepository.save(outbox);
-                } catch (JsonProcessingException e) {
-                    log.error("Failed to create outbox event for sku update", e);
-                }
+                outboxService.publishSkuEvent(product, sku, false);
             }
         }
         
-        
-        // Cache Eviction for Detail Page
-        evictProductCache(productId);
+        // Cache 무효화
+        cacheService.evictProductCache(productId);
 
         return ProductResponse.from(product);
     }
@@ -274,8 +205,8 @@ public class ProductServiceImpl implements ProductService {
         ProductSKU sku = productSKURepository.findById(skuId)
                 .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
         sku.decreaseStock(quantity);
-        publishSkuUpdateEvent(sku);
-        evictProductCache(sku.getProduct().getId());
+        outboxService.publishSkuEvent(sku.getProduct(), sku, false);
+        cacheService.evictProductCache(sku.getProduct().getId());
     }
 
     @Override
@@ -286,50 +217,30 @@ public class ProductServiceImpl implements ProductService {
         
         sku.increaseStock(quantity);
         productSKURepository.save(sku);
-        publishSkuUpdateEvent(sku);
-        // 캐시 무효화 (상세 페이지 갱신)
-        evictProductCache(sku.getProduct().getId());
-    }
-    private void publishSkuUpdateEvent(ProductSKU sku) {
-        Product product = sku.getProduct();
-        ProductEventPayload eventPayload = ProductEventPayload.builder()
-                .skuId(sku.getId())
-                .productId(product.getId())
-                .categoryId(product.getCategory() != null ? product.getCategory().getId() : null)
-                .productName(product.getName())
-                .skuCode(sku.getSkuCode())
-                .optionName(sku.generateOptionName())
-                .price(sku.getPrice())
-                .stockQuantity(sku.getStockQuantity())
-                .isPrimarySku(false) // Stock update doesn't determine primary
-                .status(product.getStatus().name())
-                .imageUrl(product.getImageUrl())
-                .createdAt(product.getCreatedAt())
-                .updatedAt(LocalDateTime.now())
-                .build();
-
-        try {
-            String payload = objectMapper.writeValueAsString(eventPayload);
-            Outbox outbox = Outbox.builder()
-                    .aggregateType("PRODUCT_SKU")
-                    .aggregateId(String.valueOf(sku.getId()))
-                    .eventType("SKU_UPDATED")
-                    .payload(payload)
-                    .build();
-            outboxRepository.save(outbox);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to create outbox event for stock update", e);
-        }
+        outboxService.publishSkuEvent(sku.getProduct(), sku, false);
+        cacheService.evictProductCache(sku.getProduct().getId());
     }
 
-
-    private void evictProductCache(Long productId) {
-        try {
-            String cacheKey = CACHE_KEY_PREFIX + productId;
-            redisTemplate.delete(cacheKey);
-            log.info(">>> [CACHE EVICT] Stock Changed -> ProductId: {}", productId);
-        } catch (Exception e) {
-            log.error("Failed to evict cache for productId: {}", productId, e);
+    @Override
+    @Transactional
+    public void deleteProduct(Long productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new IllegalArgumentException("Product not found: " + productId));
+        
+        // SKU 삭제 이벤트 발행 (ES에서 제거하기 위함)
+        for (ProductSKU sku : product.getSkus()) {
+            outboxService.publishSkuDeleteEvent(sku.getId());
+            // SKUValue를 먼저 명시적으로 삭제 (OptionValue 참조 해제)
+            skuValueRepository.deleteAll(sku.getSkuValues());
+            sku.getSkuValues().clear();
         }
+        
+        // 상품 삭제 (CASCADE로 SKU, OptionGroup 등 함께 삭제)
+        productRepository.delete(product);
+        
+        // 캐시 무효화
+        cacheService.evictProductCache(productId);
+        
+        log.info(">>> [PRODUCT] 상품 삭제 완료: productId={}", productId);
     }
 }

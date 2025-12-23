@@ -11,4 +11,5 @@ public interface ProductService {
     ProductResponse updateProduct(Long productId, com.pawbridge.storeservice.domain.product.dto.ProductUpdateRequest request);
     void decreaseStock(Long skuId, int quantity);
     void increaseStock(Long skuId, int quantity);
+    void deleteProduct(Long productId);
 }
