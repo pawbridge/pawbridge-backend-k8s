@@ -9,6 +9,9 @@ import com.pawbridge.animalservice.dto.response.AnimalResponse;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.enums.Species;
+import com.pawbridge.animalservice.exception.AnimalNotFoundException;
+import com.pawbridge.animalservice.mapper.AnimalMapper;
+import com.pawbridge.animalservice.repository.AnimalRepository;
 import com.pawbridge.animalservice.service.AnimalCommandService;
 import com.pawbridge.animalservice.service.AnimalElasticsearchService;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +31,8 @@ import java.util.List;
  *
  * <전략>
  * - Command (쓰기): MySQL (AnimalCommandService)
- * - Query (읽기): Elasticsearch (AnimalElasticsearchService) - Elasticsearch 올인 전략
+ * - Query (읽기): Elasticsearch (AnimalElasticsearchService) - 목록/검색
+ * - 상세 조회: MySQL (성능보다 데이터 정합성 우선)
  */
 @Service
 @RequiredArgsConstructor
@@ -40,6 +44,8 @@ public class AnimalFacade {
 
     private final AnimalCommandService commandService;              // Command: MySQL (CUD)
     private final AnimalElasticsearchService elasticsearchService;  // Query: Elasticsearch (R)
+    private final AnimalRepository animalRepository;                // 상세 조회용 (MySQL)
+    private final AnimalMapper animalMapper;                        // Entity → DTO 변환
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Command (쓰기 - MySQL)
@@ -115,11 +121,15 @@ public class AnimalFacade {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     /**
-     * ID로 동물 상세 조회 (Elasticsearch)
+     * ID로 동물 상세 조회 (MySQL)
+     * - 상세 조회는 데이터 정합성을 위해 MySQL 사용
+     * - Shelter 정보 fetch join으로 N+1 방지
      */
     @Transactional(readOnly = true)
     public AnimalDetailResponse findById(Long id) {
-        return elasticsearchService.findById(id);
+        Animal animal = animalRepository.findWithShelterById(id)
+                .orElseThrow(AnimalNotFoundException::new);
+        return animalMapper.toDetailResponse(animal);
     }
 
     /**
