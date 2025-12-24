@@ -2,6 +2,7 @@ package com.pawbridge.userservice.controller;
 
 import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
 import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
+import com.pawbridge.userservice.dto.response.SignupPeriodsResponse;
 import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
 import com.pawbridge.userservice.entity.Role;
 import com.pawbridge.userservice.service.UserService;
@@ -140,6 +141,22 @@ public class AdminController {
 
         Long count = userService.getTotalUserCount();
         ResponseDTO<Long> response = ResponseDTO.okWithData(count);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 기간별 가입자 수 통계 (관리자용)
+     * - GET /api/v1/admin/stats/signup-periods
+     * - 오늘, 최근 7일, 최근 30일, 이번 달의 일별 가입자 수를 한번에 반환
+     */
+    @GetMapping("/stats/signup-periods")
+    public ResponseEntity<ResponseDTO<SignupPeriodsResponse>> getSignupPeriods() {
+
+        SignupPeriodsResponse stats = userService.getSignupPeriods();
+        ResponseDTO<SignupPeriodsResponse> response = ResponseDTO.okWithData(stats);
 
         return ResponseEntity
                 .status(response.getCode())

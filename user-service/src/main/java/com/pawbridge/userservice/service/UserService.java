@@ -6,6 +6,7 @@ import com.pawbridge.userservice.dto.request.SignUpRequestDto;
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
 import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
 import com.pawbridge.userservice.dto.response.SignUpResponseDto;
+import com.pawbridge.userservice.dto.response.SignupPeriodsResponse;
 import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
 import com.pawbridge.userservice.entity.Role;
 import org.springframework.data.domain.Page;
@@ -71,5 +72,12 @@ public interface UserService {
      * @return 검색된 회원 목록
      */
     Page<UserInfoResponseDto> searchUsers(String keyword, Role role, Pageable pageable);
+
+    /**
+     * 기간별 가입자 수 통계 (관리자용)
+     * - 오늘, 최근 7일, 최근 30일, 이번 달의 일별 가입자 수를 한번에 반환
+     * @return 기간별 일별 가입자 수
+     */
+    SignupPeriodsResponse getSignupPeriods();
 
 }
