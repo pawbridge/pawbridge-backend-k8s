@@ -10,6 +10,11 @@ import lombok.NoArgsConstructor;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 옵션 그룹 (표준화된 마스터 테이블)
+ * - 상품과 독립적으로 미리 등록
+ * - 예: Color, Size, Material
+ */
 @Entity
 @Getter
 @Table(name = "option_groups")
@@ -20,19 +25,19 @@ public class OptionGroup extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
-
-    @Column(nullable = false, length = 50)
+    @Column(nullable = false, length = 50, unique = true)
     private String name; // e.g., Color, Size
 
     @OneToMany(mappedBy = "optionGroup", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OptionValue> optionValues = new ArrayList<>();
 
     @Builder
-    public OptionGroup(Product product, String name) {
-        this.product = product;
+    public OptionGroup(String name) {
+        this.name = name;
+    }
+
+    public void updateName(String name) {
         this.name = name;
     }
 }
+

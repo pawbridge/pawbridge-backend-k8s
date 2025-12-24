@@ -44,13 +44,13 @@ public class Product extends BaseEntity {
     @JoinColumn(name = "category_id")
     private Category category;
 
-    @Builder.Default
-    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<OptionGroup> optionGroups = new ArrayList<>();
+    // OptionGroup은 이제 독립 테이블이므로 직접 연관관계 제거
+    // SKU를 통해 OptionValue와 연결됨
 
     @Builder.Default
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ProductSKU> skus = new ArrayList<>();
+
     public void updateName(String name) {
         this.name = name;
     }
