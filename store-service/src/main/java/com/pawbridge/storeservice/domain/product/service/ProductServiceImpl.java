@@ -15,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.pawbridge.storeservice.domain.product.dto.ProductDetailResponse;
 
 import java.util.List;
-import java.util.Map;
 
 
 @Slf4j
@@ -29,8 +28,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductSKURepository productSKURepository;
     private final CartItemRepository cartItemRepository;
     
-    // 분리된 서비스 의존성 (4개)
-    private final ProductOptionService optionService;
+    // 분리된 서비스 의존성 (3개 - optionService 제거)
     private final ProductSKUService skuService;
     private final ProductOutboxService outboxService;
     private final ProductCacheService cacheService;
@@ -54,17 +52,12 @@ public class ProductServiceImpl implements ProductService {
 
         product = productRepository.save(product);
 
-        // 2. 옵션 그룹 및 옵션 값 저장 (위임)
-        Map<String, OptionValue> optionValueMap = optionService.createOptions(
-                product, request.getOptionGroups());
-
-        // 3. SKU 저장 및 옵션 값과 연결 (위임)
-        List<ProductSKU> savedSkus = skuService.createSkus(
-                product, request.getSkus(), optionValueMap);
+        // 2. SKU 저장 및 옵션 값과 연결 (ID 기반)
+        List<ProductSKU> savedSkus = skuService.createSkus(product, request.getSkus());
 
         ProductResponse response = ProductResponse.from(product);
 
-        // 4. Outbox 이벤트 생성
+        // 3. Outbox 이벤트 생성
         if (!savedSkus.isEmpty()) {
             ProductSKU primarySku = skuService.findPrimarySku(savedSkus);
             for (ProductSKU sku : savedSkus) {
@@ -73,8 +66,11 @@ public class ProductServiceImpl implements ProductService {
             }
         }
         
+        log.info(">>> [PRODUCT] 상품 등록 완료: productId={}, name={}", product.getId(), product.getName());
+        
         return response;
     }
+
 
     @Override
     @Transactional(readOnly = true)
@@ -172,7 +168,7 @@ public class ProductServiceImpl implements ProductService {
             skuService.deleteSkuValues(sku);
         }
         
-        // 상품 삭제 (CASCADE로 SKU, OptionGroup 등 함께 삭제)
+        // 상품 삭제 (CASCADE로 SKU 함께 삭제)
         productRepository.delete(product);
         
         // 캐시 무효화

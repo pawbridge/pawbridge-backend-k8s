@@ -29,4 +29,9 @@ public class OptionValue extends BaseEntity {
         this.optionGroup = optionGroup;
         this.name = name;
     }
+
+    public void updateName(String name) {
+        this.name = name;
+    }
 }
+

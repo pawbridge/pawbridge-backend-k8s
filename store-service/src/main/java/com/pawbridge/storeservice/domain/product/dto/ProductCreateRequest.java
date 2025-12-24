@@ -4,8 +4,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.util.List;
-import java.util.Map;
 
+/**
+ * 상품 생성 요청 DTO (표준화 버전)
+ */
 @Getter
 @NoArgsConstructor
 public class ProductCreateRequest {
@@ -13,6 +15,7 @@ public class ProductCreateRequest {
     private String description;
     private String imageUrl;
     private Long categoryId;
-    private List<OptionGroupCreateDto> optionGroups;
+    
+    // SKU 목록 (옵션 값 ID로 조합)
     private List<SkuCreateDto> skus;
 }
