@@ -288,4 +288,15 @@ public class UserServiceImpl implements UserService {
 
         return stats;
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Long getTotalUserCount() {
+        log.info("전체 회원 수 조회");
+
+        Long count = userRepository.count();
+        log.info("전체 회원 수: {}", count);
+
+        return count;
+    }
 }

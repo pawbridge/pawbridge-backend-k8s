@@ -57,4 +57,9 @@ public interface UserService {
      */
     List<DailySignupStatsResponse> getDailySignupStats(LocalDate startDate, LocalDate endDate);
 
+    /**
+     * 전체 회원 수 조회
+     */
+    Long getTotalUserCount();
+
 }

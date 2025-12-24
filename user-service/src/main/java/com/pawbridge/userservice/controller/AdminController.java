@@ -109,4 +109,19 @@ public class AdminController {
                 .status(response.getCode())
                 .body(response);
     }
+
+    /**
+     * 전체 회원 수 조회
+     * - GET /api/v1/admin/stats/total-users
+     */
+    @GetMapping("/stats/total-users")
+    public ResponseEntity<ResponseDTO<Long>> getTotalUserCount() {
+
+        Long count = userService.getTotalUserCount();
+        ResponseDTO<Long> response = ResponseDTO.okWithData(count);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
 }
