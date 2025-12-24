@@ -11,8 +11,8 @@ import java.util.Optional;
  */
 public interface CommentRepository extends JpaRepository<Comment, Long> {
 
-    // 특정 게시글의 댓글 목록 조회 (삭제되지 않은 것만)
-    List<Comment> findByPostIdAndDeletedAtIsNullOrderByCreatedAtAsc(Long postId);
+    // 특정 게시글의 댓글 목록 조회 (삭제되지 않은 것만, 최신순)
+    List<Comment> findByPostIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long postId);
 
     // commentId로 조회 (삭제되지 않은 것만)
     Optional<Comment> findByCommentIdAndDeletedAtIsNull(Long commentId);

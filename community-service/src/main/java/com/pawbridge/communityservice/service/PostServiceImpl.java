@@ -204,7 +204,7 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional(readOnly = true)
     public List<PostResponse> getAllPosts() {
-        return postRepository.findByDeletedAtIsNull().stream()
+        return postRepository.findByDeletedAtIsNullOrderByCreatedAtDesc().stream()
                 .map(post -> {
                     String authorNickname = getUserNickname(post.getAuthorId());
                     return PostResponse.fromEntity(post, authorNickname);

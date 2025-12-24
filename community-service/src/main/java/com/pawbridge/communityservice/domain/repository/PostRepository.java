@@ -13,8 +13,8 @@ import java.util.Optional;
  */
 public interface PostRepository extends JpaRepository<Post, Long> {
 
-    // Soft delete되지 않은 게시글만 조회
-    List<Post> findByDeletedAtIsNull();
+    // Soft delete되지 않은 게시글만 조회 (최신순)
+    List<Post> findByDeletedAtIsNullOrderByCreatedAtDesc();
 
     // Soft delete되지 않은 게시글만 조회 (페이징)
     Page<Post> findByDeletedAtIsNull(Pageable pageable);

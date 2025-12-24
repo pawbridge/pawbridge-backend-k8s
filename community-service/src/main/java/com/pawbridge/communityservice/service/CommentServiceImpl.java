@@ -106,7 +106,7 @@ public class CommentServiceImpl implements CommentService {
     @Override
     @Transactional(readOnly = true)
     public List<CommentResponse> getCommentsByPostId(Long postId) {
-        return commentRepository.findByPostIdAndDeletedAtIsNullOrderByCreatedAtAsc(postId).stream()
+        return commentRepository.findByPostIdAndDeletedAtIsNullOrderByCreatedAtDesc(postId).stream()
                 .map(comment -> {
                     String authorNickname = getUserNickname(comment.getAuthorId());
                     return CommentResponse.fromEntity(comment, authorNickname);

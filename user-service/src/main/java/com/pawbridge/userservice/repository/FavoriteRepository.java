@@ -14,9 +14,9 @@ import java.util.Optional;
 public interface FavoriteRepository extends JpaRepository<Favorite, Long> {
 
     /**
-     * 사용자별 찜 목록 조회
+     * 사용자별 찜 목록 조회 (최신순)
      */
-    List<Favorite> findAllByUserUserId(Long userId);
+    List<Favorite> findAllByUserUserIdOrderByCreatedAtDesc(Long userId);
 
     /**
      * 특정 찜 조회
