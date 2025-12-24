@@ -299,4 +299,18 @@ public class UserServiceImpl implements UserService {
 
         return count;
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<UserInfoResponseDto> searchUsers(String keyword, Role role, Pageable pageable) {
+        log.info("회원 검색 (관리자): keyword={}, role={}, page={}, size={}",
+                keyword, role, pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<User> users = userRepository.searchUsers(keyword, role, pageable);
+        Page<UserInfoResponseDto> result = users.map(UserInfoResponseDto::fromEntity);
+
+        log.info("회원 검색 완료: {} 건", result.getTotalElements());
+
+        return result;
+    }
 }

@@ -3,6 +3,7 @@ package com.pawbridge.userservice.controller;
 import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
 import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
 import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
+import com.pawbridge.userservice.entity.Role;
 import com.pawbridge.userservice.service.UserService;
 import com.pawbridge.userservice.util.ResponseDTO;
 import jakarta.validation.Valid;
@@ -39,6 +40,26 @@ public class AdminController {
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
 
         Page<UserInfoResponseDto> users = userService.getAllUsers(pageable);
+        ResponseDTO<Page<UserInfoResponseDto>> response = ResponseDTO.okWithData(users);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 회원 검색 (관리자용)
+     * - GET /api/v1/admin/users/search?keyword=검색어&role=ROLE_USER
+     * - keyword: 이메일, 이름, 닉네임으로 검색 (선택)
+     * - role: 역할로 필터링 (선택)
+     */
+    @GetMapping("/users/search")
+    public ResponseEntity<ResponseDTO<Page<UserInfoResponseDto>>> searchUsers(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Role role,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+
+        Page<UserInfoResponseDto> users = userService.searchUsers(keyword, role, pageable);
         ResponseDTO<Page<UserInfoResponseDto>> response = ResponseDTO.okWithData(users);
 
         return ResponseEntity

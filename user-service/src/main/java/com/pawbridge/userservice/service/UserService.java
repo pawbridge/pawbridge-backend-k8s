@@ -7,6 +7,7 @@ import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
 import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
 import com.pawbridge.userservice.dto.response.SignUpResponseDto;
 import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
+import com.pawbridge.userservice.entity.Role;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -61,5 +62,14 @@ public interface UserService {
      * 전체 회원 수 조회
      */
     Long getTotalUserCount();
+
+    /**
+     * 회원 검색 (관리자용)
+     * @param keyword 검색 키워드 (이메일, 이름, 닉네임)
+     * @param role 역할 필터 (null이면 전체)
+     * @param pageable 페이징 정보
+     * @return 검색된 회원 목록
+     */
+    Page<UserInfoResponseDto> searchUsers(String keyword, Role role, Pageable pageable);
 
 }
