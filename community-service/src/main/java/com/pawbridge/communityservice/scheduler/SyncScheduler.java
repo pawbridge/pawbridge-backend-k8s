@@ -36,7 +36,7 @@ public class SyncScheduler {
     public void syncPostsToElasticsearch() {
         log.info("🔄 Starting MySQL → Elasticsearch sync");
 
-        List<Post> posts = postRepository.findByDeletedAtIsNull();
+        List<Post> posts = postRepository.findByDeletedAtIsNullOrderByCreatedAtDesc();
         int synced = 0;
 
         for (Post post : posts) {

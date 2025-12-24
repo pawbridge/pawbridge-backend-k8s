@@ -123,8 +123,8 @@ public class FavoriteServiceImpl implements FavoriteService {
             throw new UserNotFoundException();
         }
 
-        // 2. 사용자의 Favorite 목록 조회
-        List<Favorite> favorites = favoriteRepository.findAllByUserUserId(userId);
+        // 2. 사용자의 Favorite 목록 조회 (최신순)
+        List<Favorite> favorites = favoriteRepository.findAllByUserUserIdOrderByCreatedAtDesc(userId);
 
         if (favorites.isEmpty()) {
             return FavoriteListResponseDto.of(userId, new ArrayList<>());

@@ -64,12 +64,14 @@ public class AdminPostController {
 
     /**
      * 관리자 - 게시글 수정 (작성자 체크 없음)
+     * - title, content, files 모두 선택적
+     * - null이 아닌 필드만 업데이트됨
      */
     @PutMapping(value = "/{postId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ResponseDTO<PostResponse>> updatePostByAdmin(
             @PathVariable Long postId,
-            @RequestParam("title") String title,
-            @RequestParam("content") String content,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "content", required = false) String content,
             @RequestPart(value = "files", required = false) MultipartFile[] files) {
 
         log.info("관리자 - 게시글 수정: postId={}", postId);

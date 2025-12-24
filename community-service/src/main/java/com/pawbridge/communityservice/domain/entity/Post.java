@@ -57,9 +57,15 @@ public class Post {
     private LocalDateTime updatedAt;
 
     public void update(String title, String content, List<String> imageUrls) {
-        this.title = title;
-        this.content = content;
-        this.imageUrls = imageUrls != null ? imageUrls : new ArrayList<>();
+        if (title != null) {
+            this.title = title;
+        }
+        if (content != null) {
+            this.content = content;
+        }
+        if (imageUrls != null) {
+            this.imageUrls = imageUrls;
+        }
     }
 
     public void delete() {

@@ -87,9 +87,9 @@ public class PostServiceImpl implements PostService {
      * 게시글 수정
      *
      * 동작 흐름:
-     * 1. 기존 미디어 파일을 S3에서 삭제
-     * 2. 새로운 미디어 파일을 S3에 업로드
-     * 3. Post 엔티티 수정
+     * 1. 새로운 이미지가 있으면 기존 이미지를 S3에서 삭제
+     * 2. 새로운 이미지를 S3에 업로드
+     * 3. Post 엔티티 수정 (null이 아닌 필드만)
      * 4. Outbox 이벤트 저장
      */
     @Override
@@ -103,16 +103,20 @@ public class PostServiceImpl implements PostService {
             throw new UnauthorizedPostAccessException();
         }
 
-        // 기존 미디어 파일 삭제
-        List<String> oldImageUrls = post.getImageUrls();
-        if (oldImageUrls != null && !oldImageUrls.isEmpty()) {
-            oldImageUrls.forEach(s3Service::deleteFile);
+        // 이미지 처리: null이 아니고 빈 배열이 아닐 때만 처리
+        List<String> newImageUrls = null;
+        if (images != null && images.length > 0) {
+            // 기존 미디어 파일 삭제
+            List<String> oldImageUrls = post.getImageUrls();
+            if (oldImageUrls != null && !oldImageUrls.isEmpty()) {
+                oldImageUrls.forEach(s3Service::deleteFile);
+            }
+
+            // 새로운 미디어 파일 업로드
+            newImageUrls = s3Service.uploadImages(images);
         }
 
-        // 새로운 미디어 파일 업로드 (이미지 + 영상)
-        List<String> newImageUrls = s3Service.uploadImages(images);
-
-        // 수정
+        // 수정 (null이 아닌 필드만 업데이트)
         post.update(request.title(), request.content(), newImageUrls);
         Post updated = postRepository.save(post);
 
@@ -133,7 +137,7 @@ public class PostServiceImpl implements PostService {
                 payload
         );
 
-        log.info("✅ Post updated: postId={}, imageCount={}", postId, newImageUrls.size());
+        log.info("✅ Post updated: postId={}, imageUpdated={}", postId, newImageUrls != null);
 
         String authorNickname = getUserNickname(authorId);
         return PostResponse.fromEntity(updated, authorNickname);
@@ -200,7 +204,7 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional(readOnly = true)
     public List<PostResponse> getAllPosts() {
-        return postRepository.findByDeletedAtIsNull().stream()
+        return postRepository.findByDeletedAtIsNullOrderByCreatedAtDesc().stream()
                 .map(post -> {
                     String authorNickname = getUserNickname(post.getAuthorId());
                     return PostResponse.fromEntity(post, authorNickname);
@@ -250,24 +254,30 @@ public class PostServiceImpl implements PostService {
         Post post = postRepository.findByPostIdAndDeletedAtIsNull(postId)
                 .orElseThrow(PostNotFoundException::new);
 
-        // 2. 기존 미디어 파일 삭제 (S3)
-        if (post.getImageUrls() != null && !post.getImageUrls().isEmpty()) {
-            post.getImageUrls().forEach(s3Service::deleteFile);
+        // 2. 이미지 처리: null이 아니고 빈 배열이 아닐 때만 처리
+        List<String> newImageUrls = null;
+        if (files != null && files.length > 0) {
+            // 기존 미디어 파일 삭제 (S3)
+            if (post.getImageUrls() != null && !post.getImageUrls().isEmpty()) {
+                post.getImageUrls().forEach(s3Service::deleteFile);
+            }
+
+            // 새 미디어 파일 업로드
+            newImageUrls = s3Service.uploadImages(files);
         }
 
-        // 3. 새 미디어 파일 업로드
-        List<String> newImageUrls = s3Service.uploadImages(files);
-
-        // 4. Post 수정
+        // 3. Post 수정 (null이 아닌 필드만)
         post.update(request.title(), request.content(), newImageUrls);
         Post updatedPost = postRepository.save(post);
 
-        // 5. Outbox 이벤트 저장
+        // 4. Outbox 이벤트 저장
         Map<String, Object> payload = Map.of(
-                "postId", postId,
-                "title", request.title(),
-                "content", request.content(),
-                "imageUrls", newImageUrls
+                "postId", updatedPost.getPostId(),
+                "authorId", updatedPost.getAuthorId(),
+                "title", updatedPost.getTitle(),
+                "content", updatedPost.getContent(),
+                "boardType", updatedPost.getBoardType().name(),
+                "imageUrls", updatedPost.getImageUrls()
         );
 
         outboxService.saveEvent(
@@ -278,7 +288,7 @@ public class PostServiceImpl implements PostService {
         );
 
         String authorNickname = getUserNickname(post.getAuthorId());
-        log.info("✅ Post updated by admin: postId={}", postId);
+        log.info("✅ Post updated by admin: postId={}, imageUpdated={}", postId, newImageUrls != null);
 
         return PostResponse.fromEntity(updatedPost, authorNickname);
     }

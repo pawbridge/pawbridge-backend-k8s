@@ -54,15 +54,16 @@ public class PostController {
     /**
      * 게시글 수정
      * - multipart/form-data로 개별 필드 + 미디어 파일 받음
-     * - title: 게시글 제목
-     * - content: 게시글 내용
-     * - files: 새로 업로드할 미디어 파일 배열 (이미지 + 영상, 선택, 기존 파일은 모두 삭제됨)
+     * - title: 게시글 제목 (선택)
+     * - content: 게시글 내용 (선택)
+     * - files: 새로 업로드할 미디어 파일 배열 (선택, 제공 시 기존 파일은 모두 삭제됨)
+     * - null이 아닌 필드만 업데이트됨
      */
     @PutMapping(value = "/{postId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ResponseDTO<PostResponse>> updatePost(
             @PathVariable Long postId,
-            @RequestParam("title") String title,
-            @RequestParam("content") String content,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "content", required = false) String content,
             @RequestPart(value = "files", required = false) MultipartFile[] files,
             @RequestHeader("X-User-Id") Long userId) {
 
