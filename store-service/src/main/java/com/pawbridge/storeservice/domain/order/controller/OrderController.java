@@ -3,8 +3,12 @@ package com.pawbridge.storeservice.domain.order.controller;
 import com.pawbridge.storeservice.domain.order.dto.DirectOrderCreateRequest;
 import com.pawbridge.storeservice.domain.order.dto.OrderCreateRequest;
 import com.pawbridge.storeservice.domain.order.dto.OrderResponse;
+import com.pawbridge.storeservice.domain.order.entity.OrderStatus;
 import com.pawbridge.storeservice.domain.order.service.OrderService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -38,9 +42,26 @@ public class OrderController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * 주문 상세 조회 (본인 주문만)
+     */
     @GetMapping("/{orderId}")
-    public ResponseEntity<OrderResponse> getOrder(@PathVariable Long orderId) {
-        OrderResponse response = orderService.getOrder(orderId);
+    public ResponseEntity<OrderResponse> getOrder(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long orderId) {
+        OrderResponse response = orderService.getOrder(orderId, userId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 내 주문 내역 조회 (페이징)
+     */
+    @GetMapping
+    public ResponseEntity<Page<OrderResponse>> getMyOrders(
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestParam(required = false) OrderStatus status,
+            @PageableDefault(size = 10) Pageable pageable) {
+        Page<OrderResponse> response = orderService.getOrdersByUserId(userId, status, pageable);
         return ResponseEntity.ok(response);
     }
 
@@ -50,3 +71,4 @@ public class OrderController {
         return ResponseEntity.ok().build();
     }
 }
+

@@ -7,6 +7,7 @@ import com.pawbridge.storeservice.domain.order.dto.OrderCreateRequest;
 import com.pawbridge.storeservice.domain.order.dto.OrderResponse;
 import com.pawbridge.storeservice.domain.order.entity.Order;
 import com.pawbridge.storeservice.domain.order.entity.OrderItem;
+import com.pawbridge.storeservice.domain.order.entity.OrderStatus;
 import com.pawbridge.storeservice.domain.order.repository.OrderRepository;
 import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
 import com.pawbridge.storeservice.domain.product.repository.ProductSKURepository;
@@ -19,6 +20,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -214,11 +217,30 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
-     public OrderResponse getOrder(Long orderId) {
+    public OrderResponse getOrder(Long orderId, Long userId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
+        
+        // 본인 주문인지 검증
+        if (!order.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("해당 주문에 대한 접근 권한이 없습니다.");
+        }
+        
         return OrderResponse.from(order);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> getOrdersByUserId(Long userId, OrderStatus status, Pageable pageable) {
+        Page<Order> orders;
+        if (status != null) {
+            orders = orderRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status, pageable);
+        } else {
+            orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
+        }
+        return orders.map(OrderResponse::from);
+    }
+
     @Override
     @Transactional
     public void processPayment(Long orderId) {
