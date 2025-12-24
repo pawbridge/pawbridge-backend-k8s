@@ -28,4 +28,10 @@ public class CategoryController {
         List<CategoryResponse> responses = categoryService.getAllCategories();
         return ResponseEntity.ok(responses);
     }
+
+    @DeleteMapping("/{categoryId}")
+    public ResponseEntity<Void> deleteCategory(@PathVariable Long categoryId) {
+        categoryService.deleteCategory(categoryId);
+        return ResponseEntity.noContent().build();
+    }
 }

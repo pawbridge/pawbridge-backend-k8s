@@ -48,4 +48,17 @@ public class CategoryService {
                 .map(CategoryResponse::from)
                 .collect(Collectors.toList());
     }
+
+    @Transactional
+    public void deleteCategory(Long categoryId) {
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new IllegalArgumentException("Category not found: " + categoryId));
+        
+        // 하위 카테고리가 있는지 확인
+        if (!category.getChildren().isEmpty()) {
+            throw new IllegalStateException("하위 카테고리가 있어 삭제할 수 없습니다.");
+        }
+        
+        categoryRepository.delete(category);
+    }
 }
