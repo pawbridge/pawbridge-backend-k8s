@@ -28,6 +28,7 @@ public class CategoryService {
 
         Category category = Category.builder()
                 .name(request.getName())
+                .description(request.getDescription())
                 .parent(parent)
                 .build();
         
@@ -90,7 +91,7 @@ public class CategoryService {
             }
         }
 
-        category.update(request.getName(), newParent);
+        category.update(request.getName(), request.getDescription(), newParent);
         return CategoryResponse.from(category);
     }
 
