@@ -7,5 +7,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class CategoryCreateRequest {
     private String name;
+    private String description;
     private Long parentId; // 선택 사항 (없으면 루트)
 }

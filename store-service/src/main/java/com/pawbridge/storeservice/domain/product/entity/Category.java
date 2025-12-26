@@ -23,6 +23,9 @@ public class Category extends BaseEntity {
     @Column(nullable = false, unique = true)
     private String name;
 
+    @Column(length = 500)
+    private String description;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
     private Category parent;
@@ -31,12 +34,11 @@ public class Category extends BaseEntity {
     private List<Category> children = new ArrayList<>();
 
     @Builder
-    public Category(String name, Category parent) {
+    public Category(String name, String description, Category parent) {
         this.name = name;
+        this.description = description;
         if (parent != null) {
             this.parent = parent;
-            // Convenience method for bi-directional relationship if needed, 
-            // but for simplicity in MVP we just set parent.
         }
     }
 
@@ -45,10 +47,11 @@ public class Category extends BaseEntity {
      * @param name 새로운 카테고리명
      * @param parent 새로운 부모 카테고리 (null이면 루트 카테고리)
      */
-    public void update(String name, Category parent) {
+    public void update(String name, String description, Category parent) {
         if (name != null && !name.isBlank()) {
             this.name = name;
         }
+        this.description = description;
         this.parent = parent;
     }
 }
