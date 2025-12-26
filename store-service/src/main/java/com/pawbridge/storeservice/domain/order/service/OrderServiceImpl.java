@@ -10,6 +10,7 @@ import com.pawbridge.storeservice.domain.order.entity.OrderItem;
 import com.pawbridge.storeservice.domain.order.entity.OrderStatus;
 import com.pawbridge.storeservice.domain.order.repository.OrderRepository;
 import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
+import com.pawbridge.storeservice.domain.product.entity.ProductStatus;
 import com.pawbridge.storeservice.domain.product.repository.ProductSKURepository;
 import com.pawbridge.storeservice.domain.product.service.ProductService;
 import com.pawbridge.storeservice.common.entity.Outbox;
@@ -78,6 +79,14 @@ public class OrderServiceImpl implements OrderService {
                 boolean available = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
                 if (!available) {
                     throw new RuntimeException("System is busy. Please try again later. (Lock acquire failed for SKU " + item.getSkuId() + ")");
+                }
+
+                // 상품 상태 검증 (ACTIVE 상태만 주문 가능)
+                ProductSKU sku = productSKURepository.findById(item.getSkuId())
+                        .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + item.getSkuId()));
+                ProductStatus productStatus = sku.getProduct().getStatus();
+                if (productStatus != ProductStatus.ACTIVE) {
+                    throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + productStatus + ", SKU ID: " + item.getSkuId());
                 }
 
                 // Deduct Stock
@@ -173,6 +182,12 @@ public class OrderServiceImpl implements OrderService {
         // 2. Fetch Product Info for Snapshot
         ProductSKU sku = productSKURepository.findById(skuId)
                 .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
+        
+        // 상품 상태 검증 (ACTIVE 상태만 주문 가능)
+        ProductStatus productStatus = sku.getProduct().getStatus();
+        if (productStatus != ProductStatus.ACTIVE) {
+            throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + productStatus + ", SKU ID: " + skuId);
+        }
         
         long totalAmount = sku.getPrice() * quantity;
 
