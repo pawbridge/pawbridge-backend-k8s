@@ -39,4 +39,16 @@ public class Category extends BaseEntity {
             // but for simplicity in MVP we just set parent.
         }
     }
+
+    /**
+     * 카테고리 정보 수정
+     * @param name 새로운 카테고리명
+     * @param parent 새로운 부모 카테고리 (null이면 루트 카테고리)
+     */
+    public void update(String name, Category parent) {
+        if (name != null && !name.isBlank()) {
+            this.name = name;
+        }
+        this.parent = parent;
+    }
 }

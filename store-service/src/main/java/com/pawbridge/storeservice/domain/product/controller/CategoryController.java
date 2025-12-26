@@ -1,6 +1,7 @@
 package com.pawbridge.storeservice.domain.product.controller;
 
 import com.pawbridge.storeservice.domain.product.dto.CategoryCreateRequest;
+import com.pawbridge.storeservice.domain.product.dto.CategoryUpdateRequest;
 import com.pawbridge.storeservice.domain.product.dto.CategoryResponse;
 import com.pawbridge.storeservice.domain.product.service.CategoryService;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,17 @@ public class CategoryController {
     public ResponseEntity<List<CategoryResponse>> getAllCategories() {
         List<CategoryResponse> responses = categoryService.getAllCategories();
         return ResponseEntity.ok(responses);
+    }
+
+    /**
+     * 카테고리 수정
+     */
+    @PutMapping("/{categoryId}")
+    public ResponseEntity<CategoryResponse> updateCategory(
+            @PathVariable Long categoryId,
+            @RequestBody CategoryUpdateRequest request) {
+        CategoryResponse response = categoryService.updateCategory(categoryId, request);
+        return ResponseEntity.ok(response);
     }
 
     @DeleteMapping("/{categoryId}")
