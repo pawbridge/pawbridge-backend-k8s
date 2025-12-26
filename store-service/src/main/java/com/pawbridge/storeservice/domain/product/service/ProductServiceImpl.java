@@ -154,6 +154,11 @@ public class ProductServiceImpl implements ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found: " + productId));
         
+        // 이미 삭제된 상품인지 확인
+        if (product.getStatus() == ProductStatus.DELETED) {
+            throw new IllegalStateException("이미 삭제된 상품입니다. 상품 ID: " + productId);
+        }
+        
         // 장바구니에 담긴 상품인지 확인
         List<Long> skuIds = product.getSkus().stream()
                 .map(ProductSKU::getId)
@@ -162,18 +167,17 @@ public class ProductServiceImpl implements ProductService {
             throw new IllegalStateException("장바구니에 담긴 상품은 삭제할 수 없습니다. 상품 ID: " + productId);
         }
         
-        // SKU 삭제 이벤트 발행 및 SKUValue 삭제 (위임)
-        for (ProductSKU sku : product.getSkus()) {
-            outboxService.publishSkuDeleteEvent(sku.getId());
-            skuService.deleteSkuValues(sku);
-        }
+        // 소프트 삭제: status를 DELETED로 변경
+        product.updateStatus(ProductStatus.DELETED);
         
-        // 상품 삭제 (CASCADE로 SKU 함께 삭제)
-        productRepository.delete(product);
+        // Elasticsearch 동기화를 위해 모든 SKU에 대한 Outbox 이벤트 발행
+        for (ProductSKU sku : product.getSkus()) {
+            outboxService.publishSkuEvent(product, sku, false);
+        }
         
         // 캐시 무효화
         cacheService.evictProductCache(productId);
         
-        log.info(">>> [PRODUCT] 상품 삭제 완료: productId={}", productId);
+        log.info(">>> [PRODUCT] 상품 소프트 삭제 완료: productId={}, status=DELETED", productId);
     }
 }
