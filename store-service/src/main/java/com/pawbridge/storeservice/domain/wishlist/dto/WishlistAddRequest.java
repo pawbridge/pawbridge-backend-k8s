@@ -9,5 +9,5 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class WishlistAddRequest {
     private Long userId;
-    private Long productId;
+    private Long skuId;
 }

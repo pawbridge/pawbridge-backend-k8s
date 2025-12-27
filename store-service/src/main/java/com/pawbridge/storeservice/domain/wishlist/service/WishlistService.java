@@ -6,7 +6,7 @@ import com.pawbridge.storeservice.domain.wishlist.dto.WishlistAddResponse;
 public interface WishlistService {
     
     /**
-     * 찜 추가
+     * 찜 추가 (SKU 기반)
      */
     WishlistAddResponse addWishlist(WishlistAddRequest request);
     
@@ -16,7 +16,7 @@ public interface WishlistService {
     void removeWishlist(Long wishlistId);
     
     /**
-     * 찜 삭제 (userId + productId로)
+     * 찜 삭제 (userId + skuId로)
      */
-    void removeWishlistByUserAndProduct(Long userId, Long productId);
+    void removeWishlistByUserAndSku(Long userId, Long skuId);
 }
