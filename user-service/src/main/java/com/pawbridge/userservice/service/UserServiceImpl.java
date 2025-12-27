@@ -1,6 +1,7 @@
 package com.pawbridge.userservice.service;
 
 import com.pawbridge.userservice.client.AnimalServiceClient;
+import com.pawbridge.userservice.dto.response.SignupPeriodsResponse;
 import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
 import com.pawbridge.userservice.dto.request.PasswordUpdateRequestDto;
@@ -23,7 +24,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -287,5 +291,106 @@ public class UserServiceImpl implements UserService {
         log.info("일별 가입자 수 통계 조회 완료: {} 건", stats.size());
 
         return stats;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Long getTotalUserCount() {
+        log.info("전체 회원 수 조회");
+
+        Long count = userRepository.count();
+        log.info("전체 회원 수: {}", count);
+
+        return count;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<UserInfoResponseDto> searchUsers(String keyword, Role role, Pageable pageable) {
+        log.info("회원 검색 (관리자): keyword={}, role={}, page={}, size={}",
+                keyword, role, pageable.getPageNumber(), pageable.getPageSize());
+
+        Page<User> users = userRepository.searchUsers(keyword, role, pageable);
+        Page<UserInfoResponseDto> result = users.map(UserInfoResponseDto::fromEntity);
+
+        log.info("회원 검색 완료: {} 건", result.getTotalElements());
+
+        return result;
+    }
+
+    /**
+     * 빈 날짜 채우기 (count = 0)
+     * - DB에서 가져온 데이터에 누락된 날짜를 채워서 반환
+     * @param startDate 시작 날짜
+     * @param endDate 종료 날짜
+     * @param dbResults DB 조회 결과
+     * @return 빈 날짜가 채워진 결과 (날짜 순서 정렬)
+     */
+    private List<DailySignupStatsResponse> fillMissingDates(
+            LocalDate startDate, LocalDate endDate, List<DailySignupStatsResponse> dbResults) {
+
+        // 1. DB 결과를 Map으로 변환 (날짜 -> 카운트)
+        Map<LocalDate, Long> dateCountMap = dbResults.stream()
+                .collect(Collectors.toMap(
+                        DailySignupStatsResponse::date,
+                        DailySignupStatsResponse::count
+                ));
+
+        // 2. 시작 날짜부터 종료 날짜까지 모든 날짜 생성 (빈 날짜는 count = 0)
+        List<DailySignupStatsResponse> result = new ArrayList<>();
+        LocalDate currentDate = startDate;
+
+        while (!currentDate.isAfter(endDate)) {
+            Long count = dateCountMap.getOrDefault(currentDate, 0L);
+            result.add(new DailySignupStatsResponse(currentDate, count));
+            currentDate = currentDate.plusDays(1);
+        }
+
+        return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public SignupPeriodsResponse getSignupPeriods() {
+        log.info("기간별 가입자 수 통계 조회");
+
+        LocalDate now = LocalDate.now();
+
+        // 1. 오늘 (오늘 하루)
+        LocalDate todayStart = now;
+        LocalDate todayEnd = now;
+
+        // 2. 최근 7일 (오늘 포함 7일)
+        LocalDate last7DaysStart = now.minusDays(6);
+
+        // 3. 최근 30일 (오늘 포함 30일)
+        LocalDate last30DaysStart = now.minusDays(29);
+
+        // 4. 이번 달 (1일 ~ 오늘)
+        LocalDate thisMonthStart = now.withDayOfMonth(1);
+
+        // 4번의 쿼리 실행 (각각 인덱스 활용)
+        List<DailySignupStatsResponse> todayRaw = userRepository.countDailySignups(todayStart, todayEnd);
+        List<DailySignupStatsResponse> last7DaysRaw = userRepository.countDailySignups(last7DaysStart, now);
+        List<DailySignupStatsResponse> last30DaysRaw = userRepository.countDailySignups(last30DaysStart, now);
+        List<DailySignupStatsResponse> thisMonthRaw = userRepository.countDailySignups(thisMonthStart, now);
+
+        // 빈 날짜 채우기 (count = 0)
+        List<DailySignupStatsResponse> today = fillMissingDates(todayStart, todayEnd, todayRaw);
+        List<DailySignupStatsResponse> last7Days = fillMissingDates(last7DaysStart, now, last7DaysRaw);
+        List<DailySignupStatsResponse> last30Days = fillMissingDates(last30DaysStart, now, last30DaysRaw);
+        List<DailySignupStatsResponse> thisMonth = fillMissingDates(thisMonthStart, now, thisMonthRaw);
+
+        SignupPeriodsResponse response = SignupPeriodsResponse.builder()
+                .today(today)
+                .last7Days(last7Days)
+                .last30Days(last30Days)
+                .thisMonth(thisMonth)
+                .build();
+
+        log.info("기간별 가입자 수 통계 조회 완료: 오늘={}, 최근7일={}, 최근30일={}, 이번달={}",
+                today.size(), last7Days.size(), last30Days.size(), thisMonth.size());
+
+        return response;
     }
 }

@@ -100,4 +100,21 @@ public class AdminPostController {
                 .status(response.getCode())
                 .body(response);
     }
+
+    /**
+     * 관리자 - 오늘 작성된 게시글 수 조회
+     * - GET /api/v1/admin/posts/stats/today
+     */
+    @GetMapping("/stats/today")
+    public ResponseEntity<ResponseDTO<Long>> getTodayPostCount() {
+
+        log.info("관리자 - 오늘 작성된 게시글 수 조회");
+
+        Long count = postService.getTodayPostCount();
+        ResponseDTO<Long> response = ResponseDTO.okWithData(count);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
 }

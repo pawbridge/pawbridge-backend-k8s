@@ -40,4 +40,9 @@ public interface PostService {
      * 게시글 삭제 (관리자용 - 작성자 체크 없음)
      */
     void deletePostByAdmin(Long postId);
+
+    /**
+     * 오늘 작성된 게시글 수 조회 (관리자용)
+     */
+    Long getTodayPostCount();
 }

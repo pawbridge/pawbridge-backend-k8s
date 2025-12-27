@@ -2,7 +2,9 @@ package com.pawbridge.userservice.controller;
 
 import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
 import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
+import com.pawbridge.userservice.dto.response.SignupPeriodsResponse;
 import com.pawbridge.userservice.dto.response.UserInfoResponseDto;
+import com.pawbridge.userservice.entity.Role;
 import com.pawbridge.userservice.service.UserService;
 import com.pawbridge.userservice.util.ResponseDTO;
 import jakarta.validation.Valid;
@@ -39,6 +41,26 @@ public class AdminController {
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
 
         Page<UserInfoResponseDto> users = userService.getAllUsers(pageable);
+        ResponseDTO<Page<UserInfoResponseDto>> response = ResponseDTO.okWithData(users);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 회원 검색 (관리자용)
+     * - GET /api/v1/admin/users/search?keyword=검색어&role=ROLE_USER
+     * - keyword: 이메일, 이름, 닉네임으로 검색 (선택)
+     * - role: 역할로 필터링 (선택)
+     */
+    @GetMapping("/users/search")
+    public ResponseEntity<ResponseDTO<Page<UserInfoResponseDto>>> searchUsers(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Role role,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+
+        Page<UserInfoResponseDto> users = userService.searchUsers(keyword, role, pageable);
         ResponseDTO<Page<UserInfoResponseDto>> response = ResponseDTO.okWithData(users);
 
         return ResponseEntity
@@ -97,13 +119,44 @@ public class AdminController {
      * 일별 가입자 수 통계
      * - GET /api/v1/admin/stats/daily-signups?startDate=2024-01-01&endDate=2024-01-31
      */
-    @GetMapping("/stats/daily-signups")
+    @GetMapping("/users/stats/daily-signups")
     public ResponseEntity<ResponseDTO<List<DailySignupStatsResponse>>> getDailySignupStats(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
 
         List<DailySignupStatsResponse> stats = userService.getDailySignupStats(startDate, endDate);
         ResponseDTO<List<DailySignupStatsResponse>> response = ResponseDTO.okWithData(stats);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 전체 회원 수 조회
+     * - GET /api/v1/admin/stats/total-users
+     */
+    @GetMapping("/users/stats/total-users")
+    public ResponseEntity<ResponseDTO<Long>> getTotalUserCount() {
+
+        Long count = userService.getTotalUserCount();
+        ResponseDTO<Long> response = ResponseDTO.okWithData(count);
+
+        return ResponseEntity
+                .status(response.getCode())
+                .body(response);
+    }
+
+    /**
+     * 기간별 가입자 수 통계 (관리자용)
+     * - GET /api/v1/admin/stats/signup-periods
+     * - 오늘, 최근 7일, 최근 30일, 이번 달의 일별 가입자 수를 한번에 반환
+     */
+    @GetMapping("/users/stats/signup-periods")
+    public ResponseEntity<ResponseDTO<SignupPeriodsResponse>> getSignupPeriods() {
+
+        SignupPeriodsResponse stats = userService.getSignupPeriods();
+        ResponseDTO<SignupPeriodsResponse> response = ResponseDTO.okWithData(stats);
 
         return ResponseEntity
                 .status(response.getCode())

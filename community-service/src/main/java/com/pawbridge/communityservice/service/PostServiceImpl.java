@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -325,5 +326,22 @@ public class PostServiceImpl implements PostService {
         );
 
         log.info("✅ Post deleted by admin: postId={}", postId);
+    }
+
+    /**
+     * 오늘 작성된 게시글 수 조회 (관리자용)
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Long getTodayPostCount() {
+        log.info("오늘 작성된 게시글 수 조회");
+
+        LocalDateTime startOfDay = LocalDateTime.now().toLocalDate().atStartOfDay();
+        LocalDateTime startOfNextDay = startOfDay.plusDays(1);
+
+        Long count = postRepository.countByCreatedAtBetween(startOfDay, startOfNextDay);
+        log.info("오늘 작성된 게시글 수: {}", count);
+
+        return count;
     }
 }

@@ -1,7 +1,10 @@
 package com.pawbridge.userservice.repository;
 
 import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
+import com.pawbridge.userservice.entity.Role;
 import com.pawbridge.userservice.entity.User;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -58,5 +61,25 @@ public interface UserRepository extends JpaRepository<User, Long> {
     List<DailySignupStatsResponse> countDailySignups(
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
+
+    /**
+     * 회원 검색 (관리자용)
+     * - keyword로 이메일, 이름, 닉네임 검색
+     * - role로 필터링 (선택적)
+     * @param keyword 검색 키워드 (이메일, 이름, 닉네임)
+     * @param role 역할 필터 (null이면 전체)
+     * @param pageable 페이징 정보
+     * @return 검색된 회원 목록
+     */
+    @Query("SELECT u FROM User u WHERE " +
+           "(:keyword IS NULL OR :keyword = '' OR " +
+           "LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "LOWER(u.name) LIKE LOWER(CONCAT('%', :keyword, '%')) OR " +
+           "LOWER(u.nickname) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +
+           "(:role IS NULL OR u.role = :role)")
+    Page<User> searchUsers(
+            @Param("keyword") String keyword,
+            @Param("role") Role role,
+            Pageable pageable);
 
 }
