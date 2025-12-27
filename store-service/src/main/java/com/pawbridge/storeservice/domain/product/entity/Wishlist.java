@@ -21,12 +21,12 @@ public class Wishlist extends BaseEntity {
     private Long userId;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
-    private Product product;
+    @JoinColumn(name = "sku_id", nullable = false)
+    private ProductSKU sku;
 
     @Builder
-    public Wishlist(Long userId, Product product) {
+    public Wishlist(Long userId, ProductSKU sku) {
         this.userId = userId;
-        this.product = product;
+        this.sku = sku;
     }
 }
