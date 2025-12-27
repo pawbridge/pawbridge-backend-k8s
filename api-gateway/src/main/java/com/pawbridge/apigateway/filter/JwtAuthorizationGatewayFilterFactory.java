@@ -47,10 +47,26 @@ public class JwtAuthorizationGatewayFilterFactory
             "/api/v1/comments/posts/read/*"        // 특정 게시글 댓글 목록 조회
     );
 
-    // ROLE_ADMIN만 접근 가능한 경로
+    // ROLE_ADMIN만 접근 가능한 경로 (프론트엔드 요청 기준, v1 없음)
     private static final List<String> ADMIN_ONLY_PATHS = List.of(
             "POST:/api/v1/shelters",               // 보호소 등록
-            "DELETE:/api/v1/shelters/*"            // 보호소 삭제
+            "DELETE:/api/v1/shelters/*",           // 보호소 삭제
+            // Store Service 관리자 API (프론트 요청 기준)
+            "POST:/api/products",                  // 상품 등록
+            "PATCH:/api/products/*",               // 상품 수정
+            "DELETE:/api/products/*",              // 상품 삭제
+            "POST:/api/categories",                // 카테고리 등록
+            "PUT:/api/categories/*",               // 카테고리 수정
+            "DELETE:/api/categories/*",            // 카테고리 삭제
+            "POST:/api/option-groups",             // 옵션 그룹 등록
+            "PUT:/api/option-groups/*",            // 옵션 그룹 수정
+            "DELETE:/api/option-groups/*",         // 옵션 그룹 삭제
+            "POST:/api/option-groups/*/values",    // 옵션 값 추가
+            "PUT:/api/option-groups/values/*",     // 옵션 값 수정
+            "DELETE:/api/option-groups/values/*",  // 옵션 값 삭제
+            "GET:/api/admin/orders",               // 관리자 주문 목록
+            "PATCH:/api/admin/orders/*/status",    // 주문 상태 변경
+            "PATCH:/api/admin/orders/*/delivery-status"  // 배송 상태 변경
     );
 
     // ROLE_USER가 아닐 때 접근 가능한 경로 (ROLE_ADMIN, ROLE_SHELTER)

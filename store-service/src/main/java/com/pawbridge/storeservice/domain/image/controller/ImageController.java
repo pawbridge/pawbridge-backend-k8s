@@ -13,7 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/images")
+@RequestMapping("/api/v1/images")
 @RequiredArgsConstructor
 public class ImageController {
 
