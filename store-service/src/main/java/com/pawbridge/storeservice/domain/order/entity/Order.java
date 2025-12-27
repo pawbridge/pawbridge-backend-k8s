@@ -81,4 +81,18 @@ public class Order extends BaseEntity {
     public void updateTotalAmount(Long amount) {
         this.totalAmount = amount;
     }
+
+    /**
+     * 주문 상태 변경 (관리자용)
+     */
+    public void updateStatus(OrderStatus status) {
+        this.status = status;
+    }
+
+    /**
+     * 배송 상태 변경 (관리자용)
+     */
+    public void updateDeliveryStatus(DeliveryStatus deliveryStatus) {
+        this.deliveryStatus = deliveryStatus;
+    }
 }

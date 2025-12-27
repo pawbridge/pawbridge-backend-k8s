@@ -14,8 +14,10 @@ import java.util.stream.Collectors;
 public class OrderResponse {
     private Long orderId;
     private String orderUuid;
+    private Long userId;
     private Long totalAmount;
     private String status;
+    private String deliveryStatus;
     private String receiverName;
     private String receiverPhone;
     private String deliveryAddress;
@@ -27,8 +29,10 @@ public class OrderResponse {
         return OrderResponse.builder()
                 .orderId(order.getId())
                 .orderUuid(order.getOrderUuid())
+                .userId(order.getUserId())
                 .totalAmount(order.getTotalAmount())
                 .status(order.getStatus().name())
+                .deliveryStatus(order.getDeliveryStatus().name())
                 .deliveryAddress(order.getDeliveryAddress())
                 .receiverName(order.getReceiverName())
                 .receiverPhone(order.getReceiverPhone())

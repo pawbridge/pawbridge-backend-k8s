@@ -17,7 +17,7 @@ import java.util.List;
  * - 옵션 그룹/값 CRUD
  */
 @RestController
-@RequestMapping("/api/option-groups")
+@RequestMapping("/api/v1/option-groups")
 @RequiredArgsConstructor
 public class OptionController {
 

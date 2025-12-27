@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
  * - SKU 기반
  */
 @RestController
-@RequestMapping("/api/wishlists")
+@RequestMapping("/api/v1/wishlists")
 @RequiredArgsConstructor
 public class WishlistController {
 
