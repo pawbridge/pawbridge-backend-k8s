@@ -7,8 +7,10 @@ import com.pawbridge.storeservice.domain.order.dto.OrderCreateRequest;
 import com.pawbridge.storeservice.domain.order.dto.OrderResponse;
 import com.pawbridge.storeservice.domain.order.entity.Order;
 import com.pawbridge.storeservice.domain.order.entity.OrderItem;
+import com.pawbridge.storeservice.domain.order.entity.OrderStatus;
 import com.pawbridge.storeservice.domain.order.repository.OrderRepository;
 import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
+import com.pawbridge.storeservice.domain.product.entity.ProductStatus;
 import com.pawbridge.storeservice.domain.product.repository.ProductSKURepository;
 import com.pawbridge.storeservice.domain.product.service.ProductService;
 import com.pawbridge.storeservice.common.entity.Outbox;
@@ -19,6 +21,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -75,6 +79,14 @@ public class OrderServiceImpl implements OrderService {
                 boolean available = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
                 if (!available) {
                     throw new RuntimeException("System is busy. Please try again later. (Lock acquire failed for SKU " + item.getSkuId() + ")");
+                }
+
+                // 상품 상태 검증 (ACTIVE 상태만 주문 가능)
+                ProductSKU sku = productSKURepository.findById(item.getSkuId())
+                        .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + item.getSkuId()));
+                ProductStatus productStatus = sku.getProduct().getStatus();
+                if (productStatus != ProductStatus.ACTIVE) {
+                    throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + productStatus + ", SKU ID: " + item.getSkuId());
                 }
 
                 // Deduct Stock
@@ -171,6 +183,12 @@ public class OrderServiceImpl implements OrderService {
         ProductSKU sku = productSKURepository.findById(skuId)
                 .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
         
+        // 상품 상태 검증 (ACTIVE 상태만 주문 가능)
+        ProductStatus productStatus = sku.getProduct().getStatus();
+        if (productStatus != ProductStatus.ACTIVE) {
+            throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + productStatus + ", SKU ID: " + skuId);
+        }
+        
         long totalAmount = sku.getPrice() * quantity;
 
         // 3. Create Order Entity
@@ -214,11 +232,30 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
-     public OrderResponse getOrder(Long orderId) {
+    public OrderResponse getOrder(Long orderId, Long userId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
+        
+        // 본인 주문인지 검증
+        if (!order.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("해당 주문에 대한 접근 권한이 없습니다.");
+        }
+        
         return OrderResponse.from(order);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> getOrdersByUserId(Long userId, OrderStatus status, Pageable pageable) {
+        Page<Order> orders;
+        if (status != null) {
+            orders = orderRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status, pageable);
+        } else {
+            orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
+        }
+        return orders.map(OrderResponse::from);
+    }
+
     @Override
     @Transactional
     public void processPayment(Long orderId) {

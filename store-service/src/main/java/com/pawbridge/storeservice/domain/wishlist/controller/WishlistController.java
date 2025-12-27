@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * 상품 찜(Wishlist) API 컨트롤러
+ * - SKU 기반
  */
 @RestController
 @RequestMapping("/api/wishlists")
@@ -19,7 +20,7 @@ public class WishlistController {
     private final WishlistService wishlistService;
 
     /**
-     * 찜 추가
+     * 찜 추가 (SKU 기반)
      * POST /api/wishlists
      */
     @PostMapping
@@ -39,14 +40,14 @@ public class WishlistController {
     }
 
     /**
-     * 찜 삭제 (userId + productId로)
-     * DELETE /api/wishlists?userId={userId}&productId={productId}
+     * 찜 삭제 (userId + skuId로)
+     * DELETE /api/wishlists?userId={userId}&skuId={skuId}
      */
     @DeleteMapping
-    public ResponseEntity<Void> removeWishlistByUserAndProduct(
+    public ResponseEntity<Void> removeWishlistByUserAndSku(
             @RequestParam Long userId,
-            @RequestParam Long productId) {
-        wishlistService.removeWishlistByUserAndProduct(userId, productId);
+            @RequestParam Long skuId) {
+        wishlistService.removeWishlistByUserAndSku(userId, skuId);
         return ResponseEntity.noContent().build();
     }
 }

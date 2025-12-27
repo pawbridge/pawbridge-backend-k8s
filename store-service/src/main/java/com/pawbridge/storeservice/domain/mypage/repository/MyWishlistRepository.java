@@ -12,14 +12,15 @@ import java.util.Optional;
 /**
  * 위시리스트 Repository
  * - 마이페이지용 + 찜 추가/삭제
+ * - SKU 기반
  */
 @Repository
 public interface MyWishlistRepository extends JpaRepository<Wishlist, Long> {
 
     /**
-     * 사용자별 찜 목록 조회 (Product fetch join)
+     * 사용자별 찜 목록 조회 (SKU, Product, Category fetch join)
      */
-    @EntityGraph(attributePaths = {"product", "product.category"})
+    @EntityGraph(attributePaths = {"sku", "sku.product", "sku.product.category", "sku.skuValues", "sku.skuValues.optionValue", "sku.skuValues.optionValue.optionGroup"})
     Page<Wishlist> findByUserId(Long userId, Pageable pageable);
 
     /**
@@ -28,13 +29,12 @@ public interface MyWishlistRepository extends JpaRepository<Wishlist, Long> {
     long countByUserId(Long userId);
 
     /**
-     * 중복 찜 확인
+     * 중복 찜 확인 (SKU 기반)
      */
-    boolean existsByUserIdAndProductId(Long userId, Long productId);
+    boolean existsByUserIdAndSkuId(Long userId, Long skuId);
 
     /**
-     * 찜 조회 (삭제용)
+     * 찜 조회 (삭제용, SKU 기반)
      */
-    Optional<Wishlist> findByUserIdAndProductId(Long userId, Long productId);
+    Optional<Wishlist> findByUserIdAndSkuId(Long userId, Long skuId);
 }
-
