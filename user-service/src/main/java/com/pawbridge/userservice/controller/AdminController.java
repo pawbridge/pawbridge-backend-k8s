@@ -119,7 +119,7 @@ public class AdminController {
      * 일별 가입자 수 통계
      * - GET /api/v1/admin/stats/daily-signups?startDate=2024-01-01&endDate=2024-01-31
      */
-    @GetMapping("/stats/daily-signups")
+    @GetMapping("/users/stats/daily-signups")
     public ResponseEntity<ResponseDTO<List<DailySignupStatsResponse>>> getDailySignupStats(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
@@ -136,7 +136,7 @@ public class AdminController {
      * 전체 회원 수 조회
      * - GET /api/v1/admin/stats/total-users
      */
-    @GetMapping("/stats/total-users")
+    @GetMapping("/users/stats/total-users")
     public ResponseEntity<ResponseDTO<Long>> getTotalUserCount() {
 
         Long count = userService.getTotalUserCount();
@@ -152,7 +152,7 @@ public class AdminController {
      * - GET /api/v1/admin/stats/signup-periods
      * - 오늘, 최근 7일, 최근 30일, 이번 달의 일별 가입자 수를 한번에 반환
      */
-    @GetMapping("/stats/signup-periods")
+    @GetMapping("/users/stats/signup-periods")
     public ResponseEntity<ResponseDTO<SignupPeriodsResponse>> getSignupPeriods() {
 
         SignupPeriodsResponse stats = userService.getSignupPeriods();
