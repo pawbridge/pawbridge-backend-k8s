@@ -14,7 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # 1. 모니터링 설정 파일 전송
+      # 1. prometheus.yml 환경변수 치환
+      - name: Replace environment variables in prometheus.yml
+        run: |
+          export NODE2_PRIVATE_IP=${{ secrets.NODE2_PRIVATE_IP }}
+          export NODE3_PRIVATE_IP=${{ secrets.NODE3_PRIVATE_IP }}
+          export NODE4_PRIVATE_IP=${{ secrets.NODE4_PRIVATE_IP }}
+          export NODE5_PRIVATE_IP=${{ secrets.NODE5_PRIVATE_IP }}
+          envsubst < infrastructure/prod/prometheus/prometheus.yml > prometheus.yml.tmp
+          mv prometheus.yml.tmp infrastructure/prod/prometheus/prometheus.yml
+
+      # 2. 모니터링 설정 파일 전송
       - name: Copy Monitoring Config to Node-1
         uses: appleboy/scp-action@v0.1.7
         with:
