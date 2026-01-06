@@ -41,7 +41,7 @@ jobs:
             mv infrastructure/prod/grafana ./ 2>/dev/null || true
             rm -rf infrastructure 2>/dev/null || true
             
-            # Prometheus, Grafana 재시작
-            docker compose restart prometheus grafana
+            # Prometheus, Grafana 컨테이너 재생성 (볼륨 마운트 새로 적용)
+            docker compose up -d --force-recreate prometheus grafana
             
-            echo "✅ Monitoring config updated and services restarted"
+            echo "Monitoring config updated and services recreated"
