@@ -2,19 +2,173 @@
   "settings": {
     "index.default_pipeline": "animal-date-converter",
     "number_of_shards": 1,
-    "number_of_replicas": 0
+    "number_of_replicas": 0,
+    "analysis": {
+      "tokenizer": {
+        "nori_user_dict_tokenizer": {
+          "type": "nori_tokenizer",
+          "decompound_mode": "mixed",
+          "user_dictionary_rules": [
+            "믹스견",
+            "시츄",
+            "말티즈",
+            "푸들",
+            "치와와",
+            "포메라니안",
+            "요크셔테리어",
+            "비글",
+            "웰시코기",
+            "리트리버",
+            "진돗개",
+            "삽살개"
+          ]
+        }
+      },
+      "filter": {
+        "nori_posfilter": {
+          "type": "nori_part_of_speech",
+          "stoptags": [
+            "E",
+            "IC",
+            "J",
+            "MAG",
+            "MAJ",
+            "MM",
+            "SP",
+            "SSC",
+            "SSO",
+            "SC",
+            "SE",
+            "XPN",
+            "XSA",
+            "XSN",
+            "XSV",
+            "UNA",
+            "NA",
+            "VSV"
+          ]
+        }
+      },
+      "analyzer": {
+        "nori_analyzer": {
+          "type": "custom",
+          "tokenizer": "nori_user_dict_tokenizer",
+          "filter": [
+            "nori_posfilter"
+          ]
+        }
+      }
+    }
   },
   "mappings": {
+    "dynamic": true,
     "properties": {
-      "id": { "type": "keyword" },
-      "apms_desertion_no": { "type": "keyword" },
-      "apms_notice_no": { "type": "keyword" },
-      "notice_start_date": { "type": "date" },
-      "notice_end_date": { "type": "date" },
-      "apms_updated_at": { "type": "date" },
-      "happen_date": { "type": "date" },
-      "created_at": { "type": "date" },
-      "updated_at": { "type": "date" }
+      "id": {
+        "type": "keyword"
+      },
+      "apms_desertion_no": {
+        "type": "keyword"
+      },
+      "apms_notice_no": {
+        "type": "keyword"
+      },
+      "species": {
+        "type": "keyword"
+      },
+      "breed": {
+        "type": "text",
+        "analyzer": "nori_analyzer",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "birth_year": {
+        "type": "integer"
+      },
+      "weight": {
+        "type": "keyword"
+      },
+      "color": {
+        "type": "text",
+        "analyzer": "nori_analyzer"
+      },
+      "gender": {
+        "type": "keyword"
+      },
+      "neuter_status": {
+        "type": "keyword"
+      },
+      "special_mark": {
+        "type": "text",
+        "analyzer": "nori_analyzer"
+      },
+      "apms_process_state": {
+        "type": "keyword"
+      },
+      "notice_start_date": {
+        "type": "date"
+      },
+      "notice_end_date": {
+        "type": "date"
+      },
+      "apms_updated_at": {
+        "type": "date"
+      },
+      "happen_date": {
+        "type": "date"
+      },
+      "happen_place": {
+        "type": "text",
+        "analyzer": "nori_analyzer"
+      },
+      "image_url": {
+        "type": "keyword",
+        "index": false
+      },
+      "image_url2": {
+        "type": "keyword",
+        "index": false
+      },
+      "shelter_id": {
+        "type": "long"
+      },
+      "shelter_name": {
+        "type": "text",
+        "analyzer": "nori_analyzer",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "shelter_address": {
+        "type": "text",
+        "analyzer": "nori_analyzer"
+      },
+      "shelter_phone": {
+        "type": "keyword"
+      },
+      "status": {
+        "type": "keyword"
+      },
+      "api_source": {
+        "type": "keyword"
+      },
+      "favorite_count": {
+        "type": "integer"
+      },
+      "description": {
+        "type": "text",
+        "analyzer": "nori_analyzer"
+      },
+      "created_at": {
+        "type": "date"
+      },
+      "updated_at": {
+        "type": "date"
+      }
     }
   }
 }
