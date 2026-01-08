@@ -10,7 +10,6 @@ import com.pawbridge.storeservice.domain.order.entity.OrderItem;
 import com.pawbridge.storeservice.domain.order.entity.OrderStatus;
 import com.pawbridge.storeservice.domain.order.repository.OrderRepository;
 import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
-import com.pawbridge.storeservice.domain.product.entity.ProductStatus;
 import com.pawbridge.storeservice.domain.product.repository.ProductSKURepository;
 import com.pawbridge.storeservice.domain.product.service.ProductService;
 import com.pawbridge.storeservice.common.entity.Outbox;
@@ -19,20 +18,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.redisson.api.RLock;
-import org.redisson.api.RedissonClient;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -43,69 +38,31 @@ public class OrderServiceImpl implements OrderService {
     private final OrderRepository orderRepository;
     private final CartService cartService;
     private final ProductService productService;
-    private final ProductSKURepository productSKURepository; // For entity mapping
-    private final RedissonClient redissonClient;
+    private final ProductSKURepository productSKURepository;
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
-
-    private static final String LOCK_KEY_PREFIX = "stock:sku:";
-    private static final long WAIT_TIME = 5L;
-    private static final long LEASE_TIME = 3L;
 
     @Override
     @Transactional
     public OrderResponse createOrder(Long userId, OrderCreateRequest request) {
-        // 1. Get Cart Items
+        // 1. 장바구니 조회
         List<CartItemResponse> cartItems = cartService.getMyCart(userId);
         if (cartItems.isEmpty()) {
             throw new IllegalArgumentException("Cart is empty");
         }
 
-        // 2. Sort Items by SKU ID to prevent Deadlock (Resource Ordering)
+        // 2. Deadlock 방지를 위한 SKU ID 순 정렬 (비관적 락 획득 순서 보장)
         cartItems.sort(Comparator.comparing(CartItemResponse::getSkuId));
 
         long totalAmount = 0;
-        List<ProductSKU> lockedSkus = new ArrayList<>(); // To track what we processed (implied by execution flow)
 
-        // 3. Process Items (Lock -> Deduct -> Release)
-        // Note: In @Transactional, if exception occurs, DB changes rollback.
-        // We use Redisson Lock to prevent Race Condition on Stock Read/Write from other threads.
-        
+        // 3. 재고 차감 (ProductService 내부에서 비관적 락 및 상태 검증 처리)
         for (CartItemResponse item : cartItems) {
-            String lockKey = LOCK_KEY_PREFIX + item.getSkuId();
-            RLock lock = redissonClient.getLock(lockKey);
-
-            try {
-                boolean available = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
-                if (!available) {
-                    throw new RuntimeException("System is busy. Please try again later. (Lock acquire failed for SKU " + item.getSkuId() + ")");
-                }
-
-                // 상품 상태 검증 (ACTIVE 상태만 주문 가능)
-                ProductSKU sku = productSKURepository.findById(item.getSkuId())
-                        .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + item.getSkuId()));
-                ProductStatus productStatus = sku.getProduct().getStatus();
-                if (productStatus != ProductStatus.ACTIVE) {
-                    throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + productStatus + ", SKU ID: " + item.getSkuId());
-                }
-
-                // Deduct Stock
-                productService.decreaseStock(item.getSkuId(), item.getQuantity());
-                
-                // Calculate Total
-                totalAmount += item.getPrice() * item.getQuantity();
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Order processing interrupted", e);
-            } finally {
-                if (lock.isHeldByCurrentThread()) {
-                    lock.unlock();
-                }
-            }
+            productService.decreaseStock(item.getSkuId(), item.getQuantity());
+            totalAmount += item.getPrice() * item.getQuantity();
         }
 
-        // 4. Create Order Entity
+        // 4. 주문 엔티티 생성
         Order order = Order.builder()
                 .userId(userId)
                 .orderUuid(UUID.randomUUID().toString())
@@ -116,15 +73,9 @@ public class OrderServiceImpl implements OrderService {
                 .deliveryMessage(request.getDeliveryMessage())
                 .build();
 
-        // 5. Create Order Items
-        // Re-fetch SKU entities or use simple references?
-        // We need Entity references for OrderItem.
-        // Optimization: Batch Fetch SKUs before loop or fetch here?
-        // Batch fetch is better, but since we already iterated, let's fetch by IDs.
+        // 5. 주문 상품 생성
         List<Long> skuIds = cartItems.stream().map(CartItemResponse::getSkuId).collect(Collectors.toList());
         List<ProductSKU> skus = productSKURepository.findAllById(skuIds);
-        
-        // Map: ID -> SKU
         var skuMap = skus.stream().collect(Collectors.toMap(ProductSKU::getId, sku -> sku));
 
         for (CartItemResponse item : cartItems) {
@@ -132,18 +83,18 @@ public class OrderServiceImpl implements OrderService {
             OrderItem orderItem = OrderItem.builder()
                     .order(order)
                     .productSKU(sku)
-                    .productName(sku.getProduct().getName()) // Snapshot
-                    .skuCode(sku.getSkuCode()) // Snapshot
-                    .price(sku.getPrice()) // Snapshot
+                    .productName(sku.getProduct().getName())
+                    .skuCode(sku.getSkuCode())
+                    .price(sku.getPrice())
                     .quantity(item.getQuantity())
                     .build();
             order.getOrderItems().add(orderItem);
         }
 
-        // 6. Save Order (Cascade saves items)
+        // 6. 주문 저장
         orderRepository.save(order);
 
-        // 7. Clear Cart
+        // 7. 장바구니 비우기
         cartService.clearCart(userId);
 
         log.info("Order created successfully. OrderId: {}, UserId: {}", order.getId(), userId);
@@ -157,41 +108,16 @@ public class OrderServiceImpl implements OrderService {
         Long skuId = request.getSkuId();
         Integer quantity = request.getQuantity();
 
-        // 1. Lock & Stock Deduction
-        String lockKey = LOCK_KEY_PREFIX + skuId;
-        RLock lock = redissonClient.getLock(lockKey);
+        // 1. 재고 차감 (ProductService 내부에서 비관적 락 및 상태 검증 처리)
+        productService.decreaseStock(skuId, quantity);
 
-        try {
-            boolean available = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
-            if (!available) {
-                throw new RuntimeException("System is busy. Please try again later. (Lock acquire failed for SKU " + skuId + ")");
-            }
-
-            // Deduct Stock
-            productService.decreaseStock(skuId, quantity);
-
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Order processing interrupted", e);
-        } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
-        }
-
-        // 2. Fetch Product Info for Snapshot
+        // 2. 주문 정보 생성을 위해 SKU 조회 (이미 락이 해제된 상태이므로 일반 조회)
         ProductSKU sku = productSKURepository.findById(skuId)
                 .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
         
-        // 상품 상태 검증 (ACTIVE 상태만 주문 가능)
-        ProductStatus productStatus = sku.getProduct().getStatus();
-        if (productStatus != ProductStatus.ACTIVE) {
-            throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + productStatus + ", SKU ID: " + skuId);
-        }
-        
         long totalAmount = sku.getPrice() * quantity;
 
-        // 3. Create Order Entity
+        // 3. 주문 엔티티 생성
         Order order = Order.builder()
                 .userId(userId)
                 .orderUuid(UUID.randomUUID().toString())
@@ -202,19 +128,19 @@ public class OrderServiceImpl implements OrderService {
                 .deliveryMessage(request.getDeliveryMessage())
                 .build();
 
-        // 4. Create Order Item
+        // 4. 주문 상품 생성
         OrderItem orderItem = OrderItem.builder()
                 .order(order)
                 .productSKU(sku)
-                .productName(sku.getProduct().getName()) // Snapshot
-                .skuCode(sku.getSkuCode()) // Snapshot
-                .price(sku.getPrice()) // Snapshot
+                .productName(sku.getProduct().getName())
+                .skuCode(sku.getSkuCode())
+                .price(sku.getPrice())
                 .quantity(quantity)
                 .build();
         
         order.getOrderItems().add(orderItem);
 
-        // 5. Save Order
+        // 5. 주문 저장
         orderRepository.save(order);
 
         log.info("Direct Order created. OrderId: {}, UserId: {}", order.getId(), userId);
@@ -263,7 +189,7 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
         
         // Validation
-        if (order.getStatus() != com.pawbridge.storeservice.domain.order.entity.OrderStatus.PENDING) {
+        if (order.getStatus() != OrderStatus.PENDING) {
              throw new IllegalStateException("Order is not in PENDING state. Current: " + order.getStatus());
         }
 
@@ -290,41 +216,24 @@ public class OrderServiceImpl implements OrderService {
              throw new RuntimeException("Failed to publish payment event", e);
         }
     }
+
     @Override
     @Transactional
     public void cancelOrder(String orderUuid) {
         Order order = orderRepository.findByOrderUuid(orderUuid)
                 .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderUuid));
 
-        if (order.getStatus() == com.pawbridge.storeservice.domain.order.entity.OrderStatus.CANCELLED) {
+        if (order.getStatus() == OrderStatus.CANCELLED) {
             log.warn("Order {} is already canceled.", orderUuid);
             return;
         }
 
-        order.cancelOrder(); // Status -> CANCELLED
+        order.cancelOrder();
         
-        // Stock Rollback
+        // 재고 롤백 (ProductService 내부에서 비관적 락 적용)
         for (OrderItem item : order.getOrderItems()) {
-             // Use Distributed Lock for safety
             Long skuId = item.getProductSKU().getId();
-            String lockKey = LOCK_KEY_PREFIX + skuId;
-            RLock lock = redissonClient.getLock(lockKey);
-            
-            try {
-                boolean available = lock.tryLock(WAIT_TIME, LEASE_TIME, TimeUnit.SECONDS);
-                if (available) {
-                    try {
-                        productService.increaseStock(skuId, item.getQuantity());
-                    } finally {
-                         if (lock.isHeldByCurrentThread()) lock.unlock();
-                    }
-                } else {
-                    throw new RuntimeException("Could not acquire lock for stock rollback: " + skuId);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            }
+            productService.increaseStock(skuId, item.getQuantity());
         }
         
         log.info("Order {} canceled and stock restored.", orderUuid);

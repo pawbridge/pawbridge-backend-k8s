@@ -129,8 +129,16 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public void decreaseStock(Long skuId, int quantity) {
-        ProductSKU sku = productSKURepository.findById(skuId)
+        // 비관적 락(PESSIMISTIC_WRITE)으로 재고 동시성 제어 - 트랜잭션 범위 내에서 락 자동 관리
+        ProductSKU sku = productSKURepository.findByIdWithLock(skuId)
                 .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
+        
+        // 상품 상태 검증 (락 획득 후 검증하여 정확성 보장)
+        ProductStatus status = sku.getProduct().getStatus();
+        if (status != ProductStatus.ACTIVE) {
+            throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + status + ", SKU ID: " + skuId);
+        }
+        
         sku.decreaseStock(quantity);
         outboxService.publishSkuEvent(sku.getProduct(), sku, false);
         cacheService.evictProductCache(sku.getProduct().getId());
@@ -139,7 +147,8 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public void increaseStock(Long skuId, int quantity) {
-        ProductSKU sku = productSKURepository.findById(skuId)
+        // 비관적 락(PESSIMISTIC_WRITE)으로 재고 동시성 제어 - 트랜잭션 범위 내에서 락 자동 관리
+        ProductSKU sku = productSKURepository.findByIdWithLock(skuId)
                 .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
         
         sku.increaseStock(quantity);
