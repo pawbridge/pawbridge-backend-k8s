@@ -2,36 +2,27 @@ spring:
   application:
     name: api-gateway
 
-  config:
-    import: "configserver:http://${CONFIG_SERVER_HOST}"
   profiles:
     active: local
 
   cloud:
-    config:
-      username: ${CONFIG_USERNAME}
-      password: ${CONFIG_PASSWORD}
-      fail-fast: true
-      retry:
-        max-attempts: 6
-        initial-interval: 1000
     gateway:
       routes:
         # OAuth2 경로 (JWT 필터 제외, 우선순위 높음)
         - id: user-service-oauth2
-          uri: lb://user-service
+          uri: ${USER_SERVICE_URL:http://user-service:8080}
           predicates:
             - Path=/oauth2/authorization/**, /login/oauth2/code/**
 
         # Email 경로 (JWT 필터 제외 - 회원가입 전, user-service로 라우팅)
         - id: user-service-email
-          uri: lb://user-service
+          uri: ${USER_SERVICE_URL:http://user-service:8080}
           predicates:
             - Path=/api/v1/email/**
 
         # User Service (JWT 필터 적용, 화이트리스트는 필터 내부에서 처리)
         - id: user-service
-          uri: lb://user-service
+          uri: ${USER_SERVICE_URL:http://user-service:8080}
           predicates:
             - Path=/api/v1/users/**, /api/v1/auth/**, /api/v1/favorites/**
           filters:
@@ -39,7 +30,7 @@ spring:
 
         # Animal Service - 조회 (GET, 공개)
         - id: animal-service-public
-          uri: lb://animal-service
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/animals/**, /api/v1/animals/**
             - Method=GET
@@ -49,7 +40,7 @@ spring:
 
         # Shelter Service - 조회 (GET, 공개)
         - id: shelter-service-public
-          uri: lb://animal-service
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/shelters/**, /api/v1/shelters/**
             - Method=GET
@@ -59,7 +50,7 @@ spring:
 
         # Animal/Shelter Service - CUD (POST/PUT/PATCH/DELETE, 인증 필요)
         - id: animal-service-protected
-          uri: lb://animal-service
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/animals/**, /api/shelters/**, /api/v1/animals/**, /api/v1/shelters/**, /api/v1/batch/**
             - Method=POST,PUT,PATCH,DELETE
@@ -69,7 +60,7 @@ spring:
 
         # Community Service (JWT 필터 적용)
         - id: community-service
-          uri: lb://community-service
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
           predicates:
             - Path=/api/v1/posts/**, /api/v1/comments/**
           filters:
@@ -77,14 +68,14 @@ spring:
 
         # Store Service (Product - Public GET, Protected POST) - 순서 중요
         - id: store-service-products-public
-          uri: lb://store-service
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
             - Path=/api/products/**
             - Method=GET
           # JWT 필터 없음 (상품 조회는 공개)
 
         - id: store-service-products-protected
-          uri: lb://store-service
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
             - Path=/api/products/**
             - Method=POST,PUT,PATCH,DELETE
@@ -92,7 +83,7 @@ spring:
             - JwtAuthorization
 
         - id: store-service-orders
-          uri: lb://store-service
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
             - Path=/api/orders/**
           filters:
@@ -100,7 +91,7 @@ spring:
 
         # Payment Service
         - id: payment-service
-          uri: lb://payment-service
+          uri: ${PAYMENT_SERVICE_URL:http://payment-service:8084}
           predicates:
             - Path=/api/payments/**
           filters:
@@ -108,7 +99,7 @@ spring:
 
         # Admin - User Management & Stats (user-service)
         - id: admin-users
-          uri: lb://user-service
+          uri: ${USER_SERVICE_URL:http://user-service:8080}
           predicates:
             - Path=/api/admin/users, /api/admin/users/**, /api/admin/stats/daily-signups
           filters:
@@ -117,7 +108,7 @@ spring:
 
         # Admin - Post Management (community-service)
         - id: admin-posts
-          uri: lb://community-service
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
           predicates:
             - Path=/api/admin/posts, /api/admin/posts/**
           filters:
@@ -126,7 +117,7 @@ spring:
 
         # Admin - Animal Stats (animal-service)
         - id: admin-animal-stats
-          uri: lb://animal-service
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/admin/stats/daily-animals
           filters:

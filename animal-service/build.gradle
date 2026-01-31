@@ -35,8 +35,6 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-batch'
 	implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
-	implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
-	implementation 'org.springframework.cloud:spring-cloud-starter-config'
 	implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
 	implementation 'me.paulschwarz:spring-dotenv:4.0.0'
 	implementation 'io.micrometer:micrometer-registry-prometheus'

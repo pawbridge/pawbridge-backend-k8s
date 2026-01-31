@@ -16,7 +16,7 @@ import java.util.List;
  * - animal-service와 통신
  * - 보호소 존재 여부 확인에 사용
  */
-@FeignClient(name = "animal-service")
+@FeignClient(name = "animal-service", url = "${service.animal.url:}")
 public interface AnimalServiceClient {
 
     /**
