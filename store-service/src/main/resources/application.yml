@@ -2,19 +2,17 @@ spring:
   application:
     name: store-service
 
-  config:
-    import: "configserver:http://${CONFIG_SERVER_HOST}"
   profiles:
     active: local
 
+  # DataSource 설정
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/pawbridge_store}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
   cloud:
-    config:
-      username: ${CONFIG_USERNAME}
-      password: ${CONFIG_PASSWORD}
-      fail-fast: true
-      retry:
-        max-attempts: 6
-        initial-interval: 1000
     aws:
       credentials:
         access-key: ${AWS_ACCESS_KEY}

@@ -2,19 +2,29 @@ spring:
   application:
     name: user-service
 
-  config:
-    import: "configserver:http://${CONFIG_SERVER_HOST}"
   profiles:
     active: local
 
-  cloud:
-    config:
-      username: ${CONFIG_USERNAME}
-      password: ${CONFIG_PASSWORD}
-      fail-fast: true
-      retry:
-        max-attempts: 6
-        initial-interval: 1000
+  # DataSource 설정 (ConfigMap/환경변수로 주입)
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/pawbridge_user}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # Redis 설정
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  # Kafka 설정
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: user-service-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
 
   # Mail 설정 (email-service 통합)
   mail:
@@ -32,13 +42,6 @@ spring:
           connectiontimeout: 5000
           timeout: 5000
           writetimeout: 5000
-
-  # Kafka Consumer 상세 설정 (bootstrap-servers는 Config Repository에서)
-  kafka:
-    consumer:
-      group-id: user-service-group
-      auto-offset-reset: earliest
-      enable-auto-commit: false
 
   security:
     oauth2:
@@ -59,3 +62,10 @@ spring:
 
 oauth2:
   redirect-uri: ${OAUTH2_REDIRECT_URI}
+
+# Service URLs (K8s Service DNS 기반)
+service:
+  animal:
+    url: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
+  store:
+    url: ${STORE_SERVICE_URL:http://store-service:8083}

@@ -2,19 +2,18 @@ spring:
   application:
     name: community-service
 
-  config:
-    import: "configserver:http://${CONFIG_SERVER_HOST}"
   profiles:
     active: local
 
+  # DataSource 설정
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/pawbridge_community}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # AWS S3 설정
   cloud:
-    config:
-      username: ${CONFIG_USERNAME}
-      password: ${CONFIG_PASSWORD}
-      fail-fast: true
-      retry:
-        max-attempts: 6
-        initial-interval: 1000
     aws:
       credentials:
         access-key: ${S3_ACCESS_KEY}
@@ -29,8 +28,14 @@ spring:
       max-file-size: 100MB      # 단일 파일 최대 크기 (영상 지원)
       max-request-size: 200MB   # 전체 요청 최대 크기
 
-  # Kafka Consumer 상세 설정 (bootstrap-servers는 Config Repository에서)
+  # Kafka 설정
   kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: community-service-elasticsearch-group
       auto-offset-reset: earliest
+
+# Service URLs (K8s Service DNS 기반)
+service:
+  user:
+    url: ${USER_SERVICE_URL:http://user-service:8080}

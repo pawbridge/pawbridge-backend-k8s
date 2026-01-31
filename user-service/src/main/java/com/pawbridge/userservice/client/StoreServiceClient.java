@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
  * - store-service와 통신
  * - 찜 목록, 주문 내역, 장바구니 조회에 사용
  */
-@FeignClient(name = "store-service")
+@FeignClient(name = "store-service", url = "${service.store.url:}")
 public interface StoreServiceClient {
 
     /**
