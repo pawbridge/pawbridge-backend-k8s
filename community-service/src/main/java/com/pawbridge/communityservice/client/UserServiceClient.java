@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 /**
  * User Service와 통신하는 Feign Client
  */
-@FeignClient(name = "user-service")
+@FeignClient(name = "user-service", url = "${service.user.url:}")
 public interface UserServiceClient {
 
     /**

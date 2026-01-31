@@ -2,19 +2,14 @@ spring:
   application:
     name: payment-service
 
-  config:
-    import: "configserver:http://${CONFIG_SERVER_HOST}"
   profiles:
     active: local
 
-  cloud:
-    config:
-      username: ${CONFIG_USERNAME}
-      password: ${CONFIG_PASSWORD}
-      fail-fast: true
-      retry:
-        max-attempts: 6
-        initial-interval: 1000
+  # DataSource 설정
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/pawbridge_payment}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
 
 # Toss Payments
 toss:
