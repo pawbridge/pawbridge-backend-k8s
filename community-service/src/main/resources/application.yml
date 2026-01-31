@@ -39,3 +39,18 @@ spring:
 service:
   user:
     url: ${USER_SERVICE_URL:http://user-service:8080}
+
+# K8s Probe 설정 (Actuator)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+
+server:
+  port: 8082

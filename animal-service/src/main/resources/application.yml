@@ -17,6 +17,7 @@ spring:
 
 # Server Settings
 server:
+  port: 8081
   servlet:
     context-path: /
     encoding:
@@ -45,3 +46,15 @@ batch:
       # 0 0 */6 * * ? : 6시간마다
       # 0 */30 * * * ? : 30분마다 (테스트용)
       cron: "0 0 2 * * ?"
+
+# K8s Probe 설정 (Actuator)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
