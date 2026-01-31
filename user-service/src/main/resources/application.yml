@@ -69,3 +69,18 @@ service:
     url: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
   store:
     url: ${STORE_SERVICE_URL:http://store-service:8083}
+
+# K8s Probe 설정 (Actuator)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+
+server:
+  port: 8080
