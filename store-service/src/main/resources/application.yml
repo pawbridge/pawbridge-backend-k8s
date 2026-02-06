@@ -29,7 +29,7 @@ spring:
 
   # Kafka Consumer/Producer 상세 설정 (bootstrap-servers는 Config Repository에서)
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: store-service-group
       auto-offset-reset: earliest
