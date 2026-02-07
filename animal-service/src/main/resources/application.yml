@@ -39,15 +39,21 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
+
+
 # Batch Scheduler Settings
+# Batch Scheduler Settings (Custom)
 batch:
   apms:
     sync:
-      # Cron 표현식: 매일 새벽 2시 실행 (초 분 시 일 월 요일)
-      # 0 0 2 * * ? : 매일 새벽 2시
-      # 0 0 */6 * * ? : 6시간마다
-      # 0 */30 * * * ? : 30분마다 (테스트용)
+      # Cron 표현식: 매일 새벽 2시 실행
       cron: "0 0 2 * * ?"
+
+# APMS Public API Settings
+apms:
+  api:
+    base-url: ${APMS_API_BASE_URL}
+    service-key: ${APMS_API_SERVICE_KEY}
 
 # K8s Probe 설정 (Actuator)
 management:
