@@ -59,11 +59,13 @@ spring:
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
         # Community Service (JWT 필터 적용)
+        # Community Service (JWT 필터 적용)
         - id: community-service
           uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
           predicates:
-            - Path=/api/v1/posts/**, /api/v1/comments/**
+            - Path=/api/posts/**, /api/comments/**, /api/v1/posts/**, /api/v1/comments/**
           filters:
+            - RewritePath=/api/(?<segment>posts/?.*|comments/?.*), /api/v1/${segment}
             - JwtAuthorization
 
         # Store Service (Product - Public GET, Protected POST) - 순서 중요
