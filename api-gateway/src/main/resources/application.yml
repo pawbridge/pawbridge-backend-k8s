@@ -74,6 +74,8 @@ spring:
           predicates:
             - Path=/api/products/**
             - Method=GET
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
           # JWT 필터 없음 (상품 조회는 공개)
 
         - id: store-service-products-protected
@@ -83,6 +85,7 @@ spring:
             - Method=POST,PUT,PATCH,DELETE
           filters:
             - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
         - id: store-service-orders
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
@@ -90,6 +93,7 @@ spring:
             - Path=/api/orders/**
           filters:
             - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
         # Payment Service
         - id: payment-service
