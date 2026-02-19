@@ -87,6 +87,23 @@ spring:
             - JwtAuthorization
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
+        - id: store-service-categories-public
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/categories/**
+            - Method=GET
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-categories-protected
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/categories/**
+            - Method=POST,PUT,PATCH,DELETE
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
         - id: store-service-orders
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
