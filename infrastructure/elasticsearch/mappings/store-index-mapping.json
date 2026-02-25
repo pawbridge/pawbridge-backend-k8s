@@ -19,24 +19,52 @@
   },
   "mappings": {
     "properties": {
-      "skuId": { "type": "long" },
-      "productId": { "type": "long" },
-      "productName": { 
-        "type": "text", 
+      "skuId": {
+        "type": "long"
+      },
+      "productId": {
+        "type": "long"
+      },
+      "categoryId": {
+        "type": "long"
+      },
+      "productName": {
+        "type": "text",
         "analyzer": "korean",
         "fields": {
-          "keyword": { "type": "keyword" }
+          "keyword": {
+            "type": "keyword"
+          }
         }
       },
-      "skuCode": { "type": "keyword" },
-      "optionName": { "type": "text", "analyzer": "korean" },
-      "price": { "type": "long" },
-      "stockQuantity": { "type": "integer" },
-      "isPrimarySku": { "type": "boolean" },
-      "status": { "type": "keyword" },
-      "imageUrl": { "type": "keyword" },
-      "createdAt": { "type": "date" },
-      "updatedAt": { "type": "date" }
+      "skuCode": {
+        "type": "keyword"
+      },
+      "optionName": {
+        "type": "text",
+        "analyzer": "korean"
+      },
+      "price": {
+        "type": "long"
+      },
+      "stockQuantity": {
+        "type": "integer"
+      },
+      "isPrimarySku": {
+        "type": "boolean"
+      },
+      "status": {
+        "type": "keyword"
+      },
+      "imageUrl": {
+        "type": "keyword"
+      },
+      "createdAt": {
+        "type": "date"
+      },
+      "updatedAt": {
+        "type": "date"
+      }
     }
   }
 }
