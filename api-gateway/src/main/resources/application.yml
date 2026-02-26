@@ -20,7 +20,16 @@ spring:
           predicates:
             - Path=/api/v1/email/**
 
-        # User Service (JWT 필터 적용, 화이트리스트는 필터 내부에서 처리)
+        # User Service - 구버전 라우팅 (프론트엔드 호환용, v1으로 자동 Rewrite)
+        - id: user-service-legacy
+          uri: ${USER_SERVICE_URL:http://user-service:8080}
+          predicates:
+            - Path=/api/users/**, /api/auth/**, /api/favorites/**
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+            - JwtAuthorization
+
+        # User Service - 신버전 라우팅 (정규 v1 요청)
         - id: user-service
           uri: ${USER_SERVICE_URL:http://user-service:8080}
           predicates:
