@@ -187,6 +187,7 @@ spring:
               - Authorization              # JWT 토큰
               - Content-Type               # 요청 본문 타입
               - Accept                     # 응답 타입
+              - x-user-id                  # 사용자 식별용 커스텀 헤더
             exposedHeaders:
               - Authorization              # 응답 헤더 노출
             allowCredentials: false        # 개발 단계에서는 false
