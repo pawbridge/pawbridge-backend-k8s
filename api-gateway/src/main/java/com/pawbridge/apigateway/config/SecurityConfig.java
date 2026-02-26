@@ -24,8 +24,9 @@ public class SecurityConfig {
                 // CSRF 비활성화 (JWT 사용하므로 불필요)
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 
-                // CORS 설정은 API Gateway의 globalcors 설정을 따르도록 Security에서 개입하지 않음 (기본값 유지)
-                // .cors()를 명시하거나 disable 하지 않아야 Gateway의 CORS 필터가 정상 작동함
+                // CORS는 application.yml의 spring.cloud.gateway.globalcors 설정 사용
+                // Security 레벨에서는 비활성화
+                .cors(ServerHttpSecurity.CorsSpec::disable)
 
                 // 요청 허용 설정
                 .authorizeExchange(exchange -> exchange
