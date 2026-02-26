@@ -42,7 +42,7 @@ spring:
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/animals/**, /api/v1/animals/**
-            - Method=GET
+            - Method=GET,OPTIONS
           filters:
             - RewritePath=/api/animals(?<segment>/?.*), /api/v1/animals${segment}
           # JWT 필터 없음 (로그인 없이 검색/조회 가능)
@@ -52,7 +52,7 @@ spring:
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/shelters/**, /api/v1/shelters/**
-            - Method=GET
+            - Method=GET,OPTIONS
           filters:
             - RewritePath=/api/shelters(?<segment>/?.*), /api/v1/shelters${segment}
           # JWT 필터 없음 (로그인 없이 조회 가능)
@@ -82,7 +82,7 @@ spring:
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
             - Path=/api/products/**
-            - Method=GET
+            - Method=GET,OPTIONS
           filters:
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
           # JWT 필터 없음 (상품 조회는 공개)
@@ -100,7 +100,7 @@ spring:
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
             - Path=/api/categories/**
-            - Method=GET
+            - Method=GET,OPTIONS
           filters:
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
