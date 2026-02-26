@@ -173,9 +173,9 @@ spring:
               - "http://127.0.0.1:3000"
               - "http://localhost:5173"
               - "http://127.0.0.1:5173"
-              - "https://pawbridge.com"
-              - "https://www.pawbridge.com"
-              - "https://*.pawbridge.com"
+              - "https://pawbridge.kr"
+              - "https://www.pawbridge.kr"
+              - "https://*.pawbridge.kr"
             allowedMethods:
               - GET
               - POST
