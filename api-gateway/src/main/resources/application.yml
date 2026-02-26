@@ -190,7 +190,7 @@ spring:
               - x-user-id                  # 사용자 식별용 커스텀 헤더
             exposedHeaders:
               - Authorization              # 응답 헤더 노출
-            allowCredentials: false        # 개발 단계에서는 false
+            allowCredentials: true         # 인증 정보 통신 허용 (이전의 false 설정이 마지막 차단 원인)
 
 # K8s Probe 설정 (Actuator)
 management:
