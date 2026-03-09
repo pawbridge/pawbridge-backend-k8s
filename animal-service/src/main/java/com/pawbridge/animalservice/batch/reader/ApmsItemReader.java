@@ -30,7 +30,7 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
     @Value("${apms.api.service-key}")
     private String serviceKey;
 
-    private static final int PAGE_SIZE = 500; // APMS API 페이지 크기 (Chunk와 동일하게 설정)
+    private static final int PAGE_SIZE = 1000; // APMS API 페이지 크기 (Chunk와 동일하게 설정)
 
     private int currentPage = 1;
     private List<ApmsAnimal> currentItems = new ArrayList<>();

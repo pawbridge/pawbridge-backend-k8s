@@ -24,10 +24,10 @@ public class ApmsAnimalSyncScheduler {
 
     /**
      * APMS 동물 데이터 동기화 스케줄 실행
-     * - Cron: 매일 새벽 2시 실행 (0 0 2 * * ?)
+     * - Cron: 30분마다 실행 (0 0/30 * * * ?)
      * - JobParameters에 timestamp를 추가하여 매번 새로운 Job Instance 생성
      */
-    @Scheduled(cron = "${batch.apms.sync.cron:0 0 2 * * ?}")
+    @Scheduled(cron = "${batch.apms.sync.cron:0 0/30 * * * ?}")
     public void syncApmsAnimalData() {
         try {
             log.info("APMS 동물 데이터 동기화 스케줄 시작");
