@@ -38,7 +38,7 @@ public class ApmsAnimalBatchJob {
     private final AnimalItemWriter animalItemWriter;
     private final ElasticsearchIndexService elasticsearchIndexService;
 
-    private static final int CHUNK_SIZE = 500; // Reader의 PAGE_SIZE와 동일하게 설정 (메모리 효율)
+    private static final int CHUNK_SIZE = 1000; // Reader의 PAGE_SIZE와 동일하게 설정 (메모리 효율)
 
     /**
      * APMS 동물 동기화 Job
