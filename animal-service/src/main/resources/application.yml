@@ -41,14 +41,6 @@ logging:
 
 
 
-# Batch Scheduler Settings
-# Batch Scheduler Settings (Custom)
-batch:
-  apms:
-    sync:
-      # Cron 표현식: 매일 새벽 2시 실행
-      cron: "0 0 2 * * ?"
-
 # APMS Public API Settings
 apms:
   api:

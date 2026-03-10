@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -54,19 +55,18 @@ public class BatchController {
                     jobExecution.getExitStatus().getExitCode());
 
             // 응답 생성
-            response.put("success", true);
             response.put("jobExecutionId", jobExecution.getId());
             response.put("status", jobExecution.getStatus().toString());
-            response.put("exitCode", jobExecution.getExitStatus().getExitCode());
-            response.put("startTime", jobExecution.getStartTime());
-            response.put("endTime", jobExecution.getEndTime());
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            response.put("startTime", jobExecution.getStartTime() != null ? jobExecution.getStartTime().format(formatter) : null);
+            response.put("endTime", jobExecution.getEndTime() != null ? jobExecution.getEndTime().format(formatter) : null);
 
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
             log.error("APMS 동물 동기화 배치 실행 중 오류 발생", e);
 
-            response.put("success", false);
+            response.put("status", "FAILED");
             response.put("error", e.getMessage());
 
             return ResponseEntity.internalServerError().body(response);
