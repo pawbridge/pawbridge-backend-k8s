@@ -30,12 +30,8 @@ server:
 # Logging Settings
 logging:
   level:
-    com.pawbridge.animalservice: DEBUG
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-    org.springframework.batch: DEBUG
-    org.springframework.boot.autoconfigure.batch: DEBUG
-    org.springframework.data.elasticsearch.client.elc: TRACE
+    com.pawbridge.animalservice: INFO
+    org.springframework.batch: INFO
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 

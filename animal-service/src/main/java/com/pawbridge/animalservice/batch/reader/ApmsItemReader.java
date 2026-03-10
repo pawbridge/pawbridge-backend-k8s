@@ -65,8 +65,6 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
      */
     private void loadNextPage() {
         try {
-            log.info("APMS API 호출 - 페이지: {}, 페이지 크기: {}", currentPage, PAGE_SIZE);
-
             // APMS API 호출 (response 필드로 감싸진 응답)
             ApmsRootResponse<ApmsAnimal> rootResponse = apmsApiClient.getAbandonmentAnimals(
                     serviceKey,
@@ -94,8 +92,6 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
             if (currentItems == null) {
                 currentItems = new ArrayList<>();
             }
-
-            log.info("APMS API 응답 수신 - 페이지: {}, 조회된 아이템 수: {}", currentPage, currentItems.size());
 
             // 다음 페이지로 이동
             currentPage++;
