@@ -54,11 +54,9 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal> {
             if (animal == null) {
                 // 신규 생성
                 animal = createNewAnimal(apmsAnimal, shelter);
-                log.debug("신규 Animal 생성: desertionNo={}", apmsAnimal.getDesertionNo());
             } else {
                 // 기존 데이터 업데이트
                 updateExistingAnimal(animal, apmsAnimal, shelter);
-                log.debug("기존 Animal 업데이트: desertionNo={}", apmsAnimal.getDesertionNo());
             }
 
             return animal;
