@@ -76,7 +76,7 @@ public class AnimalStatsServiceImpl implements AnimalStatsService {
      *
      * <처리 흐름>
      * 1. DB: Animal JOIN Shelter → GROUP BY shelter.id → ~200행 반환
-     * 2. 서버: shelterAddress.split(" ")[0] → 시/도 추출 → 합산
+     * 2. 서버: shelterAddress.split(" ")[0] → normalizeRegion() → 합산
      * 3. 결과: 17개 시/도 기준 정렬해서 반환
      *
      * - startDate/endDate null 시 최근 30일 기본값 적용
@@ -91,7 +91,7 @@ public class AnimalStatsServiceImpl implements AnimalStatsService {
         List<ShelterRescueCountResponse> shelterStats =
                 animalStatsRepository.countByShelterForRegional(range[0], range[1]);
 
-        // 2. shelterAddress 첫 단어로 시/도 추출 후 합산
+        // 2. shelterAddress 정제 (normalizeRegion) 후 합산
         Map<String, Long> regionMap = new LinkedHashMap<>();
         for (ShelterRescueCountResponse stat : shelterStats) {
             String address = stat.getShelterAddress();
@@ -99,8 +99,10 @@ public class AnimalStatsServiceImpl implements AnimalStatsService {
                 log.warn("주소가 없는 보호소 데이터 스킵 (count={})", stat.getCount());
                 continue;
             }
-            String region = address.split(" ")[0]; // "경상남도 창원시..." → "경상남도"
-            regionMap.merge(region, stat.getCount(), Long::sum);
+            // "경상남도 창원시..." → "경상남도" → "경남"
+            String rawRegion = address.split(" ")[0]; 
+            String normalizedRegion = normalizeRegion(rawRegion);
+            regionMap.merge(normalizedRegion, stat.getCount(), Long::sum);
         }
 
         // 3. count 내림차순 정렬 후 최종 DTO로 변환
@@ -116,6 +118,34 @@ public class AnimalStatsServiceImpl implements AnimalStatsService {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 공통 유틸
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    /**
+     * 시/도 문자열을 표준 형태(두 글자)로 정제
+     * 예: "서울특별시" -> "서울", "제주특별자치도" -> "제주"
+     */
+    private String normalizeRegion(String rawRegion) {
+        if (rawRegion == null) return "기타";
+        
+        if (rawRegion.contains("서울")) return "서울";
+        if (rawRegion.contains("부산")) return "부산";
+        if (rawRegion.contains("대구")) return "대구";
+        if (rawRegion.contains("인천")) return "인천";
+        if (rawRegion.contains("광주")) return "광주";
+        if (rawRegion.contains("대전")) return "대전";
+        if (rawRegion.contains("울산")) return "울산";
+        if (rawRegion.contains("세종")) return "세종";
+        if (rawRegion.contains("경기")) return "경기";
+        if (rawRegion.contains("강원")) return "강원";
+        if (rawRegion.contains("충청북도") || rawRegion.contains("충북")) return "충북";
+        if (rawRegion.contains("충청남도") || rawRegion.contains("충남")) return "충남";
+        if (rawRegion.contains("전라북도") || rawRegion.contains("전북")) return "전북";
+        if (rawRegion.contains("전라남도") || rawRegion.contains("전남")) return "전남";
+        if (rawRegion.contains("경상북도") || rawRegion.contains("경북")) return "경북";
+        if (rawRegion.contains("경상남도") || rawRegion.contains("경남")) return "경남";
+        if (rawRegion.contains("제주")) return "제주";
+        
+        return rawRegion; // 매핑되지 않은 경우 원본 반환
+    }
 
     /**
      * startDate/endDate null 시 최근 30일로 기본값 처리

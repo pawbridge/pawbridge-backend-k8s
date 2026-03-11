@@ -193,7 +193,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal> {
     }
 
     /**
-     * 날짜 파싱 (YYYYMMDD)
+     * 날짜 파싱 (YYYYMMDD 등)
      */
     private LocalDate parseDate(String dateStr) {
         if (!StringUtils.hasText(dateStr)) {
@@ -201,7 +201,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal> {
         }
 
         try {
-            return LocalDate.parse(dateStr, DATE_FORMATTER);
+            return LocalDate.parse(dateStr.replace("-", ""), DATE_FORMATTER);
         } catch (Exception e) {
             log.warn("날짜 파싱 실패: {}", dateStr);
             return null;
@@ -209,7 +209,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal> {
     }
 
     /**
-     * 날짜시간 파싱 (yyyy-MM-dd HH:mm:ss.S)
+     * 날짜시간 파싱 (yyyy-MM-dd HH:mm:ss.S 또는 yyyy-MM-dd HH:mm:ss)
      */
     private LocalDateTime parseDateTime(String dateTimeStr) {
         if (!StringUtils.hasText(dateTimeStr)) {
@@ -217,10 +217,15 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal> {
         }
 
         try {
-            return LocalDateTime.parse(dateTimeStr, DATETIME_FORMATTER);
+            return LocalDateTime.parse(dateTimeStr, DATETIME_FORMATTER); // "yyyy-MM-dd HH:mm:ss.S"
         } catch (Exception e) {
-            log.warn("날짜시간 파싱 실패: {}", dateTimeStr);
-            return null;
+            try {
+                // 초 소수점이 없는 경우 폴백 파싱 시도
+                return LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            } catch (Exception ex) {
+                log.warn("날짜시간 다중 파싱 모두 실패: {}", dateTimeStr);
+                return null;
+            }
         }
     }
 }
