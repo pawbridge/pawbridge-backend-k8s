@@ -271,7 +271,7 @@ public class AnimalElasticsearchService {
             mustQueries.add(breedQuery);
         }
 
-        // 4. 상태 필터
+        // 4. 상태 필터 (명시되지 않은 경우 입양 가능한 'PROTECT' 상태만 기본 노출)
         if (condition.getStatus() != null && !condition.getStatus().trim().isEmpty()) {
             Query statusQuery = Query.of(q -> q
                 .term(t -> t
@@ -280,6 +280,20 @@ public class AnimalElasticsearchService {
                 )
             );
             mustQueries.add(statusQuery);
+        } else {
+            // 명시되지 않은 경우 입양 가능한 'NOTICE'(공고중), 'PROTECT'(보호중) 상태 기본 노출
+            Query defaultStatusQuery = Query.of(q -> q
+                .terms(t -> t
+                    .field("status")
+                    .terms(ts -> ts
+                        .value(java.util.List.of(
+                            co.elastic.clients.elasticsearch._types.FieldValue.of(AnimalStatus.NOTICE.name()),
+                            co.elastic.clients.elasticsearch._types.FieldValue.of(AnimalStatus.PROTECT.name())
+                        ))
+                    )
+                )
+            );
+            mustQueries.add(defaultStatusQuery);
         }
 
         // 5. 성별 필터
@@ -375,6 +389,7 @@ public class AnimalElasticsearchService {
         NativeQuery nativeQuery = NativeQuery.builder()
             .withQuery(Query.of(q -> q.bool(boolQuery.build())))
             .withPageable(pageable)
+            .withTrackTotalHits(true) // 10,000건 이상 정확한 카운트 반환
             .build();
 
         // 검색 실행
