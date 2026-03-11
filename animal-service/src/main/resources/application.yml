@@ -33,7 +33,7 @@ logging:
     com.pawbridge.animalservice: INFO
     org.springframework.batch: INFO
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%level] - %msg%n"
 
 
 

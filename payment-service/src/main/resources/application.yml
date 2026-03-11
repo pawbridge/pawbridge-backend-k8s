@@ -43,5 +43,9 @@ management:
     tags:
       application: ${spring.application.name}
 
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%level] - %msg%n"
+
 server:
   port: 8084
