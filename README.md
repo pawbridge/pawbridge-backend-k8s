@@ -1,5 +1,5 @@
 # PawBridge Backend (Kubernetes Edition)
-
+<img width="1919" height="920" alt="Image" src="https://github.com/user-attachments/assets/2d016c69-7d91-4f1a-8111-abbb773ec5a7" />
 반려동물 입양 프로세스, 커뮤니티, 스토어 통합 커머스 플랫폼인 PawBridge의 마이크로서비스 백엔드 저장소입니다. 
 기존 AWS EC2 다중 노드 환경에서 운영되던 서비스를 개인 로컬 PC 기반의 Kubernetes(K8s) 클러스터로 마이그레이션한 버전입니다.
 
@@ -24,9 +24,16 @@
 ### 4. Spring Batch 데이터 파이프라인
 - 농림축산식품부 유기동물 공공데이터(APMS)를 주기적으로 자동 수집(`@Scheduled`), 정제 후 자체 DB 및 Elasticsearch로 동기화하는 대용량 배치 프로세스 구현
 
+### 5. Monitoring & Observability
+- Prometheus + Grafana + Zipkin 자체 호스팅으로 5개 마이크로서비스 통합 모니터링 구축
+- JVM 힙/GC/스레드, HTTP p95·p99·RPS·에러율, Node Exporter 기반 CPU·메모리 통합 관리
+- k6 부하 테스트(100 VUs, 5분) 결과를 Prometheus remote write로 Grafana에 실시간 연동
+- **결과: 100 VUs 풀 부하 구간 Peak RPS 58.2/s, 에러율 0% 달성 · Worker 노드 메모리 92% 포화 문제 포착 및 해소**
+<img width="1920" height="918" alt="Image" src="https://github.com/user-attachments/assets/4838b2c7-4d34-466e-b9db-2249253cd0a1" />
 ---
 
-## 마이그레이션 배경 (Why K8s & Local VM?)
+## 마이그레이션 배경 (Why K8s & Local VM)
+<img width="1041" height="786" alt="Image" src="https://github.com/user-attachments/assets/bd6107f9-3596-42dd-a58b-f8aa744f6f5e" />
 기존 AWS 무료 티어 기간 종료와 맞물려, 대규모 트래픽 처리에 필수적인 K8s 기반 MSA 환경과 Kafka를 직접 구축해보기 위해 로컬 수준의 클러스터로 이전했습니다.
 
 1. AWS EKS 비용 문제 우회: 관리형 서비스인 EKS의 유지 비용이 개인 프로젝트 수준에서는 매우 부담스러웠습니다. 이에 대한 대안으로 보유 중인 고사양 로컬 PC(Ryzen 7800X3D, 64GB RAM) 인프라를 활용하여 직접 클러스터를 프로비저닝(Vagrant)하였습니다.
