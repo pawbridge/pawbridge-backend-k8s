@@ -70,7 +70,7 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
             // 최근 변동된 데이터(3일 전 ~ 오늘)만 수집하여 무작위 데이터 누락 방지
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
             String endde = LocalDate.now().format(formatter);
-            String bgnde = LocalDate.now().minusDays(3).format(formatter);
+            String bgnde = LocalDate.now().minusDays(30).format(formatter);
 
             // APMS API 호출 (response 필드로 감싸진 응답)
             ApmsRootResponse<ApmsAnimal> rootResponse = apmsApiClient.getAbandonmentAnimals(
