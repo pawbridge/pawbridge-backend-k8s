@@ -62,6 +62,16 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
     @EntityGraph(attributePaths = {"shelter"})
     Optional<Animal> findWithShelterByApmsDesertionNo(String apmsDesertionNo);
 
+    /**
+     * 전체 동물 페이징 조회 (Shelter fetch join)
+     * - Elasticsearch 일괄 인덱싱 시 N+1 방지용
+     * @param pageable 페이징 정보
+     * @return Page<Animal>
+     */
+    @Query(value = "SELECT a FROM Animal a JOIN FETCH a.shelter ORDER BY a.id ASC",
+           countQuery = "SELECT COUNT(a) FROM Animal a")
+    Page<Animal> findAllWithShelter(Pageable pageable);
+
 
     // 보호소별 조회
 

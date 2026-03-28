@@ -11,6 +11,17 @@ spring:
       initialize-schema: always
     job:
       enabled: false  # REST API로 수동 실행
+
+  # JPA Batch Settings
+  jpa:
+    properties:
+      hibernate:
+        default_batch_fetch_size: 1000
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
   elasticsearch:
     connection-timeout: 5s
     socket-timeout: 30s

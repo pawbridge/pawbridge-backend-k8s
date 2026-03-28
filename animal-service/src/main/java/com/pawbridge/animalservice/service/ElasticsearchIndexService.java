@@ -57,7 +57,7 @@ public class ElasticsearchIndexService {
                 log.info("[ELASTICSEARCH] 배치 {}/{} 처리 중...", page + 1, totalPages);
 
                 Pageable pageable = PageRequest.of(page, BATCH_SIZE);
-                Page<Animal> animalPage = animalRepository.findAll(pageable);
+                Page<Animal> animalPage = animalRepository.findAllWithShelter(pageable);
 
                 List<AnimalDocument> documents = animalPage.getContent().stream()
                     .map(this::convertToDocument)
