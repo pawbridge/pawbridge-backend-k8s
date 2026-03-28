@@ -68,7 +68,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
      * @param pageable 페이징 정보
      * @return Page<Animal>
      */
-    @Query(value = "SELECT a FROM Animal a JOIN FETCH a.shelter",
+    @Query(value = "SELECT a FROM Animal a JOIN FETCH a.shelter ORDER BY a.id ASC",
            countQuery = "SELECT COUNT(a) FROM Animal a")
     Page<Animal> findAllWithShelter(Pageable pageable);
 
