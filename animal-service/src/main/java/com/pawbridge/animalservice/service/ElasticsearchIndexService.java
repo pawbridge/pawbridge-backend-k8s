@@ -13,9 +13,18 @@ import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
+import org.springframework.data.elasticsearch.core.IndexOperations;
+import org.springframework.data.elasticsearch.core.index.AliasActions;
+import org.springframework.data.elasticsearch.core.index.AliasAction;
+import org.springframework.data.elasticsearch.core.index.AliasActionParameters;
+import org.springframework.data.elasticsearch.core.index.AliasMetaData;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -35,14 +44,22 @@ public class ElasticsearchIndexService {
     private static final int BATCH_SIZE = 1000;  // 배치 크기
 
     /**
-     * 전체 동물 데이터를 Elasticsearch에 배치 인덱싱
+     * 전체 동물 데이터를 Elasticsearch에 배치 인덱싱 (기존 동작 호환)
      */
     @Transactional(readOnly = true)
     public long indexAllAnimals() {
-        log.info("[ELASTICSEARCH] 배치 인덱싱 시작 (배치 크기: {})", BATCH_SIZE);
+        return indexAnimalsToTarget("animals");
+    }
+
+    /**
+     * 지정된 대상 인덱스에 데이터 적재 (Repository 대신 IndexCoordinates로 명시적 분기)
+     */
+    private long indexAnimalsToTarget(String targetIndexName) {
+        log.info("[ELASTICSEARCH] 대상 인덱스 [{}]에 데이터 적재 시작 (배치 크기: {})", targetIndexName, BATCH_SIZE);
+        IndexCoordinates coordinates = IndexCoordinates.of(targetIndexName);
 
         long totalCount = animalRepository.count();
-        log.info("[ELASTICSEARCH] 총 {} 건의 동물 데이터", totalCount);
+        log.info("[ELASTICSEARCH] 총 {} 건의 동물 데이터 조회됨", totalCount);
 
         if (totalCount == 0) {
             log.warn("[ELASTICSEARCH] 인덱싱할 데이터가 없습니다");
@@ -54,8 +71,6 @@ public class ElasticsearchIndexService {
 
         for (int page = 0; page < totalPages; page++) {
             try {
-                log.info("[ELASTICSEARCH] 배치 {}/{} 처리 중...", page + 1, totalPages);
-
                 Pageable pageable = PageRequest.of(page, BATCH_SIZE);
                 Page<Animal> animalPage = animalRepository.findAllWithShelter(pageable);
 
@@ -63,33 +78,77 @@ public class ElasticsearchIndexService {
                     .map(this::convertToDocument)
                     .collect(Collectors.toList());
 
-                animalDocumentRepository.saveAll(documents);
-
+                // 특정 타겟 인덱스(또는 별칭)에 bulk insert
+                elasticsearchOperations.save(documents, coordinates);
                 indexedCount += documents.size();
 
-                log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건",
-                    page + 1, totalPages, documents.size());
-
+                log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건", page + 1, totalPages, documents.size());
                 documents.clear();
-
             } catch (Exception e) {
                 log.error("[ELASTICSEARCH] 배치 {} 실패: {}", page + 1, e.getMessage(), e);
             }
         }
 
-        log.info("[ELASTICSEARCH] 배치 인덱싱 완료: 총 {} 건", indexedCount);
+        log.info("[ELASTICSEARCH] 적재 완료: 총 {} 건", indexedCount);
         return indexedCount;
     }
 
     /**
-     * Elasticsearch 인덱스 초기화 후 전체 재인덱싱
+     * 무중단 전체 재인덱싱 (Alias Swap 패턴)
+     * - 신규 인덱스 생성 (Template 자동 적용) -> 적재 -> 별칭 원자적 교체 -> 구 인덱스 삭제
      */
     @Transactional(readOnly = true)
     public long reindexAllAnimals() {
-        log.info("[ELASTICSEARCH] 전체 재인덱싱 시작 (기존 데이터 삭제)");
-        long deletedCount = deleteAllDocuments();
-        log.info("[ELASTICSEARCH] 기존 데이터 {} 건 삭제 완료", deletedCount);
-        return indexAllAnimals();
+        String aliasName = "animals";
+        String newIndexName = "animals_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+
+        log.info("[ELASTICSEARCH] Alias Swap 방식 재인덱싱 시작 - 신규 인덱스 할당: {}", newIndexName);
+
+        // 1. 신규 인덱스 생성 (ES에 사전 등록된 animals_template 적용)
+        IndexOperations indexOps = elasticsearchOperations.indexOps(IndexCoordinates.of(newIndexName));
+        indexOps.create();
+        log.info("[ELASTICSEARCH] 신규 인덱스 생성 완료: {}", newIndexName);
+
+        // 2. 신규 인덱스에 데이터 적재
+        long count = indexAnimalsToTarget(newIndexName);
+
+        // 3. 기존 'animals' 별칭을 가진 구버전 인덱스 탐색
+        String oldIndexName = getIndexNameByAlias(aliasName);
+        log.info("[ELASTICSEARCH] 기존 연결된 인덱스 탐색 결과: {}", oldIndexName != null ? oldIndexName : "없음 (최초 실행)");
+
+        // 4. 별칭 atomic swap (원자적 교체)
+        AliasActions aliasActions = new AliasActions();
+        if (oldIndexName != null) {
+            aliasActions.add(new AliasAction.Remove(AliasActionParameters.builder().withIndices(oldIndexName).withAliases(aliasName).build()));
+        }
+        aliasActions.add(new AliasAction.Add(AliasActionParameters.builder().withIndices(newIndexName).withAliases(aliasName).build()));
+        
+        indexOps.alias(aliasActions);
+        log.info("[ELASTICSEARCH] 별칭 Swap 완료! ({} -> {})", oldIndexName != null ? oldIndexName : "N/A", newIndexName);
+
+        // 5. 구버전 인덱스 폐기
+        if (oldIndexName != null && !oldIndexName.equals(newIndexName)) {
+            elasticsearchOperations.indexOps(IndexCoordinates.of(oldIndexName)).delete();
+            log.info("[ELASTICSEARCH] 구버전 인덱스 [{}] 삭제 완료", oldIndexName);
+        }
+
+        return count;
+    }
+
+    /**
+     * 특정 별칭(Alias)이 현재 어떤 실제 인덱스를 가리키고 있는지 조회
+     */
+    private String getIndexNameByAlias(String aliasName) {
+        try {
+            IndexOperations aliasOps = elasticsearchOperations.indexOps(IndexCoordinates.of(aliasName));
+            Map<String, Set<AliasMetaData>> aliases = aliasOps.getAliases();
+            if (aliases != null && !aliases.isEmpty()) {
+                return aliases.keySet().stream().findFirst().orElse(null);
+            }
+        } catch (Exception e) {
+            log.warn("[ELASTICSEARCH] 별칭 조회 실패 (최초 실행이거나 일반 인덱스일 수 있음): {}", e.getMessage());
+        }
+        return null;
     }
 
     /**
