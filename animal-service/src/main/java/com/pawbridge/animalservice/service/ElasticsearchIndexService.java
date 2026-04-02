@@ -13,13 +13,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
 import org.springframework.data.elasticsearch.core.IndexOperations;
 import org.springframework.data.elasticsearch.core.index.AliasActions;
 import org.springframework.data.elasticsearch.core.index.AliasAction;
 import org.springframework.data.elasticsearch.core.index.AliasActionParameters;
-import org.springframework.data.elasticsearch.core.index.AliasMetaData;
+import org.springframework.data.elasticsearch.core.index.AliasData;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -189,7 +188,7 @@ public class ElasticsearchIndexService {
     private Set<String> getIndexNamesByAlias(String aliasName) {
         try {
             IndexOperations aliasOps = elasticsearchOperations.indexOps(IndexCoordinates.of(aliasName));
-            Map<String, Set<AliasMetaData>> aliases = aliasOps.getAliases();
+            Map<String, Set<AliasData>> aliases = aliasOps.getAliases();
             if (aliases != null && !aliases.isEmpty()) {
                 return aliases.keySet();
             }
