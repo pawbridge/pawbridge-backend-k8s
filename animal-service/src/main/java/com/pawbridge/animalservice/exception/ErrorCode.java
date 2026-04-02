@@ -22,6 +22,9 @@ public enum ErrorCode {
     INVALID_INPUT_VALUE("INVALID_INPUT_VALUE", "입력값이 올바르지 않습니다", HttpStatus.BAD_REQUEST),
     INVALID_ARGUMENT("INVALID_ARGUMENT", "잘못된 인자가 전달되었습니다", HttpStatus.BAD_REQUEST),
 
+    // 상태 충돌 에러 (409)
+    CONCURRENT_REQUEST("CONCURRENT_REQUEST", "이미 진행 중인 작업이 있습니다", HttpStatus.CONFLICT),
+
     // 권한 에러 (403)
     PERMISSION_DENIED("PERMISSION_DENIED", "접근 권한이 없습니다", HttpStatus.FORBIDDEN),
 
