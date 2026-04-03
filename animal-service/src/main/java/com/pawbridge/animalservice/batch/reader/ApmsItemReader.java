@@ -66,7 +66,9 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
      * 다음 페이지 데이터 로드
      */
     private void loadNextPage() {
+        org.springframework.util.StopWatch stopWatch = new org.springframework.util.StopWatch("APMS Reader 측정");
         try {
+            stopWatch.start("1. OpenAPI 통신 및 파싱");
             // 최근 변동된 데이터(30일 전 ~ 오늘)만 수집하여 지연 등록 데이터 누락 완벽 방지
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
             String endde = LocalDate.now().format(formatter);
@@ -86,6 +88,8 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
 
             // "response" 필드에서 실제 응답 추출
             ApmsResponse response = rootResponse != null ? rootResponse.getResponse() : null;
+            
+            stopWatch.stop();
 
             // 응답 검증
             if (response == null || response.getBody() == null || response.getBody().getItems() == null) {
@@ -99,6 +103,8 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
             if (currentItems == null) {
                 currentItems = new ArrayList<>();
             }
+            
+            log.info("[성능측정] API 호출 소요시간 - {} ms (페이지: {}, 건수: {})", stopWatch.getTotalTimeMillis(), currentPage, currentItems.size());
 
             // 다음 페이지로 이동
             currentPage++;

@@ -27,10 +27,15 @@ public class AnimalItemWriter implements ItemWriter<Animal> {
         }
 
         try {
+            org.springframework.util.StopWatch stopWatch = new org.springframework.util.StopWatch("APMS Writer 측정");
+            stopWatch.start("2. MySQL Bulk Save");
+            
             // Chunk 내의 모든 Animal을 일괄 저장
             animalRepository.saveAll(chunk.getItems());
+            
+            stopWatch.stop();
 
-            log.info("Animal {} 건 저장 완료", chunk.size());
+            log.info("Animal {} 건 저장 완료. [성능측정] DB 저장 소요시간 - {} ms", chunk.size(), stopWatch.getTotalTimeMillis());
 
         } catch (Exception e) {
             log.error("Animal 저장 중 오류 발생: chunk size={}", chunk.size(), e);
