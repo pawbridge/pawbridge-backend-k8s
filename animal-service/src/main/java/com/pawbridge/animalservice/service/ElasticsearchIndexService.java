@@ -22,10 +22,10 @@ import org.springframework.data.elasticsearch.core.index.AliasData;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.Collectors;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -187,19 +187,28 @@ public class ElasticsearchIndexService {
      */
     private Set<String> getIndexNamesByAlias(String aliasName) {
         try {
-            IndexOperations aliasOps = elasticsearchOperations.indexOps(IndexCoordinates.of(aliasName));
-            Map<String, Set<AliasData>> aliases = aliasOps.getAliases();
-            if (aliases != null && !aliases.isEmpty()) {
-                return aliases.keySet();
+            // 모든 하위 인덱스 및 별칭 정보 조회
+            IndexOperations indexOps = elasticsearchOperations.indexOps(IndexCoordinates.of("_all"));
+            Map<String, Set<AliasData>> aliasesMap = indexOps.getAliases();
+
+            if (aliasesMap == null || aliasesMap.isEmpty()) {
+                return Collections.emptySet();
             }
+
+            // 요청된 aliasName을 실제로 가지고 있는 인덱스명(Key)만 필터링하여 반환
+            return aliasesMap.entrySet().stream()
+                .filter(entry -> entry.getValue().stream()
+                    .anyMatch(aliasData -> aliasName.equals(aliasData.getAlias())))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+
         } catch (org.springframework.data.elasticsearch.NoSuchIndexException e) {
             log.info("[ELASTICSEARCH] '{}' 이름을 가진 인덱스나 별칭이 존재하지 않습니다. (최초 실행)", aliasName);
-            return null;
+            return Collections.emptySet();
         } catch (Exception e) {
             log.error("[ELASTICSEARCH] 별칭 조회 중 예상치 못한 인프라 오류 발생: {}", e.getMessage());
-            throw new IllegalStateException("ES 클러스터 연결 또는 상태 이상으로 별칭을 조회할 수 없습니다.", e);
+            throw new IllegalStateException("ES 별칭 정보를 조회할 수 없어 안전을 위해 재인덱싱을 중단합니다.", e);
         }
-        return null;
     }
 
     /**
