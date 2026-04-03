@@ -207,7 +207,7 @@ public class ElasticsearchIndexService {
             return Collections.emptySet();
         } catch (Exception e) {
             log.error("[ELASTICSEARCH] 별칭 조회 중 예상치 못한 인프라 오류 발생: {}", e.getMessage());
-            return Collections.emptySet();
+            throw new IllegalStateException("ES 별칭 정보를 조회할 수 없어 안전을 위해 재인덱싱을 중단합니다.", e);
         }
     }
 
