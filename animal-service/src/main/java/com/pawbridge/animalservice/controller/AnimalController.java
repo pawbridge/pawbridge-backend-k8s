@@ -6,6 +6,7 @@ import com.pawbridge.animalservice.dto.request.UpdateAnimalDescriptionRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalStatusRequest;
 import com.pawbridge.animalservice.dto.response.AnimalDetailResponse;
 import com.pawbridge.animalservice.dto.response.AnimalResponse;
+import com.pawbridge.animalservice.dto.response.PageResponse;
 import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.enums.Gender;
 import com.pawbridge.animalservice.enums.Species;
@@ -73,12 +74,12 @@ public class AnimalController {
      * - /api/animals?species=DOG&gender=MALE&minAge=1&maxAge=5&region=서울
      */
     @GetMapping
-    public ResponseEntity<Page<AnimalResponse>> listAnimals(
+    public ResponseEntity<PageResponse<AnimalResponse>> listAnimals(
             @ModelAttribute AnimalSearchRequest request,
             @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         Page<AnimalResponse> response = animalFacade.searchAnimals(request, pageable);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(PageResponse.from(response));
     }
 
     /**
@@ -142,11 +143,11 @@ public class AnimalController {
      * - GET /api/animals/expiring-soon
      */
     @GetMapping("/expiring-soon")
-    public ResponseEntity<Page<AnimalResponse>> listExpiringSoon(
+    public ResponseEntity<PageResponse<AnimalResponse>> listExpiringSoon(
             @PageableDefault(size = 20, sort = "noticeEndDate", direction = Sort.Direction.ASC) Pageable pageable
     ) {
         Page<AnimalResponse> response = animalFacade.findExpiringSoonAnimals(pageable);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(PageResponse.from(response));
     }
 
     /**
