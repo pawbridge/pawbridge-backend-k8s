@@ -56,7 +56,7 @@ public class ApmsAnimalBatchJob {
     public Job apmsAnimalSyncJob() {
         return new JobBuilder("apmsAnimalSyncJob", jobRepository)
                 .start(shelterPrepStep())
-                    .on("FAILED").end()
+                    .on("FAILED").fail()  // Job FAILED + 재시작 가능 (.end()는 COMPLETED로 숨김)
                 .from(shelterPrepStep())
                     .on("*").to(apmsAnimalSyncStep())
                 .from(apmsAnimalSyncStep())

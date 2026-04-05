@@ -67,26 +67,23 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     @Override
     public Animal process(ApmsAnimal apmsAnimal) throws Exception {
         if (!StringUtils.hasText(apmsAnimal.getDesertionNo())) {
-            log.warn("desertionNo가 없는 데이터 스킵: {}", apmsAnimal);
-            return null;
+            // null 반환은 조용한 필터링 → SkipListener 미호출. 예외로 throw해야 skip 통계에 집계됨
+            throw new IllegalArgumentException("desertionNo 누락: " + apmsAnimal);
         }
 
-        try {
-            Shelter shelter = findShelterFromCache(apmsAnimal);
-            if (shelter == null) {
-                return null; // shelterCache miss → 스킵
-            }
-            Long existingId = existingAnimalIdMap.get(apmsAnimal.getDesertionNo());
+        Shelter shelter = findShelterFromCache(apmsAnimal);
+        if (shelter == null) {
+            String careRegNo = StringUtils.hasText(apmsAnimal.getCareRegNo())
+                    ? apmsAnimal.getCareRegNo() : "UNKNOWN";
+            throw new IllegalArgumentException(
+                    "shelterCache miss: careRegNo=" + careRegNo + ", desertionNo=" + apmsAnimal.getDesertionNo());
+        }
 
-            if (existingId == null) {
-                return createNewAnimal(apmsAnimal, shelter);
-            } else {
-                return buildUpdateCarrier(existingId, apmsAnimal, shelter);
-            }
-
-        } catch (Exception e) {
-            log.error("ApmsAnimal 처리 중 오류 발생: desertionNo={}", apmsAnimal.getDesertionNo(), e);
-            return null;
+        Long existingId = existingAnimalIdMap.get(apmsAnimal.getDesertionNo());
+        if (existingId == null) {
+            return createNewAnimal(apmsAnimal, shelter);
+        } else {
+            return buildUpdateCarrier(existingId, apmsAnimal, shelter);
         }
     }
 
@@ -98,12 +95,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     private Shelter findShelterFromCache(ApmsAnimal apmsAnimal) {
         String careRegNo = StringUtils.hasText(apmsAnimal.getCareRegNo())
                 ? apmsAnimal.getCareRegNo() : "UNKNOWN";
-        Shelter shelter = shelterCache.get(careRegNo);
-        if (shelter == null) {
-            log.warn("[BATCH] shelterCache miss: careRegNo={}, desertionNo={} — 아이템 스킵",
-                    careRegNo, apmsAnimal.getDesertionNo());
-        }
-        return shelter;
+        return shelterCache.get(careRegNo);
     }
 
     /**

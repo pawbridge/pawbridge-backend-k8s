@@ -110,8 +110,9 @@ public class ShelterPrepTasklet implements Tasklet {
 
             if (response == null || response.getBody() == null
                     || response.getBody().getItems() == null) {
-                log.warn("[BATCH Step 0] APMS API 응답이 비어있습니다. 페이지: {}", page);
-                break;
+                // break로 끝내면 부분 로드 상태로 Step 성공 처리 → 후속 Step에서 cache miss 다량 발생
+                throw new IllegalStateException(
+                        "APMS API 비정상 응답 (null body/items) — 페이지: " + page);
             }
 
             List<ApmsAnimal> items = response.getBody().getItems().getItem();
