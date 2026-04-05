@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.repository;
 
 import com.pawbridge.animalservice.entity.Animal;
+import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.enums.Gender;
 import com.pawbridge.animalservice.enums.Species;
@@ -172,4 +173,49 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
      * @return 개수
      */
     long countByApmsNoticeNoStartingWith(String prefix);
+
+    // 배치 HashMap 캐시용
+
+    /**
+     * 배치 시작 시 기존 Animal의 (desertionNo, id) 쌍 전체 조회
+     * - AnimalItemProcessor.beforeStep() 에서 SELECT 1회로 existingAnimalIdMap 구성
+     * - row[0] = apmsDesertionNo (String), row[1] = id (Long)
+     */
+    @Query("SELECT a.apmsDesertionNo, a.id FROM Animal a WHERE a.apmsDesertionNo IS NOT NULL")
+    List<Object[]> findAllApmsDesertionNoAndId();
+
+    /**
+     * APMS 배치 기존 Animal 직접 UPDATE - SELECT 없이 id 기반 UPDATE만 실행
+     * - merge()의 SELECT → UPDATE 2단계를 UPDATE 1단계로 단축
+     * - @Modifying(clearAutomatically = true): 쿼리 후 1차 캐시 초기화로 스테일 방지
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("UPDATE Animal a SET " +
+            "a.breed = :breed, a.birthYear = :birthYear, a.weight = :weight, " +
+            "a.color = :color, a.gender = :gender, a.neuterStatus = :neuterStatus, " +
+            "a.specialMark = :specialMark, a.apmsProcessState = :apmsProcessState, " +
+            "a.noticeStartDate = :noticeStartDate, a.noticeEndDate = :noticeEndDate, " +
+            "a.apmsUpdatedAt = :apmsUpdatedAt, a.happenDate = :happenDate, " +
+            "a.happenPlace = :happenPlace, a.imageUrl = :imageUrl, a.imageUrl2 = :imageUrl2, " +
+            "a.shelter = :shelter, a.status = :status WHERE a.id = :id")
+    int updateAnimalFromApms(
+            @Param("id") Long id,
+            @Param("shelter") Shelter shelter,
+            @Param("breed") String breed,
+            @Param("birthYear") Integer birthYear,
+            @Param("weight") String weight,
+            @Param("color") String color,
+            @Param("gender") com.pawbridge.animalservice.enums.Gender gender,
+            @Param("neuterStatus") com.pawbridge.animalservice.enums.NeuterStatus neuterStatus,
+            @Param("specialMark") String specialMark,
+            @Param("apmsProcessState") String apmsProcessState,
+            @Param("noticeStartDate") java.time.LocalDate noticeStartDate,
+            @Param("noticeEndDate") java.time.LocalDate noticeEndDate,
+            @Param("apmsUpdatedAt") java.time.LocalDateTime apmsUpdatedAt,
+            @Param("happenDate") java.time.LocalDate happenDate,
+            @Param("happenPlace") String happenPlace,
+            @Param("imageUrl") String imageUrl,
+            @Param("imageUrl2") String imageUrl2,
+            @Param("status") com.pawbridge.animalservice.enums.AnimalStatus status
+    );
 }
