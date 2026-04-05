@@ -198,7 +198,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
             "a.apmsUpdatedAt = :apmsUpdatedAt, a.happenDate = :happenDate, " +
             "a.happenPlace = :happenPlace, a.imageUrl = :imageUrl, a.imageUrl2 = :imageUrl2, " +
             "a.shelter = :shelter, a.status = :status WHERE a.id = :id")
-    void updateAnimalFromApms(
+    int updateAnimalFromApms(
             @Param("id") Long id,
             @Param("shelter") Shelter shelter,
             @Param("breed") String breed,

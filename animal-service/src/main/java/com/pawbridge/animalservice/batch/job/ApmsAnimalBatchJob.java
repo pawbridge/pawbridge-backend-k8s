@@ -1,7 +1,9 @@
 package com.pawbridge.animalservice.batch.job;
 
+import com.pawbridge.animalservice.batch.listener.BatchSkipListener;
 import com.pawbridge.animalservice.batch.processor.AnimalItemProcessor;
 import com.pawbridge.animalservice.batch.reader.ApmsItemReader;
+import com.pawbridge.animalservice.batch.tasklet.ShelterPrepTasklet;
 import com.pawbridge.animalservice.batch.writer.AnimalItemWriter;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Animal;
@@ -37,28 +39,50 @@ public class ApmsAnimalBatchJob {
     private final AnimalItemProcessor animalItemProcessor;
     private final AnimalItemWriter animalItemWriter;
     private final ElasticsearchIndexService elasticsearchIndexService;
+    private final ShelterPrepTasklet shelterPrepTasklet;
+    private final BatchSkipListener batchSkipListener;
 
     private static final int CHUNK_SIZE = 1000; // Reader의 PAGE_SIZE와 동일하게 설정 (메모리 효율)
 
     /**
      * APMS 동물 동기화 Job
-     * - Step 1: APMS API → MySQL 저장
+     * - Step 0: 보호소 사전 저장 (ShelterPrepTasklet)
+     * - Step 1: APMS API → MySQL 저장 (Step 0 성공 시에만 실행)
      * - Step 2: MySQL → Elasticsearch 인덱싱
+     *
+     * Step Flow: Step 0 FAILED → Job 즉시 종료 (Step 1, 2 실행 안 함)
      */
     @Bean
     public Job apmsAnimalSyncJob() {
         return new JobBuilder("apmsAnimalSyncJob", jobRepository)
-                .start(apmsAnimalSyncStep())
-                .next(elasticsearchIndexStep())
+                .start(shelterPrepStep())
+                    .on("FAILED").end()
+                .from(shelterPrepStep())
+                    .on("*").to(apmsAnimalSyncStep())
+                .from(apmsAnimalSyncStep())
+                    .next(elasticsearchIndexStep())
+                .end()
                 .build();
     }
 
     /**
-     * APMS 동물 동기화 Step
-     * - Reader: APMS API 호출
-     * - Processor: DTO → Entity 변환
-     * - Writer: DB 저장
-     * - FaultTolerant: 에러 발생 시 Skip/Retry 정책
+     * Step 0: 보호소 사전 저장 Tasklet
+     * - APMS API 전체 조회 → 신규 보호소 saveAll()
+     * - 실패 시 Step Flow에 의해 Job 종료
+     */
+    @Bean
+    public Step shelterPrepStep() {
+        return new StepBuilder("shelterPrepStep", jobRepository)
+                .tasklet(shelterPrepTasklet, transactionManager)
+                .build();
+    }
+
+    /**
+     * Step 1: APMS 동물 동기화 Chunk Step
+     * - Reader: APMS API 호출 (PAGE_SIZE = 1000)
+     * - Processor: DTO → Entity 변환 (shelterCache/existingAnimalIdMap 캐시 조회)
+     * - Writer: 신규 saveAll(), 기존 @Modifying UPDATE
+     * - FaultTolerant: Skip(최대 100건) + FeignException Retry(최대 3회) + SkipListener 로깅
      */
     @Bean
     public Step apmsAnimalSyncStep() {
@@ -67,12 +91,15 @@ public class ApmsAnimalBatchJob {
                 .reader(apmsItemReader)
                 .processor(animalItemProcessor)
                 .writer(animalItemWriter)
-                .faultTolerant() // FaultTolerant 설정
-                .skipLimit(100) // Skip 정책: 최대 100개 아이템까지 스킵 허용
-                .skip(FeignException.class) // API 호출 실패 시 해당 아이템 스킵 (예: 401, 500 등)
-                .skip(IllegalArgumentException.class) // 데이터 파싱/변환 오류 시 스킵
-                .skip(DataAccessException.class) // DB 저장 오류 시 스킵 (예: 제약조건 위반)
-                .skip(Exception.class) // 일반 예외도 스킵 (NPE 등)
+                .faultTolerant()
+                .skipLimit(100)
+                .skip(FeignException.class)
+                .skip(IllegalArgumentException.class)
+                .skip(DataAccessException.class)
+                .skip(Exception.class)
+                .retry(FeignException.class)   // API 일시 장애 시 재시도 (일별 한도 내)
+                .retryLimit(3)                 // 3회까지 재시도 후 skip으로 전환
+                .listener(batchSkipListener)   // skip 발생 시 desertionNo/id 로그
                 .build();
     }
 

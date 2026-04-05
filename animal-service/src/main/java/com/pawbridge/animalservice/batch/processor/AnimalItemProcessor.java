@@ -72,7 +72,10 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
         }
 
         try {
-            Shelter shelter = findOrCreateShelterFromCache(apmsAnimal);
+            Shelter shelter = findShelterFromCache(apmsAnimal);
+            if (shelter == null) {
+                return null; // shelterCache miss → 스킵
+            }
             Long existingId = existingAnimalIdMap.get(apmsAnimal.getDesertionNo());
 
             if (existingId == null) {
@@ -88,23 +91,19 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     }
 
     /**
-     * shelterCache에서 조회, 신규면 DB 저장 후 캐시 추가
+     * shelterCache에서 보호소 조회
+     * - ShelterPrepTasklet(Step 0)에서 모든 보호소를 사전 저장하므로 캐시 미스 시 null 반환
+     * - null이면 process()에서 해당 아이템을 스킵 처리
      */
-    private Shelter findOrCreateShelterFromCache(ApmsAnimal apmsAnimal) {
+    private Shelter findShelterFromCache(ApmsAnimal apmsAnimal) {
         String careRegNo = StringUtils.hasText(apmsAnimal.getCareRegNo())
                 ? apmsAnimal.getCareRegNo() : "UNKNOWN";
-
-        return shelterCache.computeIfAbsent(careRegNo, key -> {
-            Shelter newShelter = Shelter.builder()
-                    .careRegNo(key)
-                    .name(StringUtils.hasText(apmsAnimal.getCareNm()) ? apmsAnimal.getCareNm() : "알 수 없는 보호소")
-                    .phone(apmsAnimal.getCareTel())
-                    .address(apmsAnimal.getCareAddr())
-                    .organizationName(apmsAnimal.getOrgNm())
-                    .build();
-            log.info("신규 Shelter 생성: careRegNo={}, name={}", key, newShelter.getName());
-            return shelterRepository.save(newShelter);
-        });
+        Shelter shelter = shelterCache.get(careRegNo);
+        if (shelter == null) {
+            log.warn("[BATCH] shelterCache miss: careRegNo={}, desertionNo={} — 아이템 스킵",
+                    careRegNo, apmsAnimal.getDesertionNo());
+        }
+        return shelter;
     }
 
     /**
