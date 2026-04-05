@@ -99,6 +99,7 @@ public class ApmsAnimalBatchJob {
                 .skip(Exception.class)
                 .retry(FeignException.class)   // API 일시 장애 시 재시도 (일별 한도 내)
                 .retryLimit(3)                 // 3회까지 재시도 후 skip으로 전환
+                .listener(animalItemProcessor)  // beforeStep() 호출 보장 (shelterCache/existingAnimalIdMap 초기화)
                 .listener(batchSkipListener)   // skip 발생 시 desertionNo/id 로그
                 .build();
     }

@@ -60,7 +60,8 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
 
         shelterCache = shelterRepository.findAll()
                 .stream()
-                .collect(Collectors.toMap(Shelter::getCareRegNo, s -> s));
+                .collect(Collectors.toMap(Shelter::getCareRegNo, s -> s,
+                        (existing, replacement) -> existing));  // careRegNo UNIQUE이나 방어적 처리
         log.info("[BATCH] 기존 Shelter {} 건 캐싱 완료 (shelterCache)", shelterCache.size());
     }
 
