@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -42,26 +43,31 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     private static final Pattern BIRTH_YEAR_PATTERN = Pattern.compile("(\\d{4})");
 
     // Step 시작 시 1회 로딩 — process()에서 DB 호출 제거
-    private Map<String, Long> existingAnimalIdMap;  // desertionNo → id
-    private Map<String, Shelter> shelterCache;       // careRegNo → Shelter
+    // ConcurrentHashMap: 멀티스레딩 환경에서 여러 스레드가 동시에 읽음 (쓰기는 beforeStep에서만)
+    private ConcurrentHashMap<String, Long> existingAnimalIdMap;  // desertionNo → id
+    private ConcurrentHashMap<String, Shelter> shelterCache;       // careRegNo → Shelter
 
     /**
      * Step 실행 전 전체 캐시 구성 (DB SELECT 각 1회)
      */
     @Override
     public void beforeStep(StepExecution stepExecution) {
-        existingAnimalIdMap = animalRepository.findAllApmsDesertionNoAndId()
-                .stream()
-                .collect(Collectors.toMap(
-                        row -> (String) row[0],
-                        row -> (Long) row[1]
-                ));
+        existingAnimalIdMap = new ConcurrentHashMap<>(
+                animalRepository.findAllApmsDesertionNoAndId()
+                        .stream()
+                        .collect(Collectors.toMap(
+                                row -> (String) row[0],
+                                row -> (Long) row[1]
+                        ))
+        );
         log.info("[BATCH] 기존 Animal {} 건 캐싱 완료 (existingAnimalIdMap)", existingAnimalIdMap.size());
 
-        shelterCache = shelterRepository.findAll()
-                .stream()
-                .collect(Collectors.toMap(Shelter::getCareRegNo, s -> s,
-                        (existing, replacement) -> existing));  // careRegNo UNIQUE이나 방어적 처리
+        shelterCache = new ConcurrentHashMap<>(
+                shelterRepository.findAll()
+                        .stream()
+                        .collect(Collectors.toMap(Shelter::getCareRegNo, s -> s,
+                                (existing, replacement) -> existing))
+        );
         log.info("[BATCH] 기존 Shelter {} 건 캐싱 완료 (shelterCache)", shelterCache.size());
     }
 

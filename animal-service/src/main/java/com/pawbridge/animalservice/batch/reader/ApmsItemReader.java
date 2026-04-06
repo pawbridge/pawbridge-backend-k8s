@@ -39,26 +39,27 @@ public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionList
     private int currentIndex = 0;
     private boolean isExhausted = false;
 
+    /**
+     * 멀티스레딩 환경에서 여러 스레드가 동시에 호출하므로 synchronized 필수
+     * - currentPage, currentItems, currentIndex, isExhausted는 공유 상태
+     * - synchronized 없이 동시 접근 시 page 중복 로드 또는 인덱스 범위 초과 발생
+     */
     @Override
-    public ApmsAnimal read() {
-        // 이미 모든 데이터를 읽었으면 null 반환
+    public synchronized ApmsAnimal read() {
         if (isExhausted) {
             return null;
         }
 
-        // 현재 페이지의 모든 아이템을 읽었으면 다음 페이지 로드
         if (currentIndex >= currentItems.size()) {
             loadNextPage();
             currentIndex = 0;
         }
 
-        // 페이지 로드 후에도 아이템이 없으면 종료
         if (currentItems.isEmpty()) {
             isExhausted = true;
             return null;
         }
 
-        // 현재 아이템 반환 후 인덱스 증가
         return currentItems.get(currentIndex++);
     }
 

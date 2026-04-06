@@ -22,14 +22,25 @@ import org.springframework.data.elasticsearch.core.index.AliasData;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Objects;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Elasticsearch 초기 인덱싱 및 동기화 서비스
@@ -45,6 +56,12 @@ public class ElasticsearchIndexService {
     private final AnimalDocumentRepository animalDocumentRepository;
     private final ElasticsearchOperations elasticsearchOperations;
     private final RedissonClient redissonClient;
+    private final PlatformTransactionManager transactionManager;
+
+    // Step 2 병렬 인덱싱용 — ApmsAnimalBatchJob에서 정의한 batchTaskExecutor 주입
+    @Autowired
+    @Qualifier("batchTaskExecutor")
+    private Executor batchTaskExecutor;
 
     private static final int BATCH_SIZE = 1000;  // 배치 크기
     private static final String REINDEX_LOCK_KEY = "lock:reindexAllAnimals";
@@ -58,7 +75,10 @@ public class ElasticsearchIndexService {
     }
 
     /**
-     * 지정된 대상 인덱스에 데이터 적재 (Repository 대신 IndexCoordinates로 명시적 분기)
+     * 지정된 대상 인덱스에 데이터 병렬 적재
+     * - 페이지별로 CompletableFuture 생성 → batchTaskExecutor 스레드 풀에서 병렬 실행
+     * - 각 스레드: TransactionTemplate(readOnly)으로 독립 트랜잭션 → DB 조회 → ES 벌크 인덱싱
+     * - 한 페이지라도 실패 시 CompletionException → IllegalStateException → 상위에서 신규 인덱스 롤백 삭제
      */
     private long indexAnimalsToTarget(String targetIndexName) {
         log.info("[ELASTICSEARCH] 대상 인덱스 [{}]에 데이터 적재 시작 (배치 크기: {})", targetIndexName, BATCH_SIZE);
@@ -73,31 +93,50 @@ public class ElasticsearchIndexService {
         }
 
         int totalPages = (int) Math.ceil((double) totalCount / BATCH_SIZE);
-        long indexedCount = 0;
+        AtomicLong indexedCount = new AtomicLong(0);
+        AtomicInteger completedPages = new AtomicInteger(0);
 
+        TransactionTemplate readOnlyTx = new TransactionTemplate(transactionManager);
+        readOnlyTx.setReadOnly(true);
+
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (int page = 0; page < totalPages; page++) {
-            try {
-                Pageable pageable = PageRequest.of(page, BATCH_SIZE);
-                Page<Animal> animalPage = animalRepository.findAllWithShelter(pageable);
+            final int p = page;
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                Pageable pageable = PageRequest.of(p, BATCH_SIZE);
 
-                List<AnimalDocument> documents = animalPage.getContent().stream()
-                    .map(this::convertToDocument)
-                    .collect(Collectors.toList());
+                // 각 스레드에서 독립 readOnly 트랜잭션으로 DB 조회
+                // execute() 반환 타입이 @Nullable이므로 null 방어 처리
+                List<AnimalDocument> documents = Objects.requireNonNullElseGet(
+                        readOnlyTx.execute(status -> {
+                            Page<Animal> animalPage = animalRepository.findAllWithShelter(pageable);
+                            return animalPage.getContent().stream()
+                                    .map(this::convertToDocument)
+                                    .collect(Collectors.toList());
+                        }),
+                        Collections::emptyList
+                );
 
-                // 특정 타겟 인덱스(또는 별칭)에 bulk insert
+                // ES 벌크 인덱싱 (트랜잭션 밖, ES는 자체 처리)
                 elasticsearchOperations.save(documents, coordinates);
-                indexedCount += documents.size();
+                indexedCount.addAndGet(documents.size());
+                log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건",
+                        completedPages.incrementAndGet(), totalPages, documents.size());
 
-                log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건", page + 1, totalPages, documents.size());
-                documents.clear();
-            } catch (Exception e) {
-                log.error("[ELASTICSEARCH] 배치 {} 실패: {}", page + 1, e.getMessage(), e);
-                throw new IllegalStateException("배치 인덱싱 실패 (Page: " + (page + 1) + ") - 데이터 유실 방지를 위해 중단합니다.", e);
-            }
+            }, batchTaskExecutor);
+            futures.add(future);
         }
 
-        log.info("[ELASTICSEARCH] 적재 완료: 총 {} 건", indexedCount);
-        return indexedCount;
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log.error("[ELASTICSEARCH] 병렬 인덱싱 중 실패 발생 - 중단합니다.", cause);
+            throw new IllegalStateException("병렬 배치 인덱싱 실패 - 데이터 유실 방지를 위해 중단합니다.", cause);
+        }
+
+        log.info("[ELASTICSEARCH] 적재 완료: 총 {} 건", indexedCount.get());
+        return indexedCount.get();
     }
 
     /**
