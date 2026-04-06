@@ -118,7 +118,9 @@ public class ApmsAnimalBatchJob {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(THREAD_POOL_SIZE);
         executor.setMaxPoolSize(THREAD_POOL_SIZE);
-        executor.setQueueCapacity(10);
+        // Integer.MAX_VALUE: ES 병렬 인덱싱 시 전체 페이지(~16개)를 한 번에 제출
+        // queueCapacity < totalPages - corePoolSize 이면 RejectedExecutionException 발생
+        executor.setQueueCapacity(Integer.MAX_VALUE);
         executor.setThreadNamePrefix("batch-");
         executor.initialize();
         return executor;

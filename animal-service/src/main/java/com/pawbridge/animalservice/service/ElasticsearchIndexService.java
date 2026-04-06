@@ -24,6 +24,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Objects;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -105,12 +106,16 @@ public class ElasticsearchIndexService {
                 Pageable pageable = PageRequest.of(p, BATCH_SIZE);
 
                 // 각 스레드에서 독립 readOnly 트랜잭션으로 DB 조회
-                List<AnimalDocument> documents = readOnlyTx.execute(status -> {
-                    Page<Animal> animalPage = animalRepository.findAllWithShelter(pageable);
-                    return animalPage.getContent().stream()
-                            .map(this::convertToDocument)
-                            .collect(Collectors.toList());
-                });
+                // execute() 반환 타입이 @Nullable이므로 null 방어 처리
+                List<AnimalDocument> documents = Objects.requireNonNullElseGet(
+                        readOnlyTx.execute(status -> {
+                            Page<Animal> animalPage = animalRepository.findAllWithShelter(pageable);
+                            return animalPage.getContent().stream()
+                                    .map(this::convertToDocument)
+                                    .collect(Collectors.toList());
+                        }),
+                        Collections::emptyList
+                );
 
                 // ES 벌크 인덱싱 (트랜잭션 밖, ES는 자체 처리)
                 elasticsearchOperations.save(documents, coordinates);
