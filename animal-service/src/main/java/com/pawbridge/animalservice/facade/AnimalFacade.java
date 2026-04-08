@@ -23,7 +23,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Animal Facade
@@ -228,16 +231,29 @@ public class AnimalFacade {
         Animal animal = animalRepository.findById(id)
                 .orElseThrow(AnimalNotFoundException::new);
 
-        if (animal.getImageUrl() == null) {
+        if (animal.getImageUrl() == null || animal.getImageUrl().isBlank()) {
             return List.of();
         }
 
-        List<Long> similarIds = pythonAiServiceClient.getSimilarAnimals(
-                new SimilarAnimalRequest(animal.getId(), animal.getImageUrl())
-        );
+        List<Long> similarIds;
+        try {
+            similarIds = pythonAiServiceClient.getSimilarAnimals(
+                    new SimilarAnimalRequest(animal.getId(), animal.getImageUrl())
+            );
+        } catch (Exception e) {
+            return List.of();
+        }
 
-        return animalRepository.findAllById(similarIds).stream()
-                .map(animalMapper::toResponse)
+        if (similarIds == null || similarIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, Animal> animalMap = animalRepository.findAllById(similarIds).stream()
+                .collect(Collectors.toMap(Animal::getId, a -> a));
+
+        return similarIds.stream()
+                .filter(animalMap::containsKey)
+                .map(similarId -> animalMapper.toResponse(animalMap.get(similarId)))
                 .toList();
     }
 

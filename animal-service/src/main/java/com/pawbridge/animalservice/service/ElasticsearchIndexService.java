@@ -345,47 +345,42 @@ public class ElasticsearchIndexService {
 
     /**
      * AnimalDocument → ES 업데이트용 필드 맵 변환
-     * - image_vector 제외 (기존 값 보존)
-     * - null 필드 제외 (기존 값 덮어쓰기 방지)
+     * - image_vector 만 제외 (Python AI Service가 관리, 보존 필요)
+     * - 나머지 nullable 필드는 null 포함하여 ES 정합성 유지
      */
     private Map<String, Object> buildDocumentFields(AnimalDocument doc) {
         Map<String, Object> fields = new HashMap<>();
-        putIfNotNull(fields, "id", doc.getId());
-        putIfNotNull(fields, "apms_desertion_no", doc.getApmsDesertionNo());
-        putIfNotNull(fields, "apms_notice_no", doc.getApmsNoticeNo());
-        putIfNotNull(fields, "species", doc.getSpecies());
-        putIfNotNull(fields, "breed", doc.getBreed());
-        putIfNotNull(fields, "birth_year", doc.getBirthYear());
-        putIfNotNull(fields, "weight", doc.getWeight());
-        putIfNotNull(fields, "color", doc.getColor());
-        putIfNotNull(fields, "gender", doc.getGender());
-        putIfNotNull(fields, "neuter_status", doc.getNeuterStatus());
-        putIfNotNull(fields, "special_mark", doc.getSpecialMark());
-        putIfNotNull(fields, "apms_process_state", doc.getApmsProcessState());
-        putIfNotNull(fields, "notice_start_date", doc.getNoticeStartDate());
-        putIfNotNull(fields, "notice_end_date", doc.getNoticeEndDate());
-        putIfNotNull(fields, "apms_updated_at", doc.getApmsUpdatedAt());
-        putIfNotNull(fields, "happen_date", doc.getHappenDate());
-        putIfNotNull(fields, "happen_place", doc.getHappenPlace());
-        putIfNotNull(fields, "image_url", doc.getImageUrl());
-        putIfNotNull(fields, "image_url2", doc.getImageUrl2());
-        putIfNotNull(fields, "shelter_id", doc.getShelterId());
-        putIfNotNull(fields, "shelter_name", doc.getShelterName());
-        putIfNotNull(fields, "shelter_address", doc.getShelterAddress());
-        putIfNotNull(fields, "shelter_phone", doc.getShelterPhone());
-        putIfNotNull(fields, "status", doc.getStatus());
-        putIfNotNull(fields, "api_source", doc.getApiSource());
-        putIfNotNull(fields, "favorite_count", doc.getFavoriteCount());
-        putIfNotNull(fields, "description", doc.getDescription());
-        putIfNotNull(fields, "created_at", doc.getCreatedAt());
-        putIfNotNull(fields, "updated_at", doc.getUpdatedAt());
+        fields.put("id", doc.getId());
+        fields.put("apms_desertion_no", doc.getApmsDesertionNo());
+        fields.put("apms_notice_no", doc.getApmsNoticeNo());
+        fields.put("species", doc.getSpecies());
+        fields.put("breed", doc.getBreed());
+        fields.put("birth_year", doc.getBirthYear());
+        fields.put("weight", doc.getWeight());
+        fields.put("color", doc.getColor());
+        fields.put("gender", doc.getGender());
+        fields.put("neuter_status", doc.getNeuterStatus());
+        fields.put("special_mark", doc.getSpecialMark());
+        fields.put("apms_process_state", doc.getApmsProcessState());
+        fields.put("notice_start_date", doc.getNoticeStartDate());
+        fields.put("notice_end_date", doc.getNoticeEndDate());
+        fields.put("apms_updated_at", doc.getApmsUpdatedAt());
+        fields.put("happen_date", doc.getHappenDate());
+        fields.put("happen_place", doc.getHappenPlace());
+        fields.put("image_url", doc.getImageUrl());
+        fields.put("image_url2", doc.getImageUrl2());
+        fields.put("shelter_id", doc.getShelterId());
+        fields.put("shelter_name", doc.getShelterName());
+        fields.put("shelter_address", doc.getShelterAddress());
+        fields.put("shelter_phone", doc.getShelterPhone());
+        fields.put("status", doc.getStatus());
+        fields.put("api_source", doc.getApiSource());
+        fields.put("favorite_count", doc.getFavoriteCount());
+        fields.put("description", doc.getDescription());
+        fields.put("created_at", doc.getCreatedAt());
+        fields.put("updated_at", doc.getUpdatedAt());
+        // image_vector는 포함하지 않음 (Python AI Service가 관리)
         return fields;
-    }
-
-    private void putIfNotNull(Map<String, Object> map, String key, Object value) {
-        if (value != null) {
-            map.put(key, value);
-        }
     }
 
     private String toStringFormat(LocalDate date) {

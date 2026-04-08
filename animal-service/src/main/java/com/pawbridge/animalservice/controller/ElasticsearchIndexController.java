@@ -49,9 +49,9 @@ public class ElasticsearchIndexController {
     }
 
     /**
-     * 전체 재인덱싱 (기존 데이터 삭제 후 재인덱싱)
-     * - 기존 Elasticsearch 인덱스 데이터 삭제
-     * - MySQL 데이터로 전체 재인덱싱
+     * 전체 재인덱싱 (upsert - image_vector 보존)
+     * - 기존 인덱스에 MySQL 데이터 upsert (image_vector 유지)
+     * - ES 매핑 변경이 필요한 경우 인덱스 직접 삭제 후 실행
      *
      * POST /api/elasticsearch/reindex
      */
@@ -60,7 +60,7 @@ public class ElasticsearchIndexController {
         log.info("[API] 전체 재인덱싱 요청");
 
         long startTime = System.currentTimeMillis();
-        long indexedCount = indexService.reindexAllAnimals();
+        long indexedCount = indexService.indexAllAnimals();
         long endTime = System.currentTimeMillis();
 
         Map<String, Object> response = new HashMap<>();
