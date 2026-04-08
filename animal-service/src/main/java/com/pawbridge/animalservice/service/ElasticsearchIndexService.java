@@ -11,6 +11,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.document.Document;
+import org.springframework.data.elasticsearch.core.query.UpdateQuery;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
@@ -24,6 +26,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Objects;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +68,7 @@ public class ElasticsearchIndexService {
 
     private static final int BATCH_SIZE = 1000;  // 배치 크기
     private static final String REINDEX_LOCK_KEY = "lock:reindexAllAnimals";
+    private static final String INDEX_NAME = "animals";
 
     /**
      * 전체 동물 데이터를 Elasticsearch에 배치 인덱싱 (기존 동작 호환)
@@ -117,8 +121,14 @@ public class ElasticsearchIndexService {
                         Collections::emptyList
                 );
 
-                // ES 벌크 인덱싱 (트랜잭션 밖, ES는 자체 처리)
-                elasticsearchOperations.save(documents, coordinates);
+                // ES 벌크 upsert (doc_as_upsert: true → image_vector 등 기존 필드 보존)
+                List<UpdateQuery> updateQueries = documents.stream()
+                        .map(doc -> UpdateQuery.builder(doc.getEsId())
+                                .withDocument(Document.from(buildDocumentFields(doc)))
+                                .withDocAsUpsert(true)
+                                .build())
+                        .collect(Collectors.toList());
+                elasticsearchOperations.bulkUpdate(updateQueries, coordinates);
                 indexedCount.addAndGet(documents.size());
                 log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건",
                         completedPages.incrementAndGet(), totalPages, documents.size());
@@ -251,12 +261,17 @@ public class ElasticsearchIndexService {
     }
 
     /**
-     * 특정 동물 한 건을 Elasticsearch에 인덱싱
+     * 특정 동물 한 건을 Elasticsearch에 upsert
+     * - doc_as_upsert: true → 기존 문서 partial update (image_vector 보존)
      */
     public void indexAnimal(Animal animal) {
         log.debug("[ELASTICSEARCH] 동물 인덱싱: id={}", animal.getId());
         AnimalDocument document = convertToDocument(animal);
-        animalDocumentRepository.save(document);
+        UpdateQuery updateQuery = UpdateQuery.builder(document.getEsId())
+                .withDocument(Document.from(buildDocumentFields(document)))
+                .withDocAsUpsert(true)
+                .build();
+        elasticsearchOperations.update(updateQuery, IndexCoordinates.of(INDEX_NAME));
         log.debug("[ELASTICSEARCH] 동물 인덱싱 완료: id={}", animal.getId());
     }
 
@@ -291,11 +306,12 @@ public class ElasticsearchIndexService {
 
     /**
      * Animal 엔티티를 AnimalDocument로 변환
+     * - esId = MySQL PK (String): upsert 시 동일 _id로 기존 문서 업데이트 (image_vector 보존)
      */
     private AnimalDocument convertToDocument(Animal animal) {
         return AnimalDocument.builder()
+            .esId(String.valueOf(animal.getId())) // ES _id = MySQL PK → upsert 키로 사용
             .id(animal.getId()) // MySQL PK (Long) -> 'id' 필드에 매핑됨
-            // .esId(null) // ES _id는 자동 생성
             .apmsDesertionNo(animal.getApmsDesertionNo())
             .apmsNoticeNo(animal.getApmsNoticeNo())
             .species(animal.getSpecies() != null ? animal.getSpecies().name() : null)
@@ -325,6 +341,46 @@ public class ElasticsearchIndexService {
             .createdAt(toStringFormat(animal.getCreatedAt()))
             .updatedAt(toStringFormat(animal.getUpdatedAt()))
             .build();
+    }
+
+    /**
+     * AnimalDocument → ES 업데이트용 필드 맵 변환
+     * - image_vector 만 제외 (Python AI Service가 관리, 보존 필요)
+     * - 나머지 nullable 필드는 null 포함하여 ES 정합성 유지
+     */
+    private Map<String, Object> buildDocumentFields(AnimalDocument doc) {
+        Map<String, Object> fields = new HashMap<>();
+        fields.put("id", doc.getId());
+        fields.put("apms_desertion_no", doc.getApmsDesertionNo());
+        fields.put("apms_notice_no", doc.getApmsNoticeNo());
+        fields.put("species", doc.getSpecies());
+        fields.put("breed", doc.getBreed());
+        fields.put("birth_year", doc.getBirthYear());
+        fields.put("weight", doc.getWeight());
+        fields.put("color", doc.getColor());
+        fields.put("gender", doc.getGender());
+        fields.put("neuter_status", doc.getNeuterStatus());
+        fields.put("special_mark", doc.getSpecialMark());
+        fields.put("apms_process_state", doc.getApmsProcessState());
+        fields.put("notice_start_date", doc.getNoticeStartDate());
+        fields.put("notice_end_date", doc.getNoticeEndDate());
+        fields.put("apms_updated_at", doc.getApmsUpdatedAt());
+        fields.put("happen_date", doc.getHappenDate());
+        fields.put("happen_place", doc.getHappenPlace());
+        fields.put("image_url", doc.getImageUrl());
+        fields.put("image_url2", doc.getImageUrl2());
+        fields.put("shelter_id", doc.getShelterId());
+        fields.put("shelter_name", doc.getShelterName());
+        fields.put("shelter_address", doc.getShelterAddress());
+        fields.put("shelter_phone", doc.getShelterPhone());
+        fields.put("status", doc.getStatus());
+        fields.put("api_source", doc.getApiSource());
+        fields.put("favorite_count", doc.getFavoriteCount());
+        fields.put("description", doc.getDescription());
+        fields.put("created_at", doc.getCreatedAt());
+        fields.put("updated_at", doc.getUpdatedAt());
+        // image_vector는 포함하지 않음 (Python AI Service가 관리)
+        return fields;
     }
 
     private String toStringFormat(LocalDate date) {

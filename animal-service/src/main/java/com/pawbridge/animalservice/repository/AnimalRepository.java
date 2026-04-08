@@ -56,6 +56,16 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
     Optional<Animal> findWithShelterById(Long id);
 
     /**
+     * ID 목록으로 동물 조회 (Shelter fetch join)
+     * - 유사 동물 목록 조회용 (toResponse에서 shelter 접근 필요)
+     * - @EntityGraph로 트랜잭션 종료 후 LazyInitializationException 방지
+     * @param ids 동물 ID 목록
+     * @return List<Animal> with Shelter
+     */
+    @EntityGraph(attributePaths = {"shelter"})
+    List<Animal> findWithShelterByIdIn(List<Long> ids);
+
+    /**
      * APMS 유기번호로 조회 (Shelter fetch join)
      * @param apmsDesertionNo APMS 유기번호
      * @return Animal Optional with Shelter

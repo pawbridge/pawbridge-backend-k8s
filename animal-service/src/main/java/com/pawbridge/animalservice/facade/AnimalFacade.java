@@ -1,7 +1,9 @@
 package com.pawbridge.animalservice.facade;
 
+import com.pawbridge.animalservice.client.PythonAiServiceClient;
 import com.pawbridge.animalservice.dto.request.AnimalSearchRequest;
 import com.pawbridge.animalservice.dto.request.CreateAnimalRequest;
+import com.pawbridge.animalservice.dto.request.SimilarAnimalRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalDescriptionRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalStatusRequest;
 import com.pawbridge.animalservice.dto.response.AnimalDetailResponse;
@@ -21,7 +23,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Animal Facade
@@ -46,6 +51,7 @@ public class AnimalFacade {
     private final AnimalElasticsearchService elasticsearchService;  // Query: Elasticsearch (R)
     private final AnimalRepository animalRepository;                // 상세 조회용 (MySQL)
     private final AnimalMapper animalMapper;                        // Entity → DTO 변환
+    private final PythonAiServiceClient pythonAiServiceClient;      // AI 유사도 검색
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Command (쓰기 - MySQL)
@@ -213,6 +219,45 @@ public class AnimalFacade {
     @Transactional(readOnly = true)
     public Page<AnimalResponse> searchAnimals(AnimalSearchRequest request, Pageable pageable) {
         return elasticsearchService.searchAnimals(request, pageable);
+    }
+
+    /**
+     * 유사 동물 목록 조회 (Python AI Service - 이미지 벡터 코사인 유사도)
+     * - Python AI Service에 animal_id + image_url 전달
+     * - 유사한 동물 ID 목록을 받아 MySQL에서 상세 정보 조회
+     *
+     * <트랜잭션 미적용 이유>
+     * - findById, findWithShelterByIdIn은 Spring Data JPA 기본 트랜잭션으로 각각 처리
+     * - @Transactional 적용 시 Feign 호출 동안 DB 커넥션 점유 → AI 서비스 지연이 커넥션 풀 고갈로 이어질 수 있음
+     */
+    public List<AnimalResponse> getSimilarAnimals(Long id) {
+        Animal animal = animalRepository.findById(id)
+                .orElseThrow(AnimalNotFoundException::new);
+
+        if (animal.getImageUrl() == null || animal.getImageUrl().isBlank()) {
+            return List.of();
+        }
+
+        List<Long> similarIds;
+        try {
+            similarIds = pythonAiServiceClient.getSimilarAnimals(
+                    new SimilarAnimalRequest(animal.getId(), animal.getImageUrl())
+            );
+        } catch (Exception e) {
+            return List.of();
+        }
+
+        if (similarIds == null || similarIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, Animal> animalMap = animalRepository.findWithShelterByIdIn(similarIds).stream()
+                .collect(Collectors.toMap(Animal::getId, a -> a));
+
+        return similarIds.stream()
+                .filter(animalMap::containsKey)
+                .map(similarId -> animalMapper.toResponse(animalMap.get(similarId)))
+                .toList();
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
