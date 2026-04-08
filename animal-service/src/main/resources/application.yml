@@ -53,6 +53,10 @@ logging:
 
 
 
+# Python AI Service
+python-ai-service:
+  url: ${PYTHON_AI_SERVICE_URL:http://localhost:8000}
+
 # APMS Public API Settings
 apms:
   api:

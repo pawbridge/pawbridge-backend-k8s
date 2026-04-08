@@ -115,15 +115,15 @@ public class ApmsAnimalBatchJob {
 
     /**
      * Elasticsearch 인덱싱 Step
-     * - MySQL에 저장된 전체 동물 데이터를 Elasticsearch에 인덱싱
-     * - 기존 ES 데이터 삭제 후 전체 재인덱싱 (데이터 일관성 보장)
+     * - MySQL → ES upsert (기존 인덱스 유지, image_vector 보존)
+     * - doc_as_upsert: true → 신규 문서는 insert, 기존 문서는 partial update
      */
     @Bean
     public Step elasticsearchIndexStep() {
         return new StepBuilder("elasticsearchIndexStep", jobRepository)
                 .tasklet((contribution, chunkContext) -> {
                     log.info("[BATCH] Elasticsearch 인덱싱 Step 시작");
-                    long indexedCount = elasticsearchIndexService.reindexAllAnimals();
+                    long indexedCount = elasticsearchIndexService.indexAllAnimals();
                     log.info("[BATCH] Elasticsearch 인덱싱 Step 완료: {} 건", indexedCount);
                     return RepeatStatus.FINISHED;
                 }, transactionManager)

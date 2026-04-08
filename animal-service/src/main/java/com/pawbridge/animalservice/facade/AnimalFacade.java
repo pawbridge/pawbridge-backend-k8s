@@ -1,7 +1,9 @@
 package com.pawbridge.animalservice.facade;
 
+import com.pawbridge.animalservice.client.PythonAiServiceClient;
 import com.pawbridge.animalservice.dto.request.AnimalSearchRequest;
 import com.pawbridge.animalservice.dto.request.CreateAnimalRequest;
+import com.pawbridge.animalservice.dto.request.SimilarAnimalRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalDescriptionRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalStatusRequest;
 import com.pawbridge.animalservice.dto.response.AnimalDetailResponse;
@@ -46,6 +48,7 @@ public class AnimalFacade {
     private final AnimalElasticsearchService elasticsearchService;  // Query: Elasticsearch (R)
     private final AnimalRepository animalRepository;                // 상세 조회용 (MySQL)
     private final AnimalMapper animalMapper;                        // Entity → DTO 변환
+    private final PythonAiServiceClient pythonAiServiceClient;      // AI 유사도 검색
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Command (쓰기 - MySQL)
@@ -213,6 +216,29 @@ public class AnimalFacade {
     @Transactional(readOnly = true)
     public Page<AnimalResponse> searchAnimals(AnimalSearchRequest request, Pageable pageable) {
         return elasticsearchService.searchAnimals(request, pageable);
+    }
+
+    /**
+     * 유사 동물 목록 조회 (Python AI Service - 이미지 벡터 코사인 유사도)
+     * - Python AI Service에 animal_id + image_url 전달
+     * - 유사한 동물 ID 목록을 받아 MySQL에서 상세 정보 조회
+     */
+    @Transactional(readOnly = true)
+    public List<AnimalResponse> getSimilarAnimals(Long id) {
+        Animal animal = animalRepository.findById(id)
+                .orElseThrow(AnimalNotFoundException::new);
+
+        if (animal.getImageUrl() == null) {
+            return List.of();
+        }
+
+        List<Long> similarIds = pythonAiServiceClient.getSimilarAnimals(
+                new SimilarAnimalRequest(animal.getId(), animal.getImageUrl())
+        );
+
+        return animalRepository.findAllById(similarIds).stream()
+                .map(animalMapper::toResponse)
+                .toList();
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

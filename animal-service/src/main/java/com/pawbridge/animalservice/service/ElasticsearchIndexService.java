@@ -11,6 +11,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.document.Document;
+import org.springframework.data.elasticsearch.core.query.UpdateQuery;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
@@ -24,6 +26,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Objects;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +68,7 @@ public class ElasticsearchIndexService {
 
     private static final int BATCH_SIZE = 1000;  // 배치 크기
     private static final String REINDEX_LOCK_KEY = "lock:reindexAllAnimals";
+    private static final String INDEX_NAME = "animals";
 
     /**
      * 전체 동물 데이터를 Elasticsearch에 배치 인덱싱 (기존 동작 호환)
@@ -117,8 +121,14 @@ public class ElasticsearchIndexService {
                         Collections::emptyList
                 );
 
-                // ES 벌크 인덱싱 (트랜잭션 밖, ES는 자체 처리)
-                elasticsearchOperations.save(documents, coordinates);
+                // ES 벌크 upsert (doc_as_upsert: true → image_vector 등 기존 필드 보존)
+                List<UpdateQuery> updateQueries = documents.stream()
+                        .map(doc -> UpdateQuery.builder(doc.getEsId())
+                                .withDocument(Document.from(buildDocumentFields(doc)))
+                                .withDocAsUpsert(true)
+                                .build())
+                        .collect(Collectors.toList());
+                elasticsearchOperations.bulkUpdate(updateQueries, coordinates);
                 indexedCount.addAndGet(documents.size());
                 log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건",
                         completedPages.incrementAndGet(), totalPages, documents.size());
@@ -251,12 +261,17 @@ public class ElasticsearchIndexService {
     }
 
     /**
-     * 특정 동물 한 건을 Elasticsearch에 인덱싱
+     * 특정 동물 한 건을 Elasticsearch에 upsert
+     * - doc_as_upsert: true → 기존 문서 partial update (image_vector 보존)
      */
     public void indexAnimal(Animal animal) {
         log.debug("[ELASTICSEARCH] 동물 인덱싱: id={}", animal.getId());
         AnimalDocument document = convertToDocument(animal);
-        animalDocumentRepository.save(document);
+        UpdateQuery updateQuery = UpdateQuery.builder(document.getEsId())
+                .withDocument(Document.from(buildDocumentFields(document)))
+                .withDocAsUpsert(true)
+                .build();
+        elasticsearchOperations.update(updateQuery, IndexCoordinates.of(INDEX_NAME));
         log.debug("[ELASTICSEARCH] 동물 인덱싱 완료: id={}", animal.getId());
     }
 
@@ -291,11 +306,12 @@ public class ElasticsearchIndexService {
 
     /**
      * Animal 엔티티를 AnimalDocument로 변환
+     * - esId = MySQL PK (String): upsert 시 동일 _id로 기존 문서 업데이트 (image_vector 보존)
      */
     private AnimalDocument convertToDocument(Animal animal) {
         return AnimalDocument.builder()
+            .esId(String.valueOf(animal.getId())) // ES _id = MySQL PK → upsert 키로 사용
             .id(animal.getId()) // MySQL PK (Long) -> 'id' 필드에 매핑됨
-            // .esId(null) // ES _id는 자동 생성
             .apmsDesertionNo(animal.getApmsDesertionNo())
             .apmsNoticeNo(animal.getApmsNoticeNo())
             .species(animal.getSpecies() != null ? animal.getSpecies().name() : null)
@@ -325,6 +341,51 @@ public class ElasticsearchIndexService {
             .createdAt(toStringFormat(animal.getCreatedAt()))
             .updatedAt(toStringFormat(animal.getUpdatedAt()))
             .build();
+    }
+
+    /**
+     * AnimalDocument → ES 업데이트용 필드 맵 변환
+     * - image_vector 제외 (기존 값 보존)
+     * - null 필드 제외 (기존 값 덮어쓰기 방지)
+     */
+    private Map<String, Object> buildDocumentFields(AnimalDocument doc) {
+        Map<String, Object> fields = new HashMap<>();
+        putIfNotNull(fields, "id", doc.getId());
+        putIfNotNull(fields, "apms_desertion_no", doc.getApmsDesertionNo());
+        putIfNotNull(fields, "apms_notice_no", doc.getApmsNoticeNo());
+        putIfNotNull(fields, "species", doc.getSpecies());
+        putIfNotNull(fields, "breed", doc.getBreed());
+        putIfNotNull(fields, "birth_year", doc.getBirthYear());
+        putIfNotNull(fields, "weight", doc.getWeight());
+        putIfNotNull(fields, "color", doc.getColor());
+        putIfNotNull(fields, "gender", doc.getGender());
+        putIfNotNull(fields, "neuter_status", doc.getNeuterStatus());
+        putIfNotNull(fields, "special_mark", doc.getSpecialMark());
+        putIfNotNull(fields, "apms_process_state", doc.getApmsProcessState());
+        putIfNotNull(fields, "notice_start_date", doc.getNoticeStartDate());
+        putIfNotNull(fields, "notice_end_date", doc.getNoticeEndDate());
+        putIfNotNull(fields, "apms_updated_at", doc.getApmsUpdatedAt());
+        putIfNotNull(fields, "happen_date", doc.getHappenDate());
+        putIfNotNull(fields, "happen_place", doc.getHappenPlace());
+        putIfNotNull(fields, "image_url", doc.getImageUrl());
+        putIfNotNull(fields, "image_url2", doc.getImageUrl2());
+        putIfNotNull(fields, "shelter_id", doc.getShelterId());
+        putIfNotNull(fields, "shelter_name", doc.getShelterName());
+        putIfNotNull(fields, "shelter_address", doc.getShelterAddress());
+        putIfNotNull(fields, "shelter_phone", doc.getShelterPhone());
+        putIfNotNull(fields, "status", doc.getStatus());
+        putIfNotNull(fields, "api_source", doc.getApiSource());
+        putIfNotNull(fields, "favorite_count", doc.getFavoriteCount());
+        putIfNotNull(fields, "description", doc.getDescription());
+        putIfNotNull(fields, "created_at", doc.getCreatedAt());
+        putIfNotNull(fields, "updated_at", doc.getUpdatedAt());
+        return fields;
+    }
+
+    private void putIfNotNull(Map<String, Object> map, String key, Object value) {
+        if (value != null) {
+            map.put(key, value);
+        }
     }
 
     private String toStringFormat(LocalDate date) {
