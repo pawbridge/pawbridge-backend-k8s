@@ -225,8 +225,11 @@ public class AnimalFacade {
      * 유사 동물 목록 조회 (Python AI Service - 이미지 벡터 코사인 유사도)
      * - Python AI Service에 animal_id + image_url 전달
      * - 유사한 동물 ID 목록을 받아 MySQL에서 상세 정보 조회
+     *
+     * <트랜잭션 미적용 이유>
+     * - findById, findWithShelterByIdIn은 Spring Data JPA 기본 트랜잭션으로 각각 처리
+     * - @Transactional 적용 시 Feign 호출 동안 DB 커넥션 점유 → AI 서비스 지연이 커넥션 풀 고갈로 이어질 수 있음
      */
-    @Transactional(readOnly = true)
     public List<AnimalResponse> getSimilarAnimals(Long id) {
         Animal animal = animalRepository.findById(id)
                 .orElseThrow(AnimalNotFoundException::new);
@@ -248,7 +251,7 @@ public class AnimalFacade {
             return List.of();
         }
 
-        Map<Long, Animal> animalMap = animalRepository.findAllById(similarIds).stream()
+        Map<Long, Animal> animalMap = animalRepository.findWithShelterByIdIn(similarIds).stream()
                 .collect(Collectors.toMap(Animal::getId, a -> a));
 
         return similarIds.stream()
