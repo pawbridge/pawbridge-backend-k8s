@@ -16,4 +16,7 @@ public class SimilarAnimalRequest {
 
     @JsonProperty("image_url")
     private String imageUrl;
+
+    @JsonProperty("species")
+    private String species;
 }
