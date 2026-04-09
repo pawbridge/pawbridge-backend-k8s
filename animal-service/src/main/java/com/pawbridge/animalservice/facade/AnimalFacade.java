@@ -241,7 +241,7 @@ public class AnimalFacade {
         List<Long> similarIds;
         try {
             similarIds = pythonAiServiceClient.getSimilarAnimals(
-                    new SimilarAnimalRequest(animal.getId(), animal.getImageUrl())
+                    new SimilarAnimalRequest(animal.getId(), animal.getImageUrl(), animal.getSpecies().name())
             );
         } catch (Exception e) {
             return List.of();
