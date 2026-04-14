@@ -140,7 +140,7 @@ public class ProductSearchService {
         // 4. 상태 필터 (ACTIVE만)
         Query statusQuery = Query.of(q -> q.term(t -> t
             .field("status")
-            .value("ACTIVE")
+            .value("active")
         ));
         boolQueryBuilder.filter(statusQuery);
 
