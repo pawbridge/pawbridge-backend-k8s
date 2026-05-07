@@ -335,6 +335,7 @@ public class AnimalElasticsearchService {
                 .match(m -> m
                     .field("shelter_address")
                     .query(condition.getShelterAddress().trim())
+                    .operator(co.elastic.clients.elasticsearch._types.query_dsl.Operator.And)
                 )
             );
             mustQueries.add(addressQuery);
