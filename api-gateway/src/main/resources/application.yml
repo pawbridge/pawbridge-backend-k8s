@@ -47,6 +47,16 @@ spring:
             - RewritePath=/api/animals(?<segment>/?.*), /api/v1/animals${segment}
           # JWT 필터 없음 (로그인 없이 검색/조회 가능)
 
+        # Animal Service - Chatbot (POST, public)
+        - id: animal-service-chatbot-public
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
+          predicates:
+            - Path=/api/animals/{animalId}/chat/messages, /api/v1/animals/{animalId}/chat/messages
+            - Method=POST,OPTIONS
+          filters:
+            - RewritePath=/api/animals/(?<animalId>[^/]+)/chat/messages, /api/v1/animals/${animalId}/chat/messages
+          # JWT 필터 없음 (익명 챗봇 사용자 허용)
+
         # Shelter Service - 조회 (GET, 공개)
         - id: shelter-service-public
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
