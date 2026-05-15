@@ -14,6 +14,7 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
+import org.springframework.web.cors.reactive.CorsUtils;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
@@ -107,8 +108,8 @@ public class JwtAuthorizationGatewayFilterFactory
             String path = request.getURI().getPath();
             String method = request.getMethod().name();
 
-            // CORS preflight 요청은 토큰 검증 없이 통과
-            if ("OPTIONS".equals(method)) {
+            // 실제 CORS preflight 요청만 토큰 검증 없이 통과
+            if (CorsUtils.isPreFlightRequest(request)) {
                 return chain.filter(exchange);
             }
 
