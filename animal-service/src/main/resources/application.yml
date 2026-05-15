@@ -58,6 +58,19 @@ python-ai-service:
   url: ${PYTHON_AI_SERVICE_URL}
   internal-api-key: ${PYTHON_AI_SERVICE_INTERNAL_API_KEY:}
 
+chatbot:
+  security:
+    ip-hash-secret: ${CHATBOT_IP_HASH_SECRET:}
+  rate-limit:
+    anonymous:
+      ten-minutes: ${CHATBOT_RATE_LIMIT_ANON_10M:5}
+      daily: ${CHATBOT_RATE_LIMIT_ANON_DAILY:20}
+    ip:
+      ten-minutes: ${CHATBOT_RATE_LIMIT_IP_10M:20}
+      daily: ${CHATBOT_RATE_LIMIT_IP_DAILY:100}
+    global:
+      daily: ${CHATBOT_RATE_LIMIT_GLOBAL_DAILY:300}
+
 # APMS Public API Settings
 apms:
   api:

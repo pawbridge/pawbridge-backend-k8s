@@ -8,4 +8,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface ChatbotMessageRepository extends JpaRepository<ChatbotMessage, Long> {
 
     List<ChatbotMessage> findTop6BySessionOrderByCreatedAtDesc(ChatbotSession session);
+
+    long countBySession(ChatbotSession session);
 }
