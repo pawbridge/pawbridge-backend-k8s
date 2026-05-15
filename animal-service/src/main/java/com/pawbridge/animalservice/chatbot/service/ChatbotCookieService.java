@@ -42,8 +42,21 @@ public class ChatbotCookieService {
         return Arrays.stream(cookies)
                 .filter(cookie -> COOKIE_NAME.equals(cookie.getName()))
                 .map(Cookie::getValue)
+                .filter(this::isValidAnonymousSessionId)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private boolean isValidAnonymousSessionId(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            UUID.fromString(value);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private boolean isSecureRequest(HttpServletRequest request) {

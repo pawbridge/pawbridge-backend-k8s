@@ -57,12 +57,14 @@ public class ChatbotService {
                 )
         );
 
-        chatbotMessageRepository.save(ChatbotMessage.user(session, request.question()));
-        chatbotMessageRepository.save(ChatbotMessage.assistant(
-                session,
-                aiResponse.answer(),
-                aiResponse.provider(),
-                aiResponse.safetyNotice()
+        chatbotMessageRepository.saveAll(List.of(
+                ChatbotMessage.user(session, request.question()),
+                ChatbotMessage.assistant(
+                        session,
+                        aiResponse.answer(),
+                        aiResponse.provider(),
+                        aiResponse.safetyNotice()
+                )
         ));
 
         return new ChatbotMessageResponse(
