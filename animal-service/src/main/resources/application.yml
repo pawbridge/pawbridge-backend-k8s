@@ -56,6 +56,7 @@ logging:
 # Python AI Service
 python-ai-service:
   url: ${PYTHON_AI_SERVICE_URL}
+  internal-api-key: ${PYTHON_AI_SERVICE_INTERNAL_API_KEY:}
 
 # APMS Public API Settings
 apms:
