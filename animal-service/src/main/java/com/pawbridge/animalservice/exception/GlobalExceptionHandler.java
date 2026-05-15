@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.exception;
 
 import com.pawbridge.animalservice.util.ResponseDto;
+import com.pawbridge.animalservice.chatbot.exception.ChatbotRateLimitExceededException;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.TypeMismatchException;
 import org.springframework.dao.DataAccessException;
@@ -92,6 +93,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ResponseDto.errorWithMessage(HttpStatus.BAD_REQUEST, ex.getMessage()));
+    }
+
+    @ExceptionHandler(ChatbotRateLimitExceededException.class)
+    public ResponseEntity<ResponseDto<Void>> handleChatbotRateLimitExceededException(ChatbotRateLimitExceededException ex) {
+        log.warn("Chatbot rate limit exceeded: {}", ex.getMessage());
+
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(ResponseDto.errorWithMessage(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage()));
     }
 
     /**
