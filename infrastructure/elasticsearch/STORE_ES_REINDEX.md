@@ -111,8 +111,10 @@ PAYMENT_LAG=$(
     --group payment-group --describe \
   | awk '$2 ~ /^payment(\.events)?$/ {
       rows += 1
-      if ($3 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/) invalid = 1
-      else lag += $6
+      if ($3 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/) invalid = 1
+      else if ($6 ~ /^[0-9]+$/) lag += $6
+      else if ($4 == "-" && $5 == 0 && $6 == "-") lag += 0
+      else invalid = 1
     }
     END { if (rows == 0 || invalid) exit 2; print lag + 0 }'
 )
@@ -127,6 +129,8 @@ kubectl get deployment api-gateway payment-service store-service -n pawbridge \
 ```
 
 세 Deployment의 `DESIRED`가 모두 0인지 확인한다. `payment-outbox-connector`가 `PAUSED`인지, `payment-group` lag가 같은 엄격한 검사에서 다시 0인지 확인한다. connector가 멈춘 뒤의 Payment DB outbox는 아직 Kafka로 나오지 않아도 되며, 이 fence 때문에 재색인 중 상품 delta를 만들 수 없다. 기존 sink consumer group `connect-store-es-sink-connector` lag가 0이고 Store source/sink connector와 task가 모두 `RUNNING`인지도 확인한다. 이 시점부터 Payment connector를 재개할 때까지 상품/SKU MySQL 데이터가 바뀌면 절차를 중단하고 처음부터 다시 시작한다.
+
+Kafka는 한 번도 offset을 commit하지 않은 빈 topic을 `CURRENT-OFFSET=-`, `LOG-END-OFFSET=0`, `LAG=-`로 표시할 수 있다. 위 검사는 이 조합만 lag 0으로 인정한다. `LOG-END-OFFSET`이 0보다 큰데 offset 또는 lag가 `-`이면 처리 여부를 증명할 수 없으므로 실패한다.
 
 ### 2. topic과 version index 준비
 
@@ -294,8 +298,10 @@ PAYMENT_LAG=$(
     --group payment-group --describe \
   | awk '$2 ~ /^payment(\.events)?$/ {
       rows += 1
-      if ($3 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/) invalid = 1
-      else lag += $6
+      if ($3 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/) invalid = 1
+      else if ($6 ~ /^[0-9]+$/) lag += $6
+      else if ($4 == "-" && $5 == 0 && $6 == "-") lag += 0
+      else invalid = 1
     }
     END { if (rows == 0 || invalid) exit 2; print lag + 0 }'
 )
@@ -310,8 +316,10 @@ PAYMENT_LAG=$(
     --group payment-group --describe \
   | awk '$2 ~ /^payment(\.events)?$/ {
       rows += 1
-      if ($3 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/) invalid = 1
-      else lag += $6
+      if ($3 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/) invalid = 1
+      else if ($6 ~ /^[0-9]+$/) lag += $6
+      else if ($4 == "-" && $5 == 0 && $6 == "-") lag += 0
+      else invalid = 1
     }
     END { if (rows == 0 || invalid) exit 2; print lag + 0 }'
 )
@@ -330,8 +338,10 @@ kubectl exec -n kafka pawbridge-kafka-0 -- \
   --group connect-store-es-sink-connector --describe \
 | awk '$2 == "store.product-sku.events" {
     rows += 1
-    if ($3 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/) invalid = 1
-    else lag += $6
+    if ($3 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/) invalid = 1
+    else if ($6 ~ /^[0-9]+$/) lag += $6
+    else if ($4 == "-" && $5 == 0 && $6 == "-") lag += 0
+    else invalid = 1
   }
   END {
     if (rows == 0 || invalid || lag != 0) exit 2
@@ -435,8 +445,10 @@ PAYMENT_LAG=$(
     --group payment-group --describe \
   | awk '$2 ~ /^payment(\.events)?$/ {
       rows += 1
-      if ($3 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/) invalid = 1
-      else lag += $6
+      if ($3 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/) invalid = 1
+      else if ($6 ~ /^[0-9]+$/) lag += $6
+      else if ($4 == "-" && $5 == 0 && $6 == "-") lag += 0
+      else invalid = 1
     }
     END { if (rows == 0 || invalid) exit 2; print lag + 0 }'
 )
