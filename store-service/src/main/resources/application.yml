@@ -73,3 +73,5 @@ server:
 pawbridge:
   storage:
     public-base-url: ${R2_PUBLIC_BASE_URL:https://images.pawbridge.kr}
+  search:
+    product-index: ${STORE_PRODUCT_SEARCH_INDEX:store-products-read}

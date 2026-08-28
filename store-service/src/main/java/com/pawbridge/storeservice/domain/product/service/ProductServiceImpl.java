@@ -14,7 +14,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.pawbridge.storeservice.domain.product.dto.ProductDetailResponse;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 
 @Slf4j
@@ -59,11 +65,7 @@ public class ProductServiceImpl implements ProductService {
 
         // 3. Outbox 이벤트 생성
         if (!savedSkus.isEmpty()) {
-            ProductSKU primarySku = skuService.findPrimarySku(savedSkus);
-            for (ProductSKU sku : savedSkus) {
-                boolean isPrimary = (sku == primarySku);
-                outboxService.publishSkuEvent(product, sku, isPrimary);
-            }
+            outboxService.publishProductSnapshot(product);
         }
         
         log.info(">>> [PRODUCT] 상품 등록 완료: productId={}, name={}", product.getId(), product.getName());
@@ -83,8 +85,9 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional
     public ProductResponse updateProduct(Long productId, com.pawbridge.storeservice.domain.product.dto.ProductUpdateRequest request) {
-        Product product = productRepository.findById(productId)
+        Product product = productRepository.findByIdWithLock(productId)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found: " + productId));
+        productSKURepository.findAllByProductIdWithLock(productId);
 
         // Dirty Checking
         if (request.getName() != null) product.updateName(request.getName());
@@ -115,9 +118,7 @@ public class ProductServiceImpl implements ProductService {
         
         // Elasticsearch 동기화를 위해 모든 SKU에 대한 Outbox 이벤트 발행
         if (!product.getSkus().isEmpty()) {
-            for (ProductSKU sku : product.getSkus()) {
-                outboxService.publishSkuEvent(product, sku, false);
-            }
+            outboxService.publishProductSnapshot(product);
         }
         
         // Cache 무효화
@@ -128,40 +129,22 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
-    public void decreaseStock(Long skuId, int quantity) {
-        // 비관적 락(PESSIMISTIC_WRITE)으로 재고 동시성 제어 - 트랜잭션 범위 내에서 락 자동 관리
-        ProductSKU sku = productSKURepository.findByIdWithLock(skuId)
-                .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
-        
-        // 상품 상태 검증 (락 획득 후 검증하여 정확성 보장)
-        ProductStatus status = sku.getProduct().getStatus();
-        if (status != ProductStatus.ACTIVE) {
-            throw new IllegalStateException("주문할 수 없는 상품입니다. 상품 상태: " + status + ", SKU ID: " + skuId);
-        }
-        
-        sku.decreaseStock(quantity);
-        outboxService.publishSkuEvent(sku.getProduct(), sku, false);
-        cacheService.evictProductCache(sku.getProduct().getId());
+    public void decreaseStocks(Map<Long, Integer> quantitiesBySkuId) {
+        adjustStocks(quantitiesBySkuId, true);
     }
 
     @Override
     @Transactional
-    public void increaseStock(Long skuId, int quantity) {
-        // 비관적 락(PESSIMISTIC_WRITE)으로 재고 동시성 제어 - 트랜잭션 범위 내에서 락 자동 관리
-        ProductSKU sku = productSKURepository.findByIdWithLock(skuId)
-                .orElseThrow(() -> new IllegalArgumentException("SKU not found: " + skuId));
-        
-        sku.increaseStock(quantity);
-        productSKURepository.save(sku);
-        outboxService.publishSkuEvent(sku.getProduct(), sku, false);
-        cacheService.evictProductCache(sku.getProduct().getId());
+    public void increaseStocks(Map<Long, Integer> quantitiesBySkuId) {
+        adjustStocks(quantitiesBySkuId, false);
     }
 
     @Override
     @Transactional
     public void deleteProduct(Long productId) {
-        Product product = productRepository.findById(productId)
+        Product product = productRepository.findByIdWithLock(productId)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found: " + productId));
+        productSKURepository.findAllByProductIdWithLock(productId);
         
         // 이미 삭제된 상품인지 확인
         if (product.getStatus() == ProductStatus.DELETED) {
@@ -180,13 +163,72 @@ public class ProductServiceImpl implements ProductService {
         product.updateStatus(ProductStatus.DELETED);
         
         // Elasticsearch 동기화를 위해 모든 SKU에 대한 Outbox 이벤트 발행
-        for (ProductSKU sku : product.getSkus()) {
-            outboxService.publishSkuEvent(product, sku, false);
-        }
+        outboxService.publishProductSnapshot(product);
         
         // 캐시 무효화
         cacheService.evictProductCache(productId);
         
         log.info(">>> [PRODUCT] 상품 소프트 삭제 완료: productId={}, status=DELETED", productId);
+    }
+
+    private void adjustStocks(Map<Long, Integer> quantitiesBySkuId, boolean decrease) {
+        if (quantitiesBySkuId == null || quantitiesBySkuId.isEmpty()) {
+            return;
+        }
+
+        quantitiesBySkuId.forEach((skuId, quantity) -> {
+            if (skuId == null || quantity == null || quantity <= 0) {
+                throw new IllegalArgumentException("SKU ID와 수량은 유효한 양수여야 합니다.");
+            }
+        });
+
+        List<ProductSKURepository.SkuProductId> skuProductIds = productSKURepository
+                .findProductIdsBySkuIdIn(quantitiesBySkuId.keySet());
+        if (skuProductIds.size() != quantitiesBySkuId.size()) {
+            throw new IllegalArgumentException("존재하지 않는 SKU가 포함되어 있습니다.");
+        }
+
+        Map<Long, List<Long>> skuIdsByProductId = new HashMap<>();
+        skuProductIds.forEach(reference -> skuIdsByProductId
+                .computeIfAbsent(reference.getProductId(), ignored -> new ArrayList<>())
+                .add(reference.getSkuId()));
+
+        skuIdsByProductId.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> adjustProductStocks(entry.getKey(), entry.getValue(), quantitiesBySkuId, decrease));
+    }
+
+    private void adjustProductStocks(
+            Long productId,
+            List<Long> targetSkuIds,
+            Map<Long, Integer> quantitiesBySkuId,
+            boolean decrease
+    ) {
+        Product product = productRepository.findByIdWithLock(productId)
+                .orElseThrow(() -> new IllegalArgumentException("Product not found: " + productId));
+        List<ProductSKU> lockedSkus = productSKURepository.findAllByProductIdWithLock(productId);
+        Map<Long, ProductSKU> lockedSkuById = lockedSkus.stream()
+                .collect(Collectors.toMap(ProductSKU::getId, sku -> sku));
+
+        targetSkuIds.stream()
+                .sorted(Comparator.naturalOrder())
+                .forEach(skuId -> {
+                    ProductSKU sku = Optional.ofNullable(lockedSkuById.get(skuId))
+                            .orElseThrow(() -> new IllegalArgumentException("SKU not found after product lock: " + skuId));
+                    if (decrease && product.getStatus() != ProductStatus.ACTIVE) {
+                        throw new IllegalStateException(
+                                "주문할 수 없는 상품입니다. 상품 상태: " + product.getStatus() + ", SKU ID: " + skuId
+                        );
+                    }
+
+                    if (decrease) {
+                        sku.decreaseStock(quantitiesBySkuId.get(skuId));
+                    } else {
+                        sku.increaseStock(quantitiesBySkuId.get(skuId));
+                    }
+                });
+
+        outboxService.publishProductSnapshot(product);
+        cacheService.evictProductCache(productId);
     }
 }

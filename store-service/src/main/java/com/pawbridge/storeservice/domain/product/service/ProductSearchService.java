@@ -7,8 +7,9 @@ import co.elastic.clients.json.JsonData;
 import com.pawbridge.storeservice.domain.product.dto.ProductSearchRequest;
 import com.pawbridge.storeservice.domain.product.dto.ProductSearchResponse;
 import com.pawbridge.storeservice.domain.product.dto.ProductSearchItem;
-import lombok.RequiredArgsConstructor;
+import com.pawbridge.storeservice.domain.product.entity.ProductStatus;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.client.elc.NativeQuery;
@@ -26,10 +27,18 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ProductSearchService {
 
     private final ElasticsearchOperations elasticsearchOperations;
+    private final String productSearchIndex;
+
+    public ProductSearchService(
+            ElasticsearchOperations elasticsearchOperations,
+            @Value("${pawbridge.search.product-index:store-products-read}") String productSearchIndex
+    ) {
+        this.elasticsearchOperations = elasticsearchOperations;
+        this.productSearchIndex = productSearchIndex;
+    }
 
     public ProductSearchResponse searchProducts(ProductSearchRequest request) {
         log.info(">>> [Service] Building search query for: {}", request);
@@ -46,7 +55,7 @@ public class ProductSearchService {
             SearchHits<Map> searchHits = elasticsearchOperations.search(
                 searchQuery,
                 Map.class,
-                org.springframework.data.elasticsearch.core.mapping.IndexCoordinates.of("store.outbox.events")
+                org.springframework.data.elasticsearch.core.mapping.IndexCoordinates.of(productSearchIndex)
             );
 
             log.info(">>> [Service] Search completed. Total Hits: {}", searchHits.getTotalHits());
@@ -129,7 +138,7 @@ public class ProductSearchService {
         if (request.getInStockOnly() != null && request.getInStockOnly()) {
             Query stockQuery = Query.of(q -> q.range(r -> r
                 .number(n -> n
-                    .field("stockQuantity")
+                    .field("totalStockQuantity")
                     .gt(0.0)
                 )
             ));
@@ -140,7 +149,7 @@ public class ProductSearchService {
         // 4. 상태 필터 (ACTIVE만)
         Query statusQuery = Query.of(q -> q.term(t -> t
             .field("status")
-            .value("active")
+            .value(ProductStatus.ACTIVE.name())
         ));
         boolQueryBuilder.filter(statusQuery);
 
@@ -183,7 +192,7 @@ public class ProductSearchService {
             .description(getStringValue(source, "productName")) // SKU 인덱스에 description 필드가 없을 수 있어 상품명을 대신 사용
             .imageUrl(getStringValue(source, "imageUrl"))
             .price(getLongValue(source, "price"))
-            .totalStock(getIntegerValue(source, "stockQuantity"))
+            .totalStock(getIntegerValue(source, "totalStockQuantity"))
             .status(getStringValue(source, "status"))
             .createdAt(getLocalDateTimeValue(source, "createdAt"))
             .updatedAt(getLocalDateTimeValue(source, "updatedAt"))
