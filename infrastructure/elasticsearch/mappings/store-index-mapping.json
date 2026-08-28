@@ -18,6 +18,13 @@
     "number_of_replicas": 0
   },
   "mappings": {
+    "dynamic": "strict",
+    "_meta": {
+      "contract": "store-products-v1",
+      "document_id": "skuId",
+      "primary_sku": "lowest price, then lowest skuId",
+      "status": "ProductStatus enum name"
+    },
     "properties": {
       "skuId": {
         "type": "long"
@@ -48,6 +55,9 @@
         "type": "long"
       },
       "stockQuantity": {
+        "type": "integer"
+      },
+      "totalStockQuantity": {
         "type": "integer"
       },
       "isPrimarySku": {

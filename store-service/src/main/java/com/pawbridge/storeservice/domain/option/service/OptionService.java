@@ -8,6 +8,9 @@ import com.pawbridge.storeservice.domain.product.entity.OptionGroup;
 import com.pawbridge.storeservice.domain.product.entity.OptionValue;
 import com.pawbridge.storeservice.domain.product.repository.OptionGroupRepository;
 import com.pawbridge.storeservice.domain.product.repository.OptionValueRepository;
+import com.pawbridge.storeservice.domain.product.repository.ProductRepository;
+import com.pawbridge.storeservice.domain.product.repository.ProductSKURepository;
+import com.pawbridge.storeservice.domain.product.service.ProductOutboxService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +29,9 @@ public class OptionService {
 
     private final OptionGroupRepository optionGroupRepository;
     private final OptionValueRepository optionValueRepository;
+    private final ProductRepository productRepository;
+    private final ProductSKURepository productSKURepository;
+    private final ProductOutboxService productOutboxService;
 
     // ==================== 옵션 그룹 ====================
 
@@ -73,10 +79,13 @@ public class OptionService {
 
     @Transactional
     public OptionGroupResponse updateOptionGroup(Long groupId, OptionGroupRequest request) {
-        OptionGroup group = optionGroupRepository.findById(groupId)
+        OptionGroup group = optionGroupRepository.findByIdWithLock(groupId)
                 .orElseThrow(() -> new IllegalArgumentException("옵션 그룹을 찾을 수 없습니다: " + groupId));
+        optionValueRepository.findAllByOptionGroupIdWithLock(groupId);
+        List<Long> affectedProductIds = productSKURepository.findProductIdsByOptionGroupId(groupId);
 
         group.updateName(request.getName());
+        publishAffectedProductSnapshots(affectedProductIds);
         log.info(">>> [OPTION] 옵션 그룹 수정: id={}, name={}", groupId, request.getName());
         return OptionGroupResponse.from(group);
     }
@@ -117,10 +126,12 @@ public class OptionService {
 
     @Transactional
     public OptionValueResponse updateOptionValue(Long valueId, OptionValueRequest request) {
-        OptionValue value = optionValueRepository.findById(valueId)
+        OptionValue value = optionValueRepository.findByIdWithLock(valueId)
                 .orElseThrow(() -> new IllegalArgumentException("옵션 값을 찾을 수 없습니다: " + valueId));
+        List<Long> affectedProductIds = productSKURepository.findProductIdsByOptionValueId(valueId);
 
         value.updateName(request.getName());
+        publishAffectedProductSnapshots(affectedProductIds);
         log.info(">>> [OPTION] 옵션 값 수정: id={}, name={}", valueId, request.getName());
         return OptionValueResponse.from(value);
     }
@@ -137,5 +148,18 @@ public class OptionService {
 
         optionValueRepository.delete(value);
         log.info(">>> [OPTION] 옵션 값 삭제: id={}", valueId);
+    }
+
+    private void publishAffectedProductSnapshots(List<Long> affectedProductIds) {
+        affectedProductIds.stream()
+                .sorted()
+                .forEach(productId -> {
+                    var product = productRepository.findByIdWithLock(productId)
+                            .orElseThrow(() -> new IllegalStateException("옵션에 연결된 상품을 찾을 수 없습니다: " + productId));
+                    var lockedSkus = productSKURepository.findAllByProductIdWithLock(productId);
+                    if (!lockedSkus.isEmpty()) {
+                        productOutboxService.publishProductSnapshot(product);
+                    }
+                });
     }
 }
