@@ -64,6 +64,7 @@ public class JwtAuthorizationGatewayFilterFactory
             "POST:/api/products",
             "PATCH:/api/products/*",
             "DELETE:/api/products/*",
+            "POST:/api/images",
             "POST:/api/categories",
             "PUT:/api/categories/*",
             "DELETE:/api/categories/*",

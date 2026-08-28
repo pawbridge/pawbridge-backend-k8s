@@ -1,6 +1,5 @@
 package com.pawbridge.storeservice.common.service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -16,13 +15,13 @@ import java.util.UUID;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class S3Service {
 
-    private final S3Client s3Client;
+    private static final long MAX_IMAGE_SIZE_BYTES = 5L * 1024 * 1024;
 
-    @Value("${spring.cloud.aws.s3.bucket}")
-    private String bucketName;
+    private final S3Client s3Client;
+    private final String bucketName;
+    private final String publicBaseUrl;
 
     private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
             "image/jpeg",
@@ -31,6 +30,16 @@ public class S3Service {
             "image/gif",
             "image/webp"
     );
+
+    public S3Service(
+            S3Client s3Client,
+            @Value("${spring.cloud.aws.s3.bucket}") String bucketName,
+            @Value("${pawbridge.storage.public-base-url}") String publicBaseUrl
+    ) {
+        this.s3Client = s3Client;
+        this.bucketName = bucketName;
+        this.publicBaseUrl = removeTrailingSlashes(publicBaseUrl);
+    }
 
     public String uploadImage(MultipartFile file) {
         validateFileType(file);
@@ -52,7 +61,7 @@ public class S3Service {
 
             s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
 
-            return "https://" + bucketName + ".s3.ap-northeast-2.amazonaws.com/" + key;
+            return publicBaseUrl + "/" + key;
 
         } catch (IOException e) {
              throw new RuntimeException("Failed to upload image", e);
@@ -60,9 +69,24 @@ public class S3Service {
     }
 
     private void validateFileType(MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("Image file must not be empty");
+        }
+        if (file.getSize() > MAX_IMAGE_SIZE_BYTES) {
+            throw new IllegalArgumentException("Image file must not exceed 5MB");
+        }
+
         String contentType = file.getContentType();
         if (contentType == null || !ALLOWED_IMAGE_TYPES.contains(contentType.toLowerCase())) {
             throw new IllegalArgumentException("Invalid file type. Allowed: " + ALLOWED_IMAGE_TYPES);
         }
+    }
+
+    private static String removeTrailingSlashes(String url) {
+        int end = url.length();
+        while (end > 0 && url.charAt(end - 1) == '/') {
+            end--;
+        }
+        return url.substring(0, end);
     }
 }

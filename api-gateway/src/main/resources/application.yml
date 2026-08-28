@@ -106,6 +106,15 @@ spring:
             - JwtAuthorization
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
+        - id: store-service-images
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/images, /api/images/**
+            - Method=POST,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
         - id: store-service-categories-public
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
