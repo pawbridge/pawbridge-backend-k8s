@@ -5,6 +5,11 @@ spring:
   profiles:
     active: local
 
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
   # DataSource 설정
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/pawbridge_store}
@@ -15,12 +20,15 @@ spring:
   cloud:
     aws:
       credentials:
-        access-key: ${AWS_ACCESS_KEY}
-        secret-key: ${AWS_SECRET_KEY}
+        access-key: ${R2_ACCESS_KEY_ID}
+        secret-key: ${R2_SECRET_ACCESS_KEY}
       region:
-        static: ${AWS_REGION}
+        static: ${R2_REGION:auto}
       s3:
-        bucket: ${AWS_BUCKET_NAME}
+        endpoint: ${R2_ENDPOINT}
+        path-style-access-enabled: true
+        chunked-encoding-enabled: false
+        bucket: ${R2_BUCKET_NAME}
 
   data:
     redis:
@@ -61,3 +69,9 @@ logging:
 
 server:
   port: 8083
+
+pawbridge:
+  storage:
+    public-base-url: ${R2_PUBLIC_BASE_URL:https://images.pawbridge.kr}
+  search:
+    product-index: ${STORE_PRODUCT_SEARCH_INDEX:store-products-read}
