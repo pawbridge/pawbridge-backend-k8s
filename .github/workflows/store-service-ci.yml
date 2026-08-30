@@ -6,12 +6,16 @@ on:
       - dev
     paths:
       - "store-service/**"
+      - ".github/scripts/update_store_image_values.py"
+      - ".github/scripts/test_update_store_image_values.py"
       - ".github/workflows/store-service-ci.yml"
   push:
     branches:
       - dev
     paths:
       - "store-service/**"
+      - ".github/scripts/update_store_image_values.py"
+      - ".github/scripts/test_update_store_image_values.py"
       - ".github/workflows/store-service-ci.yml"
 
 permissions:
@@ -19,7 +23,7 @@ permissions:
 
 concurrency:
   group: store-service-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   test-and-build:
@@ -76,6 +80,19 @@ jobs:
       - name: Run tests and build executable JAR
         run: bash ./gradlew test bootJar --no-daemon
 
+      - name: Test Store image values updater
+        working-directory: ${{ github.workspace }}
+        run: >-
+          python3 -m unittest discover
+          --start-directory .github/scripts
+          --pattern 'test_*.py'
+
+      - name: Set up Helm
+        if: github.event_name == 'push'
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.21.3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -88,6 +105,7 @@ jobs:
           scope: dorosiya/pawbridge-store-service@push
 
       - name: Build and optionally publish Store Service image
+        id: image
         uses: docker/build-push-action@v7
         with:
           context: ./store-service
@@ -95,3 +113,274 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: dorosiya/pawbridge-store-service:sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Verify published Store Service image digest
+        if: github.event_name == 'push'
+        env:
+          STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: >-
+          docker buildx imagetools inspect
+          "dorosiya/pawbridge-store-service@$STORE_IMAGE_DIGEST"
+
+      - name: Check out Infra repository
+        if: github.event_name == 'push'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: pawbridge/pawbridge-infra-k8s
+          ref: dev
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: infra
+          fetch-depth: 0
+
+      - name: Update Store image reference
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}
+        env:
+          STORE_IMAGE_TAG: sha-${{ github.sha }}
+          STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: >-
+          python3 .github/scripts/update_store_image_values.py
+          infra/environments/dev/values/store-service.yaml
+          --repository dorosiya/pawbridge-store-service
+          --tag "$STORE_IMAGE_TAG"
+          --digest "$STORE_IMAGE_DIGEST"
+
+      - name: Validate Store image Helm override
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}/infra
+        env:
+          STORE_IMAGE_REPOSITORY: dorosiya/pawbridge-store-service
+          STORE_IMAGE_TAG: sha-${{ github.sha }}
+          STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          values_file="environments/dev/values/store-service.yaml"
+          first_hash="$(git hash-object "$values_file")"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/update_store_image_values.py" \
+            "$values_file" \
+            --repository "$STORE_IMAGE_REPOSITORY" \
+            --tag "$STORE_IMAGE_TAG" \
+            --digest "$STORE_IMAGE_DIGEST"
+          second_hash="$(git hash-object "$values_file")"
+
+          if [ "$first_hash" != "$second_hash" ]; then
+            echo "Store image values update is not idempotent" >&2
+            exit 1
+          fi
+
+          git diff --check
+          helm lint charts/store-service --values "$values_file"
+          rendered="$(helm template store-service charts/store-service \
+            --values "$values_file" \
+            --show-only templates/deployment.yaml)"
+          expected_image="image: \"$STORE_IMAGE_REPOSITORY@$STORE_IMAGE_DIGEST\""
+
+          if ! grep -Fq "$expected_image" <<<"$rendered"; then
+            echo "Rendered Store image does not match the published digest" >&2
+            exit 1
+          fi
+
+      - name: Create Infra pull request
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}/infra
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+          BACKEND_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INFRA_REPOSITORY: pawbridge/pawbridge-infra-k8s
+          STORE_IMAGE_TAG: sha-${{ github.sha }}
+          STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          BACKEND_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          branch="chore/store-image-${GITHUB_SHA:0:12}"
+          title="chore: Store Service 이미지 digest 갱신"
+          values_file="environments/dev/values/store-service.yaml"
+
+          check_store_freshness() {
+            local changed_files
+            local changed_file
+            local changed_file_count
+
+            newer_store_path=""
+            latest_backend_sha="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/git/ref/heads/dev" \
+              --jq '.object.sha')" || return 2
+            if [ "$latest_backend_sha" = "$GITHUB_SHA" ]; then
+              return 0
+            fi
+
+            changed_file_count="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest_backend_sha" \
+              --jq '.files | length')" || return 2
+            if [ "$changed_file_count" -ge 300 ]; then
+              echo "Backend comparison reached the 300-file API safety limit" >&2
+              return 2
+            fi
+
+            changed_files="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest_backend_sha" \
+              --jq '.files[] | .filename, (.previous_filename // empty)')" || return 2
+            while IFS= read -r changed_file; do
+              case "$changed_file" in
+                store-service/*|.github/workflows/store-service-ci.yml|.github/scripts/update_store_image_values.py|.github/scripts/test_update_store_image_values.py)
+                  newer_store_path="$changed_file"
+                  return 1
+                  ;;
+              esac
+            done <<<"$changed_files"
+
+            return 0
+          }
+
+          freshness_status=0
+          check_store_freshness || freshness_status=$?
+          if [ "$freshness_status" -eq 1 ]; then
+            echo "Skip stale Store run: $newer_store_path changed after $GITHUB_SHA"
+            exit 0
+          elif [ "$freshness_status" -ne 0 ]; then
+            echo "Could not determine Store run freshness" >&2
+            exit "$freshness_status"
+          fi
+
+          if git diff --quiet -- "$values_file"; then
+            echo "Infra already references $STORE_IMAGE_TAG@$STORE_IMAGE_DIGEST"
+            exit 0
+          fi
+
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+          cat >"$body_file" <<EOF
+          <!-- pawbridge-automation: store-service-image -->
+
+          ## Summary
+
+          Backend \`dev\`에서 발행된 Store Service 이미지를 dev 환경의 불변 digest로 고정합니다.
+
+          ## Changes
+
+          - Store Service 이미지 tag: \`$STORE_IMAGE_TAG\`
+          - Store Service 이미지 digest: \`$STORE_IMAGE_DIGEST\`
+
+          ## Impact
+
+          - API / Data: 변경 없음
+          - Configuration / Deployment: 이 PR을 머지하면 dev 선언 상태가 새 Store Service 이미지를 가리킵니다. 머지만으로 실제 클러스터에 배포하지는 않습니다.
+
+          ## Verification
+
+          - Backend 테스트와 실행 JAR 빌드 성공 후 이미지를 발행했습니다.
+          - Docker Hub에서 \`repository@digest\` 조회가 성공한 값을 values에 반영했습니다.
+          - Store Service Helm lint와 렌더 결과의 digest 일치를 확인했습니다.
+
+          ## Related
+
+          - Backend commit: $BACKEND_COMMIT_URL
+
+          ## Out of Scope
+
+          - PR 자동 머지
+          - Argo CD 동기화와 실제 Kubernetes 배포
+
+          ## Checklist
+
+          - [x] 비밀정보가 diff·본문·로그에 포함되지 않았습니다.
+          - [x] API·데이터·설정·배포 영향을 필요한 범위에서 명시했습니다.
+          - [x] 실행한 검증과 미실행 검증을 사실대로 구분했습니다.
+          - [ ] 필요한 문서가 함께 갱신되었습니다. (해당 없음: 이미지 참조 자동 갱신)
+          EOF
+
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin \
+              "refs/heads/$branch:refs/remotes/origin/$branch"
+            changed_paths="$(git diff --name-only "origin/dev...origin/$branch")"
+            recovery_commit_count="$(git rev-list --count "origin/dev..origin/$branch")"
+            recovery_author_email="$(git show -s --format='%ae' "origin/$branch")"
+            recovery_subject="$(git show -s --format='%s' "origin/$branch")"
+
+            if [ "$changed_paths" != "$values_file" ] || \
+              [ "$recovery_commit_count" -ne 1 ] || \
+              [ "$recovery_author_email" != "41898282+github-actions[bot]@users.noreply.github.com" ] || \
+              [ "$recovery_subject" != "$title" ]; then
+              echo "Existing automation branch failed provenance checks: $branch" >&2
+              exit 1
+            fi
+
+            if ! git diff --quiet "origin/$branch" -- "$values_file"; then
+              echo "Existing automation branch has unexpected Store image values: $branch" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$branch"
+            git add -- "$values_file"
+            git commit -m "chore: Store Service 이미지 digest 갱신"
+            git push --set-upstream origin "$branch"
+          fi
+
+          pr_number="$(gh pr list \
+            --repo "$INFRA_REPOSITORY" \
+            --base dev \
+            --head "$branch" \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create \
+              --repo "$INFRA_REPOSITORY" \
+              --base dev \
+              --head "$branch" \
+              --title "$title" \
+              --draft \
+              --body-file "$body_file")"
+            pr_number="${pr_url##*/}"
+          else
+            pr_url="$(gh pr view "$pr_number" \
+              --repo "$INFRA_REPOSITORY" \
+              --json url \
+              --jq '.url')"
+          fi
+
+          freshness_status=0
+          check_store_freshness || freshness_status=$?
+          if [ "$freshness_status" -eq 1 ]; then
+            gh pr close "$pr_number" --repo "$INFRA_REPOSITORY"
+            echo "Closed stale Infra pull request because $newer_store_path changed"
+            exit 0
+          elif [ "$freshness_status" -ne 0 ]; then
+            echo "Could not recheck Store run freshness" >&2
+            exit "$freshness_status"
+          fi
+
+          pr_is_draft="$(gh pr view "$pr_number" \
+            --repo "$INFRA_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft')"
+          if [ "$pr_is_draft" = "true" ]; then
+            gh pr ready "$pr_number" --repo "$INFRA_REPOSITORY"
+          fi
+
+          obsolete_prs="$(gh pr list \
+            --repo "$INFRA_REPOSITORY" \
+            --base dev \
+            --state open \
+            --limit 100 \
+            --json number,headRefName,body \
+            --jq '.[] | select(.headRefName | test("^chore/store-image-[0-9a-f]{12}$")) | select((.body // "") | contains("<!-- pawbridge-automation: store-service-image -->")) | [.number, .headRefName] | @tsv')"
+          while IFS=$'\t' read -r obsolete_number obsolete_branch; do
+            if [ -z "$obsolete_number" ] || [ "$obsolete_branch" = "$branch" ]; then
+              continue
+            fi
+
+            obsolete_sha="${obsolete_branch#chore/store-image-}"
+            comparison_status="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$obsolete_sha...$GITHUB_SHA" \
+              --jq '.status')"
+            if [ "$comparison_status" = "ahead" ]; then
+              gh pr close "$obsolete_number" --repo "$INFRA_REPOSITORY"
+            fi
+          done <<<"$obsolete_prs"
+
+          echo "Infra pull request ready: $pr_url"
