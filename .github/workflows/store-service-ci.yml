@@ -7,13 +7,19 @@ on:
     paths:
       - "store-service/**"
       - ".github/workflows/store-service-ci.yml"
+  push:
+    branches:
+      - dev
+    paths:
+      - "store-service/**"
+      - ".github/workflows/store-service-ci.yml"
 
 permissions:
   contents: read
 
 concurrency:
   group: store-service-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-and-build:
@@ -70,5 +76,22 @@ jobs:
       - name: Run tests and build executable JAR
         run: bash ./gradlew test bootJar --no-daemon
 
-      - name: Validate Store Service container image build
-        run: docker build --tag "pawbridge-store-service:ci-${GITHUB_SHA}" .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          username: dorosiya
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          scope: dorosiya/pawbridge-store-service@push
+
+      - name: Build and optionally publish Store Service image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./store-service
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          tags: dorosiya/pawbridge-store-service:sha-${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
