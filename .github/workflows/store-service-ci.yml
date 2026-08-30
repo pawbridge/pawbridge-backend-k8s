@@ -20,6 +20,25 @@ jobs:
     name: Test and build Store Service
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/pawbridge_store
+      SPRING_DATASOURCE_USERNAME: pawbridge_ci
+      SPRING_DATASOURCE_PASSWORD: ci_only_password
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: pawbridge_store
+          MYSQL_USER: pawbridge_ci
+          MYSQL_PASSWORD: ci_only_password
+          MYSQL_ROOT_PASSWORD: ci_only_root_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --protocol=tcp -h 127.0.0.1 -uroot -pci_only_root_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     defaults:
       run:
         working-directory: store-service
