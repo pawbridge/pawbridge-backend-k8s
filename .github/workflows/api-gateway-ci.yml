@@ -1,0 +1,352 @@
+name: API Gateway CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - "api-gateway/**"
+      - ".github/scripts/update_api_gateway_image_values.py"
+      - ".github/scripts/test_update_api_gateway_image_values.py"
+      - ".github/workflows/api-gateway-ci.yml"
+  push:
+    branches:
+      - dev
+    paths:
+      - "api-gateway/**"
+      - ".github/scripts/update_api_gateway_image_values.py"
+      - ".github/scripts/test_update_api_gateway_image_values.py"
+      - ".github/workflows/api-gateway-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-gateway-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test and build API Gateway
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JWT_SECRET: ci_test_placeholder_not_for_runtime_0123456789
+    defaults:
+      run:
+        working-directory: api-gateway
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run tests and build executable JAR
+        run: bash ./gradlew test bootJar --no-daemon
+
+      - name: Test API Gateway image values updater
+        working-directory: ${{ github.workspace }}
+        run: >-
+          python3 -m unittest discover
+          --start-directory .github/scripts
+          --pattern 'test_update_api_gateway_image_values.py'
+
+      - name: Set up Helm
+        if: github.event_name == 'push'
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.21.4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          username: dorosiya
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          scope: dorosiya/pawbridge-api-gateway@push
+
+      - name: Build and optionally publish API Gateway image
+        id: image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./api-gateway
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          tags: dorosiya/pawbridge-api-gateway:sha-${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Verify published API Gateway image digest
+        if: github.event_name == 'push'
+        env:
+          API_GATEWAY_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: >-
+          docker buildx imagetools inspect
+          "dorosiya/pawbridge-api-gateway@$API_GATEWAY_IMAGE_DIGEST"
+
+      - name: Check out Infra repository
+        if: github.event_name == 'push'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: pawbridge/pawbridge-infra-k8s
+          ref: dev
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: infra
+          fetch-depth: 0
+
+      - name: Update API Gateway image reference
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}
+        env:
+          API_GATEWAY_IMAGE_TAG: sha-${{ github.sha }}
+          API_GATEWAY_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: >-
+          python3 .github/scripts/update_api_gateway_image_values.py
+          infra/environments/dev/values/api-gateway-pilot.yaml
+          --repository dorosiya/pawbridge-api-gateway
+          --tag "$API_GATEWAY_IMAGE_TAG"
+          --digest "$API_GATEWAY_IMAGE_DIGEST"
+
+      - name: Validate API Gateway image Helm override
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}/infra
+        env:
+          API_GATEWAY_IMAGE_REPOSITORY: dorosiya/pawbridge-api-gateway
+          API_GATEWAY_IMAGE_TAG: sha-${{ github.sha }}
+          API_GATEWAY_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          values_file="environments/dev/values/api-gateway-pilot.yaml"
+          first_hash="$(git hash-object "$values_file")"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/update_api_gateway_image_values.py" \
+            "$values_file" \
+            --repository "$API_GATEWAY_IMAGE_REPOSITORY" \
+            --tag "$API_GATEWAY_IMAGE_TAG" \
+            --digest "$API_GATEWAY_IMAGE_DIGEST"
+          second_hash="$(git hash-object "$values_file")"
+
+          if [ "$first_hash" != "$second_hash" ]; then
+            echo "API Gateway image values update is not idempotent" >&2
+            exit 1
+          fi
+
+          git diff --check
+          helm lint charts/api-gateway --values "$values_file"
+          rendered="$(helm template api-gateway charts/api-gateway \
+            --values "$values_file" \
+            --show-only templates/deployment.yaml)"
+          expected_image="image: \"$API_GATEWAY_IMAGE_REPOSITORY@$API_GATEWAY_IMAGE_DIGEST\""
+
+          if ! grep -Fq "$expected_image" <<<"$rendered"; then
+            echo "Rendered API Gateway image does not match the published digest" >&2
+            exit 1
+          fi
+
+      - name: Create Infra draft pull request
+        if: github.event_name == 'push'
+        working-directory: ${{ github.workspace }}/infra
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+          BACKEND_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INFRA_REPOSITORY: pawbridge/pawbridge-infra-k8s
+          API_GATEWAY_IMAGE_TAG: sha-${{ github.sha }}
+          API_GATEWAY_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          BACKEND_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          branch="chore/api-gateway-image-${GITHUB_SHA:0:12}"
+          title="chore: API Gateway 이미지 digest 갱신"
+          values_file="environments/dev/values/api-gateway-pilot.yaml"
+
+          check_gateway_freshness() {
+            local changed_files
+            local changed_file
+            local changed_file_count
+
+            newer_gateway_path=""
+            latest_backend_sha="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/git/ref/heads/dev" \
+              --jq '.object.sha')" || return 2
+            if [ "$latest_backend_sha" = "$GITHUB_SHA" ]; then
+              return 0
+            fi
+
+            changed_file_count="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest_backend_sha" \
+              --jq '.files | length')" || return 2
+            if [ "$changed_file_count" -ge 300 ]; then
+              echo "Backend comparison reached the 300-file API safety limit" >&2
+              return 2
+            fi
+
+            changed_files="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest_backend_sha" \
+              --jq '.files[] | .filename, (.previous_filename // empty)')" || return 2
+            while IFS= read -r changed_file; do
+              case "$changed_file" in
+                api-gateway/*|.github/workflows/api-gateway-ci.yml|.github/scripts/update_api_gateway_image_values.py|.github/scripts/test_update_api_gateway_image_values.py)
+                  newer_gateway_path="$changed_file"
+                  return 1
+                  ;;
+              esac
+            done <<<"$changed_files"
+
+            return 0
+          }
+
+          freshness_status=0
+          check_gateway_freshness || freshness_status=$?
+          if [ "$freshness_status" -eq 1 ]; then
+            echo "Skip stale API Gateway run: $newer_gateway_path changed after $GITHUB_SHA"
+            exit 0
+          elif [ "$freshness_status" -ne 0 ]; then
+            echo "Could not determine API Gateway run freshness" >&2
+            exit "$freshness_status"
+          fi
+
+          if git diff --quiet -- "$values_file"; then
+            echo "Infra already references $API_GATEWAY_IMAGE_TAG@$API_GATEWAY_IMAGE_DIGEST"
+            exit 0
+          fi
+
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+          cat >"$body_file" <<EOF
+          <!-- pawbridge-automation: api-gateway-image -->
+
+          ## Summary
+
+          Backend \`dev\`에서 발행된 API Gateway 이미지를 대상 클러스터용 dev 환경의 불변 digest로 고정합니다.
+
+          ## Changes
+
+          - API Gateway 이미지 tag: \`$API_GATEWAY_IMAGE_TAG\`
+          - API Gateway 이미지 digest: \`$API_GATEWAY_IMAGE_DIGEST\`
+
+          ## Impact
+
+          - API / Data: 변경 없음
+          - Configuration / Deployment: 이 Draft PR을 머지하면 대상 클러스터용 dev 선언 상태가 새 API Gateway 이미지를 가리킵니다. 머지만으로 실제 클러스터에 배포하지는 않습니다.
+
+          ## Verification
+
+          - Backend 테스트와 실행 JAR 빌드 성공 후 이미지를 발행했습니다.
+          - Docker Hub에서 \`repository@digest\` 조회가 성공한 값을 values에 반영했습니다.
+          - API Gateway Helm lint와 렌더 결과의 digest 일치를 확인했습니다.
+
+          ## Related
+
+          - Backend commit: $BACKEND_COMMIT_URL
+
+          ## Out of Scope
+
+          - PR 자동 Ready 전환과 자동 머지
+          - Argo CD 동기화와 실제 Kubernetes 배포
+
+          ## Checklist
+
+          - [x] 비밀정보가 diff·본문·로그에 포함되지 않았습니다.
+          - [x] API·데이터·설정·배포 영향을 필요한 범위에서 명시했습니다.
+          - [x] 실행한 검증과 미실행 검증을 사실대로 구분했습니다.
+          - [ ] 필요한 문서가 함께 갱신되었습니다. (해당 없음: 이미지 참조 자동 갱신)
+          EOF
+
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin \
+              "refs/heads/$branch:refs/remotes/origin/$branch"
+            changed_paths="$(git diff --name-only "origin/dev...origin/$branch")"
+            recovery_commit_count="$(git rev-list --count "origin/dev..origin/$branch")"
+            recovery_author_email="$(git show -s --format='%ae' "origin/$branch")"
+            recovery_subject="$(git show -s --format='%s' "origin/$branch")"
+
+            if [ "$changed_paths" != "$values_file" ] || \
+              [ "$recovery_commit_count" -ne 1 ] || \
+              [ "$recovery_author_email" != "41898282+github-actions[bot]@users.noreply.github.com" ] || \
+              [ "$recovery_subject" != "$title" ]; then
+              echo "Existing automation branch failed provenance checks: $branch" >&2
+              exit 1
+            fi
+
+            if ! git diff --quiet "origin/$branch" -- "$values_file"; then
+              echo "Existing automation branch has unexpected API Gateway image values: $branch" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$branch"
+            git add -- "$values_file"
+            git commit -m "chore: API Gateway 이미지 digest 갱신"
+            git push --set-upstream origin "$branch"
+          fi
+
+          pr_number="$(gh pr list \
+            --repo "$INFRA_REPOSITORY" \
+            --base dev \
+            --head "$branch" \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create \
+              --repo "$INFRA_REPOSITORY" \
+              --base dev \
+              --head "$branch" \
+              --title "$title" \
+              --draft \
+              --body-file "$body_file")"
+            pr_number="${pr_url##*/}"
+          else
+            pr_url="$(gh pr view "$pr_number" \
+              --repo "$INFRA_REPOSITORY" \
+              --json url \
+              --jq '.url')"
+          fi
+
+          freshness_status=0
+          check_gateway_freshness || freshness_status=$?
+          if [ "$freshness_status" -eq 1 ]; then
+            gh pr close "$pr_number" --repo "$INFRA_REPOSITORY"
+            echo "Closed stale Infra pull request because $newer_gateway_path changed"
+            exit 0
+          elif [ "$freshness_status" -ne 0 ]; then
+            echo "Could not recheck API Gateway run freshness" >&2
+            exit "$freshness_status"
+          fi
+
+          obsolete_prs="$(gh pr list \
+            --repo "$INFRA_REPOSITORY" \
+            --base dev \
+            --state open \
+            --limit 100 \
+            --json number,headRefName,body \
+            --jq '.[] | select(.headRefName | test("^chore/api-gateway-image-[0-9a-f]{12}$")) | select((.body // "") | contains("<!-- pawbridge-automation: api-gateway-image -->")) | [.number, .headRefName] | @tsv')"
+          while IFS=$'\t' read -r obsolete_number obsolete_branch; do
+            if [ -z "$obsolete_number" ] || [ "$obsolete_branch" = "$branch" ]; then
+              continue
+            fi
+
+            obsolete_sha="${obsolete_branch#chore/api-gateway-image-}"
+            comparison_status="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$obsolete_sha...$GITHUB_SHA" \
+              --jq '.status')"
+            if [ "$comparison_status" = "ahead" ]; then
+              gh pr close "$obsolete_number" --repo "$INFRA_REPOSITORY"
+            fi
+          done <<<"$obsolete_prs"
+
+          echo "Infra draft pull request created or recovered: $pr_url"
