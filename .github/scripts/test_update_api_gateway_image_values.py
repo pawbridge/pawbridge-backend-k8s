@@ -16,6 +16,7 @@ SPEC.loader.exec_module(MODULE)
 REPOSITORY = "dorosiya/pawbridge-api-gateway"
 TAG = "sha-" + "a" * 40
 DIGEST = "sha256:" + "b" * 64
+OLD_DIGEST = "sha256:" + "c" * 64
 
 
 class UpdateApiGatewayImageValuesTest(unittest.TestCase):
@@ -80,6 +81,45 @@ class UpdateApiGatewayImageValuesTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "duplicate image key: tag"):
             MODULE.update_values(original, REPOSITORY, TAG, DIGEST)
+
+    def test_updates_gateway_image_in_verification_script(self) -> None:
+        original = (
+            "#!/usr/bin/env bash\n"
+            f'readonly GATEWAY_IMAGE="{REPOSITORY}@{OLD_DIGEST}"\n'
+        )
+
+        updated = MODULE.update_verification_script(original, REPOSITORY, DIGEST)
+
+        self.assertEqual(
+            updated,
+            "#!/usr/bin/env bash\n"
+            f'readonly GATEWAY_IMAGE="{REPOSITORY}@{DIGEST}"\n',
+        )
+
+    def test_verification_script_update_is_idempotent(self) -> None:
+        original = f'readonly GATEWAY_IMAGE="{REPOSITORY}@{OLD_DIGEST}"\n'
+        first = MODULE.update_verification_script(original, REPOSITORY, DIGEST)
+
+        second = MODULE.update_verification_script(first, REPOSITORY, DIGEST)
+
+        self.assertEqual(second, first)
+
+    def test_rejects_missing_or_duplicate_gateway_image_declaration(self) -> None:
+        invalid_scripts = [
+            "#!/usr/bin/env bash\n",
+            (
+                f'readonly GATEWAY_IMAGE="{REPOSITORY}@{OLD_DIGEST}"\n'
+                f'readonly GATEWAY_IMAGE="{REPOSITORY}@{DIGEST}"\n'
+            ),
+        ]
+
+        for script in invalid_scripts:
+            with self.subTest(script=script):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "exactly one GATEWAY_IMAGE declaration",
+                ):
+                    MODULE.update_verification_script(script, REPOSITORY, DIGEST)
 
 
 if __name__ == "__main__":
