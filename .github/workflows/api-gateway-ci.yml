@@ -115,6 +115,7 @@ jobs:
         run: >-
           python3 .github/scripts/update_api_gateway_image_values.py
           infra/environments/dev/values/api-gateway-pilot.yaml
+          --verification-script infra/infra/network/verify-target-edge-gates.sh
           --repository dorosiya/pawbridge-api-gateway
           --tag "$API_GATEWAY_IMAGE_TAG"
           --digest "$API_GATEWAY_IMAGE_DIGEST"
@@ -130,16 +131,18 @@ jobs:
           set -euo pipefail
 
           values_file="environments/dev/values/api-gateway-pilot.yaml"
-          first_hash="$(git hash-object "$values_file")"
+          verification_file="infra/network/verify-target-edge-gates.sh"
+          first_hashes="$(git hash-object "$values_file" "$verification_file")"
           python3 "$GITHUB_WORKSPACE/.github/scripts/update_api_gateway_image_values.py" \
             "$values_file" \
+            --verification-script "$verification_file" \
             --repository "$API_GATEWAY_IMAGE_REPOSITORY" \
             --tag "$API_GATEWAY_IMAGE_TAG" \
             --digest "$API_GATEWAY_IMAGE_DIGEST"
-          second_hash="$(git hash-object "$values_file")"
+          second_hashes="$(git hash-object "$values_file" "$verification_file")"
 
-          if [ "$first_hash" != "$second_hash" ]; then
-            echo "API Gateway image values update is not idempotent" >&2
+          if [ "$first_hashes" != "$second_hashes" ]; then
+            echo "API Gateway image reference update is not idempotent" >&2
             exit 1
           fi
 
@@ -171,6 +174,7 @@ jobs:
           branch="chore/api-gateway-image-${GITHUB_SHA:0:12}"
           title="chore: API Gateway 이미지 digest 갱신"
           values_file="environments/dev/values/api-gateway-pilot.yaml"
+          verification_file="infra/network/verify-target-edge-gates.sh"
 
           check_gateway_freshness() {
             local changed_files
@@ -218,7 +222,7 @@ jobs:
             exit "$freshness_status"
           fi
 
-          if git diff --quiet -- "$values_file"; then
+          if git diff --quiet -- "$values_file" "$verification_file"; then
             echo "Infra already references $API_GATEWAY_IMAGE_TAG@$API_GATEWAY_IMAGE_DIGEST"
             exit 0
           fi
@@ -236,6 +240,7 @@ jobs:
 
           - API Gateway 이미지 tag: \`$API_GATEWAY_IMAGE_TAG\`
           - API Gateway 이미지 digest: \`$API_GATEWAY_IMAGE_DIGEST\`
+          - 대상 클러스터 검증기의 기대 API Gateway digest 동기화
 
           ## Impact
 
@@ -273,7 +278,8 @@ jobs:
             recovery_author_email="$(git show -s --format='%ae' "origin/$branch")"
             recovery_subject="$(git show -s --format='%s' "origin/$branch")"
 
-            if [ "$changed_paths" != "$values_file" ] || \
+            expected_changed_paths="$(printf '%s\n%s' "$values_file" "$verification_file")"
+            if [ "$changed_paths" != "$expected_changed_paths" ] || \
               [ "$recovery_commit_count" -ne 1 ] || \
               [ "$recovery_author_email" != "41898282+github-actions[bot]@users.noreply.github.com" ] || \
               [ "$recovery_subject" != "$title" ]; then
@@ -281,15 +287,15 @@ jobs:
               exit 1
             fi
 
-            if ! git diff --quiet "origin/$branch" -- "$values_file"; then
-              echo "Existing automation branch has unexpected API Gateway image values: $branch" >&2
+            if ! git diff --quiet "origin/$branch" -- "$values_file" "$verification_file"; then
+              echo "Existing automation branch has unexpected API Gateway image references: $branch" >&2
               exit 1
             fi
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git switch -c "$branch"
-            git add -- "$values_file"
+            git add -- "$values_file" "$verification_file"
             git commit -m "chore: API Gateway 이미지 digest 갱신"
             git push --set-upstream origin "$branch"
           fi
