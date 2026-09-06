@@ -24,6 +24,7 @@ spring:
       region:
         static: placeholder-region
       s3:
+        endpoint: http://127.0.0.1:4566
         bucket: placeholder-bucket
 
   task:
