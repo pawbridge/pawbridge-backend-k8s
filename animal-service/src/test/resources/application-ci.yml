@@ -21,9 +21,9 @@ spring:
 
   data:
     redis:
-      host: 127.0.0.1
-      port: 6379
-      password: ''
+      host: ${SPRING_DATA_REDIS_HOST:127.0.0.1}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:ci_placeholder}
 
   elasticsearch:
     uris: http://127.0.0.1:9200

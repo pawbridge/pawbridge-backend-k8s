@@ -108,9 +108,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker run --detach --rm --name pawbridge-ci-redis -p 6379:6379 redis:7-alpine
+          docker run --detach --rm --name pawbridge-ci-redis -p 6379:6379 \
+            redis:7-alpine redis-server --requirepass ci_placeholder
           for attempt in $(seq 1 20); do
-            if docker exec pawbridge-ci-redis redis-cli ping | grep -Fxq PONG; then
+            if docker exec -e REDISCLI_AUTH=ci_placeholder pawbridge-ci-redis \
+              redis-cli ping | grep -Fxq PONG; then
               exit 0
             fi
             sleep 1
