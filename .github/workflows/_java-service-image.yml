@@ -1,0 +1,542 @@
+name: Reusable Java Service Image CI
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Java service directory to validate and build.
+        required: true
+        type: string
+      publish:
+        description: Whether this invocation may publish and create an Infra Draft PR.
+        required: true
+        type: boolean
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: false
+      INFRA_REPO_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  test-build-publish:
+    name: Test, build, and publish ${{ inputs.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SPRING_PROFILES_ACTIVE: ci
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: pawbridge_ci
+          MYSQL_USER: pawbridge_ci
+          MYSQL_PASSWORD: ci_placeholder
+          MYSQL_ROOT_PASSWORD: ci_root_placeholder
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --protocol=tcp -h 127.0.0.1 -uroot -pci_root_placeholder"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - id: service
+        name: Set service metadata
+        run: |
+          set -euo pipefail
+
+          case "${{ inputs.service }}" in
+            user-service)
+              display_name="User Service"
+              image_repository="dorosiya/pawbridge-user-service"
+              values_file="environments/dev/values/user-service.yaml"
+              chart="charts/user-service"
+              ;;
+            animal-service)
+              display_name="Animal Service"
+              image_repository="dorosiya/pawbridge-animal-service"
+              values_file="environments/dev/values/animal-service.yaml"
+              chart="charts/animal-service"
+              ;;
+            community-service)
+              display_name="Community Service"
+              image_repository="dorosiya/pawbridge-community-service"
+              values_file="environments/dev/values/community-service.yaml"
+              chart="charts/community-service"
+              ;;
+            payment-service)
+              display_name="Payment Service"
+              image_repository="dorosiya/pawbridge-payment-service"
+              values_file="environments/dev/values/payment-service.yaml"
+              chart="charts/payment-service"
+              ;;
+            *)
+              echo "Unsupported service: ${{ inputs.service }}" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "display_name=$display_name"
+            echo "image_repository=$image_repository"
+            echo "values_file=$values_file"
+            echo "chart=$chart"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-provider: basic
+
+      - name: Start Redis required by Animal Service
+        if: inputs.service == 'animal-service'
+        run: |
+          set -euo pipefail
+
+          docker run --detach --rm --name pawbridge-ci-redis -p 6379:6379 redis:7-alpine
+          for attempt in $(seq 1 20); do
+            if docker exec pawbridge-ci-redis redis-cli ping | grep -Fxq PONG; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs pawbridge-ci-redis
+          exit 1
+
+      - name: Start Elasticsearch with nori required by Community Service
+        if: inputs.service == 'community-service'
+        run: |
+          set -euo pipefail
+
+          docker run --detach --rm --name pawbridge-ci-elasticsearch -p 9200:9200 \
+            -e discovery.type=single-node \
+            -e xpack.security.enabled=false \
+            -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
+            docker.elastic.co/elasticsearch/elasticsearch:8.15.5@sha256:8870d5b7b86235fa790c9112464f5fd3b693f89d73e757a630f8b5cda350f95b \
+            bash -c 'bin/elasticsearch-plugin install --batch analysis-nori && exec /usr/local/bin/docker-entrypoint.sh eswrapper'
+
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --show-error http://127.0.0.1:9200 >/dev/null && \
+               curl --fail --silent --show-error 'http://127.0.0.1:9200/_cat/plugins?h=component' | grep -Fxq analysis-nori; then
+              exit 0
+            fi
+            sleep 3
+          done
+
+          docker logs pawbridge-ci-elasticsearch
+          exit 1
+
+      - name: Run tests and build executable JAR
+        working-directory: ${{ inputs.service }}
+        run: bash ./gradlew test bootJar --no-daemon
+
+      - id: jar
+        name: Select executable JAR for image build
+        working-directory: ${{ inputs.service }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t jars < <(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' -printf '%f\n')
+          if [ "${#jars[@]}" -ne 1 ]; then
+            printf 'Expected one executable JAR, found: %s\n' "${jars[*]:-none}" >&2
+            exit 1
+          fi
+          echo "file=${jars[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Helm
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.21.4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to Docker Hub
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: dorosiya
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and optionally publish service image
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./${{ inputs.service }}
+          platforms: linux/amd64
+          push: ${{ inputs.publish && github.ref == 'refs/heads/dev' }}
+          tags: ${{ steps.service.outputs.image_repository }}:sha-${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            JAR_FILE=build/libs/${{ steps.jar.outputs.file }}
+
+      - name: Verify published image digest
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        env:
+          IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Buildx did not return a valid published image digest" >&2
+            exit 1
+          fi
+          docker buildx imagetools inspect "$IMAGE_REPOSITORY@$IMAGE_DIGEST"
+
+      - name: Check out Infra repository
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: pawbridge/pawbridge-infra-k8s
+          ref: dev
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: infra
+          fetch-depth: 0
+
+      - id: infra-base
+        name: Record checked out Infra dev SHA
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        working-directory: ${{ github.workspace }}/infra
+        run: |
+          set -euo pipefail
+          infra_dev_sha="$(git rev-parse HEAD)"
+          echo "sha=$infra_dev_sha" >> "$GITHUB_OUTPUT"
+          echo "Checked out Infra dev SHA: $infra_dev_sha"
+
+      - name: Update service image reference
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        env:
+          IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
+          IMAGE_TAG: sha-${{ github.sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          VALUES_FILE: ${{ steps.service.outputs.values_file }}
+        run: >-
+          python3 .github/scripts/update_service_image_values.py
+          "infra/$VALUES_FILE"
+          --repository "$IMAGE_REPOSITORY"
+          --tag "$IMAGE_TAG"
+          --digest "$IMAGE_DIGEST"
+
+      - name: Validate digest-aware Infra Helm override
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        working-directory: ${{ github.workspace }}/infra
+        env:
+          IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
+          IMAGE_TAG: sha-${{ github.sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          VALUES_FILE: ${{ steps.service.outputs.values_file }}
+          CHART: ${{ steps.service.outputs.chart }}
+        run: |
+          set -euo pipefail
+
+          first_hash="$(git hash-object "$VALUES_FILE")"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/update_service_image_values.py" \
+            "$VALUES_FILE" \
+            --repository "$IMAGE_REPOSITORY" \
+            --tag "$IMAGE_TAG" \
+            --digest "$IMAGE_DIGEST"
+          second_hash="$(git hash-object "$VALUES_FILE")"
+
+          if [ "$first_hash" != "$second_hash" ]; then
+            echo "Service image values update is not idempotent" >&2
+            exit 1
+          fi
+
+          git diff --check
+          helm lint "$CHART" --values "$VALUES_FILE"
+          rendered="$(helm template "${{ inputs.service }}" "$CHART" \
+            --values "$VALUES_FILE" \
+            --show-only templates/deployment.yaml)"
+          expected_image="image: \"$IMAGE_REPOSITORY@$IMAGE_DIGEST\""
+
+          if ! grep -Fq "$expected_image" <<<"$rendered"; then
+            echo "Infra chart must render repository@digest before an image-update Draft PR is created" >&2
+            exit 1
+          fi
+
+      - name: Create or update Infra draft pull request
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        working-directory: ${{ github.workspace }}/infra
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+          BACKEND_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INFRA_REPOSITORY: pawbridge/pawbridge-infra-k8s
+          EXPECTED_INFRA_DEV_SHA: ${{ steps.infra-base.outputs.sha }}
+          SERVICE_DIRECTORY: ${{ inputs.service }}
+          SERVICE_NAME: ${{ steps.service.outputs.display_name }}
+          IMAGE_TAG: sha-${{ github.sha }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          VALUES_FILE: ${{ steps.service.outputs.values_file }}
+          BACKEND_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin dev
+          current_infra_dev_sha="$(git rev-parse FETCH_HEAD)"
+          if [ "$current_infra_dev_sha" != "$EXPECTED_INFRA_DEV_SHA" ]; then
+            echo "Infra dev changed after checkout ($EXPECTED_INFRA_DEV_SHA -> $current_infra_dev_sha); refusing to create a branch" >&2
+            exit 1
+          fi
+
+          branch="chore/${SERVICE_DIRECTORY}-image-${GITHUB_SHA:0:12}"
+          title="chore: ${SERVICE_NAME} 이미지 digest 갱신"
+          marker="<!-- pawbridge-automation: ${SERVICE_DIRECTORY}-image -->"
+          infra_owner="${INFRA_REPOSITORY%%/*}"
+
+          check_infra_base_freshness() {
+            local latest_infra_sha
+
+            latest_infra_sha="$(git ls-remote origin refs/heads/dev | awk '{print $1}')"
+            if [ -z "$latest_infra_sha" ] || [ "$latest_infra_sha" != "$EXPECTED_INFRA_DEV_SHA" ]; then
+              echo "Infra dev changed after checkout; refusing to branch from a stale base" >&2
+              return 1
+            fi
+          }
+
+          check_service_freshness() {
+            local changed_file
+            local changed_file_count
+            local changed_files
+            local comparison_status
+
+            newer_service_path=""
+            latest_backend_sha="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/git/ref/heads/dev" \
+              --jq '.object.sha')" || return 2
+            if [ "$latest_backend_sha" = "$GITHUB_SHA" ]; then
+              return 0
+            fi
+
+            comparison_status="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest_backend_sha" \
+              --jq '.status')" || return 2
+            if [ "$comparison_status" != "ahead" ]; then
+              echo "Backend dev is not a descendant of this workflow commit: $comparison_status" >&2
+              return 2
+            fi
+
+            changed_file_count="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest_backend_sha" \
+              --jq '.files | length')" || return 2
+            if [ "$changed_file_count" -ge 300 ]; then
+              echo "Backend comparison reached the 300-file API safety limit" >&2
+              return 2
+            fi
+
+            changed_files="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...$latest_backend_sha" \
+              --jq '.files[] | .filename, (.previous_filename // empty)')" || return 2
+            while IFS= read -r changed_file; do
+              case "$changed_file" in
+                "$SERVICE_DIRECTORY"/*|.github/workflows/remaining-services-image-ci.yml|.github/workflows/_java-service-image.yml|.github/scripts/update_service_image_values.py|.github/scripts/test_update_service_image_values.py)
+                  newer_service_path="$changed_file"
+                  return 1
+                  ;;
+              esac
+            done <<<"$changed_files"
+
+            return 0
+          }
+
+          freshness_status=0
+          check_service_freshness || freshness_status=$?
+          if [ "$freshness_status" -eq 1 ]; then
+            echo "Skip stale ${SERVICE_NAME} run: $newer_service_path changed after $GITHUB_SHA"
+            exit 0
+          elif [ "$freshness_status" -ne 0 ]; then
+            echo "Could not determine ${SERVICE_NAME} run freshness" >&2
+            exit "$freshness_status"
+          fi
+
+          if git diff --quiet -- "$VALUES_FILE"; then
+            echo "Infra already references $IMAGE_TAG@$IMAGE_DIGEST for ${SERVICE_NAME}"
+            exit 0
+          fi
+
+          body_file="$(mktemp)"
+          trap 'rm -f "$body_file"' EXIT
+          cat >"$body_file" <<EOF
+          $marker
+
+          ## Summary
+
+          Backend \`dev\`에서 발행된 ${SERVICE_NAME} 이미지를 dev 환경의 불변 digest로 고정합니다.
+
+          ## Changes
+
+          - ${SERVICE_NAME} 이미지 tag: \`$IMAGE_TAG\`
+          - ${SERVICE_NAME} 이미지 digest: \`$IMAGE_DIGEST\`
+
+          ## Impact
+
+          - API / Data: 변경 없음
+          - Configuration / Deployment: 이 Draft PR을 머지하면 dev 선언 상태가 새 ${SERVICE_NAME} 이미지를 가리킵니다. PR 생성이나 머지만으로 실제 클러스터에 배포하지는 않습니다.
+
+          ## Verification
+
+          - Backend 테스트와 실행 JAR 빌드 성공 후 이미지를 발행했습니다.
+          - Docker Hub에서 \`repository@digest\` 조회가 성공한 값을 values에 반영했습니다.
+          - Helm lint와 렌더 결과의 \`repository@digest\` 일치를 확인했습니다.
+
+          ## Related
+
+          - Backend commit: $BACKEND_COMMIT_URL
+
+          ## Out of Scope
+
+          - PR 자동 Ready/merge
+          - Argo CD 동기화와 실제 Kubernetes 배포
+
+          ## Checklist
+
+          - [x] 비밀정보가 diff·본문·로그에 포함되지 않았습니다.
+          - [x] API·데이터·설정·배포 영향을 필요한 범위에서 명시했습니다.
+          - [x] 실행한 검증과 미실행 검증을 사실대로 구분했습니다.
+          - [ ] 필요한 문서가 함께 갱신되었습니다. (해당 없음: 이미지 참조 자동 갱신)
+          EOF
+
+          check_infra_base_freshness
+
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+            changed_paths="$(git diff --name-only "origin/dev...origin/$branch")"
+            recovery_commit_count="$(git rev-list --count "origin/dev..origin/$branch")"
+            recovery_parent_sha="$(git rev-parse "origin/$branch^")"
+            recovery_author_email="$(git show -s --format='%ae' "origin/$branch")"
+            recovery_subject="$(git show -s --format='%s' "origin/$branch")"
+
+            if [ "$changed_paths" != "$VALUES_FILE" ] || \
+              [ "$recovery_commit_count" -ne 1 ] || \
+              [ "$recovery_parent_sha" != "$EXPECTED_INFRA_DEV_SHA" ] || \
+              [ "$recovery_author_email" != "41898282+github-actions[bot]@users.noreply.github.com" ] || \
+              [ "$recovery_subject" != "$title" ]; then
+              echo "Existing automation branch failed provenance checks: $branch" >&2
+              exit 1
+            fi
+
+            if ! git diff --quiet "origin/$branch" -- "$VALUES_FILE"; then
+              echo "Existing automation branch has unexpected ${SERVICE_NAME} image values: $branch" >&2
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git switch -c "$branch"
+            git add -- "$VALUES_FILE"
+            git commit -m "$title"
+            git push --set-upstream origin "$branch"
+          fi
+
+          automation_head_oid="$(git rev-parse "origin/$branch")"
+          pr_number="$(gh api --method GET \
+            "/repos/$INFRA_REPOSITORY/pulls" \
+            -f state=open \
+            -f base=dev \
+            -f head="$infra_owner:$branch" \
+            --jq '.[0].number // empty')"
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create \
+              --repo "$INFRA_REPOSITORY" \
+              --base dev \
+              --head "$branch" \
+              --title "$title" \
+              --draft \
+              --body-file "$body_file")"
+            pr_number="${pr_url##*/}"
+          fi
+
+          pr_metadata="$(gh pr view "$pr_number" \
+            --repo "$INFRA_REPOSITORY" \
+            --json url,isDraft,headRefName,headRefOid,headRepositoryOwner,isCrossRepository \
+            --jq '[.url, (.isDraft | tostring), .headRefName, .headRefOid, .headRepositoryOwner.login, (.isCrossRepository | tostring)] | @tsv')"
+          IFS=$'\t' read -r pr_url pr_is_draft pr_head_ref pr_head_oid pr_head_owner pr_is_cross_repository <<<"$pr_metadata"
+          if [ "$pr_head_ref" != "$branch" ] || \
+            [ "$pr_head_oid" != "$automation_head_oid" ] || \
+            [ "$pr_head_owner" != "$infra_owner" ] || \
+            [ "$pr_is_cross_repository" != "false" ]; then
+            echo "Infra pull request head provenance mismatch: $pr_number" >&2
+            exit 1
+          elif [ "$pr_is_draft" != "true" ]; then
+            echo "Existing automation pull request is not Draft: $pr_url" >&2
+            exit 1
+          fi
+
+          freshness_status=0
+          check_service_freshness || freshness_status=$?
+          if [ "$freshness_status" -eq 1 ]; then
+            gh pr close "$pr_number" --repo "$INFRA_REPOSITORY"
+            echo "Closed stale Infra Draft pull request because $newer_service_path changed"
+            exit 0
+          elif [ "$freshness_status" -ne 0 ]; then
+            echo "Could not recheck ${SERVICE_NAME} run freshness" >&2
+            exit "$freshness_status"
+          fi
+
+          obsolete_prs="$(gh pr list \
+            --repo "$INFRA_REPOSITORY" \
+            --base dev \
+            --state open \
+            --limit 100 \
+            --json number,headRefName,headRefOid,headRepositoryOwner,isCrossRepository,body,isDraft \
+            --jq ".[] | select(.isCrossRepository == false) | select(.headRepositoryOwner.login == \"$infra_owner\") | select(.headRefName | test(\"^chore/${SERVICE_DIRECTORY}-image-[0-9a-f]{12}$\")) | select((.body // \"\") | contains(\"$marker\")) | [.number, .headRefName, .headRefOid, .isDraft] | @tsv")"
+          while IFS=$'\t' read -r obsolete_number obsolete_branch obsolete_head_oid obsolete_is_draft; do
+            if [ -z "$obsolete_number" ] || [ "$obsolete_branch" = "$branch" ]; then
+              continue
+            fi
+
+            obsolete_sha="${obsolete_branch##*-image-}"
+            comparison_status="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
+              "/repos/$GITHUB_REPOSITORY/compare/$obsolete_sha...$GITHUB_SHA" \
+              --jq '.status')"
+            if [ "$comparison_status" = "ahead" ]; then
+              if [ "$obsolete_is_draft" != "true" ]; then
+                echo "Obsolete automation pull request is not Draft: $obsolete_branch" >&2
+                exit 1
+              fi
+
+              remote_obsolete_oid="$(git ls-remote origin "refs/heads/$obsolete_branch" | awk '{print $1}')"
+              if [ -z "$remote_obsolete_oid" ] || [ "$remote_obsolete_oid" != "$obsolete_head_oid" ]; then
+                echo "Obsolete automation branch head provenance mismatch: $obsolete_branch" >&2
+                exit 1
+              fi
+
+              git fetch origin \
+                "refs/heads/$obsolete_branch:refs/remotes/origin/$obsolete_branch"
+              obsolete_parent_line="$(git rev-list --parents -n 1 "origin/$obsolete_branch")"
+              obsolete_parent_count="$(awk '{print NF - 1}' <<<"$obsolete_parent_line")"
+              obsolete_parent_sha="${obsolete_parent_line#* }"
+              obsolete_changed_paths="$(git diff --name-only "$obsolete_parent_sha" "origin/$obsolete_branch")"
+              obsolete_author_email="$(git show -s --format='%ae' "origin/$obsolete_branch")"
+              obsolete_subject="$(git show -s --format='%s' "origin/$obsolete_branch")"
+              if [ "$obsolete_parent_count" -ne 1 ] || \
+                ! git merge-base --is-ancestor "$obsolete_parent_sha" origin/dev || \
+                [ "$obsolete_changed_paths" != "$VALUES_FILE" ] || \
+                [ "$obsolete_author_email" != "41898282+github-actions[bot]@users.noreply.github.com" ] || \
+                [ "$obsolete_subject" != "$title" ]; then
+                echo "Obsolete automation branch failed provenance checks: $obsolete_branch" >&2
+                exit 1
+              fi
+
+              gh pr close "$obsolete_number" --repo "$INFRA_REPOSITORY"
+            fi
+          done <<<"$obsolete_prs"
+
+          echo "Infra Draft pull request: $pr_url"
