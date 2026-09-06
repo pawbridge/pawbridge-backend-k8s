@@ -1,0 +1,174 @@
+name: Remaining Java Services Image CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - "user-service/**"
+      - "animal-service/**"
+      - "community-service/**"
+      - "payment-service/**"
+      - ".github/scripts/update_service_image_values.py"
+      - ".github/scripts/test_update_service_image_values.py"
+      - ".github/workflows/remaining-services-image-ci.yml"
+      - ".github/workflows/_java-service-image.yml"
+  push:
+    branches:
+      - dev
+    paths:
+      - "user-service/**"
+      - "animal-service/**"
+      - "community-service/**"
+      - "payment-service/**"
+      - ".github/scripts/update_service_image_values.py"
+      - ".github/scripts/test_update_service_image_values.py"
+      - ".github/workflows/remaining-services-image-ci.yml"
+      - ".github/workflows/_java-service-image.yml"
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service to build.
+        required: true
+        type: choice
+        options:
+          - user-service
+          - animal-service
+          - community-service
+          - payment-service
+      publish:
+        description: Publish only from dev, then create or update that service's Infra Draft PR.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remaining-java-services-image-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate-automation:
+    name: Validate image-values updater
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Test service image-values updater
+        run: >-
+          python3 -m unittest discover
+          --start-directory .github/scripts
+          --pattern 'test_update_service_image_values.py'
+
+  detect-services:
+    name: Detect changed Java services
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.services.outputs.matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: services
+        name: Select service build matrix
+        env:
+          MANUAL_SERVICE: ${{ inputs.service }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          services=(user-service animal-service community-service payment-service)
+          selected_services=()
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            selected_services=("$MANUAL_SERVICE")
+          else
+            if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+              changed_files="$(git diff --name-only --no-renames "$PULL_REQUEST_BASE_SHA" "$GITHUB_SHA")"
+            elif [ "$PUSH_BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              changed_files="$(git diff-tree --no-commit-id --name-only --no-renames -r "$GITHUB_SHA")"
+            else
+              changed_files="$(git diff --name-only --no-renames "$PUSH_BEFORE_SHA" "$GITHUB_SHA")"
+            fi
+
+            for service in "${services[@]}"; do
+              service_changed=false
+              while IFS= read -r changed_file; do
+                case "$changed_file" in
+                  "$service"/*)
+                    service_changed=true
+                    break
+                    ;;
+                esac
+              done <<<"$changed_files"
+
+              if [ "$service_changed" = true ]; then
+                selected_services+=("$service")
+              fi
+            done
+          fi
+
+          if [ "${#selected_services[@]}" -eq 0 ]; then
+            echo "matrix={\"service\":[]}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Only shared CI automation changed; use workflow_dispatch to build one selected service without publishing."
+            exit 0
+          fi
+
+          matrix_entries=""
+          for service in "${selected_services[@]}"; do
+            if [ -n "$matrix_entries" ]; then
+              matrix_entries+=","
+            fi
+            matrix_entries+="\"$service\""
+          done
+          echo "matrix={\"service\":[${matrix_entries}]}" >> "$GITHUB_OUTPUT"
+
+  service-image-check:
+    name: Service image check
+    needs:
+      - validate-automation
+      - detect-services
+    if: >-
+      ${{ needs.detect-services.outputs.matrix != '{"service":[]}' &&
+          (github.event_name == 'pull_request' ||
+           (github.event_name == 'workflow_dispatch' &&
+            (inputs.publish != true || github.ref != 'refs/heads/dev'))) }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect-services.outputs.matrix) }}
+    uses: ./.github/workflows/_java-service-image.yml
+    with:
+      service: ${{ matrix.service }}
+      publish: false
+
+  service-image-publish:
+    name: Service image publish
+    needs:
+      - validate-automation
+      - detect-services
+    if: >-
+      ${{ needs.detect-services.outputs.matrix != '{"service":[]}' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+           (github.event_name == 'workflow_dispatch' && inputs.publish &&
+            github.ref == 'refs/heads/dev')) }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect-services.outputs.matrix) }}
+    uses: ./.github/workflows/_java-service-image.yml
+    with:
+      service: ${{ matrix.service }}
+      publish: true
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      INFRA_REPO_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
