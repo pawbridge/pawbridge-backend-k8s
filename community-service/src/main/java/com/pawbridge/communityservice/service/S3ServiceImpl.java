@@ -1,7 +1,6 @@
 package com.pawbridge.communityservice.service;
 
 import com.pawbridge.communityservice.exception.InvalidImageFormatException;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,14 +20,12 @@ import java.util.UUID;
  * S3 파일 업로드 서비스 구현체
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class S3ServiceImpl implements S3Service {
 
     private final S3Client s3Client;
-
-    @Value("${spring.cloud.aws.s3.bucket}")
-    private String bucketName;
+    private final String bucketName;
+    private final String publicBaseUrl;
 
     // 허용된 파일 타입 (이미지 + 영상)
     private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
@@ -45,6 +42,16 @@ public class S3ServiceImpl implements S3Service {
             "video/x-msvideo",    // .avi
             "video/x-matroska"    // .mkv
     );
+
+    public S3ServiceImpl(
+            S3Client s3Client,
+            @Value("${spring.cloud.aws.s3.bucket}") String bucketName,
+            @Value("${pawbridge.storage.public-base-url}") String publicBaseUrl
+    ) {
+        this.s3Client = s3Client;
+        this.bucketName = bucketName;
+        this.publicBaseUrl = removeTrailingSlashes(publicBaseUrl);
+    }
 
     /**
      * 여러 이미지/영상 파일을 S3에 업로드
@@ -101,9 +108,8 @@ public class S3ServiceImpl implements S3Service {
 
         s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
 
-        // 업로드된 파일의 URL 반환
-        String fileUrl = String.format("https://%s.s3.%s.amazonaws.com/%s",
-                bucketName, "ap-northeast-2", uniqueFilename);
+        // S3-compatible storage endpoint와 공개 제공 URL은 서로 다를 수 있다.
+        String fileUrl = publicBaseUrl + "/" + uniqueFilename;
 
         log.info("파일 업로드 성공: {}", fileUrl);
         return fileUrl;
@@ -156,8 +162,7 @@ public class S3ServiceImpl implements S3Service {
     @Override
     public void deleteFile(String fileUrl) {
         try {
-            // URL에서 키 추출 (예: https://bucket.s3.region.amazonaws.com/posts/uuid.jpg -> posts/uuid.jpg)
-            String key = fileUrl.substring(fileUrl.indexOf(".com/") + 5);
+            String key = extractObjectKey(fileUrl);
 
             DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
                     .bucket(bucketName)
@@ -170,5 +175,26 @@ public class S3ServiceImpl implements S3Service {
         } catch (Exception e) {
             log.error("파일 삭제 실패: {}", fileUrl, e);
         }
+    }
+
+    private String extractObjectKey(String fileUrl) {
+        String publicUrlPrefix = publicBaseUrl + "/";
+        if (fileUrl == null || !fileUrl.startsWith(publicUrlPrefix)) {
+            throw new IllegalArgumentException("등록된 공개 저장소 URL이 아닙니다.");
+        }
+
+        String key = fileUrl.substring(publicUrlPrefix.length());
+        if (key.isBlank()) {
+            throw new IllegalArgumentException("삭제할 객체 키가 없습니다.");
+        }
+        return key;
+    }
+
+    private static String removeTrailingSlashes(String url) {
+        int end = url.length();
+        while (end > 0 && url.charAt(end - 1) == '/') {
+            end--;
+        }
+        return url.substring(0, end);
     }
 }
