@@ -34,8 +34,11 @@ spring:
         access-key: placeholder
         secret-key: placeholder
       region:
-        static: placeholder-region
+        static: auto
       s3:
+        endpoint: http://127.0.0.1:19000
+        path-style-access-enabled: true
+        chunked-encoding-enabled: false
         bucket: placeholder-bucket
 
   task:
@@ -54,3 +57,7 @@ apms:
   api:
     base-url: http://127.0.0.1:18001
     service-key: placeholder
+
+pawbridge:
+  storage:
+    public-base-url: https://images.example.test
