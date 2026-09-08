@@ -8,6 +8,8 @@ on:
       - "store-service/**"
       - ".github/scripts/update_store_image_values.py"
       - ".github/scripts/test_update_store_image_values.py"
+      - ".github/scripts/store_release_guard.py"
+      - ".github/scripts/test_store_release_guard.py"
       - ".github/workflows/store-service-ci.yml"
   push:
     branches:
@@ -16,14 +18,24 @@ on:
       - "store-service/**"
       - ".github/scripts/update_store_image_values.py"
       - ".github/scripts/test_update_store_image_values.py"
+      - ".github/scripts/store_release_guard.py"
+      - ".github/scripts/test_store_release_guard.py"
       - ".github/workflows/store-service-ci.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a new SHA tag from dev and update the Infra PR; existing tags are refused.
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
   group: store-service-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not interrupt a publication between the image push and Infra PR creation.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-and-build:
@@ -31,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      # Do not let a script output alone authorize writes from a PR checkout.
+      STORE_PUBLISH_ALLOWED: ${{ github.ref == 'refs/heads/dev' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}
       SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/pawbridge_store
       SPRING_DATASOURCE_USERNAME: pawbridge_ci
       SPRING_DATASOURCE_PASSWORD: ci_only_password
@@ -68,6 +82,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Decide Store publication
+        id: release
+        working-directory: ${{ github.workspace }}
+        env:
+          MANUAL_PUBLISH: ${{ inputs.publish }}
+        run: python3 .github/scripts/store_release_guard.py plan >> "$GITHUB_OUTPUT"
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -88,7 +109,7 @@ jobs:
           --pattern 'test_*.py'
 
       - name: Set up Helm
-        if: github.event_name == 'push'
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.21.3
@@ -96,8 +117,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Refuse an existing or unverified Store image tag
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        working-directory: ${{ github.workspace }}
+        run: python3 .github/scripts/store_release_guard.py check-tag
+
       - name: Log in to Docker Hub
-        if: github.event_name == 'push'
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         uses: docker/login-action@v4
         with:
           username: dorosiya
@@ -110,12 +136,12 @@ jobs:
         with:
           context: ./store-service
           platforms: linux/amd64
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true' }}
           tags: dorosiya/pawbridge-store-service:sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Verify published Store Service image digest
-        if: github.event_name == 'push'
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         env:
           STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: >-
@@ -123,7 +149,7 @@ jobs:
           "dorosiya/pawbridge-store-service@$STORE_IMAGE_DIGEST"
 
       - name: Check out Infra repository
-        if: github.event_name == 'push'
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: pawbridge/pawbridge-infra-k8s
@@ -133,7 +159,7 @@ jobs:
           fetch-depth: 0
 
       - name: Update Store image reference
-        if: github.event_name == 'push'
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         working-directory: ${{ github.workspace }}
         env:
           STORE_IMAGE_TAG: sha-${{ github.sha }}
@@ -146,7 +172,7 @@ jobs:
           --digest "$STORE_IMAGE_DIGEST"
 
       - name: Validate Store image Helm override
-        if: github.event_name == 'push'
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         working-directory: ${{ github.workspace }}/infra
         env:
           STORE_IMAGE_REPOSITORY: dorosiya/pawbridge-store-service
@@ -182,7 +208,7 @@ jobs:
           fi
 
       - name: Create Infra pull request
-        if: github.event_name == 'push'
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         working-directory: ${{ github.workspace }}/infra
         env:
           GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
@@ -224,7 +250,7 @@ jobs:
               --jq '.files[] | .filename, (.previous_filename // empty)')" || return 2
             while IFS= read -r changed_file; do
               case "$changed_file" in
-                store-service/*|.github/workflows/store-service-ci.yml|.github/scripts/update_store_image_values.py|.github/scripts/test_update_store_image_values.py)
+                store-service/*|.github/workflows/store-service-ci.yml|.github/scripts/update_store_image_values.py|.github/scripts/test_update_store_image_values.py|.github/scripts/store_release_guard.py|.github/scripts/test_store_release_guard.py)
                   newer_store_path="$changed_file"
                   return 1
                   ;;
