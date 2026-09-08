@@ -2,11 +2,9 @@ package com.pawbridge.animalservice.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.Job;
+import com.pawbridge.animalservice.batch.ApmsBatchRunner;
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.JobParameters;
-import org.springframework.batch.core.JobParametersBuilder;
-import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,8 +16,7 @@ import java.util.Map;
 
 /**
  * Spring Batch 작업 실행을 위한 REST API 컨트롤러
- * - 개발/테스트 환경에서 수동 배치 실행용
- * - 운영 환경에서는 스케줄러로 대체 권장
+ * - 내부 CronJob 또는 운영자가 호출하는 동기 실행 API
  */
 @Slf4j
 @RestController
@@ -27,8 +24,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class BatchController {
 
-    private final JobLauncher jobLauncher;
-    private final Job apmsAnimalSyncJob;
+    private final ApmsBatchRunner apmsBatchRunner;
 
     /**
      * APMS 동물 동기화 배치 수동 실행
@@ -40,15 +36,7 @@ public class BatchController {
         Map<String, Object> response = new HashMap<>();
 
         try {
-            // JobParameters 생성 (동일 Job 재실행을 위해 timestamp 추가)
-            JobParameters jobParameters = new JobParametersBuilder()
-                    .addLong("timestamp", System.currentTimeMillis())
-                    .toJobParameters();
-
-            log.info("APMS 동물 동기화 배치 시작 - JobParameters: {}", jobParameters);
-
-            // Batch Job 실행
-            JobExecution jobExecution = jobLauncher.run(apmsAnimalSyncJob, jobParameters);
+            JobExecution jobExecution = apmsBatchRunner.run();
 
             log.info("APMS 동물 동기화 배치 완료 - Status: {}, ExitCode: {}",
                     jobExecution.getStatus(),
@@ -61,13 +49,27 @@ public class BatchController {
             response.put("startTime", jobExecution.getStartTime() != null ? jobExecution.getStartTime().format(formatter) : null);
             response.put("endTime", jobExecution.getEndTime() != null ? jobExecution.getEndTime().format(formatter) : null);
 
-            return ResponseEntity.ok(response);
-
+            long skipCount = jobExecution.getStepExecutions().stream()
+                    .mapToLong(step -> step.getSkipCount()).sum();
+            response.put("skipCount", skipCount);
+            if (jobExecution.getStatus() == BatchStatus.COMPLETED && skipCount == 0) {
+                return ResponseEntity.ok(response);
+            }
+            if (jobExecution.isRunning() || jobExecution.getStatus() == BatchStatus.UNKNOWN) {
+                return ResponseEntity.status(503).body(response);
+            }
+            return ResponseEntity.internalServerError().body(response);
+        } catch (ApmsBatchRunner.AlreadyRunningException exception) {
+            response.put("status", "ALREADY_RUNNING");
+            return ResponseEntity.status(409).body(response);
+        } catch (ApmsBatchRunner.UnavailableException exception) {
+            response.put("status", "GUARD_UNAVAILABLE");
+            return ResponseEntity.status(503).body(response);
         } catch (Exception e) {
-            log.error("APMS 동물 동기화 배치 실행 중 오류 발생", e);
+            log.error("APMS 동물 동기화 배치 실행 실패 - 예외 종류: {}", e.getClass().getSimpleName());
 
             response.put("status", "FAILED");
-            response.put("error", e.getMessage());
+            response.put("error", "APMS batch execution failed");
 
             return ResponseEntity.internalServerError().body(response);
         }
