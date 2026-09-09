@@ -24,6 +24,7 @@ import java.time.Year;
 @Table(name = "animals",
         indexes = {
                 @Index(name = "idx_apms_desertion_no", columnList = "apmsDesertionNo", unique = true),
+                @Index(name = "idx_apms_notice_no", columnList = "apmsNoticeNo"),
                 @Index(name = "idx_species_status", columnList = "species,status"),
                 @Index(name = "idx_notice_end_date", columnList = "noticeEndDate"),
                 @Index(name = "idx_shelter_id", columnList = "shelter_id")
@@ -53,9 +54,10 @@ public class Animal extends BaseTimeEntity {
      * 공고번호 (noticeNo)
      * - 예: "경남-창원1-2025-00833", "경기-양평-2025-00429"
      * - APMS 배치 + 수동 등록 모두 사용
-     * - UNIQUE 제약: 중복 방지
+     * - 서로 다른 유기번호에 같은 공고번호가 부여될 수 있으므로 고유 식별자가 아님
+     * - 동물 식별과 중복 방지는 id / apmsDesertionNo를 사용
      */
-    @Column(nullable = false, unique = true, length = 100)
+    @Column(nullable = false, length = 100)
     private String apmsNoticeNo;
 
     // 동물 기본 정보 (9개)
