@@ -1,6 +1,5 @@
 package com.pawbridge.animalservice.batch.job;
 
-import com.pawbridge.animalservice.batch.listener.BatchSkipListener;
 import com.pawbridge.animalservice.batch.processor.AnimalItemProcessor;
 import com.pawbridge.animalservice.batch.reader.ApmsItemReader;
 import com.pawbridge.animalservice.batch.tasklet.ShelterPrepTasklet;
@@ -8,7 +7,6 @@ import com.pawbridge.animalservice.batch.writer.AnimalItemWriter;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.service.ElasticsearchIndexService;
-import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -22,7 +20,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskExecutor;
-import org.springframework.dao.DataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
@@ -43,7 +40,6 @@ public class ApmsAnimalBatchJob {
     private final AnimalItemWriter animalItemWriter;
     private final ElasticsearchIndexService elasticsearchIndexService;
     private final ShelterPrepTasklet shelterPrepTasklet;
-    private final BatchSkipListener batchSkipListener;
 
     // BatchExecutorConfig에서 정의 — 순환 참조 방지를 위해 분리
     @Autowired
@@ -90,7 +86,7 @@ public class ApmsAnimalBatchJob {
      * - Reader: APMS API 호출 (PAGE_SIZE = 1000)
      * - Processor: DTO → Entity 변환 (shelterCache/existingAnimalIdMap 캐시 조회)
      * - Writer: 신규 saveAll(), 기존 @Modifying UPDATE
-     * - FaultTolerant: Skip(최대 100건) + FeignException Retry(최대 3회) + SkipListener 로깅
+     * - 읽기/변환/저장 실패 시 Step 실패: 누락을 정상 완료로 처리하지 않음
      */
     @Bean
     public Step apmsAnimalSyncStep() {
@@ -99,16 +95,7 @@ public class ApmsAnimalBatchJob {
                 .reader(apmsItemReader)
                 .processor(animalItemProcessor)
                 .writer(animalItemWriter)
-                .faultTolerant()
-                .skipLimit(100)
-                .skip(FeignException.class)
-                .skip(IllegalArgumentException.class)
-                .skip(DataAccessException.class)
-                .skip(Exception.class)
-                .retry(FeignException.class)   // API 일시 장애 시 재시도 (일별 한도 내)
-                .retryLimit(3)                 // 3회까지 재시도 후 skip으로 전환
                 .listener(animalItemProcessor)  // beforeStep() 호출 보장 (shelterCache/existingAnimalIdMap 초기화)
-                .listener(batchSkipListener)   // skip 발생 시 desertionNo/id 로그
                 .taskExecutor(batchTaskExecutor) // 멀티스레딩: 청크를 병렬로 처리
                 .build();
     }

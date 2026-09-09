@@ -2,8 +2,7 @@ package com.pawbridge.animalservice.batch.tasklet;
 
 import com.pawbridge.animalservice.client.ApmsApiClient;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
-import com.pawbridge.animalservice.dto.apms.ApmsResponse;
-import com.pawbridge.animalservice.dto.apms.ApmsRootResponse;
+import com.pawbridge.animalservice.batch.ApmsPage;
 import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.repository.ShelterRepository;
 import lombok.RequiredArgsConstructor;
@@ -93,7 +92,7 @@ public class ShelterPrepTasklet implements Tasklet {
 
     /**
      * APMS API 전체 페이지 조회
-     * - 오류 발생 시 예외 그대로 throw → Step FAILED → Step Flow에 의해 Job 종료
+     * - 통신/응답 오류는 민감 요청 정보를 제외한 예외 → Step FAILED
      */
     private List<ApmsAnimal> fetchAllAnimals() {
         List<ApmsAnimal> result = new ArrayList<>();
@@ -103,26 +102,9 @@ public class ShelterPrepTasklet implements Tasklet {
 
         int page = 1;
         while (true) {
-            ApmsRootResponse<ApmsAnimal> rootResponse = apmsApiClient.getAbandonmentAnimals(
-                    serviceKey, page, PAGE_SIZE, bgnde, endde, null, null, "json"
-            );
-            ApmsResponse response = rootResponse != null ? rootResponse.getResponse() : null;
-
-            if (response == null || response.getBody() == null
-                    || response.getBody().getItems() == null) {
-                // break로 끝내면 부분 로드 상태로 Step 성공 처리 → 후속 Step에서 cache miss 다량 발생
-                throw new IllegalStateException(
-                        "APMS API 비정상 응답 (null body/items) — 페이지: " + page);
-            }
-
-            List<ApmsAnimal> items = response.getBody().getItems().getItem();
-            if (items == null || items.isEmpty()) {
-                break;
-            }
-
-            result.addAll(items);
-
-            if (items.size() < PAGE_SIZE) {
+            ApmsPage response = ApmsPage.fetch(apmsApiClient, serviceKey, page, PAGE_SIZE, bgnde, endde);
+            result.addAll(response.items());
+            if (response.last()) {
                 log.info("[BATCH Step 0] 마지막 페이지 도달. 총 페이지: {}, 총 건수: {}", page, result.size());
                 break;
             }

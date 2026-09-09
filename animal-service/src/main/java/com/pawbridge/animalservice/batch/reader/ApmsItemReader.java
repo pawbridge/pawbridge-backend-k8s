@@ -1,11 +1,9 @@
 package com.pawbridge.animalservice.batch.reader;
 
+import com.pawbridge.animalservice.batch.ApmsPage;
 import com.pawbridge.animalservice.client.ApmsApiClient;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
-import com.pawbridge.animalservice.dto.apms.ApmsResponse;
-import com.pawbridge.animalservice.dto.apms.ApmsRootResponse;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.item.ItemReader;
@@ -14,122 +12,48 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 
-/**
- * APMS API로부터 유기동물 데이터를 읽어오는 ItemReader
- * - 페이징 처리를 통해 전체 데이터를 순차적으로 읽음
- * - StepExecutionListener를 구현하여 Step 실행마다 상태 초기화
- */
-@Slf4j
 @Component
 @RequiredArgsConstructor
 public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionListener {
-
     private final ApmsApiClient apmsApiClient;
 
     @Value("${apms.api.service-key}")
     private String serviceKey;
-
-    private static final int PAGE_SIZE = 1000; // APMS API 페이지 크기 (Chunk와 동일하게 설정)
+    private static final int PAGE_SIZE = 1000;
 
     private int currentPage = 1;
-    private List<ApmsAnimal> currentItems = new ArrayList<>();
-    private int currentIndex = 0;
-    private boolean isExhausted = false;
+    private List<ApmsAnimal> currentItems = List.of();
+    private int currentIndex;
+    private boolean lastPage;
+    private String beginDate;
+    private String endDate;
 
-    /**
-     * 멀티스레딩 환경에서 여러 스레드가 동시에 호출하므로 synchronized 필수
-     * - currentPage, currentItems, currentIndex, isExhausted는 공유 상태
-     * - synchronized 없이 동시 접근 시 page 중복 로드 또는 인덱스 범위 초과 발생
-     */
+    // The existing chunk executor shares this reader across threads.
     @Override
     public synchronized ApmsAnimal read() {
-        if (isExhausted) {
-            return null;
-        }
-
         if (currentIndex >= currentItems.size()) {
-            loadNextPage();
+            if (lastPage) {
+                return null;
+            }
+            var page = ApmsPage.fetch(apmsApiClient, serviceKey, currentPage, PAGE_SIZE, beginDate, endDate);
+            currentItems = page.items();
+            lastPage = page.last();
             currentIndex = 0;
-        }
-
-        if (currentItems.isEmpty()) {
-            isExhausted = true;
-            return null;
-        }
-
-        return currentItems.get(currentIndex++);
-    }
-
-    /**
-     * 다음 페이지 데이터 로드
-     */
-    private void loadNextPage() {
-        org.springframework.util.StopWatch stopWatch = new org.springframework.util.StopWatch("APMS Reader 측정");
-        try {
-            stopWatch.start("1. OpenAPI 통신 및 파싱");
-            // 최근 변동된 데이터(30일 전 ~ 오늘)만 수집하여 지연 등록 데이터 누락 완벽 방지
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-            String endde = LocalDate.now().format(formatter);
-            String bgnde = LocalDate.now().minusDays(30).format(formatter);
-
-            // APMS API 호출 (response 필드로 감싸진 응답)
-            ApmsRootResponse<ApmsAnimal> rootResponse = apmsApiClient.getAbandonmentAnimals(
-                    serviceKey,
-                    currentPage,
-                    PAGE_SIZE,
-                    bgnde,
-                    endde,
-                    null, // upkind
-                    null, // state
-                   "json"
-            );
-
-            // "response" 필드에서 실제 응답 추출
-            ApmsResponse response = rootResponse != null ? rootResponse.getResponse() : null;
-            
-            stopWatch.stop();
-
-            // 응답 검증
-            if (response == null || response.getBody() == null || response.getBody().getItems() == null) {
-                log.warn("APMS API 응답이 비어있습니다. 페이지: {}", currentPage);
-                currentItems = new ArrayList<>();
-                return;
-            }
-
-            // 아이템 추출
-            currentItems = response.getBody().getItems().getItem();
-            if (currentItems == null) {
-                currentItems = new ArrayList<>();
-            }
-            
-            log.info("[성능측정] API 호출 소요시간 - {} ms (페이지: {}, 건수: {})", stopWatch.getTotalTimeMillis(), currentPage, currentItems.size());
-
-            // 다음 페이지로 이동
             currentPage++;
-
-            // 아이템이 PAGE_SIZE보다 작으면 마지막 페이지
-            if (currentItems.size() < PAGE_SIZE) {
-                log.info("마지막 페이지 도달 - 총 페이지: {}", currentPage - 1);
-            }
-
-        } catch (Exception e) {
-            log.error("APMS API 호출 중 오류 발생 - 페이지: {}", currentPage, e);
-            currentItems = new ArrayList<>();
         }
+        return currentItems.isEmpty() ? null : currentItems.get(currentIndex++);
     }
 
-    /**
-     * Step 실행 전 호출 - Reader 상태 초기화
-     */
     @Override
     public void beforeStep(StepExecution stepExecution) {
         currentPage = 1;
-        currentItems = new ArrayList<>();
+        currentItems = List.of();
         currentIndex = 0;
-        isExhausted = false;
-        log.info("ApmsItemReader 상태 초기화 - Step 실행 전");
+        lastPage = false;
+        LocalDate today = LocalDate.now();
+        beginDate = today.minusDays(30).format(DateTimeFormatter.BASIC_ISO_DATE);
+        endDate = today.format(DateTimeFormatter.BASIC_ISO_DATE);
     }
 }
