@@ -1,5 +1,6 @@
 package com.pawbridge.communityservice.kafka;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,16 +40,10 @@ public class PostEventConsumer {
 
             log.info("📥 Received event: eventId={}, eventType={}", eventId, eventType);
 
-            // 2. Value 파싱 (Debezium EventRouter 구조: {schema, payload})
-            String payloadJson = record.value();
-            Map<String, Object> debeziumMessage = objectMapper.readValue(payloadJson, Map.class);
-
-            // Debezium의 payload 필드 추출
-            Map<String, Object> payload = (Map<String, Object>) debeziumMessage.get("payload");
-
-            if (payload == null) {
-                log.error("❌ Payload is null in Debezium message");
-                return;
+            // 2. EventRouter가 확장한 JSON 본문 자체가 게시글 payload다.
+            Map<String, Object> payload = objectMapper.readValue(record.value(), new TypeReference<>() {});
+            if (payload == null || payload.isEmpty()) {
+                throw new IllegalArgumentException("Post event payload must be a non-empty object");
             }
 
             // 3. eventType에 따라 Handler로 라우팅
@@ -56,7 +51,7 @@ public class PostEventConsumer {
                 case "POST_CREATED" -> postEventHandler.indexPost(eventId, payload);
                 case "POST_UPDATED" -> postEventHandler.updatePost(eventId, payload);
                 case "POST_DELETED" -> postEventHandler.deletePost(eventId, payload);
-                default -> log.warn("⚠️ Unknown event type: {}", eventType);
+                default -> throw new IllegalArgumentException("Unknown event type: " + eventType);
             }
 
         } catch (Exception e) {
@@ -70,9 +65,13 @@ public class PostEventConsumer {
      */
     private String extractHeader(ConsumerRecord<String, String> record, String key) {
         Header header = record.headers().lastHeader(key);
-        if (header == null) {
+        if (header == null || header.value() == null) {
             throw new IllegalArgumentException("Header not found: " + key);
         }
-        return new String(header.value(), StandardCharsets.UTF_8);
+        String value = new String(header.value(), StandardCharsets.UTF_8);
+        if (value.isBlank()) {
+            throw new IllegalArgumentException("Header is blank: " + key);
+        }
+        return value;
     }
 }
