@@ -3,6 +3,7 @@ package com.pawbridge.animalservice.controller;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.pawbridge.animalservice.batch.ApmsBatchRunner;
+import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.http.ResponseEntity;
@@ -52,6 +53,16 @@ public class BatchController {
             long skipCount = jobExecution.getStepExecutions().stream()
                     .mapToLong(step -> step.getSkipCount()).sum();
             response.put("skipCount", skipCount);
+            var collection = jobExecution.getExecutionContext();
+            if (collection.containsKey(ApmsAnimalSnapshot.INCOMPLETE_COUNT)) {
+                int incomplete = collection.getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT);
+                response.put("collectionStatus", incomplete == 0 ? "COMPLETE" : "INCOMPLETE");
+                response.put("incompleteQueryCount", incomplete);
+                response.put("collectedCount", collection.getInt(ApmsAnimalSnapshot.COLLECTED_COUNT));
+            }
+            response.put("searchSyncStatus", jobExecution.getStepExecutions().stream()
+                    .filter(step -> "elasticsearchIndexStep".equals(step.getStepName()))
+                    .map(step -> step.getStatus().toString()).findFirst().orElse("NOT_STARTED"));
             if (jobExecution.getStatus() == BatchStatus.COMPLETED && skipCount == 0) {
                 return ResponseEntity.ok(response);
             }

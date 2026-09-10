@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.batch.job;
 
+import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import com.pawbridge.animalservice.batch.processor.AnimalItemProcessor;
 import com.pawbridge.animalservice.batch.reader.ApmsItemReader;
 import com.pawbridge.animalservice.batch.tasklet.ShelterPrepTasklet;
@@ -120,6 +121,31 @@ class ApmsAnimalBatchJobTest {
         when(reader.read()).thenReturn(null);
         when(indexService.indexAllAnimals()).thenThrow(new IllegalStateException("search update failed"));
         assertThat(runJob().getStatus()).isEqualTo(BatchStatus.FAILED);
+    }
+
+    @Test
+    void givenIncompleteCollection__whenHealthyAnimalsWrittenAndIndexed__thenFailOnlyFinalVerification() throws Exception {
+        when(shelterPrep.execute(any(), any())).thenAnswer(call -> {
+            org.springframework.batch.core.StepContribution contribution = call.getArgument(0);
+            contribution.getStepExecution().getJobExecution().getExecutionContext()
+                    .putInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT, 1);
+            return RepeatStatus.FINISHED;
+        });
+        var item = new ApmsAnimal();
+        when(reader.read()).thenReturn(item).thenReturn(null);
+        when(processor.process(item)).thenReturn(Animal.builder().build());
+        JobExecution execution = runJob();
+        assertThat(execution.getStatus()).isEqualTo(BatchStatus.FAILED);
+        assertThat(execution.getStepExecutions()).anySatisfy(step -> {
+            assertThat(step.getStepName()).isEqualTo("elasticsearchIndexStep");
+            assertThat(step.getStatus()).isEqualTo(BatchStatus.COMPLETED);
+        }).anySatisfy(step -> {
+            assertThat(step.getStepName()).isEqualTo("apmsCollectionVerificationStep");
+            assertThat(step.getStatus()).isEqualTo(BatchStatus.FAILED);
+        });
+        var order = inOrder(writer, indexService);
+        order.verify(writer).write(any());
+        order.verify(indexService).indexAllAnimals();
     }
 
     private JobExecution runJob() {
