@@ -1,14 +1,15 @@
 package com.pawbridge.animalservice.batch;
 
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
+
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
@@ -21,14 +22,16 @@ public class ApmsBatchRunner {
     private final JobExplorer jobExplorer;
     private final JobLauncher jobLauncher;
     private final Job apmsAnimalSyncJob;
+    private final ApmsSyncPlanFactory planFactory;
 
     public ApmsBatchRunner(DataSource dataSource, JobExplorer jobExplorer,
                            @Qualifier("apmsJobLauncher") JobLauncher jobLauncher,
-                           Job apmsAnimalSyncJob) {
+                           Job apmsAnimalSyncJob, ApmsSyncPlanFactory planFactory) {
         this.dataSource = dataSource;
         this.jobExplorer = jobExplorer;
         this.jobLauncher = jobLauncher;
         this.apmsAnimalSyncJob = apmsAnimalSyncJob;
+        this.planFactory = planFactory;
     }
 
     public JobExecution run() throws Exception {
@@ -59,7 +62,7 @@ public class ApmsBatchRunner {
                     throw new UnavailableException();
                 }
                 // The explicitly qualified APMS launcher holds this thread until completion.
-                return jobLauncher.run(apmsAnimalSyncJob, new JobParametersBuilder()
+                return jobLauncher.run(apmsAnimalSyncJob, new JobParametersBuilder(planFactory.create(apmsAnimalSyncJob.getName()).parameters())
                         .addString("requestId", UUID.randomUUID().toString()).toJobParameters());
             } finally {
                 release(connection);

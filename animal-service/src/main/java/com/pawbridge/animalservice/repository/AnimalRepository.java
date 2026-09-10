@@ -3,8 +3,10 @@ package com.pawbridge.animalservice.repository;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.enums.AnimalStatus;
+import com.pawbridge.animalservice.enums.ApiSource;
 import com.pawbridge.animalservice.enums.Gender;
 import com.pawbridge.animalservice.enums.Species;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -27,6 +29,9 @@ import java.util.Optional;
 @Repository
 public interface AnimalRepository extends JpaRepository<Animal, Long>,
                                           org.springframework.data.jpa.repository.JpaSpecificationExecutor<Animal> {
+
+    @Query("SELECT MIN(a.happenDate) FROM Animal a WHERE a.apiSource = :source")
+    LocalDate findEarliestHappenDate(@Param("source") ApiSource source);
 
     //기본 조회 (UNIQUE KEY)
     /**
