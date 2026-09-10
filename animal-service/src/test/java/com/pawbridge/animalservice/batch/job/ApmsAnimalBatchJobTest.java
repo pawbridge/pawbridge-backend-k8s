@@ -7,23 +7,24 @@ import com.pawbridge.animalservice.batch.writer.AnimalItemWriter;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.service.ElasticsearchIndexService;
-import org.junit.jupiter.api.BeforeEach;
+
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.batch.core.BatchStatus;
-import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.repository.support.ResourcelessJobRepository;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.batch.support.transaction.ResourcelessTransactionManager;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -111,6 +112,14 @@ class ApmsAnimalBatchJobTest {
         order.verify(writer).write(any());
         order.verify(indexService).indexAllAnimals();
         verify(reader).beforeStep(any());
+    }
+
+    @Test
+    void givenElasticsearchFailure__whenJobRuns__thenDoNotReportSuccessfulCollection() throws Exception {
+        when(shelterPrep.execute(any(), any())).thenReturn(RepeatStatus.FINISHED);
+        when(reader.read()).thenReturn(null);
+        when(indexService.indexAllAnimals()).thenThrow(new IllegalStateException("search update failed"));
+        assertThat(runJob().getStatus()).isEqualTo(BatchStatus.FAILED);
     }
 
     private JobExecution runJob() {

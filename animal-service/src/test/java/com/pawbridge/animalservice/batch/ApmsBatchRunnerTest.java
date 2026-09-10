@@ -12,6 +12,7 @@ import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.launch.JobLauncher;
 
 import javax.sql.DataSource;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -33,11 +34,12 @@ class ApmsBatchRunnerTest {
     @Mock private JobExplorer explorer;
     @Mock private JobLauncher launcher;
     @Mock private Job job;
+    @Mock private ApmsSyncPlanFactory planFactory;
     private ApmsBatchRunner runner;
 
     @BeforeEach
     void setUp() throws Exception {
-        runner = new ApmsBatchRunner(dataSource, explorer, launcher, job);
+        runner = new ApmsBatchRunner(dataSource, explorer, launcher, job, planFactory);
         when(dataSource.getConnection()).thenReturn(connection);
     }
 
@@ -94,7 +96,8 @@ class ApmsBatchRunnerTest {
         var order = inOrder(acquireStatement, explorer, launcher, releaseStatement, connection);
         order.verify(acquireStatement).executeQuery();
         order.verify(explorer).findRunningJobExecutions("apmsAnimalSyncJob");
-        order.verify(launcher).run(eq(job), argThat(parameters -> parameters.getString("requestId") != null));
+        order.verify(launcher).run(eq(job), argThat(parameters -> parameters.getString("requestId") != null
+                && ApmsSyncPlan.from(parameters).end().equals(java.time.LocalDate.of(2026, 9, 10))));
         order.verify(releaseStatement).executeQuery();
         order.verify(connection).close();
         verify(connection, never()).abort(any());
@@ -130,8 +133,21 @@ class ApmsBatchRunnerTest {
         verifyNoInteractions(explorer, launcher);
     }
 
+    @Test
+    void givenPlanningFailure__whenRun__thenReleaseLockWithoutLaunching() throws Exception {
+        allowedStart();
+        released(1);
+        when(planFactory.create("apmsAnimalSyncJob")).thenThrow(new IllegalStateException("history unavailable"));
+        assertThatThrownBy(runner::run).hasMessage("history unavailable");
+        verifyNoInteractions(launcher);
+        verify(releaseStatement).executeQuery();
+        verify(connection).close();
+    }
+
     private void allowedStart() throws Exception {
         acquired(1);
+        var day = java.time.LocalDate.of(2026, 9, 10);
+        when(planFactory.create("apmsAnimalSyncJob")).thenReturn(new ApmsSyncPlan(day.minusDays(30), day.minusDays(30).withDayOfMonth(1), day.minusDays(30), day));
         when(job.getName()).thenReturn("apmsAnimalSyncJob");
         when(explorer.findRunningJobExecutions("apmsAnimalSyncJob")).thenReturn(Set.of());
     }

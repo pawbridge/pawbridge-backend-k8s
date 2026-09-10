@@ -7,8 +7,10 @@ import com.pawbridge.animalservice.batch.writer.AnimalItemWriter;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.service.ElasticsearchIndexService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
@@ -46,7 +48,7 @@ public class ApmsAnimalBatchJob {
     @Qualifier("batchTaskExecutor")
     private TaskExecutor batchTaskExecutor;
 
-    private static final int CHUNK_SIZE = 1000; // Reader의 PAGE_SIZE와 동일하게 설정 (메모리 효율)
+    private static final int CHUNK_SIZE = 1000; // 수집 완료된 snapshot을 청크 단위로 저장
 
     /**
      * APMS 동물 동기화 Job
@@ -83,7 +85,7 @@ public class ApmsAnimalBatchJob {
 
     /**
      * Step 1: APMS 동물 동기화 Chunk Step
-     * - Reader: APMS API 호출 (PAGE_SIZE = 1000)
+     * - Reader: Step 0에서 수집한 snapshot 순회
      * - Processor: DTO → Entity 변환 (shelterCache/existingAnimalIdMap 캐시 조회)
      * - Writer: 신규 saveAll(), 기존 @Modifying UPDATE
      * - 읽기/변환/저장 실패 시 Step 실패: 누락을 정상 완료로 처리하지 않음

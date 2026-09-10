@@ -1,13 +1,16 @@
 package com.pawbridge.animalservice.batch.processor;
 
+import com.pawbridge.animalservice.batch.ApmsUpdatedAt;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.enums.*;
 import com.pawbridge.animalservice.repository.AnimalRepository;
 import com.pawbridge.animalservice.repository.ShelterRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.item.ItemProcessor;
@@ -39,7 +42,6 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     private final ShelterRepository shelterRepository;
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.S");
     private static final Pattern BIRTH_YEAR_PATTERN = Pattern.compile("(\\d{4})");
 
     // Step 시작 시 1회 로딩 — process()에서 DB 호출 제거
@@ -216,18 +218,6 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
      * 날짜시간 파싱 (yyyy-MM-dd HH:mm:ss.S 또는 yyyy-MM-dd HH:mm:ss)
      */
     private LocalDateTime parseDateTime(String dateTimeStr) {
-        if (!StringUtils.hasText(dateTimeStr)) {
-            return null;
-        }
-        try {
-            return LocalDateTime.parse(dateTimeStr, DATETIME_FORMATTER);
-        } catch (Exception e) {
-            try {
-                return LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-            } catch (Exception ex) {
-                log.warn("날짜시간 다중 파싱 모두 실패: {}", dateTimeStr);
-                return null;
-            }
-        }
+        return ApmsUpdatedAt.parse(dateTimeStr);
     }
 }

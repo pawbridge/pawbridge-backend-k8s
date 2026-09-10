@@ -4,15 +4,18 @@ import com.pawbridge.animalservice.client.ApmsApiClient;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.dto.apms.ApmsRootResponse;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /** A validated provider page shared by shelter preparation and animal ingestion. */
 public record ApmsPage(List<ApmsAnimal> items, boolean last) {
     public static ApmsPage fetch(ApmsApiClient client, String key, int page, int size,
-                                 String beginDate, String endDate) {
+                                 ApmsSyncPlan.Query query) {
         ApmsRootResponse<ApmsAnimal> root;
         try {
-            root = client.getAbandonmentAnimals(key, page, size, beginDate, endDate, null, null, "json");
+            root = client.getAbandonmentAnimals(key, page, size, format(query.intakeStart()), format(query.intakeEnd()),
+                    null, null, "json", format(query.updatedStart()), format(query.updatedEnd()));
         } catch (RuntimeException exception) {
             // Feign exceptions can contain the service key in the request URL.
             throw new IllegalStateException("APMS request failed at page " + page);
@@ -42,4 +45,8 @@ public record ApmsPage(List<ApmsAnimal> items, boolean last) {
         }
         return new ApmsPage(items, offset + items.size() >= total);
     }
+    private static String format(LocalDate date) {
+        return date == null ? null : date.format(DateTimeFormatter.BASIC_ISO_DATE);
+    }
+
 }

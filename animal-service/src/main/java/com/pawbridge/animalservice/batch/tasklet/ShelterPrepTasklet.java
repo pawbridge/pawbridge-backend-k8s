@@ -1,22 +1,20 @@
 package com.pawbridge.animalservice.batch.tasklet;
 
-import com.pawbridge.animalservice.client.ApmsApiClient;
+import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
-import com.pawbridge.animalservice.batch.ApmsPage;
 import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.repository.ShelterRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.repeat.RepeatStatus;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -34,19 +32,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ShelterPrepTasklet implements Tasklet {
 
-    private final ApmsApiClient apmsApiClient;
+    private final ApmsAnimalSnapshot snapshot;
     private final ShelterRepository shelterRepository;
-
-    @Value("${apms.api.service-key}")
-    private String serviceKey;
-
-    private static final int PAGE_SIZE = 1000;
 
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
         log.info("[BATCH Step 0] 보호소 사전 저장 Tasklet 시작");
 
-        List<ApmsAnimal> allAnimals = fetchAllAnimals();
+        List<ApmsAnimal> allAnimals = snapshot.animals();
         log.info("[BATCH Step 0] APMS API 전체 조회 완료: {} 건", allAnimals.size());
 
         // careRegNo 기준 중복 제거 (첫 번째 등장 기준)
@@ -90,26 +83,4 @@ public class ShelterPrepTasklet implements Tasklet {
         return RepeatStatus.FINISHED;
     }
 
-    /**
-     * APMS API 전체 페이지 조회
-     * - 통신/응답 오류는 민감 요청 정보를 제외한 예외 → Step FAILED
-     */
-    private List<ApmsAnimal> fetchAllAnimals() {
-        List<ApmsAnimal> result = new ArrayList<>();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd");
-        String endde = LocalDate.now().format(formatter);
-        String bgnde = LocalDate.now().minusDays(30).format(formatter);
-
-        int page = 1;
-        while (true) {
-            ApmsPage response = ApmsPage.fetch(apmsApiClient, serviceKey, page, PAGE_SIZE, bgnde, endde);
-            result.addAll(response.items());
-            if (response.last()) {
-                log.info("[BATCH Step 0] 마지막 페이지 도달. 총 페이지: {}, 총 건수: {}", page, result.size());
-                break;
-            }
-            page++;
-        }
-        return result;
-    }
 }

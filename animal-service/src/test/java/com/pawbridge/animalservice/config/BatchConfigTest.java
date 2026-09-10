@@ -1,10 +1,11 @@
 package com.pawbridge.animalservice.config;
 
 import com.pawbridge.animalservice.batch.ApmsBatchRunner;
+import com.pawbridge.animalservice.batch.ApmsSyncPlanFactory;
+import com.pawbridge.animalservice.repository.AnimalRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
@@ -54,7 +55,8 @@ class BatchConfigTest {
             context.registerBean(DataSource.class, () -> source);
             context.registerBean(Job.class, () -> job);
             context.registerBean("jobLauncher", JobLauncher.class, () -> defaultLauncher);
-            context.register(BatchConfig.class, ApmsBatchRunner.class);
+            context.registerBean(AnimalRepository.class, () -> mock(AnimalRepository.class));
+            context.register(BatchConfig.class, ApmsBatchRunner.class, ApmsSyncPlanFactory.class);
             context.refresh();
             var execution = context.getBean(ApmsBatchRunner.class).run();
             assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
