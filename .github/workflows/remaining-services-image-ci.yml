@@ -5,6 +5,9 @@ on:
     branches:
       - dev
     paths:
+      - ".github/migrations/**"
+      - ".github/scripts/update_migration_image_pair.py"
+      - ".github/scripts/test_update_migration_image_pair.py"
       - "user-service/**"
       - "animal-service/**"
       - "community-service/**"
@@ -17,6 +20,9 @@ on:
     branches:
       - dev
     paths:
+      - ".github/migrations/**"
+      - ".github/scripts/update_migration_image_pair.py"
+      - ".github/scripts/test_update_migration_image_pair.py"
       - "user-service/**"
       - "animal-service/**"
       - "community-service/**"
@@ -64,7 +70,7 @@ jobs:
         run: >-
           python3 -m unittest discover
           --start-directory .github/scripts
-          --pattern 'test_update_service_image_values.py'
+          --pattern 'test_*.py'
 
   detect-services:
     name: Detect changed Java services
@@ -106,7 +112,7 @@ jobs:
               service_changed=false
               while IFS= read -r changed_file; do
                 case "$changed_file" in
-                  "$service"/*)
+                  "$service"/*|.github/migrations/**|.github/scripts/update_migration_image_pair.py|.github/scripts/test_update_migration_image_pair.py|.github/workflows/_java-service-image.yml)
                     service_changed=true
                     break
                     ;;

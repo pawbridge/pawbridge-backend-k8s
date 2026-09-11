@@ -146,7 +146,7 @@ jobs:
 
       - name: Run tests and build executable JAR
         working-directory: ${{ inputs.service }}
-        run: bash ./gradlew test bootJar --no-daemon
+        run: bash ./gradlew test migrationTest bootJar migrationDistribution --no-daemon
 
       - id: jar
         name: Select executable JAR for image build
@@ -189,11 +189,33 @@ jobs:
           build-args: |
             JAR_FILE=build/libs/${{ steps.jar.outputs.file }}
 
+      - name: Build and optionally publish migration image
+        id: migration
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./${{ inputs.service }}/build/migration
+          file: .github/migrations/Dockerfile
+          platforms: linux/amd64
+          push: ${{ inputs.publish && github.ref == 'refs/heads/dev' }}
+          tags: ${{ steps.service.outputs.image_repository }}:migration-sha-${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Verify published migration digest
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        env:
+          MIGRATION_REPOSITORY: ${{ steps.service.outputs.image_repository }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$MIGRATION_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "$MIGRATION_REPOSITORY@$MIGRATION_DIGEST"
+
       - name: Verify published image digest
         if: inputs.publish && github.ref == 'refs/heads/dev'
         env:
           IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
         run: |
           set -euo pipefail
 
@@ -229,13 +251,14 @@ jobs:
           IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
           IMAGE_TAG: sha-${{ github.sha }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
           VALUES_FILE: ${{ steps.service.outputs.values_file }}
         run: >-
-          python3 .github/scripts/update_service_image_values.py
+          python3 .github/scripts/update_migration_image_pair.py
           "infra/$VALUES_FILE"
           --repository "$IMAGE_REPOSITORY"
           --tag "$IMAGE_TAG"
-          --digest "$IMAGE_DIGEST"
+          --digest "$IMAGE_DIGEST" --migration-digest "$MIGRATION_DIGEST"
 
       - name: Validate digest-aware Infra Helm override
         if: inputs.publish && github.ref == 'refs/heads/dev'
@@ -244,17 +267,18 @@ jobs:
           IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
           IMAGE_TAG: sha-${{ github.sha }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
           VALUES_FILE: ${{ steps.service.outputs.values_file }}
           CHART: ${{ steps.service.outputs.chart }}
         run: |
           set -euo pipefail
 
           first_hash="$(git hash-object "$VALUES_FILE")"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/update_service_image_values.py" \
+          python3 "$GITHUB_WORKSPACE/.github/scripts/update_migration_image_pair.py" \
             "$VALUES_FILE" \
             --repository "$IMAGE_REPOSITORY" \
             --tag "$IMAGE_TAG" \
-            --digest "$IMAGE_DIGEST"
+            --digest "$IMAGE_DIGEST" --migration-digest "$MIGRATION_DIGEST"
           second_hash="$(git hash-object "$VALUES_FILE")"
 
           if [ "$first_hash" != "$second_hash" ]; then
@@ -263,10 +287,10 @@ jobs:
           fi
 
           git diff --check
-          helm lint "$CHART" --values "$VALUES_FILE"
+          helm lint "$CHART" --namespace pawbridge --values "$VALUES_FILE"
           rendered="$(helm template "${{ inputs.service }}" "$CHART" \
             --values "$VALUES_FILE" \
-            --show-only templates/deployment.yaml)"
+            --namespace pawbridge --show-only templates/deployment.yaml)"
           expected_image="image: \"$IMAGE_REPOSITORY@$IMAGE_DIGEST\""
 
           if ! grep -Fq "$expected_image" <<<"$rendered"; then
@@ -286,6 +310,7 @@ jobs:
           SERVICE_NAME: ${{ steps.service.outputs.display_name }}
           IMAGE_TAG: sha-${{ github.sha }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
           VALUES_FILE: ${{ steps.service.outputs.values_file }}
           BACKEND_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
         run: |
@@ -348,7 +373,7 @@ jobs:
               --jq '.files[] | .filename, (.previous_filename // empty)')" || return 2
             while IFS= read -r changed_file; do
               case "$changed_file" in
-                "$SERVICE_DIRECTORY"/*|.github/workflows/remaining-services-image-ci.yml|.github/workflows/_java-service-image.yml|.github/scripts/update_service_image_values.py|.github/scripts/test_update_service_image_values.py)
+                "$SERVICE_DIRECTORY"/*|.github/workflows/remaining-services-image-ci.yml|.github/workflows/_java-service-image.yml|.github/scripts/update_migration_image_pair.py|.github/scripts/test_update_migration_image_pair.py|.github/migrations/*|.github/scripts/update_service_image_values.py|.github/scripts/test_update_service_image_values.py)
                   newer_service_path="$changed_file"
                   return 1
                   ;;
@@ -387,10 +412,12 @@ jobs:
           - ${SERVICE_NAME} 이미지 tag: \`$IMAGE_TAG\`
           - ${SERVICE_NAME} 이미지 digest: \`$IMAGE_DIGEST\`
 
+          - Migration 이미지 digest: \`$MIGRATION_DIGEST\` (동일 Backend commit)
+
           ## Impact
 
           - API / Data: 변경 없음
-          - Configuration / Deployment: 이 Draft PR을 머지하면 dev 선언 상태가 새 ${SERVICE_NAME} 이미지를 가리킵니다. PR 생성이나 머지만으로 실제 클러스터에 배포하지는 않습니다.
+          - Configuration / Deployment: 이 Draft PR을 머지하면 dev 선언 상태가 새 ${SERVICE_NAME} 이미지를 가리킵니다. Argo 자동 동기화가 켜져 있으면 병합 후 배포가 시작됩니다.
 
           ## Verification
 

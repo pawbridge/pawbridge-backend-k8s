@@ -5,9 +5,12 @@ on:
     branches:
       - dev
     paths:
+      - ".github/migrations/**"
+      - ".github/scripts/update_migration_image_pair.py"
+      - ".github/scripts/test_update_migration_image_pair.py"
       - "store-service/**"
-      - ".github/scripts/update_store_image_values.py"
-      - ".github/scripts/test_update_store_image_values.py"
+      - ".github/scripts/update_service_image_values.py"
+      - ".github/scripts/test_update_service_image_values.py"
       - ".github/scripts/store_release_guard.py"
       - ".github/scripts/test_store_release_guard.py"
       - ".github/workflows/store-service-ci.yml"
@@ -15,9 +18,12 @@ on:
     branches:
       - dev
     paths:
+      - ".github/migrations/**"
+      - ".github/scripts/update_migration_image_pair.py"
+      - ".github/scripts/test_update_migration_image_pair.py"
       - "store-service/**"
-      - ".github/scripts/update_store_image_values.py"
-      - ".github/scripts/test_update_store_image_values.py"
+      - ".github/scripts/update_service_image_values.py"
+      - ".github/scripts/test_update_service_image_values.py"
       - ".github/scripts/store_release_guard.py"
       - ".github/scripts/test_store_release_guard.py"
       - ".github/workflows/store-service-ci.yml"
@@ -99,7 +105,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Run tests and build executable JAR
-        run: bash ./gradlew test bootJar --no-daemon
+        run: bash ./gradlew test migrationTest bootJar migrationDistribution --no-daemon
 
       - name: Test Store image values updater
         working-directory: ${{ github.workspace }}
@@ -140,10 +146,32 @@ jobs:
           tags: dorosiya/pawbridge-store-service:sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
+      - name: Build and optionally publish migration image
+        id: migration
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./store-service/build/migration
+          file: .github/migrations/Dockerfile
+          platforms: linux/amd64
+          push: ${{ env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true' }}
+          tags: dorosiya/pawbridge-store-service:migration-sha-${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Verify published migration digest
+        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        env:
+          MIGRATION_REPOSITORY: dorosiya/pawbridge-store-service
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$MIGRATION_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          docker buildx imagetools inspect "$MIGRATION_REPOSITORY@$MIGRATION_DIGEST"
+
       - name: Verify published Store Service image digest
         if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         env:
           STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
         run: >-
           docker buildx imagetools inspect
           "dorosiya/pawbridge-store-service@$STORE_IMAGE_DIGEST"
@@ -164,12 +192,13 @@ jobs:
         env:
           STORE_IMAGE_TAG: sha-${{ github.sha }}
           STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
         run: >-
-          python3 .github/scripts/update_store_image_values.py
+          python3 .github/scripts/update_migration_image_pair.py
           infra/environments/dev/values/store-service.yaml
           --repository dorosiya/pawbridge-store-service
           --tag "$STORE_IMAGE_TAG"
-          --digest "$STORE_IMAGE_DIGEST"
+          --digest "$STORE_IMAGE_DIGEST" --migration-digest "$MIGRATION_DIGEST"
 
       - name: Validate Store image Helm override
         if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
@@ -178,16 +207,17 @@ jobs:
           STORE_IMAGE_REPOSITORY: dorosiya/pawbridge-store-service
           STORE_IMAGE_TAG: sha-${{ github.sha }}
           STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
         run: |
           set -euo pipefail
 
           values_file="environments/dev/values/store-service.yaml"
           first_hash="$(git hash-object "$values_file")"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/update_store_image_values.py" \
+          python3 "$GITHUB_WORKSPACE/.github/scripts/update_migration_image_pair.py" \
             "$values_file" \
             --repository "$STORE_IMAGE_REPOSITORY" \
             --tag "$STORE_IMAGE_TAG" \
-            --digest "$STORE_IMAGE_DIGEST"
+            --digest "$STORE_IMAGE_DIGEST" --migration-digest "$MIGRATION_DIGEST"
           second_hash="$(git hash-object "$values_file")"
 
           if [ "$first_hash" != "$second_hash" ]; then
@@ -196,10 +226,10 @@ jobs:
           fi
 
           git diff --check
-          helm lint charts/store-service --values "$values_file"
+          helm lint charts/store-service --namespace pawbridge --values "$values_file"
           rendered="$(helm template store-service charts/store-service \
             --values "$values_file" \
-            --show-only templates/deployment.yaml)"
+            --namespace pawbridge --show-only templates/deployment.yaml)"
           expected_image="image: \"$STORE_IMAGE_REPOSITORY@$STORE_IMAGE_DIGEST\""
 
           if ! grep -Fq "$expected_image" <<<"$rendered"; then
@@ -216,6 +246,7 @@ jobs:
           INFRA_REPOSITORY: pawbridge/pawbridge-infra-k8s
           STORE_IMAGE_TAG: sha-${{ github.sha }}
           STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
           BACKEND_COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
         run: |
           set -euo pipefail
@@ -250,7 +281,7 @@ jobs:
               --jq '.files[] | .filename, (.previous_filename // empty)')" || return 2
             while IFS= read -r changed_file; do
               case "$changed_file" in
-                store-service/*|.github/workflows/store-service-ci.yml|.github/scripts/update_store_image_values.py|.github/scripts/test_update_store_image_values.py|.github/scripts/store_release_guard.py|.github/scripts/test_store_release_guard.py)
+                store-service/*|.github/workflows/store-service-ci.yml|.github/scripts/update_migration_image_pair.py|.github/scripts/test_update_migration_image_pair.py|.github/scripts/store_release_guard.py|.github/scripts/test_store_release_guard.py|.github/migrations/*|.github/scripts/update_service_image_values.py|.github/scripts/test_update_service_image_values.py)
                   newer_store_path="$changed_file"
                   return 1
                   ;;
@@ -289,10 +320,12 @@ jobs:
           - Store Service 이미지 tag: \`$STORE_IMAGE_TAG\`
           - Store Service 이미지 digest: \`$STORE_IMAGE_DIGEST\`
 
+          - Migration 이미지 digest: \`$MIGRATION_DIGEST\` (동일 Backend commit)
+
           ## Impact
 
           - API / Data: 변경 없음
-          - Configuration / Deployment: 이 PR을 머지하면 dev 선언 상태가 새 Store Service 이미지를 가리킵니다. 머지만으로 실제 클러스터에 배포하지는 않습니다.
+          - Configuration / Deployment: 이 PR을 머지하면 dev 선언 상태가 새 Store Service 이미지를 가리킵니다. Argo 자동 동기화가 켜져 있으면 병합 후 배포가 시작됩니다.
 
           ## Verification
 
