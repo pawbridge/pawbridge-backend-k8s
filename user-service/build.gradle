@@ -69,3 +69,6 @@ dependencyManagement {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// Schema tools remain outside the API application's startup and runtime classpath.
+apply from: 'gradle/schema-migration.gradle'
