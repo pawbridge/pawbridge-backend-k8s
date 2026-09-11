@@ -63,3 +63,8 @@ dependencyManagement {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// The operator CLI has its own main; the service entry point stays unchanged.
+springBoot {
+    mainClass = 'com.pawbridge.animalservice.AnimalServiceApplication'
+}
