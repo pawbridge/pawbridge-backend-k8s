@@ -102,7 +102,7 @@ class ApmsSyncPlanFactoryTest {
     private JobExecution execution(long id, BatchStatus status, LocalDate end, boolean current) {
         var plan = new ApmsSyncPlan(end.minusDays(30), end.minusDays(30).withDayOfMonth(1), end.minusDays(30), end);
         var execution = new JobExecution(new JobInstance(id, "apmsAnimalSyncJob"), id,
-                current ? plan.parameters() : new JobParameters());
+                current ? new JobParametersBuilder(plan.parameters()).addString(ApmsSyncPlan.CONTRACT_KEY, ApmsSyncPlan.LEGACY_CONTRACT).toJobParameters() : new JobParameters());
         execution.setStatus(status);
         return execution;
     }
