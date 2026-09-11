@@ -66,8 +66,3 @@ tasks.named('test') {
 
 // Keep schema tooling out of the API application's classpath and startup path.
 apply from: 'gradle/schema-migration.gradle'
-
-// The operator CLI has its own main; the service entry point stays unchanged.
-springBoot {
-    mainClass = 'com.pawbridge.animalservice.AnimalServiceApplication'
-}
