@@ -1,0 +1,79 @@
+sourceSets {
+    migration
+    migrationTest {
+        compileClasspath += sourceSets.migration.output + sourceSets.main.output
+        runtimeClasspath += sourceSets.migration.output + sourceSets.main.output
+    }
+}
+
+configurations {
+    migrationTestImplementation.extendsFrom migrationImplementation
+    migrationTestImplementation.extendsFrom implementation
+    migrationTestRuntimeOnly.extendsFrom migrationRuntimeOnly
+}
+
+dependencies {
+    // Versions follow this service's Spring Boot BOM (3.4.11: Flyway 10.20.1).
+    migrationImplementation 'org.flywaydb:flyway-core'
+    migrationRuntimeOnly 'org.flywaydb:flyway-mysql'
+    migrationRuntimeOnly 'com.mysql:mysql-connector-j'
+    migrationTestImplementation 'org.springframework.boot:spring-boot-starter-test'
+    migrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.register('migrationTest', Test) {
+    description = 'Checks the isolated schema runner without application infrastructure.'
+    group = 'verification'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform { excludeTags 'mysql' }
+}
+
+tasks.register('migrationMysqlTest', Test) {
+    description = 'Checks the runner against an explicitly supplied disposable local MySQL.'
+    group = 'verification'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'mysql'
+        excludeTags 'rehearsal'
+    }
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('migrationRehearsal', Test) {
+    description = 'Opt-in existing-schema adoption drill; not part of check or migrationMysqlTest.'
+    group = 'verification'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'rehearsal' }
+    outputs.upToDateWhen { false }
+}
+
+tasks.named('check') { dependsOn tasks.named('migrationTest') }
+
+['inspect', 'info', 'validate', 'migrate'].each { command ->
+    tasks.register("schema${command.capitalize()}", JavaExec) {
+        group = 'database'
+        description = "Runs animal schema ${command} without starting Spring Boot."
+        classpath = sourceSets.migration.runtimeClasspath
+        mainClass = 'com.pawbridge.animalservice.migration.AnimalSchemaMigration'
+        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+        args command
+    }
+}
+
+tasks.register('migrationJar', Jar) {
+    archiveClassifier = 'migration'
+    // The API Dockerfile copies build/libs/*.jar. Never put this tool there.
+    destinationDirectory = layout.buildDirectory.dir('migration-artifacts')
+    from sourceSets.migration.output
+    manifest { attributes 'Main-Class': 'com.pawbridge.animalservice.migration.AnimalSchemaMigration' }
+}
+
+tasks.register('migrationDistribution', Sync) {
+    description = 'Packages the standalone runner and its dependencies for a future migration Job.'
+    into layout.buildDirectory.dir('migration')
+    from(tasks.named('migrationJar')) { into 'lib' }
+    from(configurations.migrationRuntimeClasspath) { into 'lib' }
+}
