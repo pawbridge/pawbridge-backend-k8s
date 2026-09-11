@@ -21,6 +21,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class ApmsAnimalSnapshotTest {
     @Mock private ApmsApiClient api;
+    private JobExecution execution;
     private final ApmsSyncPlan plan = new ApmsSyncPlan(LocalDate.of(2026, 8, 11),
             LocalDate.of(2026, 7, 1), LocalDate.of(2026, 8, 11), LocalDate.of(2026, 9, 10));
 
@@ -109,41 +110,44 @@ class ApmsAnimalSnapshotTest {
     }
 
     @Test
-    void givenTransportFailure__whenCollected__thenFailWithoutLeakingRequest() {
-        when(api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null))
+    void givenTransportFailure__whenCollected__thenRecordIncompleteWithoutLeakingRequest() {
+        when(api.getAbandonmentAnimals(eq("test-key"), anyInt(), eq(1000), anyString(), anyString(),
+                isNull(), isNull(), eq("json"), isNull(), isNull()))
                 .thenThrow(new IllegalStateException("private-service-key-placeholder"));
-        assertThatThrownBy(() -> snapshot().animals()).isInstanceOf(IllegalStateException.class)
-                .hasMessageNotContaining("private-service-key-placeholder").hasNoCause();
+        assertIncomplete("REQUEST_FAILED");
+        assertThat(execution.getExecutionContext().getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS))
+                .doesNotContain("private-service-key-placeholder");
     }
 
     @Test
-    void givenProviderError__whenCollected__thenFail() {
-        var response = page("0", List.of(), 1); response.getResponse().getHeader().setResultCode("30"); recent(response);
-        assertThatThrownBy(() -> snapshot().animals()).hasMessageContaining("unsuccessful");
+    void givenProviderError__whenCollected__thenRecordIncomplete() {
+        var response = page("0", List.of(), 1); response.getResponse().getHeader().setResultCode("30");
+        everyIntakeQuery(response);
+        assertIncomplete("UNSUCCESSFUL_RESPONSE");
     }
 
     @Test
-    void givenMissingResponse__whenCollected__thenFail() {
-        recent(null);
-        assertThatThrownBy(() -> snapshot().animals()).hasMessageContaining("unsuccessful");
+    void givenMissingResponse__whenCollected__thenRecordIncomplete() {
+        everyIntakeQuery(null);
+        assertIncomplete("UNSUCCESSFUL_RESPONSE");
     }
 
     @Test
-    void givenPositiveCountAndMissingItems__whenCollected__thenFail() {
+    void givenPositiveCountAndMissingItems__whenCollected__thenRecordIncomplete() {
         recent(page("3", null, 1));
-        assertThatThrownBy(() -> snapshot().animals()).hasMessageContaining("incomplete");
+        assertIncomplete("COUNT_MISMATCH");
     }
 
     @Test
-    void givenPositiveCountAndEmptyItems__whenCollected__thenFail() {
+    void givenPositiveCountAndEmptyItems__whenCollected__thenRecordIncomplete() {
         recent(page("3", List.of(), 1));
-        assertThatThrownBy(() -> snapshot().animals()).hasMessageContaining("incomplete");
+        assertIncomplete("COUNT_MISMATCH");
     }
 
     @Test
-    void givenTruncatedPage__whenCollected__thenFail() {
+    void givenTruncatedPage__whenCollected__thenRecordIncomplete() {
         recent(page("2", List.of(animal("one", "20260908", null, "보호중")), 1));
-        assertThatThrownBy(() -> snapshot().animals()).hasMessageContaining("incomplete");
+        assertIncomplete("COUNT_MISMATCH");
     }
 
     @Test
@@ -153,16 +157,19 @@ class ApmsAnimalSnapshotTest {
     }
 
     @Test
-    void givenRequestBudgetReached__whenAnotherQueryNeeded__thenFailBeforeExtraCall() {
-        assertThatThrownBy(() -> snapshot(1, 50000).animals()).hasMessageContaining("request budget");
+    void givenRequestBudgetReached__whenAnotherQueryNeeded__thenRecordUnqueriedWindowsWithoutExtraCall() {
+        assertThat(snapshot(1, 50000).animals()).isEmpty();
+        assertThat(execution.getExecutionContext().getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS)).contains("REQUEST_BUDGET");
         verify(api, times(1)).getAbandonmentAnimals(anyString(), anyInt(), anyInt(), anyString(), anyString(),
                 any(), any(), anyString(), any(), any());
     }
 
     @Test
-    void givenAnimalBudgetReached__whenNewNumberArrives__thenFail() {
+    void givenAnimalBudgetReached__whenNewNumberArrives__thenKeepBoundedDataAndRecordIncomplete() {
         recent(page("2", List.of(animal("one", "20260908", null, "보호중"), animal("two", "20260908", null, "보호중")), 1));
-        assertThatThrownBy(() -> snapshot(100, 1).animals()).hasMessageContaining("animal budget");
+        assertThat(snapshot(100, 1).animals()).extracting(ApmsAnimal::getDesertionNo).containsExactly("one");
+        assertThat(execution.getExecutionContext().getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT)).isPositive();
+        assertThat(execution.getExecutionContext().getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS)).contains("ANIMAL_BUDGET");
     }
 
     @Test
@@ -189,12 +196,22 @@ class ApmsAnimalSnapshotTest {
         assertThatThrownBy(() -> snapshot().animals()).hasMessageContaining("timestamp is invalid");
     }
 
+    private void assertIncomplete(String reason) {
+        snapshot().animals();
+        assertThat(execution.getExecutionContext().getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT)).isPositive();
+        assertThat(execution.getExecutionContext().getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS)).contains(reason);
+    }
     private ApmsAnimalSnapshot snapshot() { return snapshot(100, 50000); }
     private ApmsAnimalSnapshot snapshot(int requests, int animals) {
-        return new ApmsAnimalSnapshot(api, "test-key", new JobExecution(1L, plan.parameters()), requests, animals);
+        execution = new JobExecution(1L, plan.parameters());
+        return new ApmsAnimalSnapshot(api, "test-key", execution, requests, animals);
     }
     private ApmsAnimal animal(String number, String intake, String updated, String state) {
         return ApmsAnimal.builder().desertionNo(number).happenDt(intake).updTm(updated).processState(state).build();
+    }
+    private void everyIntakeQuery(ApmsRootResponse<ApmsAnimal> response) {
+        when(api.getAbandonmentAnimals(eq("test-key"), anyInt(), eq(1000), anyString(), anyString(),
+                isNull(), isNull(), eq("json"), isNull(), isNull())).thenReturn(response);
     }
     private void recent(ApmsRootResponse<ApmsAnimal> response) {
         when(api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)).thenReturn(response);

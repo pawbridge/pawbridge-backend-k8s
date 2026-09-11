@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.controller;
 
 import com.pawbridge.animalservice.batch.ApmsBatchRunner;
+import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -69,6 +70,21 @@ class BatchControllerTest {
         when(runner.run()).thenThrow(new IllegalStateException("private-service-key-placeholder"));
         mvc.perform(post("/api/v1/batch/apms/sync")).andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.error").value("APMS batch execution failed"));
+    }
+
+    @Test
+    void givenIncompleteCollectionButSuccessfulIndex__whenSync__thenExposeBothStatesWithoutReportingSuccess() throws Exception {
+        var job = execution(BatchStatus.FAILED, 0);
+        job.getExecutionContext().putInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT, 1);
+        job.getExecutionContext().putInt(ApmsAnimalSnapshot.COLLECTED_COUNT, 990);
+        job.createStepExecution("elasticsearchIndexStep").setStatus(BatchStatus.COMPLETED);
+        when(runner.run()).thenReturn(job);
+        mvc.perform(post("/api/v1/batch/apms/sync"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.collectionStatus").value("INCOMPLETE"))
+                .andExpect(jsonPath("$.incompleteQueryCount").value(1))
+                .andExpect(jsonPath("$.collectedCount").value(990))
+                .andExpect(jsonPath("$.searchSyncStatus").value("COMPLETED"));
     }
 
     private JobExecution execution(BatchStatus status, long skips) {

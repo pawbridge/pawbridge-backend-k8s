@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.batch.job;
 
+import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import com.pawbridge.animalservice.batch.processor.AnimalItemProcessor;
 import com.pawbridge.animalservice.batch.reader.ApmsItemReader;
 import com.pawbridge.animalservice.batch.tasklet.ShelterPrepTasklet;
@@ -67,6 +68,7 @@ public class ApmsAnimalBatchJob {
                     .on("*").to(apmsAnimalSyncStep())
                 .from(apmsAnimalSyncStep())
                     .next(elasticsearchIndexStep())
+                    .next(apmsCollectionVerificationStep())
                 .end()
                 .build();
     }
@@ -118,4 +120,18 @@ public class ApmsAnimalBatchJob {
                 }, transactionManager)
                 .build();
     }
+    /** Persist healthy records and search updates before reporting any unresolved collection gap. */
+    @Bean
+    public Step apmsCollectionVerificationStep() {
+        return new StepBuilder("apmsCollectionVerificationStep", jobRepository)
+                .tasklet((contribution, chunkContext) -> {
+                    var execution = contribution.getStepExecution().getJobExecution();
+                    if (execution.getExecutionContext().getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT, 0) > 0) {
+                        throw new IllegalStateException("APMS collection incomplete; inspect job execution context");
+                    }
+                    return RepeatStatus.FINISHED;
+                }, transactionManager)
+                .build();
+    }
+
 }
