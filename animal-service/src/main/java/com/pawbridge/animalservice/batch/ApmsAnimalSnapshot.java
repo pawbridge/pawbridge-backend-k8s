@@ -62,6 +62,7 @@ public class ApmsAnimalSnapshot {
         }
         Map<String, ApmsAnimal> byNumber = new LinkedHashMap<>();
         List<String> incomplete = new ArrayList<>();
+        List<ApmsQueryProgress.Result> results = new ArrayList<>();
         // Complete the first pass before spending retries on a problematic interval.
         // A bad early month must not consume the request budget of later healthy months.
         Map<ApmsSyncPlan.Query, Outcome> initial = new LinkedHashMap<>();
@@ -74,6 +75,7 @@ public class ApmsAnimalSnapshot {
             if (!result.complete()) {
                 result = recover(query, result, 0, new RecoveryBudget(RECOVERY_REQUESTS_PER_QUERY), byNumber);
             }
+            results.add(new ApmsQueryProgress.Result(query, result.complete()));
             if (!result.complete()) {
                 incomplete.add("intake=" + query.intakeStart() + ".." + query.intakeEnd()
                         + ";updated=" + query.updatedStart() + ".." + query.updatedEnd()
@@ -81,6 +83,7 @@ public class ApmsAnimalSnapshot {
                         + ";observed=" + result.numbers().size());
             }
         }
+        ApmsQueryProgress.store(execution, results);
         animals = List.copyOf(byNumber.values());
         execution.getExecutionContext().putInt(INCOMPLETE_COUNT, incomplete.size());
         execution.getExecutionContext().putString(INCOMPLETE_DETAILS, String.join("\n", incomplete));
