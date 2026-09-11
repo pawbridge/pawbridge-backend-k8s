@@ -110,7 +110,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     /**
      * 신규 Animal 생성 (id = null → Writer에서 saveAll() 경로)
      */
-    private Animal createNewAnimal(ApmsAnimal apmsAnimal, Shelter shelter) {
+    public static Animal createNewAnimal(ApmsAnimal apmsAnimal, Shelter shelter) {
         return Animal.builder()
                 .apmsDesertionNo(apmsAnimal.getDesertionNo())
                 .apmsNoticeNo(apmsAnimal.getNoticeNo())
@@ -169,7 +169,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
      * 품종명 추출
      * - "[개] 믹스견" → "믹스견"
      */
-    private String extractBreedName(String kindNm) {
+    private static String extractBreedName(String kindNm) {
         if (!StringUtils.hasText(kindNm)) {
             return null;
         }
@@ -183,7 +183,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
      * 출생연도 추출
      * - "2023(년생)" → 2023
      */
-    private Integer extractBirthYear(String age) {
+    private static Integer extractBirthYear(String age) {
         if (!StringUtils.hasText(age)) {
             return null;
         }
@@ -202,7 +202,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     /**
      * 날짜 파싱 (YYYYMMDD)
      */
-    private LocalDate parseDate(String dateStr) {
+    private static LocalDate parseDate(String dateStr) {
         if (!StringUtils.hasText(dateStr)) {
             return null;
         }
@@ -217,7 +217,7 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     /**
      * 날짜시간 파싱 (yyyy-MM-dd HH:mm:ss.S 또는 yyyy-MM-dd HH:mm:ss)
      */
-    private LocalDateTime parseDateTime(String dateTimeStr) {
+    private static LocalDateTime parseDateTime(String dateTimeStr) {
         return ApmsUpdatedAt.parse(dateTimeStr);
     }
 }
