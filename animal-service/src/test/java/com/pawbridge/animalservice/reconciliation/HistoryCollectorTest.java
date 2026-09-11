@@ -41,6 +41,32 @@ class HistoryCollectorTest {
         assertThatThrownBy(() -> new HistoryCollector((month, page) -> new HistoryCollector.Page(2, 0, List.of()))
                 .collect(HistoryPlanTest.MONTH)).hasMessageContaining("Invalid APMS page");
     }
+    @Test void preservesUnselectedFieldsUntilCandidateValidationWithoutDroppingRecords() throws Exception {
+        var existing = HistoryPlanTest.animal("existing");
+        existing.setNoticeSdt("20260131"); existing.setNoticeEdt("20260130");
+        var missing = HistoryPlanTest.animal("missing");
+        var snapshot = new HistoryCollector((month, page) ->
+                new HistoryCollector.Page(page, 2, List.of(existing, missing))).collect(HistoryPlanTest.MONTH);
+        assertThat(snapshot.items()).containsExactly(existing, missing);
+        assertThat(snapshot.reported()).isEqualTo(2);
+        assertThat(snapshot.warnings()).isEmpty();
+        assertThat(existing.getNoticeEdt()).isEqualTo("20260130");
+    }
+    @Test void rejectsMissingOrOverlengthIdentityBeforeCountingRecords() {
+        for (String number : Arrays.asList(null, "", " ", "x".repeat(51))) {
+            var source = HistoryPlanTest.animal(number);
+            assertThatThrownBy(() -> new HistoryCollector((month, page) ->
+                    new HistoryCollector.Page(page, 1, List.of(source))).collect(HistoryPlanTest.MONTH))
+                    .isInstanceOf(HistoryPlan.RejectedPlanException.class);
+        }
+    }
+    @Test void rejectsInvalidIntakeDatesAndRecordsOutsideRequestedMonth() {
+        var source = HistoryPlanTest.animal("one"); source.setHappenDt("20260201");
+        var collector = new HistoryCollector((month, page) -> new HistoryCollector.Page(page, 1, List.of(source)));
+        assertThatThrownBy(() -> collector.collect(HistoryPlanTest.MONTH)).hasMessageContaining("outside");
+        source.setHappenDt("20260132");
+        assertThatThrownBy(() -> collector.collect(HistoryPlanTest.MONTH)).isInstanceOf(java.time.DateTimeException.class);
+    }
     @Test void historicalMonthIsPassedWithoutRecentStateOrUpdateFilters() throws Exception {
         var calls = new AtomicInteger();
         var snapshot = new HistoryCollector((month, page) -> {

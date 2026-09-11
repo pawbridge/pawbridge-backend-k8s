@@ -89,6 +89,34 @@ class HistoryReconciliationIntegrationTest {
             assertThat(http.request("GET", es + "/animals/_count", null, null, false).body().path("count").asInt()).isZero();
         } finally { server.stop(0); }
     }
+    @Test void unchangedExistingInvalidNoticeDoesNotBlockPlanningValidMissingAnimal() throws Exception {
+        var old = existing("existing");
+        var existingSource = HistoryPlanTest.animal("existing");
+        existingSource.setProcessState("보호중"); existingSource.setHappenDt("20260101");
+        existingSource.setUpdTm("2026-01-03 00:00:00.0");
+        existingSource.setNoticeSdt("20260131"); existingSource.setNoticeEdt("20260130");
+        var missing = HistoryPlanTest.animal("missing");
+        var snapshot = new HistoryCollector((month, page) ->
+                new HistoryCollector.Page(page, 2, List.of(existingSource, missing))).collect(HistoryPlanTest.MONTH);
+        try (var store = store()) {
+            var plan = store.plan(HistoryPlanTest.MONTH, snapshot, search().identity());
+            assertThat(plan.reported()).isEqualTo(2);
+            assertThat(plan.observed()).isEqualTo(2);
+            assertThat(plan.warnings()).isEmpty();
+            assertThat(plan.entries()).singleElement().satisfies(entry -> {
+                assertThat(entry.source().getDesertionNo()).isEqualTo("missing");
+                assertThat(entry.before()).isNull();
+            });
+        }
+        assertThat(animals.count()).isEqualTo(1);
+        var retained = animals.findById(old.getId()).orElseThrow();
+        assertThat(retained.getStatus()).isEqualTo(old.getStatus());
+        assertThat(retained.getNoticeStartDate()).isEqualTo(old.getNoticeStartDate());
+        assertThat(retained.getNoticeEndDate()).isEqualTo(old.getNoticeEndDate());
+        assertThat(retained.getDescription()).isEqualTo("user text");
+        assertThat(retained.getFavoriteCount()).isEqualTo(1);
+        assertThat(http.request("GET", es + "/animals/_count", null, null, false).body().path("count").asInt()).isZero();
+    }
     @Test void insertsMissingIdsWithExistingMapperAndRerunsWithoutDuplicatesOrWatermarkChanges() throws Exception {
         long jobsBefore = new JdbcTemplate(dataSource).queryForObject("SELECT COUNT(*) FROM BATCH_JOB_EXECUTION", Long.class);
         try (var store = store()) {

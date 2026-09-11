@@ -42,6 +42,14 @@ class HistoryPlanTest {
         source.setProcessState("공고중"); source.setUpdTm("2026-09-10 01:02:03.1234567");
         assertThatThrownBy(() -> HistoryPlan.validateSource(source, MONTH)).hasMessageContaining("precision");
     }
+    @Test void rejectsReversedNoticeDatesForBothNewAndExistingCandidates() {
+        var source = animal("one"); source.setNoticeSdt("20260131"); source.setNoticeEdt("20260130");
+        var before = new HistoryPlan.State(1L, "PROTECT", "보호중", LocalDate.of(2026, 1, 2),
+                LocalDateTime.of(2026, 1, 3, 0, 0));
+        for (var entry : List.of(new HistoryPlan.Entry(source, null, 1), new HistoryPlan.Entry(source, before, 1))) {
+            assertThatThrownBy(() -> plan(List.of(entry), List.of()).validate()).hasMessage("Invalid notice dates");
+        }
+    }
     @Test void rejectsDuplicateIdentityButAllowsRepeatedNoticeNumber() {
         var first = new HistoryPlan.Entry(animal("one"), null, 1);
         plan(List.of(first, new HistoryPlan.Entry(animal("two"), null, 1)), List.of()).validate();

@@ -33,7 +33,7 @@ public final class HistoryCollector {
             if (total == -1) total = response.reported();
             if (total != response.reported()) HistoryPlan.fail("APMS total changed during scan");
             for (var animal : response.items()) {
-                HistoryPlan.validateSource(animal, month);
+                HistoryPlan.validateCollectedSource(animal, month);
                 var previous = items.putIfAbsent(animal.getDesertionNo(), animal);
                 if (previous != null) {
                     if (!previous.equals(animal)) HistoryPlan.fail("Conflicting duplicate APMS record");

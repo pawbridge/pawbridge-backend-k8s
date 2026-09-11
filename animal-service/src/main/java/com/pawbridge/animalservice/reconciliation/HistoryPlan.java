@@ -33,12 +33,15 @@ public record HistoryPlan(String contract, String month, Instant capturedAt, Str
     public static LocalDate date(String value) {
         return LocalDate.parse(Objects.requireNonNull(value, "Missing APMS date"), DateTimeFormatter.BASIC_ISO_DATE);
     }
-    public static void validateSource(ApmsAnimal source, YearMonth month) {
+    public static void validateCollectedSource(ApmsAnimal source, YearMonth month) {
         requireText(source.getDesertionNo(), 50);
+        if (!YearMonth.from(date(source.getHappenDt())).equals(month)) fail("Source is outside approved month");
+    }
+    public static void validateSource(ApmsAnimal source, YearMonth month) {
+        validateCollectedSource(source, month);
         requireText(source.getNoticeNo(), 100);
         requireText(source.getCareRegNo(), 50);
         requireText(source.getProcessState(), 50);
-        if (!YearMonth.from(date(source.getHappenDt())).equals(month)) fail("Source is outside approved month");
         if (date(source.getNoticeEdt()).isBefore(date(source.getNoticeSdt()))) fail("Invalid notice dates");
         if (ApmsUpdatedAt.parse(source.getUpdTm()) == null) fail("Missing source version");
         if (ApmsUpdatedAt.parse(source.getUpdTm()).getNano() % 1000 != 0) fail("Source precision exceeds MySQL microseconds");
