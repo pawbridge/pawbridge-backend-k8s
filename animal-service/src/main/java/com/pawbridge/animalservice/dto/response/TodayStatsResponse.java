@@ -7,7 +7,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDate;
 
 /**
- * 오늘의 구조/입양 통계 응답 DTO
+ * 오늘 구조 및 호환용 APMS 수정일 통계 응답 DTO
  * - GET /api/v1/animals/stats/today
  */
 @Getter
@@ -26,7 +26,7 @@ public class TodayStatsResponse {
     private Long rescuedToday;
 
     /**
-     * 오늘 입양된 마릿수 (status=ADOPTED AND DATE(apmsUpdatedAt)=오늘)
+     * 호환용 필드: 오늘 APMS 정보가 수정된 입양 상태 마릿수. 실제 입양 발생일이 아님.
      */
     private Long adoptedToday;
 }
