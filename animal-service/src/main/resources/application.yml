@@ -109,3 +109,17 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+
+# Independent photo archive; activate only after schema, optimizer and archive bucket are ready.
+apms-photo-archive:
+  enabled: ${APMS_PHOTO_ARCHIVE_ENABLED:false}
+  bucket: ${APMS_PHOTO_ARCHIVE_BUCKET:}
+  optimizer-url: ${APMS_PHOTO_OPTIMIZER_URL:}
+  internal-api-key: ${APMS_PHOTO_OPTIMIZER_INTERNAL_API_KEY:}
+  scan-size: ${APMS_PHOTO_ARCHIVE_SCAN_SIZE:50}
+  max-photos: ${APMS_PHOTO_ARCHIVE_MAX_PHOTOS:25}
+  max-run-seconds: ${APMS_PHOTO_ARCHIVE_MAX_RUN_SECONDS:300}
+  lease-seconds: ${APMS_PHOTO_ARCHIVE_LEASE_SECONDS:300}
+  recheck-seconds: ${APMS_PHOTO_ARCHIVE_RECHECK_SECONDS:604800}
+  interval-ms: ${APMS_PHOTO_ARCHIVE_INTERVAL_MS:900000}
+  initial-delay-ms: ${APMS_PHOTO_ARCHIVE_INITIAL_DELAY_MS:60000}
