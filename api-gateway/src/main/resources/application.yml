@@ -47,6 +47,16 @@ spring:
             - RewritePath=/api/animals(?<segment>/?.*), /api/v1/animals${segment}
           # JWT 필터 없음 (로그인 없이 검색/조회 가능)
 
+        # Pet Travel - 공개 목록/상세 조회만 animal-service로 전달
+        - id: animal-service-places-public
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
+          predicates:
+            - Path=/api/places, /api/places/regions, /api/places/{contentId}, /api/v1/places, /api/v1/places/regions, /api/v1/places/{contentId}
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/places(?<segment>/?.*), /api/v1/places${segment}
+          # JWT 필터 없음. 쓰기·하위 관리 경로는 공개하지 않는다.
+
         # Animal Service - Chatbot (POST, public)
         - id: animal-service-chatbot-public
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
