@@ -61,7 +61,7 @@ class AnimalSchemaMigrationMysqlTest {
             statement.execute("DROP TABLE IF EXISTS flyway_schema_history");
             statement.execute("DROP TABLE IF EXISTS migration_probe");
             // Reverse dependency order; fixed allowlist confined to this guarded test schema.
-            for (String table : List.of("pet_travel_places", "pet_travel_targets", "pet_travel_regions",
+            for (String table : List.of("apms_photo_archive", "apms_photo_scan", "pet_travel_places", "pet_travel_targets", "pet_travel_regions",
                     "pet_travel_collection_state", "pet_travel_collection_runs", "pet_travel_request_budgets",
                     "BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ",
                     "BATCH_JOB_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION",
@@ -104,7 +104,7 @@ class AnimalSchemaMigrationMysqlTest {
             try (var rows = statement.executeQuery("SELECT COUNT(*) FROM information_schema.TABLES "
                     + "WHERE TABLE_SCHEMA = 'pawbridge_animal'")) {
                 assertThat(rows.next()).isTrue();
-                assertThat(rows.getInt(1)).isEqualTo(24); // V1 17 + V2 6 + Flyway history.
+                assertThat(rows.getInt(1)).isEqualTo(26); // V1 17 + V2 6 + V4 2 + Flyway history.
             }
             for (String table : List.of("BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ")) {
                 try (var rows = statement.executeQuery("SELECT ID, UNIQUE_KEY FROM " + table)) {
