@@ -6,11 +6,13 @@ import com.pawbridge.animalservice.dto.response.StatusStatsResponse;
 import com.pawbridge.animalservice.dto.response.TodayStatsResponse;
 import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.repository.AnimalStatsRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.ZoneId;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,23 +24,33 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class AnimalStatsServiceImpl implements AnimalStatsService {
 
     private final AnimalStatsRepository animalStatsRepository;
+    private final Clock clock;
+
+    @Autowired
+    public AnimalStatsServiceImpl(AnimalStatsRepository animalStatsRepository) {
+        this(animalStatsRepository, Clock.system(ZoneId.of("Asia/Seoul")));
+    }
+
+    AnimalStatsServiceImpl(AnimalStatsRepository animalStatsRepository, Clock clock) {
+        this.animalStatsRepository = animalStatsRepository;
+        this.clock = clock.withZone(ZoneId.of("Asia/Seoul"));
+    }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // API 1: 오늘의 통계
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     /**
-     * 오늘 구조 마릿수 + 입양 마릿수 반환
-     * - TZ env 설정으로 JVM 자체가 KST이므로 LocalDate.now() 그대로 사용
+     * 오늘 구조 마릿수 + 오늘 APMS 정보가 수정된 입양 상태 마릿수 반환
+     * - 호스트 시간대와 관계없이 한국 날짜 사용
      */
     @Override
     @Transactional(readOnly = true)
     public TodayStatsResponse getTodayStats() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(clock);
         log.info("오늘의 통계 조회: date={}", today);
 
         Long rescuedToday = animalStatsRepository.countRescuedToday(today);
@@ -149,13 +161,13 @@ public class AnimalStatsServiceImpl implements AnimalStatsService {
 
     /**
      * startDate/endDate null 시 최근 30일로 기본값 처리
-     * - TZ env 설정으로 JVM이 KST이므로 LocalDate.now() 그대로 사용
+     * - 오늘을 포함하는 한국 날짜 기준 30일
      *
      * @return [startDate, endDate]
      */
     private LocalDate[] resolveDefaultDateRange(LocalDate startDate, LocalDate endDate) {
-        LocalDate resolvedEnd = (endDate != null) ? endDate : LocalDate.now();
-        LocalDate resolvedStart = (startDate != null) ? startDate : resolvedEnd.minusDays(30);
+        LocalDate resolvedEnd = (endDate != null) ? endDate : LocalDate.now(clock);
+        LocalDate resolvedStart = (startDate != null) ? startDate : resolvedEnd.minusDays(29);
         return new LocalDate[]{resolvedStart, resolvedEnd};
     }
 }

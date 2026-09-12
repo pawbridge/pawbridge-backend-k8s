@@ -28,7 +28,7 @@ public class AnimalStatsController {
     private final AnimalStatsService animalStatsService;
 
     /**
-     * 오늘의 구조/입양 통계
+     * 오늘 구조 및 호환용 APMS 수정일 통계
      * - GET /api/v1/animals/stats/today
      * - 메인 페이지 위젯용
      *
@@ -46,9 +46,9 @@ public class AnimalStatsController {
     }
 
     /**
-     * 기간별 상태별 현황
+     * 선택 기간에 구조된 동물의 현재 상태별 현황
      * - GET /api/v1/animals/stats/status
-     * - startDate/endDate 생략 시 최근 30일
+     * - startDate/endDate 생략 시 오늘 포함 최근 30일 (한국 시간)
      * - 통계 페이지 도넛/바 차트용
      *
      * 응답 예시:
@@ -69,7 +69,7 @@ public class AnimalStatsController {
     /**
      * 기간별 지역별 구조 통계
      * - GET /api/v1/animals/stats/regional
-     * - startDate/endDate 생략 시 최근 30일
+     * - startDate/endDate 생략 시 오늘 포함 최근 30일 (한국 시간)
      * - 통계 페이지 지도 시각화용 (포인핸드 차별점)
      *
      * 응답 예시:

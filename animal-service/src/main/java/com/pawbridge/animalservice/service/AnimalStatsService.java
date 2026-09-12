@@ -14,14 +14,14 @@ import java.util.List;
 public interface AnimalStatsService {
 
     /**
-     * 오늘의 구조/입양 통계
+     * 오늘 구조 및 호환용 APMS 수정일 통계
      *
-     * @return 오늘 구조 마릿수 + 입양 마릿수
+     * @return 오늘 구조 마릿수 + 오늘 APMS 정보가 수정된 입양 상태 마릿수
      */
     TodayStatsResponse getTodayStats();
 
     /**
-     * 기간별 상태별 현황
+     * 선택 기간에 구조된 동물의 현재 상태별 현황
      *
      * @param startDate 시작일 (null이면 최근 30일)
      * @param endDate   종료일 (null이면 오늘)
