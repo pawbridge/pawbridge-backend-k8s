@@ -103,6 +103,19 @@ public class JwtProvider {
     /**
      * JWT 토큰에서 Claims 추출
      */
+    public Long getAccessUserId(String token) {
+        try {
+            Claims claims = getClaims(token);
+            Long id = claims.get("userId", Long.class);
+            if (id == null || id <= 0 || claims.get("role", String.class) == null) {
+                throw new IllegalArgumentException("Not an access token");
+            }
+            return id;
+        } catch (RuntimeException e) {
+            throw new com.pawbridge.userservice.exception.TokenInvalidException();
+        }
+    }
+
     private Claims getClaims(String token) {
         return Jwts.parser()
                 .verifyWith(secretKey)
