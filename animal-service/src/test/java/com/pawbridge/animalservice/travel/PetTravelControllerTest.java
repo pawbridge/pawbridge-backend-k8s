@@ -62,6 +62,19 @@ class PetTravelControllerTest {
     }
 
     @Test
+    void givenTransactionCannotStart__whenList__then503AndNoStore() throws Exception {
+        when(service.places("11", 0)).thenThrow(new org.springframework.transaction.CannotCreateTransactionException(
+                "Could not start transaction", new java.sql.SQLTransientConnectionException("Connection unavailable")));
+        var mvcWithAdvice = MockMvcBuilders.standaloneSetup(new PetTravelController(service))
+                .setControllerAdvice(new com.pawbridge.animalservice.exception.GlobalExceptionHandler()).build();
+
+        mvcWithAdvice.perform(get("/api/v1/places").param("areaCode", "11"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.code").value("PET_TRAVEL_UNAVAILABLE"));
+    }
+
+    @Test
     void givenMissingPlace__whenGet__then404() throws Exception {
         when(service.detail("123")).thenThrow(new PetTravelException(PetTravelException.Code.NOT_FOUND));
         mvc.perform(get("/api/v1/places/123")).andExpect(status().isNotFound())

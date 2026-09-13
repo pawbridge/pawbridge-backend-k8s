@@ -34,7 +34,8 @@ public class PetTravelController {
                 .body(Map.of("code", "PET_TRAVEL_" + exception.getCode().name()));
     }
 
-    @ExceptionHandler(org.springframework.dao.DataAccessException.class)
+    @ExceptionHandler({org.springframework.dao.DataAccessException.class,
+            org.springframework.transaction.CannotCreateTransactionException.class})
     public ResponseEntity<Map<String, String>> databaseFailure() {
         return failure(PetTravelException.unavailable());
     }
