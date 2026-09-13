@@ -101,9 +101,18 @@ public class PetTravelCatalog {
     }
 
     public List<Place> places(String areaCode) {
+        return places(areaCode, 0);
+    }
+
+    public List<Place> places(String areaCode, int page) {
         return jdbc.query(publicQuery() + " AND t.area_code=? ORDER BY "
-                + "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.title')),p.title),t.content_id LIMIT 10",
-                this::place, PROVIDER, areaCode);
+                + "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.title')),p.title),t.content_id LIMIT 10 OFFSET ?",
+                this::place, PROVIDER, areaCode, (long) page * 10);
+    }
+
+    public long countPlaces(String areaCode) {
+        return jdbc.queryForObject("SELECT COUNT(*) " + publicFrom()
+                + " AND t.area_code=?", Long.class, PROVIDER, areaCode);
     }
 
     public Optional<Place> detail(String contentId) {
@@ -113,7 +122,11 @@ public class PetTravelCatalog {
 
     private String publicQuery() {
         return "SELECT t.basic_data,t.basic_fetched_at,t.image_url,t.copyright_type,t.pending,t.detail_error,"
-                + "p.common_data,p.pet_data,p.published_at FROM pet_travel_targets t "
+                + "p.common_data,p.pet_data,p.published_at " + publicFrom();
+    }
+
+    private String publicFrom() {
+        return "FROM pet_travel_targets t "
                 + "LEFT JOIN pet_travel_places p ON p.provider=t.provider AND p.content_id=t.content_id AND p.visible=TRUE "
                 + "WHERE t.provider=? AND t.shown=TRUE AND t.area_code IS NOT NULL "
                 + "AND (t.basic_data IS NOT NULL OR p.content_id IS NOT NULL)";

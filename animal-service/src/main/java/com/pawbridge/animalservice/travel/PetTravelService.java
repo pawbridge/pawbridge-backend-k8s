@@ -4,6 +4,8 @@ import java.util.Map;
 import java.net.URI;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class PetTravelService {
@@ -20,15 +22,22 @@ public class PetTravelService {
     }
 
     public PetTravelResponse.Places places(String areaCode) {
+        return places(areaCode, 0);
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PetTravelResponse.Places places(String areaCode, int page) {
+        if (page < 0) invalid();
         if (areaCode == null || !areaCode.matches("[0-9]{2,5}")) invalid();
         var region = repository.regions().stream().filter(row -> row.code().equals(areaCode)).findFirst()
                 .orElseThrow(() -> new PetTravelException(PetTravelException.Code.INVALID_REQUEST));
-        var data = repository.places(areaCode);
+        long total = repository.countPlaces(areaCode);
+        var data = (long) page * 10 < total ? repository.places(areaCode, page) : java.util.List.<PetTravelCatalog.Place>of();
         var state = repository.collectionState();
         boolean failed = "COLLECTION_FAILED".equals(state.errorCode());
-        String availability = region.completedAt() == null ? (data.isEmpty() ? (failed ? "FAILED" : "PREPARING") : "PARTIAL") : (failed ? "STALE" : "READY");
+        String availability = region.completedAt() == null ? (total == 0 ? (failed ? "FAILED" : "PREPARING") : "PARTIAL") : (failed ? "STALE" : "READY");
         return new PetTravelResponse.Places(areaCode, data.stream().map(row -> place(row.common())).toList(),
-                true, region.completedAt(), availability);
+                true, region.completedAt(), availability, page, 10, total, (total + 9) / 10);
     }
 
     public PetTravelResponse.Detail detail(String contentId) {
