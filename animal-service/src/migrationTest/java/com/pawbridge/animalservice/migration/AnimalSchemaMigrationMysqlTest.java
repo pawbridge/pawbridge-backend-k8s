@@ -61,7 +61,7 @@ class AnimalSchemaMigrationMysqlTest {
             statement.execute("DROP TABLE IF EXISTS flyway_schema_history");
             statement.execute("DROP TABLE IF EXISTS migration_probe");
             // Reverse dependency order; fixed allowlist confined to this guarded test schema.
-            for (String table : List.of("apms_photo_archive", "apms_photo_scan", "pet_travel_places", "pet_travel_targets", "pet_travel_regions",
+            for (String table : List.of("shelter_public_information", "apms_photo_archive", "apms_photo_scan", "pet_travel_places", "pet_travel_targets", "pet_travel_regions",
                     "pet_travel_collection_state", "pet_travel_collection_runs", "pet_travel_request_budgets",
                     "BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ",
                     "BATCH_JOB_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION",
@@ -104,7 +104,7 @@ class AnimalSchemaMigrationMysqlTest {
             try (var rows = statement.executeQuery("SELECT COUNT(*) FROM information_schema.TABLES "
                     + "WHERE TABLE_SCHEMA = 'pawbridge_animal'")) {
                 assertThat(rows.next()).isTrue();
-                assertThat(rows.getInt(1)).isEqualTo(26); // V1 17 + V2 6 + V4 2 + Flyway history.
+                assertThat(rows.getInt(1)).isEqualTo(27); // V1 17 + V2 6 + V4 2 + V5 1 + Flyway history.
             }
             for (String table : List.of("BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ")) {
                 try (var rows = statement.executeQuery("SELECT ID, UNIQUE_KEY FROM " + table)) {
@@ -540,4 +540,50 @@ class AnimalSchemaMigrationMysqlTest {
     private Connection connection() throws Exception {
         return DriverManager.getConnection(settings.url(), settings.username(), settings.password());
     }
+
+    @Test
+    void shelter_directory_preserves_identity_custom_fields_and_missing_shelters() throws Exception {
+        AnimalSchemaMigration.execute("migrate", settings, "classpath:db/migration");
+        var source = new DriverManagerDataSource(settings.url(), settings.username(), settings.password());
+        var jdbc = new JdbcTemplate(source);
+        jdbc.update("INSERT INTO shelters(id,care_reg_no,name,phone,introduction,operating_hours,created_at) VALUES (71,'123456789012345','기존 이름','직접 입력 전화','직접 소개','직접 시간',NOW())");
+        jdbc.update("INSERT INTO shelters(id,care_reg_no,name,created_at) VALUES (72,'123456789012346','누락 보충 보호소',NOW())");
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        var client = mock(com.pawbridge.animalservice.shelter.ShelterDirectoryClient.class);
+        var store = new com.pawbridge.animalservice.shelter.ShelterDirectoryStore(jdbc, mapper);
+        var collector = new com.pawbridge.animalservice.shelter.ShelterDirectoryCollector(source, client, store);
+        when(client.collect()).thenReturn(List.of(Map.of("careRegNo","123456789012345","careNm","공공 이름",
+                "careAddr","새 주소","careTel","공공 전화","lat","37.5","lng","127","weekOprStime","09:00"),
+                Map.of("careRegNo","123456789012347","careNm","신규 보호소")));
+        assertThat(collector.collect()).isEqualTo(2);
+        assertThat(collector.collect()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM shelters", Integer.class)).isEqualTo(3);
+        var existing = jdbc.queryForMap("SELECT * FROM shelters WHERE id=71");
+        assertThat(existing).containsEntry("name","공공 이름").containsEntry("phone","직접 입력 전화")
+                .containsEntry("introduction","직접 소개").containsEntry("operating_hours","직접 시간");
+        assertThat(store.find(71L).phone()).isEqualTo("공공 전화");
+        assertThat(store.find(71L).latitude()).isEqualTo(37.5);
+        when(client.collect()).thenReturn(List.of(Map.of("careRegNo","123456789012345","careNm","공공 이름")));
+        collector.collect();
+        assertThat(store.find(71L).phone()).isEqualTo("공공 전화");
+        assertThat(store.find(71L).latitude()).isEqualTo(37.5);
+        assertThat(jdbc.queryForObject("SELECT name FROM shelters WHERE id=72", String.class)).isEqualTo("누락 보충 보호소");
+        var repository = mock(com.pawbridge.animalservice.repository.ShelterRepository.class);
+        when(repository.findById(71L)).thenReturn(java.util.Optional.of(com.pawbridge.animalservice.entity.Shelter.builder()
+                .id(71L).careRegNo("123456789012345").name("공공 이름").phone("직접 입력 전화").build()));
+        var query = new com.pawbridge.animalservice.service.ShelterQueryService(repository,
+                new com.pawbridge.animalservice.mapper.ShelterMapper(), store);
+        assertThat(query.findById(71L).getPublicInformation().phone()).isEqualTo("공공 전화");
+        assertThat(query.findById(71L).getPhone()).isEqualTo("직접 입력 전화");
+        when(client.collect()).thenReturn(List.of(Map.of("careRegNo","123456789012345","careNm","공공 이름",
+                "careAddr","이전과 다른 주소","dataStdDt","2026-09-13")));
+        collector.collect();
+        assertThat(store.find(71L).latitude()).isNull();
+        when(client.collect()).thenReturn(List.of(Map.of("careRegNo","123456789012345","careNm","오래된 이름",
+                "careAddr","오래된 주소","dataStdDt","2026-09-01")));
+        collector.collect();
+        assertThat(jdbc.queryForObject("SELECT address FROM shelters WHERE id=71",String.class)).isEqualTo("이전과 다른 주소");
+
+    }
+
 }

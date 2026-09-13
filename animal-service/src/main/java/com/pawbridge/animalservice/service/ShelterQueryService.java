@@ -27,6 +27,7 @@ public class ShelterQueryService {
 
     private final ShelterRepository shelterRepository;
     private final ShelterMapper mapper;
+    private final com.pawbridge.animalservice.shelter.ShelterDirectoryStore directoryStore;
 
     /**
      * ID로 보호소 상세 조회
@@ -37,7 +38,9 @@ public class ShelterQueryService {
     public ShelterDetailResponse findById(Long id) {
         Shelter shelter = shelterRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Shelter not found: " + id));
-        return mapper.toDetailResponse(shelter);
+        var response = mapper.toDetailResponse(shelter);
+        response.setPublicInformation(directoryStore.find(shelter.getId()));
+        return response;
     }
 
     /**
@@ -49,7 +52,9 @@ public class ShelterQueryService {
     public ShelterDetailResponse findByCareRegNo(String careRegNo) {
         Shelter shelter = shelterRepository.findByCareRegNo(careRegNo)
                 .orElseThrow(() -> new EntityNotFoundException("Shelter not found: " + careRegNo));
-        return mapper.toDetailResponse(shelter);
+        var response = mapper.toDetailResponse(shelter);
+        response.setPublicInformation(directoryStore.find(shelter.getId()));
+        return response;
     }
 
     /**

@@ -128,3 +128,9 @@ apms-photo-archive:
   recheck-seconds: ${APMS_PHOTO_ARCHIVE_RECHECK_SECONDS:604800}
   interval-ms: ${APMS_PHOTO_ARCHIVE_INTERVAL_MS:900000}
   initial-delay-ms: ${APMS_PHOTO_ARCHIVE_INITIAL_DELAY_MS:60000}
+
+# Separate APMS shelter master collection. Decoding key; enable schedule only after migration.
+shelter-directory:
+  service-key: ${SHELTER_DIRECTORY_SERVICE_KEY:}
+  schedule-enabled: ${SHELTER_DIRECTORY_SCHEDULE_ENABLED:false}
+  collection-cron: ${SHELTER_DIRECTORY_CRON:0 0 4 * * *}
