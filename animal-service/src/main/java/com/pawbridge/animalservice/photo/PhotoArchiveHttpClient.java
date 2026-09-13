@@ -15,8 +15,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 public class PhotoArchiveHttpClient {
+    private static final Pattern SOURCE_PATH = Pattern.compile("^(https?://[^/?#]+)(/[^?#]*)");
     private final HttpClient http;
     private final URI optimizer;
     private final String key;
@@ -35,7 +37,15 @@ public class PhotoArchiveHttpClient {
 
     public byte[] download(String url) {
         URI uri;
-        try { uri = URI.create(url); }
+        try {
+            // APMS filenames can contain literal brackets; preserve authority, query and existing escapes.
+            var path = SOURCE_PATH.matcher(url);
+            String encoded = path.find()
+                    ? path.group(1) + path.group(2).replace("[", "%5B").replace("]", "%5D")
+                        + url.substring(path.end())
+                    : url;
+            uri = URI.create(encoded);
+        }
         catch (RuntimeException malformed) { throw new PhotoArchiveFailure("SOURCE_URL", true); }
         if (uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
                 || !Set.of("http", "https").contains(uri.getScheme())

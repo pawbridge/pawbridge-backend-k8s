@@ -32,9 +32,30 @@ class PhotoArchiveHttpClientTest {
     }
     @Test void arbitrary_host_userinfo_and_nonstandard_port_are_rejected_before_network() {
         for (String url:List.of("http://127.0.0.1/x","http://openapi.animal.go.kr.evil.test/x",
-                "http://user@openapi.animal.go.kr/x","file:///tmp/x","http://openapi.animal.go.kr:8080/x"))
+                "http://user@openapi.animal.go.kr/x","file:///tmp/x","http://openapi.animal.go.kr:8080/x",
+                "https://openapi.animal.go.kr/[photo].jpg#fragment",
+                "https://[openapi.animal.go.kr]/[photo].jpg",
+                "https://openapi.animal.go.kr.evil.test/[photo].jpg",
+                "https://user@openapi.animal.go.kr/[photo].jpg",
+                "https://openapi.animal.go.kr:8080/[photo].jpg"))
             assertThatThrownBy(()->client().download(url)).hasMessage("SOURCE_URL");
         verifyNoInteractions(transport);
+    }
+    @Test void source_path_brackets_are_encoded_without_changing_existing_escapes_or_query() {
+        var urls = Map.of(
+                "https://openapi.animal.go.kr/photos/[notice]%20dog.jpg?name=[dog]&q=%5Bok%5D",
+                "https://openapi.animal.go.kr/photos/%5Bnotice%5D%20dog.jpg?name=[dog]&q=%5Bok%5D",
+                "http://openapi.animal.go.kr/a%5Bb%5D[1].jpg",
+                "http://openapi.animal.go.kr/a%5Bb%5D%5B1%5D.jpg");
+        for (var entry : urls.entrySet()) {
+            respond(200, raw, Map.of());
+            clearInvocations(transport);
+            assertThat(client().download(entry.getKey())).isEqualTo(raw);
+            var request = ArgumentCaptor.forClass(HttpRequest.class);
+            verify(transport).sendAsync(request.capture(), org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<byte[]>>any());
+            assertThat(request.getValue().uri().toString()).isEqualTo(entry.getValue());
+            assertThat(request.getValue().headers().firstValue("X-Internal-API-Key")).isEmpty();
+        }
     }
     @Test void redirect_is_not_treated_as_photo_and_download_has_no_internal_key() {
         respond(302,new byte[0],Map.of("Location",List.of("http://127.0.0.1/private")));
