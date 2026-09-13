@@ -69,26 +69,11 @@ public class UserServiceImpl implements UserService {
             throw new AdminRoleNotAllowedException();
         }
 
-        // 6. ROLE_SHELTER인 경우 careRegNo 검증
-        if (requestDto.role() == Role.ROLE_SHELTER) {
-            // careRegNo가 없으면 에러
-            if (requestDto.careRegNo() == null || requestDto.careRegNo().isBlank()) {
-                throw new ShelterCareRegNoRequiredException();
-            }
-
-            // animal-service에 보호소 존재 여부 확인
-            try {
-                Boolean exists = animalServiceClient.existsByCareRegNo(requestDto.careRegNo());
-                if (exists == null || !exists) {
-                    throw new ShelterNotFoundException();
-                }
-                log.info("보호소 등록번호 검증 완료: {}", requestDto.careRegNo());
-            } catch (ShelterNotFoundException e) {
-                throw e;
-            } catch (Exception e) {
-                log.error("보호소 존재 여부 확인 실패: {}", e.getMessage());
-                throw new ShelterServiceUnavailableException();
-            }
+        // 보호소 권한은 로그인 후 신청·관리자 승인으로만 부여한다.
+        if (requestDto.role() != Role.ROLE_USER ||
+                (requestDto.careRegNo() != null && !requestDto.careRegNo().isBlank())) {
+            throw new com.pawbridge.userservice.shelter.ShelterApplicationException(
+                    com.pawbridge.userservice.exception.common.ErrorCode.SHELTER_APPROVAL_REQUIRED);
         }
 
         // 7. 닉네임 자동 생성
@@ -242,8 +227,15 @@ public class UserServiceImpl implements UserService {
     public void updateUserByAdmin(Long userId, AdminUserUpdateRequest request) {
         log.info("회원 수정 (관리자): userId={}, request={}", userId, request);
 
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new UserNotFoundException());
+
+        if ((request.role() == Role.ROLE_SHELTER && user.getRole() != Role.ROLE_SHELTER)
+                || (request.careRegNo() != null && !request.careRegNo().isBlank()
+                && !request.careRegNo().equals(user.getCareRegNo()))) {
+            throw new com.pawbridge.userservice.shelter.ShelterApplicationException(
+                    com.pawbridge.userservice.exception.common.ErrorCode.SHELTER_APPROVAL_REQUIRED);
+        }
 
         // 닉네임 수정
         if (request.nickname() != null && !request.nickname().isBlank()) {
