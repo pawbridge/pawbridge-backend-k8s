@@ -29,13 +29,15 @@ import org.springframework.web.util.HtmlUtils;
 public class TourApiClient {
     static final int MAX_BYTES = 1024 * 1024;
     static final String BASE = "https://apis.data.go.kr/B551011/KorPetTourService2/";
+    static final String BULK_BASE = "https://apis.data.go.kr/B551011/KorService2/";
     private static final Set<String> FIELDS = Set.of("code", "name", "contentid", "title", "addr1", "overview", "firstimage", "cpyrhtDivCd",
             "acmpyTypeCd", "acmpyPsblCpam", "acmpyNeedMtr", "etcAcmpyInfo",
             "relaAcdntRiskMtr", "relaPosesFclty", "relaFrnshPrdlst", "areacode", "sigungucode",
             "modifiedtime", "showflag", "addr2", "contenttypeid", "mapx", "mapy", "lDongRegnCd", "lDongSignguCd");
     public enum Operation {
         REGIONS("ldongCode2", 50), PLACES("areaBasedList2", 10),
-        COMMON("detailCommon2", 1), PET("detailPetTour2", 1), SYNC("petTourSyncList2", 100);
+        COMMON("detailCommon2", 1), PET("detailPetTour2", 1), SYNC("petTourSyncList2", 100),
+        PET_BULK("detailPetTour2", 100);
         final String path;
         final int rows;
         Operation(String path, int rows) { this.path = path; this.rows = rows; }
@@ -67,7 +69,8 @@ public class TourApiClient {
         CompletableFuture<HttpResponse<byte[]>> pending = null;
         try {
             if (!properties.isEnabled()) throw PetTravelException.unavailable();
-            var key = decodedKey();
+            if (operation == Operation.PET_BULK && !properties.isBulkPetEnabled()) throw PetTravelException.unavailable();
+            var key = decodedKey(operation == Operation.PET_BULK ? properties.getBulkServiceKey() : properties.getServiceKey());
             var query = new LinkedHashMap<String, String>();
             query.put("serviceKey", key);
             query.put("MobileOS", "ETC");
@@ -84,13 +87,14 @@ public class TourApiClient {
                 if (!argument.matches("[0-9]{1,2}")) throw PetTravelException.unavailable();
                 query.put("areaCode", argument);
                 query.put("arrange", "A");
-            } else if (operation != Operation.REGIONS) {
+            } else if (operation != Operation.REGIONS && operation != Operation.PET_BULK) {
                 if (!argument.matches("[0-9]{1,20}")) throw PetTravelException.unavailable();
                 query.put("contentId", argument);
             }
             var encoded = query.entrySet().stream().map(e -> encode(e.getKey()) + "=" + encode(e.getValue()))
                     .collect(java.util.stream.Collectors.joining("&"));
-            var request = HttpRequest.newBuilder(URI.create(BASE + operation.path + "?" + encoded))
+            var base = operation == Operation.PET_BULK ? BULK_BASE : BASE;
+            var request = HttpRequest.newBuilder(URI.create(base + operation.path + "?" + encoded))
                     .timeout(Duration.ofSeconds(5)).header("Accept", "application/json").GET().build();
             pending = http.sendAsync(request, info -> new LimitedBody());
             // Includes body consumption; a slow response body cannot hold a caller indefinitely.
@@ -98,7 +102,7 @@ public class TourApiClient {
             if (response.statusCode() != 200) throw PetTravelException.unavailable();
             var items = parse(response.body(), operation, key);
             int total = items.size();
-            if (operation == Operation.SYNC) {
+            if (operation == Operation.SYNC || operation == Operation.PET_BULK) {
                 var count = mapper.readTree(response.body()).path("response").path("body").path("totalCount");
                 if (!count.asText().matches("[0-9]{1,8}")) throw PetTravelException.unavailable();
                 total = Integer.parseInt(count.asText());
@@ -116,9 +120,8 @@ public class TourApiClient {
         }
     }
 
-    private String decodedKey() {
+    private String decodedKey(String raw) {
         try {
-            var raw = properties.getServiceKey();
             var key = URLDecoder.decode(raw.trim().replace("+", "%2B"), StandardCharsets.UTF_8);
             if (!key.matches("[A-Za-z0-9+/=_-]{16,2048}")) throw PetTravelException.unavailable();
             return key;
@@ -156,11 +159,14 @@ public class TourApiClient {
                     if (!values.getOrDefault("code", "").matches("[0-9]{2,5}") || values.getOrDefault("name", "").isBlank())
                         throw PetTravelException.unavailable();
                 } else if (!values.getOrDefault("contentid", "").matches("[0-9]{1,20}")
-                        || (operation != Operation.PET && operation != Operation.SYNC && values.getOrDefault("title", "").isBlank())) {
+                        || (operation != Operation.PET && operation != Operation.PET_BULK && operation != Operation.SYNC && values.getOrDefault("title", "").isBlank())) {
                     throw PetTravelException.unavailable();
                 }
                 result.add(Map.copyOf(values));
             }
+            if (operation == Operation.PET_BULK
+                    && result.stream().map(row -> row.get("contentid")).distinct().count() != result.size())
+                throw PetTravelException.unavailable();
             return List.copyOf(result);
         } catch (Exception exception) {
             throw PetTravelException.unavailable();

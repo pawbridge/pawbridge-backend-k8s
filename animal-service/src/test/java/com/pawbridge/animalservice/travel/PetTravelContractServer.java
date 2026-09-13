@@ -44,6 +44,7 @@ public final class PetTravelContractServer {
                 throw new IllegalStateException("Fresh catalog required");
             var catalog=new PetTravelCatalog(jdbc,new ObjectMapper(),new DataSourceTransactionManager(ds));
             var properties=new TourApiProperties();properties.setEnabled(true);properties.setMaxDetailsPerRun(1);
+            properties.setBulkPetEnabled("true".equals(System.getenv("PAWBRIDGE_TRAVEL_BULK_CONTRACT_TEST")));
             var client=new TourApiClient(properties,new ObjectMapper()) {
                 @Override public List<Map<String,String>> fetch(Operation operation,String argument) {
                     requests.incrementAndGet();
@@ -57,6 +58,9 @@ public final class PetTravelContractServer {
                 }
                 @Override public Page fetchPage(Operation operation,String shown,int page) {
                     requests.incrementAndGet();
+                    if (operation==Operation.PET_BULK)
+                        return new Page(List.of(Map.of("contentid","123","acmpyNeedMtr","목줄 착용·배변 봉투 지참"),
+                                Map.of("contentid","124","acmpyNeedMtr","이동장 지참")),2);
                     if ("0".equals(shown)) return new Page(hidden.get()?List.of(Map.of(
                             "contentid","125","lDongRegnCd","36110","modifiedtime","20260913000000","showflag","0")):List.of(),hidden.get()?1:0);
                     var rows=new ArrayList<Map<String,String>>(List.of(
