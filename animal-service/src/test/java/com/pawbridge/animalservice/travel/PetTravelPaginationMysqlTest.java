@@ -49,7 +49,8 @@ class PetTravelPaginationMysqlTest {
                 .as("fresh disposable schema required; do not reuse any populated database").isZero();
         new ResourceDatabasePopulator(
                 new FileSystemResource("src/migration/resources/db/migration/V2__pet_travel_catalog.sql"),
-                new FileSystemResource("src/migration/resources/db/migration/V3__pet_travel_list_first.sql")).execute(source);
+                new FileSystemResource("src/migration/resources/db/migration/V3__pet_travel_list_first.sql"),
+                new FileSystemResource("src/migration/resources/db/migration/V6__pet_travel_bulk_details.sql")).execute(source);
         catalog=context.getBean(PetTravelCatalog.class);
         service=context.getBean(PetTravelService.class);
         catalog.saveRegions(Map.of("11","서울","26","부산"),Instant.EPOCH);

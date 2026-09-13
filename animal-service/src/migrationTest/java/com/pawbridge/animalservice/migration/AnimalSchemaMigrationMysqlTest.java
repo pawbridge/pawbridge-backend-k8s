@@ -61,7 +61,7 @@ class AnimalSchemaMigrationMysqlTest {
             statement.execute("DROP TABLE IF EXISTS flyway_schema_history");
             statement.execute("DROP TABLE IF EXISTS migration_probe");
             // Reverse dependency order; fixed allowlist confined to this guarded test schema.
-            for (String table : List.of("shelter_public_information", "apms_photo_archive", "apms_photo_scan", "pet_travel_places", "pet_travel_targets", "pet_travel_regions",
+            for (String table : List.of("pet_travel_pet_details", "pet_travel_pet_collection_state", "shelter_public_information", "apms_photo_archive", "apms_photo_scan", "pet_travel_places", "pet_travel_targets", "pet_travel_regions",
                     "pet_travel_collection_state", "pet_travel_collection_runs", "pet_travel_request_budgets",
                     "BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ",
                     "BATCH_JOB_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION",
@@ -104,7 +104,7 @@ class AnimalSchemaMigrationMysqlTest {
             try (var rows = statement.executeQuery("SELECT COUNT(*) FROM information_schema.TABLES "
                     + "WHERE TABLE_SCHEMA = 'pawbridge_animal'")) {
                 assertThat(rows.next()).isTrue();
-                assertThat(rows.getInt(1)).isEqualTo(27); // V1 17 + V2 6 + V4 2 + V5 1 + Flyway history.
+                assertThat(rows.getInt(1)).isEqualTo(29); // V1 17 + V2 6 + V4 2 + V5 1 + V6 2 + Flyway history.
             }
             for (String table : List.of("BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ")) {
                 try (var rows = statement.executeQuery("SELECT ID, UNIQUE_KEY FROM " + table)) {
@@ -247,6 +247,107 @@ class AnimalSchemaMigrationMysqlTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(catalog.pending(10)).containsExactly(target);
         assertThat(catalog.detail("100")).isEmpty();
+    }
+
+    @Test
+    void bulk_conditions_are_public_before_common_details_but_unknown_ids_never_become_places() {
+        var catalog=catalog();var now=Instant.now();
+        catalog.saveRegions(Map.of("11","서울"),now);
+        catalog.observeBasic(Map.of("contentid","123","title","공원","modifiedtime","20260913000000","showflag","1"),"11",now);
+        catalog.savePetPage(catalog.petCollectionState(),new TourApiClient.Page(List.of(
+                Map.of("contentid","123","acmpyNeedMtr","목줄 필수"),
+                Map.of("contentid","999","acmpyNeedMtr","가방 필수")),2),now,now.plusSeconds(86400));
+        catalog.detailFailed(catalog.pending(1).get(0),now);
+        var detail=new PetTravelService(catalog).detail("123");
+        assertThat(detail.petInformationStatus()).isEqualTo("READY");
+        assertThat(detail.petInformationAvailable()).isTrue();
+        assertThat(detail.overview()).isNull();
+        assertThat(catalog.detail("123").orElseThrow().pet()).containsEntry("acmpyNeedMtr","목줄 필수");
+        assertThat(catalog.detail("999")).isEmpty();
+        assertThat(catalog.countPlaces("11")).isEqualTo(1);
+        assertThat(catalog.publishCommon(catalog.pending(1).get(0),Map.of("contentid","123","title","공원","overview","소개"),now.plusSeconds(60))).isTrue();
+        assertThat(new PetTravelService(catalog).detail("123").overview()).isEqualTo("소개");
+        assertThat(catalog.detail("123").orElseThrow().pet()).containsEntry("acmpyNeedMtr","목줄 필수");
+    }
+
+    @Test
+    void common_only_publication_does_not_claim_pet_information_was_collected() {
+        var catalog=catalog();var now=Instant.now();
+        catalog.observeBasic(Map.of("contentid","123","title","공원","modifiedtime","20260913000000","showflag","1"),"11",now);
+        catalog.publishCommon(catalog.pending(1).get(0),Map.of("contentid","123","title","공원"),now);
+        var detail=new PetTravelService(catalog).detail("123");
+        assertThat(detail.petInformationStatus()).isEqualTo("PREPARING");
+        assertThat(detail.petInformationFetchedAt()).isNull();
+        assertThat(detail.petInformationAvailable()).isFalse();
+    }
+
+    @Test
+    void bulk_page_checkpoint_and_rows_are_atomic_and_resume_without_duplicates() {
+        var catalog=catalog();var now=Instant.now();
+        var first=java.util.stream.IntStream.range(1000,1100).mapToObj(id->Map.of("contentid",String.valueOf(id))).toList();
+        catalog.savePetPage(catalog.petCollectionState(),new TourApiClient.Page(first,102),now,now.plusSeconds(86400));
+        var checkpoint=catalog.petCollectionState();
+        assertThat(checkpoint.nextPage()).isEqualTo(2);
+        assertThat(checkpoint.expectedTotal()).isEqualTo(102);
+        assertThat(checkpoint.completedAt()).isNull();
+        // First insert in this page must also roll back when the second row is invalid.
+        assertThatThrownBy(()->catalog.savePetPage(checkpoint,new TourApiClient.Page(List.of(
+                Map.of("contentid","2000"),Map.of("contentid","invalid")),102),now,now.plusSeconds(86400)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(catalog.petCollectionState()).isEqualTo(checkpoint);
+        assertThatThrownBy(()->catalog.savePetPage(checkpoint,new TourApiClient.Page(List.of(
+                Map.of("contentid","2000"),Map.of("contentid","1000")),102),now,now.plusSeconds(86400)))
+                .hasMessage("PET_INVENTORY_CHANGED");
+        catalog.savePetPage(checkpoint,new TourApiClient.Page(List.of(Map.of("contentid","2000"),Map.of("contentid","2001")),102),
+                now,now.plusSeconds(86400));
+        assertThat(catalog.petCollectionState().nextPage()).isEqualTo(1);
+        assertThat(catalog.petCollectionState().completedAt()).isNotNull();
+        assertThat(catalog.petCollectionState().cycleId()).isNotEqualTo(checkpoint.cycleId());
+    }
+
+    @Test
+    void bulk_total_change_does_not_advance_checkpoint_or_erase_existing_snapshots() {
+        var catalog=catalog();var now=Instant.now();
+        var first=java.util.stream.IntStream.range(1000,1100).mapToObj(id->Map.of("contentid",String.valueOf(id))).toList();
+        catalog.savePetPage(catalog.petCollectionState(),new TourApiClient.Page(first,101),now,now.plusSeconds(86400));
+        var state=catalog.petCollectionState();
+        assertThatThrownBy(()->catalog.savePetPage(state,new TourApiClient.Page(List.of(),100),now,now.plusSeconds(86400)))
+                .hasMessage("PET_INVENTORY_CHANGED");
+        assertThat(catalog.petCollectionState()).isEqualTo(state);
+        catalog.petCollectionFailed("PET_INVENTORY_CHANGED",true);
+        assertThat(catalog.petCollectionState().nextPage()).isEqualTo(1);
+        assertThat(catalog.petCollectionState().expectedTotal()).isNull();
+    }
+
+    @Test
+    void hidden_then_reappeared_place_cannot_reuse_bulk_conditions_after_common_only_refresh() {
+        var catalog=catalog();var now=Instant.now();
+        var row=new java.util.HashMap<>(Map.of("contentid","123","title","공원","modifiedtime","20260913000000","showflag","1"));
+        catalog.observeBasic(row,"11",now);
+        catalog.savePetPage(catalog.petCollectionState(),new TourApiClient.Page(List.of(Map.of("contentid","123","acmpyNeedMtr","옛 조건")),1),
+                now,now.plusSeconds(86400));
+        row.put("showflag","0");row.put("modifiedtime","20260914000000");
+        catalog.observeBasic(row,"11",now.plusSeconds(60));
+        assertThat(catalog.detail("123")).isEmpty();
+        row.put("showflag","1");row.put("modifiedtime","20260915000000");
+        catalog.observeBasic(row,"11",now.plusSeconds(120));
+        catalog.publishCommon(catalog.pending(1).get(0),Map.of("contentid","123","title","공원"),now.plusSeconds(180));
+        assertThat(catalog.detail("123").orElseThrow().pet()).isEmpty();
+        assertThat(new PetTravelService(catalog).detail("123").petInformationStatus()).isEqualTo("PREPARING");
+    }
+
+    @Test
+    void expired_bulk_snapshot_is_stale_not_confirmed_empty_and_new_cycle_replaces_conditions() {
+        var catalog=catalog();var now=Instant.now();
+        catalog.observeBasic(Map.of("contentid","123","title","공원","modifiedtime","20260913000000","showflag","1"),"11",now);
+        catalog.savePetPage(catalog.petCollectionState(),new TourApiClient.Page(List.of(Map.of("contentid","123","acmpyNeedMtr","목줄")),1),
+                now.minusSeconds(7200),now.minusSeconds(3600));
+        assertThat(new PetTravelService(catalog).detail("123").petInformationStatus()).isEqualTo("STALE");
+        // An empty field set in an actually returned record is a successful observation.
+        catalog.savePetPage(catalog.petCollectionState(),new TourApiClient.Page(List.of(Map.of("contentid","123")),1),now,now.plusSeconds(86400));
+        var detail=new PetTravelService(catalog).detail("123");
+        assertThat(detail.petInformationStatus()).isEqualTo("READY");
+        assertThat(detail.petInformationAvailable()).isFalse();
     }
 
     private PetTravelCatalog catalog() {

@@ -40,6 +40,51 @@ public class PetTravelCatalog {
         }
     }
     public record CollectionState(String phase, int nextPage, String errorCode, Instant completedAt) {}
+    public record PetCollectionState(int nextPage, Integer expectedTotal, String cycleId, Instant completedAt) {}
+
+    public PetCollectionState petCollectionState() {
+        return jdbc.queryForObject("SELECT * FROM pet_travel_pet_collection_state WHERE id=1",
+                (r,i) -> new PetCollectionState(r.getInt("next_page"),(Integer)r.getObject("expected_total"),
+                        r.getString("cycle_id"),instant(r,"completed_at")));
+    }
+
+    /** Page data and its checkpoint commit together. No inferred deletion for absent IDs. */
+    public void savePetPage(PetCollectionState expected, TourApiClient.Page page, Instant fetchedAt, Instant validUntil) {
+        long remaining=(long)page.totalCount()-(long)(expected.nextPage()-1)*100;
+        if (page.totalCount()<0 || page.items().size()!=Math.min(100,Math.max(0,remaining))
+                || (expected.nextPage()>1 && remaining<=0)
+                || (expected.expectedTotal()!=null && expected.expectedTotal()!=page.totalCount())
+                || page.items().stream().map(row->row.get("contentid")).distinct().count()!=page.items().size())
+            throw new IllegalStateException("PET_INVENTORY_CHANGED");
+        transaction.executeWithoutResult(status -> {
+            var current=jdbc.queryForObject("SELECT cycle_id FROM pet_travel_pet_collection_state WHERE id=1 FOR UPDATE",String.class);
+            var state=petCollectionState();
+            if (!expected.cycleId().equals(current) || expected.nextPage()!=state.nextPage())
+                throw new IllegalStateException("PET_CHECKPOINT_CHANGED");
+            for (var row:page.items()) {
+                String contentId=row.get("contentid");
+                if (contentId==null || !contentId.matches("[0-9]{1,20}")) throw new IllegalArgumentException("Invalid pet identity");
+                if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pet_travel_pet_details "
+                        + "WHERE provider=? AND content_id=? AND cycle_id=?)",Boolean.class,PROVIDER,contentId,expected.cycleId())))
+                    throw new IllegalStateException("PET_INVENTORY_CHANGED");
+                jdbc.update("INSERT INTO pet_travel_pet_details(provider,content_id,pet_data,source,fetched_at,valid_until,cycle_id) "
+                        + "VALUES (?,?,?,'BULK',?,?,?) ON DUPLICATE KEY UPDATE pet_data=VALUES(pet_data),source='BULK',"
+                        + "fetched_at=VALUES(fetched_at),valid_until=VALUES(valid_until),cycle_id=VALUES(cycle_id)",
+                        PROVIDER,contentId,json(row),Timestamp.from(fetchedAt),Timestamp.from(validUntil),expected.cycleId());
+            }
+            boolean complete=(long)expected.nextPage()*100>=page.totalCount();
+            jdbc.update("UPDATE pet_travel_pet_collection_state SET next_page=?,expected_total=?,cycle_id=?,"
+                    + "completed_at=IF(?,?,completed_at),error_code=NULL WHERE id=1",
+                    complete?1:expected.nextPage()+1,complete?null:page.totalCount(),
+                    complete?java.util.UUID.randomUUID().toString():expected.cycleId(),complete,Timestamp.from(fetchedAt));
+        });
+    }
+
+    public void petCollectionFailed(String code, boolean restart) {
+        if (restart) jdbc.update("UPDATE pet_travel_pet_collection_state SET next_page=1,expected_total=NULL,cycle_id=?,error_code=? WHERE id=1",
+                java.util.UUID.randomUUID().toString(),code);
+        else jdbc.update("UPDATE pet_travel_pet_collection_state SET error_code=? WHERE id=1",code);
+    }
 
     public CollectionState collectionState() {
         return jdbc.queryForObject("SELECT * FROM pet_travel_collection_state WHERE id=1",
@@ -122,12 +167,15 @@ public class PetTravelCatalog {
 
     private String publicQuery() {
         return "SELECT t.basic_data,t.basic_fetched_at,t.image_url,t.copyright_type,t.pending,t.detail_error,"
-                + "p.common_data,p.pet_data,p.published_at " + publicFrom();
+                + "p.common_data,q.pet_data,q.fetched_at AS pet_fetched_at,q.source AS pet_source,"
+                + "q.valid_until AS pet_valid_until,t.pet_changed_at " + publicFrom();
     }
 
     private String publicFrom() {
         return "FROM pet_travel_targets t "
                 + "LEFT JOIN pet_travel_places p ON p.provider=t.provider AND p.content_id=t.content_id AND p.visible=TRUE "
+                + "LEFT JOIN pet_travel_pet_details q ON q.provider=t.provider AND q.content_id=t.content_id "
+                + "AND (t.pet_valid_after IS NULL OR q.fetched_at>=t.pet_valid_after) "
                 + "WHERE t.provider=? AND t.shown=TRUE AND t.area_code IS NOT NULL "
                 + "AND (t.basic_data IS NOT NULL OR p.content_id IS NOT NULL)";
     }
@@ -179,6 +227,12 @@ public class PetTravelCatalog {
             if (modifiedTime.compareTo(previous.modifiedTime()) < 0) return;
             boolean pending = shown && (previous.pending() || refreshDetail || !previous.shown()
                     || !modifiedTime.equals(previous.modifiedTime()) || !java.util.Objects.equals(areaCode, previous.areaCode()));
+            if (shown!=previous.shown())
+                jdbc.update("UPDATE pet_travel_targets SET pet_valid_after=? WHERE provider=? AND content_id=?",
+                        Timestamp.from(observedAt),PROVIDER,contentId);
+            if (!modifiedTime.equals(previous.modifiedTime()))
+                jdbc.update("UPDATE pet_travel_targets SET pet_changed_at=? WHERE provider=? AND content_id=?",
+                        Timestamp.from(observedAt),PROVIDER,contentId);
             jdbc.update("UPDATE pet_travel_targets SET area_code=?,modified_time=?,shown=?,image_url=?,"
                     + "copyright_type=?,generation=generation+1,pending=?,observed_at=?,detail_error=IF(?,NULL,detail_error) WHERE provider=? AND content_id=?",
                     areaCode, modifiedTime, shown, imageUrl, copyrightType, pending, Timestamp.from(observedAt),
@@ -197,6 +251,14 @@ public class PetTravelCatalog {
 
     /** Returns false if discovery changed while HTTP was in flight. An empty pet map is valid. */
     public boolean publish(Target expected, Map<String, String> common, Map<String, String> pet, Instant fetchedAt) {
+        return publish(expected,common,pet,fetchedAt,true);
+    }
+
+    public boolean publishCommon(Target expected, Map<String,String> common, Instant fetchedAt) {
+        return publish(expected,common,Map.of(),fetchedAt,false);
+    }
+
+    private boolean publish(Target expected, Map<String,String> common, Map<String,String> pet, Instant fetchedAt, boolean includesPet) {
         if (!expected.contentId().equals(common.get("contentid")) || common.getOrDefault("title", "").isBlank()
                 || (!pet.isEmpty() && !expected.contentId().equals(pet.get("contentid")))) {
             throw new IllegalArgumentException("Mismatched or incomplete detail");
@@ -209,9 +271,13 @@ public class PetTravelCatalog {
             jdbc.update("INSERT INTO pet_travel_places(provider,content_id,area_code,title,common_data,pet_data,"
                     + "image_url,copyright_type,visible,published_at) VALUES (?,?,?,?,?,?,?, ?,TRUE,?) "
                     + "ON DUPLICATE KEY UPDATE area_code=VALUES(area_code),title=VALUES(title),common_data=VALUES(common_data),"
-                    + "pet_data=VALUES(pet_data),image_url=VALUES(image_url),copyright_type=VALUES(copyright_type),"
+                    + "pet_data=IF(?,VALUES(pet_data),pet_data),image_url=VALUES(image_url),copyright_type=VALUES(copyright_type),"
                     + "visible=TRUE,published_at=VALUES(published_at)", PROVIDER, current.contentId(), current.areaCode(),
-                    common.get("title"), commonJson, petJson, current.imageUrl(), current.copyrightType(), Timestamp.from(fetchedAt));
+                    common.get("title"), commonJson, petJson, current.imageUrl(), current.copyrightType(), Timestamp.from(fetchedAt),includesPet);
+            if (includesPet)
+                jdbc.update("INSERT INTO pet_travel_pet_details(provider,content_id,pet_data,source,fetched_at) VALUES (?,?,?,'LEGACY',?) "
+                        + "ON DUPLICATE KEY UPDATE pet_data=VALUES(pet_data),source='LEGACY',fetched_at=VALUES(fetched_at),valid_until=NULL,cycle_id=NULL",
+                        PROVIDER,current.contentId(),petJson,Timestamp.from(fetchedAt));
             jdbc.update("UPDATE pet_travel_targets SET pending=FALSE,detail_error=NULL,detail_attempted_at=? WHERE provider=? AND content_id=?",
                     Timestamp.from(fetchedAt),PROVIDER,current.contentId());
             return true;
@@ -250,8 +316,15 @@ public class PetTravelCatalog {
         common.remove("cpyrhtDivCd");
         if (row.getString("image_url") != null) common.put("firstimage", row.getString("image_url"));
         if (row.getString("copyright_type") != null) common.put("cpyrhtDivCd", row.getString("copyright_type"));
-        var published=instant(row,"published_at");
-        String detailStatus=row.getString("detail_error") != null ? (published == null ? "FAILED" : "STALE")
+        var published=instant(row,"pet_fetched_at");
+        boolean bulk="BULK".equals(row.getString("pet_source"));
+        var validUntil=instant(row,"pet_valid_until");
+        var changedAt=instant(row,"pet_changed_at");
+        // Compare Instants rather than the database session's wall clock/time zone.
+        boolean stale=bulk && ((validUntil!=null && !validUntil.isAfter(Instant.now()))
+                || (changedAt!=null && published.isBefore(changedAt)));
+        String detailStatus=bulk ? (stale ? "STALE" : "READY")
+                : row.getString("detail_error") != null ? (published == null ? "FAILED" : "STALE")
                 : published == null ? "PREPARING" : row.getBoolean("pending") ? "STALE" : "READY";
         return new Place(Map.copyOf(common),row.getString("pet_data") == null ? Map.of() : fields(row.getString("pet_data")),
                 published,instant(row,"basic_fetched_at"),detailStatus);
