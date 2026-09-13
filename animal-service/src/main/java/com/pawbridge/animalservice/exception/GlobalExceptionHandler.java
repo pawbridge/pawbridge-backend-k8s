@@ -186,6 +186,12 @@ public class GlobalExceptionHandler {
                 .body(ResponseDto.errorWithMessage(HttpStatus.INTERNAL_SERVER_ERROR, "데이터베이스 오류가 발생했습니다."));
     }
 
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<ResponseDto<Void>> handleUploadSizeExceeded() {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(ResponseDto.errorWithMessage(HttpStatus.PAYLOAD_TOO_LARGE, "사진 크기 제한을 초과했습니다"));
+    }
+
     /**
      * Exception 처리
      * - 처리되지 않은 모든 예외는 500 반환
