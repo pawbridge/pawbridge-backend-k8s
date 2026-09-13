@@ -97,6 +97,11 @@ public class ShelterQueryService {
         return shelters.map(mapper::toResponse);
     }
 
+    public Page<ShelterResponse> searchByKeywordAndAddress(String keyword, String address, Pageable pageable) {
+        return shelterRepository.findByKeywordAndAddress(keyword.trim(), address.trim(), pageable)
+                .map(mapper::toResponse);
+    }
+
     /**
      * 여러 개의 careRegNo로 Shelter 조회
      * - 배치 작업에서 대량 조회
