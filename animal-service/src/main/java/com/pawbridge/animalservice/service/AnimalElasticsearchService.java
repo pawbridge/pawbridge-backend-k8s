@@ -604,6 +604,8 @@ public class AnimalElasticsearchService {
             builder.shelterAddress(addressBuilder.toString());
         }
 
+        builder.shelterId(request.getShelterId());
+
         // 페이징 및 정렬
         builder.page(pageable.getPageNumber());
         builder.size(pageable.getPageSize());

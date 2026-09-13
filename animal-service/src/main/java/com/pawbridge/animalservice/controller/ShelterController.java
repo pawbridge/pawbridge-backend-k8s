@@ -54,7 +54,10 @@ public class ShelterController {
         Page<ShelterResponse> response;
 
         // 필터 조건에 따라 적절한 Facade 메서드 호출
-        if (keyword != null) {
+        if (org.springframework.util.StringUtils.hasText(keyword)
+                && org.springframework.util.StringUtils.hasText(address)) {
+            response = shelterFacade.searchByKeywordAndAddress(keyword, address, pageable);
+        } else if (keyword != null) {
             // 통합 검색 (이름 또는 주소)
             response = shelterFacade.searchByNameOrAddress(keyword, pageable);
         } else if (name != null) {
