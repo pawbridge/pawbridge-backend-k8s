@@ -12,9 +12,11 @@ public final class PetTravelResponse {
     // imageUrl is a provider-hosted Type1/Type3 photo or null; consumers must show
     // attribution and preserve the complete image without cropping or modification.
     public record Place(String contentId, String title, String address, String imageUrl) {}
-    public record Places(String areaCode, List<Place> items, boolean previewOnly, Instant fetchedAt, String availability) {
+    // previewOnly is retained for older clients; paged clients use the page metadata.
+    public record Places(String areaCode, List<Place> items, boolean previewOnly, Instant fetchedAt, String availability,
+                         int page, int size, long totalElements, long totalPages) {
         public Places(String areaCode, List<Place> items, boolean previewOnly, Instant fetchedAt) {
-            this(areaCode, items, previewOnly, fetchedAt, "READY");
+            this(areaCode, items, previewOnly, fetchedAt, "READY", 0, 10, items.size(), items.isEmpty() ? 0 : 1);
         }
     }
     public record Conditions(String areas, String allowedAnimals, String requirements, String otherInformation,

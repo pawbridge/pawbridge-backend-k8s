@@ -16,10 +16,39 @@ class PetTravelServiceTest {
     private void detail(Map<String,String> common,Map<String,String> pet) {
         when(catalog.detail("123")).thenReturn(Optional.of(new PetTravelCatalog.Place(common,pet,now)));
     }
+    @Test void givenSecondPage__whenRead__thenReturnStoredPageAndTotal() {
+        when(catalog.regions()).thenReturn(List.of(new PetTravelCatalog.Region("11","서울",now,now)));
+        when(catalog.collectionState()).thenReturn(new PetTravelCatalog.CollectionState("HIDDEN",1,null,now));
+        when(catalog.countPlaces("11")).thenReturn(21L);
+        when(catalog.places("11",1)).thenReturn(List.of(new PetTravelCatalog.Place(row(),Map.of(),now)));
+        var response=service.places("11",1);
+        assertThat(response.page()).isEqualTo(1);
+        assertThat(response.size()).isEqualTo(10);
+        assertThat(response.totalElements()).isEqualTo(21);
+        assertThat(response.totalPages()).isEqualTo(3);
+        assertThat(response.items()).extracting(PetTravelResponse.Place::contentId).containsExactly("123");
+    }
+    @ParameterizedTest @ValueSource(ints={3,Integer.MAX_VALUE})
+    void givenPageBeyondInventory__whenRead__thenEmptyPageRetainsPartialState(int page) {
+        when(catalog.regions()).thenReturn(List.of(new PetTravelCatalog.Region("11","서울",now,null)));
+        when(catalog.collectionState()).thenReturn(new PetTravelCatalog.CollectionState("SHOWN",1,null,null));
+        when(catalog.countPlaces("11")).thenReturn(21L);
+        var response=service.places("11",page);
+        assertThat(response.items()).isEmpty();
+        assertThat(response.totalElements()).isEqualTo(21);
+        assertThat(response.availability()).isEqualTo("PARTIAL");
+        verify(catalog,never()).places(anyString(),anyInt());
+    }
+    @Test void givenNegativePage__whenRead__thenRejectBeforeDatabase() {
+        assertThatThrownBy(()->service.places("11",-1)).isInstanceOf(PetTravelException.class)
+                .extracting("code").isEqualTo(PetTravelException.Code.INVALID_REQUEST);
+        verifyNoInteractions(catalog);
+    }
     @Test void givenStoredData__whenRead__thenNoKeyOrRedisDependencies() {
         when(catalog.regions()).thenReturn(List.of(new PetTravelCatalog.Region("11","서울",now,now)));
         when(catalog.collectionState()).thenReturn(new PetTravelCatalog.CollectionState("HIDDEN",1,null,now));
-        when(catalog.places("11")).thenReturn(List.of(new PetTravelCatalog.Place(row(),Map.of(),now)));
+        when(catalog.countPlaces("11")).thenReturn(1L);
+        when(catalog.places("11",0)).thenReturn(List.of(new PetTravelCatalog.Place(row(),Map.of(),now)));
         assertThat(service.places("11").items()).containsExactly(new PetTravelResponse.Place("123","공원","서울",null));
         assertThat(service.places("11").availability()).isEqualTo("READY");
         detail(row(),Map.of("acmpyPsblCpam","시각 장애인 안내견","acmpyNeedMtr","목줄"));

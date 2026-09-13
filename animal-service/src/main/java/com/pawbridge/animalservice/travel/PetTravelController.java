@@ -15,8 +15,9 @@ public class PetTravelController {
     public PetTravelResponse.Regions regions() { return service.regions(); }
 
     @GetMapping
-    public PetTravelResponse.Places places(@RequestParam(required = false) String areaCode) {
-        return service.places(areaCode);
+    public PetTravelResponse.Places places(@RequestParam(required = false) String areaCode,
+                                          @RequestParam(defaultValue = "0") int page) {
+        return service.places(areaCode, page);
     }
 
     @GetMapping("/{contentId}")
@@ -36,5 +37,10 @@ public class PetTravelController {
     @ExceptionHandler(org.springframework.dao.DataAccessException.class)
     public ResponseEntity<Map<String, String>> databaseFailure() {
         return failure(PetTravelException.unavailable());
+    }
+
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, String>> invalidParameter() {
+        return failure(new PetTravelException(PetTravelException.Code.INVALID_REQUEST));
     }
 }
