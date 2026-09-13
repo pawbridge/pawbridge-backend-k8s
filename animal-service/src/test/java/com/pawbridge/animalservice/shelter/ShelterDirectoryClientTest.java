@@ -19,6 +19,20 @@ class ShelterDirectoryClientTest {
         assertThat(client.collect()).containsExactly(row);
         verify(client,times(1)).fetch(2);
     }
+    @Test void givenEmptyObjectLastPage_whenCollecting_thenReturnsParsedInventory() throws Exception {
+        String item = new ObjectMapper().writeValueAsString(row);
+        doAnswer(invocation -> client.parse(json("{\"item\":[" + item + "]}"))).when(client).fetch(1);
+        doAnswer(invocation -> client.parse(json("{}"))).when(client).fetch(2);
+
+        assertThat(client.collect()).containsExactly(row);
+        verify(client, never()).fetch(3);
+    }
+    @Test void givenEmptyObjectFirstPage_whenCollecting_thenRejectsEmptySnapshot() {
+        doAnswer(invocation -> client.parse(json("{}"))).when(client).fetch(1);
+
+        assertThatThrownBy(client::collect).hasMessage("SHELTER_DIRECTORY_UNAVAILABLE");
+        verify(client, never()).fetch(2);
+    }
     @Test void givenRepeatedPage_whenCollecting_thenFailsInsteadOfLooping() {
         doReturn(List.of(row)).when(client).fetch(anyInt());
         assertThatThrownBy(client::collect).hasMessage("SHELTER_DIRECTORY_UNAVAILABLE");
@@ -38,7 +52,7 @@ class ShelterDirectoryClientTest {
         for(String raw:List.of("{}","{\"header\":{\"resultCode\":\"30\"}}","<error>test-key</error>"))
             assertThatThrownBy(()->client.parse(raw.getBytes(StandardCharsets.UTF_8)))
                 .hasMessage("SHELTER_DIRECTORY_UNAVAILABLE").hasNoCause();
-        assertThatThrownBy(()->client.parse(json("{}"))).hasMessage("SHELTER_DIRECTORY_UNAVAILABLE");
+        assertThatThrownBy(()->client.parse(json("{\"unexpected\":[]}"))).hasMessage("SHELTER_DIRECTORY_UNAVAILABLE");
     }
     @Test void givenInvalidCoordinatePair_whenNormalizing_thenDoesNotPublishOrEraseCoordinates() {
         assertThat(ShelterPublicInformation.details(Map.of("lat","0","lng","127"))).doesNotContainKeys("latitude","longitude");
