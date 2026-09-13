@@ -73,6 +73,7 @@ public class ShelterDirectoryClient {
             if (!root.path("body").isObject()) throw unavailable();
             var items = root.path("body").path("items");
             if (items.isTextual() && items.asText().isBlank()) return List.of();
+            if (items.isObject() && items.isEmpty()) return List.of();
             if (!items.isObject() || !items.has("item")) throw unavailable();
             var node = items.get("item");
             if (!node.isArray() && !node.isObject()) throw unavailable();
