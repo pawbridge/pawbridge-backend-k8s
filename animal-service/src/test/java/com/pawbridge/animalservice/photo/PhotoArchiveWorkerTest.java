@@ -79,6 +79,8 @@ class PhotoArchiveWorkerTest {
         new ApplicationContextRunner().withUserConfiguration(PhotoArchiveConfiguration.class).run(context -> {
             assertThat(context).hasNotFailed(); assertThat(context).doesNotHaveBean(PhotoArchiveWorker.class);
             assertThat(context).doesNotHaveBean(PhotoArchiveProperties.class);
+            assertThat(context).doesNotHaveBean(PhotoArchiveStorageProperties.class);
+            assertThat(context).doesNotHaveBean(PhotoArchiveObjectStorage.class);
         });
     }
     @Test void retry_delay_grows_but_is_capped() {

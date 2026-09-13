@@ -7,7 +7,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
-public class PhotoArchiveObjectStorage {
+public class PhotoArchiveObjectStorage implements AutoCloseable {
     private final S3Client s3;
     private final String bucket;
     public PhotoArchiveObjectStorage(S3Client s3, String bucket) { this.s3 = s3; this.bucket = bucket; }
@@ -18,6 +18,11 @@ public class PhotoArchiveObjectStorage {
                         .overrideConfiguration(c -> c.apiCallTimeout(Duration.ofSeconds(30)).apiCallAttemptTimeout(Duration.ofSeconds(15)))
                         .build(), RequestBody.fromBytes(photo.bytes()));
         if (!matchesExisting(photo)) throw new PhotoArchiveFailure("STORAGE_NOT_VISIBLE", false);
+    }
+
+    @Override
+    public void close() {
+        s3.close();
     }
 
     private boolean matchesExisting(ArchivedPhoto photo) {

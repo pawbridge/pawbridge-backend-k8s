@@ -114,6 +114,11 @@ management:
 apms-photo-archive:
   enabled: ${APMS_PHOTO_ARCHIVE_ENABLED:false}
   bucket: ${APMS_PHOTO_ARCHIVE_BUCKET:}
+  storage:
+    endpoint: ${APMS_PHOTO_ARCHIVE_ENDPOINT:}
+    region: ${APMS_PHOTO_ARCHIVE_REGION:auto}
+    access-key-id: ${APMS_PHOTO_ARCHIVE_ACCESS_KEY_ID:}
+    secret-access-key: ${APMS_PHOTO_ARCHIVE_SECRET_ACCESS_KEY:}
   optimizer-url: ${APMS_PHOTO_OPTIMIZER_URL:}
   internal-api-key: ${APMS_PHOTO_OPTIMIZER_INTERNAL_API_KEY:}
   scan-size: ${APMS_PHOTO_ARCHIVE_SCAN_SIZE:50}
