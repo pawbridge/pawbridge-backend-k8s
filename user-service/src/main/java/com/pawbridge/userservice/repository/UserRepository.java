@@ -17,6 +17,12 @@ import java.util.Optional;
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
 
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from User u where u.userId = :id")
+    Optional<User> findByIdForUpdate(@Param("id") Long id);
+
+    Page<User> findByCareRegNoAndRole(String careRegNo, Role role, Pageable pageable);
+
     Optional<User> findByEmail(String email);
 
     /**

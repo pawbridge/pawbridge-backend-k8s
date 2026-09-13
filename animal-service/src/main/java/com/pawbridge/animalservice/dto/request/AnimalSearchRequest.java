@@ -76,4 +76,7 @@ public class AnimalSearchRequest {
      * - breed, specialMark, happenPlace에서 OR 검색
      */
     private String keyword;
+
+    /** 보호소 내부 ID (해당 보호소의 동물만 조회) */
+    private Long shelterId;
 }

@@ -20,6 +20,8 @@ import java.time.LocalDateTime;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ShelterDetailResponse {
 
+    private com.pawbridge.animalservice.shelter.ShelterPublicInformation publicInformation;
+
     // 기본 정보
     /**
      * 보호소 ID
