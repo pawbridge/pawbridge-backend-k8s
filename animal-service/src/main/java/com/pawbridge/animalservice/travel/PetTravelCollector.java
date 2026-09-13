@@ -50,6 +50,7 @@ public class PetTravelCollector {
         int[] counts=new int[3];
         boolean inventoryCompleted=false;
         try {
+            String petError=properties.isBulkPetEnabled() ? collectPetPages(connection,counts) : null;
             reserve(connection,TourApiClient.Operation.REGIONS,counts);
             var regions=new LinkedHashMap<String,String>();
             for (var row:client.fetch(TourApiClient.Operation.REGIONS,"")) regions.put(row.get("code"),row.get("name"));
@@ -88,10 +89,14 @@ public class PetTravelCollector {
                     reserve(connection,TourApiClient.Operation.COMMON,counts);
                     var common=client.fetch(TourApiClient.Operation.COMMON,target.contentId());
                     if (common.size()!=1) throw PetTravelException.unavailable();
-                    reserve(connection,TourApiClient.Operation.PET,counts);
-                    var pet=client.fetch(TourApiClient.Operation.PET,target.contentId());
-                    if (pet.size()>1) throw PetTravelException.unavailable();
-                    if (catalog.publish(target,common.get(0),pet.isEmpty()?Map.of():pet.get(0),clock.instant())) counts[2]++;
+                    if (properties.isBulkPetEnabled()) {
+                        if (catalog.publishCommon(target,common.get(0),clock.instant())) counts[2]++;
+                    } else {
+                        reserve(connection,TourApiClient.Operation.PET,counts);
+                        var pet=client.fetch(TourApiClient.Operation.PET,target.contentId());
+                        if (pet.size()>1) throw PetTravelException.unavailable();
+                        if (catalog.publish(target,common.get(0),pet.isEmpty()?Map.of():pet.get(0),clock.instant())) counts[2]++;
+                    }
                     } catch (BudgetExhausted exception) {
                         throw exception;
                     } catch (Exception exception) {
@@ -100,7 +105,7 @@ public class PetTravelCollector {
                         detailFailures++;
                     }
                 }
-                if (inventoryCompleted && catalog.pending(1).isEmpty()) {
+                if (inventoryCompleted && catalog.pending(1).isEmpty() && petError==null) {
                     if (catalog.hasUnresolvedRegions()) {
                         // Keep unresolved rows durable, publish healthy rows, and retry discovery next run.
                         catalog.finishRun(id,"PARTIAL","REGION_UNRESOLVED",counts[0],counts[1],counts[2],clock.instant());
@@ -110,7 +115,7 @@ public class PetTravelCollector {
                     return new Result("COMPLETED",counts[0],counts[1],counts[2]);
                 }
             }
-            catalog.finishRun(id,"PARTIAL",detailFailures>0?"DETAIL_FAILED":null,counts[0],counts[1],counts[2],clock.instant());
+            catalog.finishRun(id,"PARTIAL",petError!=null?petError:detailFailures>0?"DETAIL_FAILED":null,counts[0],counts[1],counts[2],clock.instant());
             return new Result("PARTIAL",counts[0],counts[1],counts[2]);
         } catch (BudgetExhausted exception) {
             catalog.finishRun(id,"QUOTA","REQUEST_BUDGET",counts[0],counts[1],counts[2],clock.instant());
@@ -119,6 +124,33 @@ public class PetTravelCollector {
             catalog.finishRun(id,"FAILED","COLLECTION_FAILED",counts[0],counts[1],counts[2],clock.instant());
             // Do not retain upstream URL/credential-bearing causes in Batch metadata.
             throw new IllegalStateException("TRAVEL_COLLECTION_FAILED");
+        }
+    }
+
+    /** Separate provider operation/budget: a failed bulk page never triggers N individual requests. */
+    private String collectPetPages(Connection connection,int[] counts) throws Exception {
+        try {
+            for (int pages=0;pages<properties.getMaxBulkPagesPerRun();pages++) {
+                var state=catalog.petCollectionState();
+                if (state.nextPage()==1 && state.completedAt()!=null
+                        && state.completedAt().plus(Duration.ofDays(1)).isAfter(clock.instant())) return null;
+                reserve(connection,TourApiClient.Operation.PET_BULK,counts);
+                var startedAt=clock.instant();
+                var page=client.fetchPage(TourApiClient.Operation.PET_BULK,"",state.nextPage());
+                if (!lock(connection,"SELECT IS_USED_LOCK(?)=CONNECTION_ID()"))
+                    throw new IllegalStateException("TRAVEL_LOCK_LOST");
+                catalog.savePetPage(state,page,startedAt,startedAt.plus(Duration.ofDays(properties.getDetailRefreshDays())));
+                if ((long)state.nextPage()*100>=page.totalCount()) return null;
+            }
+            return "PET_BULK_PENDING";
+        } catch (BudgetExhausted exception) {
+            catalog.petCollectionFailed("PET_BULK_QUOTA",false);
+            return "PET_BULK_QUOTA";
+        } catch (Exception exception) {
+            if ("TRAVEL_LOCK_LOST".equals(exception.getMessage())) throw exception;
+            boolean changed="PET_INVENTORY_CHANGED".equals(exception.getMessage());
+            catalog.petCollectionFailed(changed?"PET_INVENTORY_CHANGED":"PET_BULK_FAILED",changed);
+            return "PET_BULK_FAILED";
         }
     }
 

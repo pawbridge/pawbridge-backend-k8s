@@ -20,6 +20,48 @@ class TourApiClientTest {
     private final TourApiClient client = new TourApiClient(properties, new ObjectMapper(), http);
 
     @Test
+    void givenBulkPetPage__whenFetch__thenUseSeparateKeyAndServiceWithoutContentId() {
+        properties.setBulkPetEnabled(true);
+        properties.setBulkServiceKey("bulkSynthetic1234%2B%2F%3D");
+        reply(200, bulkPayload("[{\"contentid\":\"123\",\"acmpyNeedMtr\":\"목줄\"}]",101));
+        var page=client.fetchPage(TourApiClient.Operation.PET_BULK,"",2);
+        assertThat(page.totalCount()).isEqualTo(101);
+        assertThat(page.items().get(0)).containsEntry("acmpyNeedMtr","목줄");
+        var request=ArgumentCaptor.forClass(HttpRequest.class);
+        verify(http).sendAsync(request.capture(),any(HttpResponse.BodyHandler.class));
+        assertThat(request.getValue().uri().getPath()).isEqualTo("/B551011/KorService2/detailPetTour2");
+        assertThat(request.getValue().uri().getRawQuery()).contains("pageNo=2","numOfRows=100","serviceKey=bulkSynthetic1234%2B%2F%3D")
+                .doesNotContain("contentId","syntheticOnly");
+    }
+
+    @Test
+    void givenDisabledOrMissingBulkKey__whenFetch__thenNeverFallbackToOldKey() {
+        assertThatThrownBy(()->client.fetch(TourApiClient.Operation.PET_BULK,"")).hasMessage("UNAVAILABLE");
+        properties.setBulkPetEnabled(true);
+        assertThatThrownBy(()->client.fetch(TourApiClient.Operation.PET_BULK,"")).hasMessage("UNAVAILABLE");
+        verifyNoInteractions(http);
+    }
+
+    @Test
+    void givenDuplicateBulkIdentities__whenFetch__thenRejectPage() {
+        properties.setBulkPetEnabled(true);properties.setBulkServiceKey(KEY);
+        reply(200,bulkPayload("[{\"contentid\":\"123\"},{\"contentid\":\"123\"}]",2));
+        assertThatThrownBy(()->client.fetch(TourApiClient.Operation.PET_BULK,"")).hasMessage("UNAVAILABLE").hasNoCause();
+    }
+
+    @Test
+    void givenBulkWithoutTotalCount__whenFetch__thenDoNotInferCompletionFromPageSize() {
+        properties.setBulkPetEnabled(true);properties.setBulkServiceKey(KEY);
+        reply(200,payload("{\"contentid\":\"123\"}"));
+        assertThatThrownBy(()->client.fetch(TourApiClient.Operation.PET_BULK,"")).hasMessage("UNAVAILABLE");
+    }
+
+    private static byte[] bulkPayload(String rows,int total) {
+        return ("{\"response\":{\"header\":{\"resultCode\":\"0000\"},\"body\":{\"totalCount\":"+total
+                +",\"items\":{\"item\":"+rows+"}}}}").getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Test
     void givenHiddenSyncPage__whenFetch__thenPreserveMetadataAndExplicitPaging() {
         reply(200, ("{\"response\":{\"header\":{\"resultCode\":\"0000\"},\"body\":{\"totalCount\":101,"
                 + "\"items\":{\"item\":[{\"contentid\":\"123\",\"showflag\":\"0\",\"lDongRegnCd\":\"36110\","
