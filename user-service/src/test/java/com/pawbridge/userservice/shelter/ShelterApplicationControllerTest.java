@@ -15,7 +15,7 @@ class ShelterApplicationControllerTest {
     private MockMvc mvc;
     @BeforeEach void setup() {
         mvc = MockMvcBuilders.standaloneSetup(new ShelterApplicationController(service),
-                new AdminShelterApplicationController(service))
+                new AdminShelterApplicationController(service), new AdminShelterMemberController(service))
                 .setControllerAdvice(new GlobalExceptionRestAdvice()).build();
     }
     @Test void blankShelterNameDoesNotSubmit() throws Exception {
@@ -52,5 +52,18 @@ class ShelterApplicationControllerTest {
                 .content("{\"careRegNo\":\"123\",\"note\":\"verified\"}"))
                 .andExpect(status().isOk());
         verify(service).approve("Bearer admin", 5L, "123", "verified");
+    }
+    @Test void memberLookupPassesRegistrationAndPagination() throws Exception {
+        when(service.members("Bearer admin", "123", 2, 10)).thenReturn(org.springframework.data.domain.Page.empty(org.springframework.data.domain.PageRequest.of(2, 10)));
+        mvc.perform(get("/api/v1/admin/users/shelters/123/members")
+                .header("Authorization", "Bearer admin").param("page", "2").param("size", "10"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.content").isArray());
+        verify(service).members("Bearer admin", "123", 2, 10);
+    }
+    @Test void memberLookupPropagatesForbidden() throws Exception {
+        when(service.members("Bearer member", "123", 0, 20))
+                .thenThrow(new ShelterApplicationException(ErrorCode.SHELTER_APPLICATION_FORBIDDEN));
+        mvc.perform(get("/api/v1/admin/users/shelters/123/members").header("Authorization", "Bearer member"))
+                .andExpect(status().isForbidden());
     }
 }

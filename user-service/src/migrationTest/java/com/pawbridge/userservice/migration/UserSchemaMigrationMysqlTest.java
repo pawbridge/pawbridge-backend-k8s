@@ -204,6 +204,31 @@ class UserSchemaMigrationMysqlTest {
         }
     }
 
+    @Test
+    void linked_members_follow_current_role_and_registration_with_optional_approval() throws Exception {
+        UserSchemaMigration.execute("migrate", settings, "classpath:db/migration");
+        try (var runtime = new ShelterTransactionHarness(settings.url(), settings.username(), settings.password())) {
+            assertThat(runtime.service.members(runtime.adminToken, "123", 0, 20).getContent()).isEmpty();
+            org.mockito.Mockito.when(runtime.animals.getShelterByCareRegNo("123")).thenReturn(
+                    com.pawbridge.userservice.dto.response.ShelterResponse.builder().id(2L).careRegNo("123").build());
+            runtime.service.approve(runtime.adminToken, runtime.applicationId, "123", "verified");
+            var linked = runtime.service.members(runtime.adminToken, "123", 0, 20).getContent();
+            assertThat(linked).hasSize(1);
+            assertThat(linked.get(0).userId()).isEqualTo(runtime.memberId);
+            assertThat(linked.get(0).approvalApplicationId()).isEqualTo(runtime.applicationId);
+            assertThat(runtime.service.members(runtime.adminToken, "999", 0, 20).getContent()).isEmpty();
+            runtime.tx.executeWithoutResult(tx -> runtime.users.findById(runtime.memberId).orElseThrow()
+                    .updateRole(com.pawbridge.userservice.entity.Role.ROLE_USER));
+            assertThat(runtime.service.members(runtime.adminToken, "123", 0, 20).getContent()).isEmpty();
+            runtime.tx.executeWithoutResult(tx -> runtime.users.save(
+                    com.pawbridge.userservice.entity.User.createLocalUser("legacy@example.invalid", "legacy",
+                            "unused", "legacy", com.pawbridge.userservice.entity.Role.ROLE_SHELTER, "123")));
+            var legacy = runtime.service.members(runtime.adminToken, "123", 0, 20).getContent();
+            assertThat(legacy).hasSize(1);
+            assertThat(legacy.get(0).approvalApplicationId()).isNull();
+        }
+    }
+
     private Connection connection() throws Exception {
         return DriverManager.getConnection(settings.url(), settings.username(), settings.password());
     }

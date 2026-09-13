@@ -84,6 +84,19 @@ public class ShelterApplicationService {
         return result.map(a -> AdminShelterApplicationResponse.from(a, applicants.get(a.getUserId())));
     }
 
+    public Page<ShelterMemberResponse> members(String authorization, String careRegNo, int page, int size) {
+        administrator(authorization);
+        String registration = ShelterApplication.requiredText(careRegNo, 50);
+        Pageable validated = page(page, size);
+        Pageable membersPage = PageRequest.of(validated.getPageNumber(), validated.getPageSize(),
+                Sort.by(Sort.Direction.DESC, "userId"));
+        return users.findByCareRegNoAndRole(registration, Role.ROLE_SHELTER, membersPage).map(user ->
+                new ShelterMemberResponse(user.getUserId(), user.getName(), user.getEmail(),
+                        applications.findFirstByUserIdAndCareRegNoAndStatusOrderByIdDesc(
+                                user.getUserId(), registration, ShelterApplicationStatus.APPROVED)
+                                .map(ShelterApplication::getId).orElse(null)));
+    }
+
     public AdminShelterApplicationResponse detail(String authorization, Long id) {
         administrator(authorization);
         ShelterApplication a = find(id);

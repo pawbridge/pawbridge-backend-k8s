@@ -140,4 +140,35 @@ class ShelterApplicationServiceTest {
         assertThatThrownBy(() -> service.list(adminAuth, null, 0, 101)).isInstanceOf(ApplicationException.class);
         verifyNoInteractions(applications);
     }
+    @Test void membersRequireCurrentAdminRole() {
+        when(users.findById(10L)).thenReturn(Optional.of(user));
+        assertThatThrownBy(() -> service.members(userAuth, "123", 0, 20)).isInstanceOf(ApplicationException.class);
+        verify(users, never()).findByCareRegNoAndRole(any(), any(), any());
+    }
+    @Test void legacyShelterMemberHasNoInventedApprovalHistory() {
+        when(users.findById(1L)).thenReturn(Optional.of(admin));
+        user.updateRole(Role.ROLE_SHELTER);
+        user.updateCareRegNo("123");
+        when(users.findByCareRegNoAndRole(eq("123"), eq(Role.ROLE_SHELTER), any()))
+                .thenReturn(new PageImpl<>(List.of(user)));
+        when(applications.findFirstByUserIdAndCareRegNoAndStatusOrderByIdDesc(10L, "123", ShelterApplicationStatus.APPROVED))
+                .thenReturn(Optional.empty());
+        var result = service.members(adminAuth, "123", 0, 20).getContent();
+        assertThat(result).containsExactly(new ShelterMemberResponse(10L, "사용자", "user@example.invalid", null));
+        verify(users).findByCareRegNoAndRole(eq("123"), eq(Role.ROLE_SHELTER),
+                argThat(p -> p.getPageSize() == 20 && p.getSort().getOrderFor("userId") != null));
+    }
+    @Test void linkedMemberIncludesExistingApprovalOnly() {
+        when(users.findById(1L)).thenReturn(Optional.of(admin));
+        when(users.findByCareRegNoAndRole(eq("123"), eq(Role.ROLE_SHELTER), any())).thenReturn(new PageImpl<>(List.of(user)));
+        var approval = mock(ShelterApplication.class);
+        when(approval.getId()).thenReturn(17L);
+        when(applications.findFirstByUserIdAndCareRegNoAndStatusOrderByIdDesc(10L, "123", ShelterApplicationStatus.APPROVED)).thenReturn(Optional.of(approval));
+        assertThat(service.members(adminAuth, "123", 0, 20).getContent().get(0).approvalApplicationId()).isEqualTo(17L);
+    }
+    @Test void membersRejectUnboundedPage() {
+        when(users.findById(1L)).thenReturn(Optional.of(admin));
+        assertThatThrownBy(() -> service.members(adminAuth, "123", 0, 101)).isInstanceOf(ApplicationException.class);
+        verify(users, never()).findByCareRegNoAndRole(any(), any(), any());
+    }
 }
