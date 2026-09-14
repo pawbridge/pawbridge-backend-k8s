@@ -23,6 +23,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
@@ -100,6 +101,9 @@ public class ApmsAnimalBatchJob {
                 .processor(animalItemProcessor)
                 .writer(animalItemWriter)
                 .listener(animalItemProcessor)  // beforeStep() 호출 보장 (shelterCache/existingAnimalIdMap 초기화)
+                .faultTolerant()
+                .retry(CannotAcquireLockException.class)
+                .retryLimit(3)
                 .taskExecutor(batchTaskExecutor) // 멀티스레딩: 청크를 병렬로 처리
                 .build();
     }
@@ -126,7 +130,15 @@ public class ApmsAnimalBatchJob {
         return new StepBuilder("apmsCollectionVerificationStep", jobRepository)
                 .tasklet((contribution, chunkContext) -> {
                     var execution = contribution.getStepExecution().getJobExecution();
-                    if (execution.getExecutionContext().getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT, 0) > 0) {
+                    int incomplete = execution.getExecutionContext()
+                            .getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT, 0);
+                    int countMismatches = execution.getExecutionContext()
+                            .getInt(ApmsAnimalSnapshot.COUNT_MISMATCH_COUNT, 0);
+                    if (incomplete > 0 && incomplete == countMismatches) {
+                        log.warn("[BATCH] APMS count mismatch remains retryable: queries={}", incomplete);
+                        return RepeatStatus.FINISHED;
+                    }
+                    if (incomplete > 0) {
                         throw new IllegalStateException("APMS collection incomplete; inspect job execution context");
                     }
                     return RepeatStatus.FINISHED;

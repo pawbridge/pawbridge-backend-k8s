@@ -26,6 +26,7 @@ import org.springframework.batch.support.transaction.ResourcelessTransactionMana
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -102,6 +103,20 @@ class ApmsAnimalBatchJobTest {
     }
 
     @Test
+    void givenTransientDatabaseLock__whenChunkIsRetried__thenWriteAndIndexOnceRecovered() throws Exception {
+        when(shelterPrep.execute(any(), any())).thenReturn(RepeatStatus.FINISHED);
+        var item = new ApmsAnimal();
+        when(reader.read()).thenReturn(item).thenReturn(null);
+        when(processor.process(item)).thenReturn(Animal.builder().build());
+        doThrow(new CannotAcquireLockException("deadlock")).doNothing().when(writer).write(any());
+
+        assertThat(runJob().getStatus()).isEqualTo(BatchStatus.COMPLETED);
+
+        verify(writer, times(2)).write(any());
+        verify(indexService).indexAllAnimals();
+    }
+
+    @Test
     void givenSuccessfulIngestion__whenJobRuns__thenIndexAfterWriting() throws Exception {
         when(shelterPrep.execute(any(), any())).thenReturn(RepeatStatus.FINISHED);
         var item = new ApmsAnimal();
@@ -143,6 +158,27 @@ class ApmsAnimalBatchJobTest {
             assertThat(step.getStepName()).isEqualTo("apmsCollectionVerificationStep");
             assertThat(step.getStatus()).isEqualTo(BatchStatus.FAILED);
         });
+        var order = inOrder(writer, indexService);
+        order.verify(writer).write(any());
+        order.verify(indexService).indexAllAnimals();
+    }
+
+    @Test
+    void givenOnlyCountMismatch__whenHealthyAnimalsWrittenAndIndexed__thenCompleteForScheduledRetry() throws Exception {
+        when(shelterPrep.execute(any(), any())).thenAnswer(call -> {
+            org.springframework.batch.core.StepContribution contribution = call.getArgument(0);
+            var execution = contribution.getStepExecution().getJobExecution();
+            execution.getExecutionContext().putInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT, 1);
+            execution.getExecutionContext().putInt(ApmsAnimalSnapshot.COUNT_MISMATCH_COUNT, 1);
+            return RepeatStatus.FINISHED;
+        });
+        var item = new ApmsAnimal();
+        when(reader.read()).thenReturn(item).thenReturn(null);
+        when(processor.process(item)).thenReturn(Animal.builder().build());
+
+        JobExecution execution = runJob();
+
+        assertThat(execution.getStatus()).isEqualTo(BatchStatus.COMPLETED);
         var order = inOrder(writer, indexService);
         order.verify(writer).write(any());
         order.verify(indexService).indexAllAnimals();

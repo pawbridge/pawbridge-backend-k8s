@@ -33,6 +33,7 @@ public class ApmsAnimalSnapshot {
     private final int maxAnimals;
     public static final String INCOMPLETE_COUNT = "apms.sync.incompleteQueryCount";
     public static final String INCOMPLETE_DETAILS = "apms.sync.incompleteQueryDetails";
+    public static final String COUNT_MISMATCH_COUNT = "apms.sync.countMismatchQueryCount";
     public static final String COLLECTED_COUNT = "apms.sync.collectedCount";
     private static final int MAX_SPLIT_DEPTH = 2;
     private static final int RECOVERY_REQUESTS_PER_QUERY = 8;
@@ -62,6 +63,7 @@ public class ApmsAnimalSnapshot {
         }
         Map<String, ApmsAnimal> byNumber = new LinkedHashMap<>();
         List<String> incomplete = new ArrayList<>();
+        int countMismatches = 0;
         List<ApmsQueryProgress.Result> results = new ArrayList<>();
         // Complete the first pass before spending retries on a problematic interval.
         // A bad early month must not consume the request budget of later healthy months.
@@ -77,6 +79,9 @@ public class ApmsAnimalSnapshot {
             }
             results.add(new ApmsQueryProgress.Result(query, result.complete()));
             if (!result.complete()) {
+                if ("COUNT_MISMATCH".equals(result.reason())) {
+                    countMismatches++;
+                }
                 incomplete.add("intake=" + query.intakeStart() + ".." + query.intakeEnd()
                         + ";updated=" + query.updatedStart() + ".." + query.updatedEnd()
                         + ";reason=" + result.reason() + ";reported=" + result.expected()
@@ -87,6 +92,7 @@ public class ApmsAnimalSnapshot {
         animals = List.copyOf(byNumber.values());
         execution.getExecutionContext().putInt(INCOMPLETE_COUNT, incomplete.size());
         execution.getExecutionContext().putString(INCOMPLETE_DETAILS, String.join("\n", incomplete));
+        execution.getExecutionContext().putInt(COUNT_MISMATCH_COUNT, countMismatches);
         execution.getExecutionContext().putInt(COLLECTED_COUNT, animals.size());
         log.info("APMS snapshot ready: requests={}, animals={}, incompleteQueries={}, updatedStart={}, end={}",
                 requests, animals.size(), incomplete.size(), plan.updatedStart(), plan.end());

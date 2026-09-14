@@ -58,6 +58,8 @@ public class BatchController {
                 int incomplete = collection.getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT);
                 response.put("collectionStatus", incomplete == 0 ? "COMPLETE" : "INCOMPLETE");
                 response.put("incompleteQueryCount", incomplete);
+                response.put("countMismatchQueryCount",
+                        collection.getInt(ApmsAnimalSnapshot.COUNT_MISMATCH_COUNT, 0));
                 response.put("collectedCount", collection.getInt(ApmsAnimalSnapshot.COLLECTED_COUNT));
             }
             response.put("searchSyncStatus", jobExecution.getStepExecutions().stream()

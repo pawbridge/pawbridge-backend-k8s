@@ -87,6 +87,25 @@ class BatchControllerTest {
                 .andExpect(jsonPath("$.searchSyncStatus").value("COMPLETED"));
     }
 
+    @Test
+    void givenCompletedCountMismatch__whenSync__thenReturnSuccessAndExposeRetryableGap() throws Exception {
+        var job = execution(BatchStatus.COMPLETED, 0);
+        job.getExecutionContext().putInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT, 1);
+        job.getExecutionContext().putInt(ApmsAnimalSnapshot.COUNT_MISMATCH_COUNT, 1);
+        job.getExecutionContext().putInt(ApmsAnimalSnapshot.COLLECTED_COUNT, 1046);
+        job.createStepExecution("elasticsearchIndexStep").setStatus(BatchStatus.COMPLETED);
+        when(runner.run()).thenReturn(job);
+
+        mvc.perform(post("/api/v1/batch/apms/sync"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.collectionStatus").value("INCOMPLETE"))
+                .andExpect(jsonPath("$.incompleteQueryCount").value(1))
+                .andExpect(jsonPath("$.countMismatchQueryCount").value(1))
+                .andExpect(jsonPath("$.collectedCount").value(1046))
+                .andExpect(jsonPath("$.searchSyncStatus").value("COMPLETED"));
+    }
+
     private JobExecution execution(BatchStatus status, long skips) {
         var execution = new JobExecution(42L);
         execution.setStatus(status);
