@@ -28,19 +28,26 @@ import org.springframework.web.util.HtmlUtils;
 @Component
 public class TourApiClient {
     static final int MAX_BYTES = 1024 * 1024;
-    static final String BASE = "https://apis.data.go.kr/B551011/KorPetTourService2/";
-    static final String BULK_BASE = "https://apis.data.go.kr/B551011/KorService2/";
+    static final String PET_BASE = "https://apis.data.go.kr/B551011/KorPetTourService2/";
+    static final String KOREAN_BASE = "https://apis.data.go.kr/B551011/KorService2/";
     private static final Set<String> FIELDS = Set.of("code", "name", "contentid", "title", "addr1", "overview", "firstimage", "cpyrhtDivCd",
             "acmpyTypeCd", "acmpyPsblCpam", "acmpyNeedMtr", "etcAcmpyInfo",
             "relaAcdntRiskMtr", "relaPosesFclty", "relaFrnshPrdlst", "areacode", "sigungucode",
             "modifiedtime", "showflag", "addr2", "contenttypeid", "mapx", "mapy", "lDongRegnCd", "lDongSignguCd");
     public enum Operation {
-        REGIONS("ldongCode2", 50), PLACES("areaBasedList2", 10),
-        COMMON("detailCommon2", 1), PET("detailPetTour2", 1), SYNC("petTourSyncList2", 100),
-        PET_BULK("detailPetTour2", 100);
+        REGIONS("ldongCode2", 50, Service.PET), PLACES("areaBasedList2", 10, Service.PET),
+        COMMON("detailCommon2", 1, Service.KOREAN), PET("detailPetTour2", 1, Service.KOREAN),
+        SYNC("petTourSyncList2", 100, Service.PET), PET_BULK("detailPetTour2", 100, Service.KOREAN);
         final String path;
         final int rows;
-        Operation(String path, int rows) { this.path = path; this.rows = rows; }
+        final Service service;
+        Operation(String path, int rows, Service service) { this.path = path; this.rows = rows; this.service = service; }
+    }
+
+    enum Service {
+        PET(PET_BASE), KOREAN(KOREAN_BASE);
+        final String base;
+        Service(String base) { this.base = base; }
     }
 
     private final TourApiProperties properties;
@@ -70,7 +77,8 @@ public class TourApiClient {
         try {
             if (!properties.isEnabled()) throw PetTravelException.unavailable();
             if (operation == Operation.PET_BULK && !properties.isBulkPetEnabled()) throw PetTravelException.unavailable();
-            var key = decodedKey(operation == Operation.PET_BULK ? properties.getBulkServiceKey() : properties.getServiceKey());
+            var key = decodedKey(operation.service == Service.KOREAN
+                    ? properties.getKoreanServiceKey() : properties.getServiceKey());
             var query = new LinkedHashMap<String, String>();
             query.put("serviceKey", key);
             query.put("MobileOS", "ETC");
@@ -93,8 +101,7 @@ public class TourApiClient {
             }
             var encoded = query.entrySet().stream().map(e -> encode(e.getKey()) + "=" + encode(e.getValue()))
                     .collect(java.util.stream.Collectors.joining("&"));
-            var base = operation == Operation.PET_BULK ? BULK_BASE : BASE;
-            var request = HttpRequest.newBuilder(URI.create(base + operation.path + "?" + encoded))
+            var request = HttpRequest.newBuilder(URI.create(operation.service.base + operation.path + "?" + encoded))
                     .timeout(Duration.ofSeconds(5)).header("Accept", "application/json").GET().build();
             pending = http.sendAsync(request, info -> new LimitedBody());
             // Includes body consumption; a slow response body cannot hold a caller indefinitely.

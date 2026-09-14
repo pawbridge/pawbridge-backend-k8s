@@ -9,10 +9,14 @@ public class TourApiProperties {
     private boolean enabled;
     private String serviceKey = "";
     private boolean bulkPetEnabled;
+    private String koreanServiceKey = "";
     private String bulkServiceKey = "";
     private int maxBulkPagesPerRun = 10;
     public boolean isBulkPetEnabled() { return bulkPetEnabled; }
     public void setBulkPetEnabled(boolean value) { bulkPetEnabled = value; }
+    public String getKoreanServiceKey() { return koreanServiceKey.isBlank() ? bulkServiceKey : koreanServiceKey; }
+    public void setKoreanServiceKey(String value) { koreanServiceKey = value; }
+    // Compatibility alias for the environment variable already deployed by Kubernetes.
     public String getBulkServiceKey() { return bulkServiceKey; }
     public void setBulkServiceKey(String value) { bulkServiceKey = value; }
     public int getMaxBulkPagesPerRun() { return maxBulkPagesPerRun; }
