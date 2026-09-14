@@ -14,6 +14,7 @@ class PetTravelConfigurationTest {
         assertThat(properties.getDetailRefreshDays()).isEqualTo(14);
         assertThat(properties.isBulkPetEnabled()).isFalse();
         assertThat(properties.getMaxBulkPagesPerRun()).isEqualTo(10);
+        assertThat(properties.getKoreanServiceKey()).isEmpty();
     }
     @Test void givenRefreshOverride__whenBound__thenUseConfiguredDays() {
         var environment=new org.springframework.core.env.StandardEnvironment();
@@ -66,22 +67,33 @@ class PetTravelConfigurationTest {
                     assertThat(context).doesNotHaveBean(TourApiClient.class).doesNotHaveBean(org.redisson.api.RedissonClient.class);
                 });
     }
-    @Test void givenBulkEnvironment__whenBound__thenUseSeparateCredentialAndBoundedPages() {
+    @Test void givenKoreanServiceEnvironment__whenBound__thenUseSeparateCredentialAndBoundedPages() {
         var environment=new org.springframework.core.env.StandardEnvironment();
         environment.getPropertySources().replace(org.springframework.core.env.StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
                 new org.springframework.core.env.SystemEnvironmentPropertySource(
                         org.springframework.core.env.StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
                         java.util.Map.of("TOURAPI_SERVICEKEY","syntheticPetKey1234",
-                                "TOURAPI_BULKSERVICEKEY","syntheticBulkKey1234",
+                                "TOURAPI_KOREANSERVICEKEY","syntheticKoreanKey1234",
+                                "TOURAPI_BULKSERVICEKEY","legacySyntheticKey1234",
                                 "TOURAPI_BULKPETENABLED","true","TOURAPI_MAXBULKPAGESPERRUN","4")));
         var properties=org.springframework.boot.context.properties.bind.Binder.get(environment)
                 .bind("tourapi",org.springframework.boot.context.properties.bind.Bindable.of(TourApiProperties.class)).get();
         assertThat(properties.getServiceKey()).isEqualTo("syntheticPetKey1234");
-        assertThat(properties.getBulkServiceKey()).isEqualTo("syntheticBulkKey1234");
+        assertThat(properties.getKoreanServiceKey()).isEqualTo("syntheticKoreanKey1234");
         assertThat(properties.isBulkPetEnabled()).isTrue();
         assertThat(properties.getMaxBulkPagesPerRun()).isEqualTo(4);
         assertThatThrownBy(()->properties.setMaxBulkPagesPerRun(0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(()->properties.setMaxBulkPagesPerRun(101)).isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void givenDeployedBulkKeyAlias__whenBound__thenReuseAsKoreanServiceCredential() {
+        var environment=new org.springframework.core.env.StandardEnvironment();
+        environment.getPropertySources().replace(org.springframework.core.env.StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                new org.springframework.core.env.SystemEnvironmentPropertySource(
+                        org.springframework.core.env.StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                        java.util.Map.of("TOURAPI_BULKSERVICEKEY","legacySyntheticKey1234")));
+        var properties=org.springframework.boot.context.properties.bind.Binder.get(environment)
+                .bind("tourapi",org.springframework.boot.context.properties.bind.Bindable.of(TourApiProperties.class)).get();
+        assertThat(properties.getKoreanServiceKey()).isEqualTo("legacySyntheticKey1234");
     }
     @Test void givenBudgetAboveCeiling__whenConfigured__thenReject() {
         for (int limit : new int[]{0,1001}) {

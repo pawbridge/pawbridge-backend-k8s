@@ -22,7 +22,7 @@ class TourApiClientTest {
     @Test
     void givenBulkPetPage__whenFetch__thenUseSeparateKeyAndServiceWithoutContentId() {
         properties.setBulkPetEnabled(true);
-        properties.setBulkServiceKey("bulkSynthetic1234%2B%2F%3D");
+        properties.setKoreanServiceKey("koreanSynthetic1234%2B%2F%3D");
         reply(200, bulkPayload("[{\"contentid\":\"123\",\"acmpyNeedMtr\":\"목줄\"}]",101));
         var page=client.fetchPage(TourApiClient.Operation.PET_BULK,"",2);
         assertThat(page.totalCount()).isEqualTo(101);
@@ -30,16 +30,33 @@ class TourApiClientTest {
         var request=ArgumentCaptor.forClass(HttpRequest.class);
         verify(http).sendAsync(request.capture(),any(HttpResponse.BodyHandler.class));
         assertThat(request.getValue().uri().getPath()).isEqualTo("/B551011/KorService2/detailPetTour2");
-        assertThat(request.getValue().uri().getRawQuery()).contains("pageNo=2","numOfRows=100","serviceKey=bulkSynthetic1234%2B%2F%3D")
+        assertThat(request.getValue().uri().getRawQuery()).contains("pageNo=2","numOfRows=100","serviceKey=koreanSynthetic1234%2B%2F%3D")
                 .doesNotContain("contentId","syntheticOnly");
     }
 
     @Test
-    void givenDisabledOrMissingBulkKey__whenFetch__thenNeverFallbackToOldKey() {
+    void givenDisabledOrMissingKoreanKey__whenFetch__thenNeverFallbackToPetServiceKey() {
         assertThatThrownBy(()->client.fetch(TourApiClient.Operation.PET_BULK,"")).hasMessage("UNAVAILABLE");
         properties.setBulkPetEnabled(true);
         assertThatThrownBy(()->client.fetch(TourApiClient.Operation.PET_BULK,"")).hasMessage("UNAVAILABLE");
+        assertThatThrownBy(()->client.fetch(TourApiClient.Operation.COMMON,"123")).hasMessage("UNAVAILABLE");
         verifyNoInteractions(http);
+    }
+
+    @Test
+    void givenDisplayDetail__whenFetch__thenUseKoreanServiceAndCredential() {
+        properties.setKoreanServiceKey("koreanSynthetic1234%2B%2F%3D");
+        for (var operation : List.of(TourApiClient.Operation.COMMON, TourApiClient.Operation.PET)) {
+            reset(http);
+            reply(200, payload("{\"contentid\":\"123\",\"title\":\"장소\"}"));
+            assertThat(client.fetch(operation,"123")).hasSize(1);
+            var request=ArgumentCaptor.forClass(HttpRequest.class);
+            verify(http).sendAsync(request.capture(),any(HttpResponse.BodyHandler.class));
+            assertThat(request.getValue().uri().getPath()).isEqualTo("/B551011/KorService2/" + operation.path);
+            assertThat(request.getValue().uri().getRawQuery())
+                    .contains("contentId=123","serviceKey=koreanSynthetic1234%2B%2F%3D")
+                    .doesNotContain("syntheticOnly");
+        }
     }
 
     @Test
@@ -91,7 +108,7 @@ class TourApiClientTest {
         var request = ArgumentCaptor.forClass(HttpRequest.class);
         verify(http).sendAsync(request.capture(), any(HttpResponse.BodyHandler.class));
         assertThat(request.getValue().uri().getHost()).isEqualTo("apis.data.go.kr");
-        assertThat(request.getValue().uri().getPath()).endsWith("/ldongCode2");
+        assertThat(request.getValue().uri().getPath()).isEqualTo("/B551011/KorPetTourService2/ldongCode2");
         assertThat(request.getValue().uri().getRawQuery()).contains("serviceKey=syntheticOnly1234%2B%2F%3D");
         assertThat(request.getValue().timeout()).contains(java.time.Duration.ofSeconds(5));
     }
