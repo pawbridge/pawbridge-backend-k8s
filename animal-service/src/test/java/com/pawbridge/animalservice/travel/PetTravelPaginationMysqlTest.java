@@ -60,7 +60,8 @@ class PetTravelPaginationMysqlTest {
         // These titles sort before the attractions: filtering only a rendered page would fail.
         for (var entry:Map.of("9100","38","9101","32","9102","39","9103","999","9104","").entrySet()) {
             catalog.observeBasic(Map.of("contentid",entry.getKey(),"title","000 약국 또는 상점",
-                    "contenttypeid",entry.getValue(),"modifiedtime","20260913000000","showflag","1"),"11",Instant.EPOCH);
+                    "contenttypeid",entry.getValue(),"modifiedtime","20260913000000","showflag","1"),"11",
+                    Instant.EPOCH.minusSeconds(1));
         }
         catalog.observeBasic(Map.of("contentid","9105","title","분류 미확인",
                 "modifiedtime","20260913000000","showflag","1"),"11",Instant.EPOCH);
@@ -103,6 +104,10 @@ class PetTravelPaginationMysqlTest {
         for (String id:java.util.List.of("9100","9101","9102","9103","9104","9105")) {
             assertThat(service.detail(id).place().contentId()).isEqualTo(id);
         }
+    }
+
+    @Test void givenOlderNonDiscoveryTarget__whenSelectingPendingDetail__thenDiscoveryTypeHasPriority() {
+        assertThat(catalog.pending(1)).extracting(PetTravelCatalog.Target::contentId).containsExactly("1000");
     }
 
     @Test void givenConcurrentHideAfterCount__whenRead__thenOneResponseUsesSameSnapshot() throws Exception {
