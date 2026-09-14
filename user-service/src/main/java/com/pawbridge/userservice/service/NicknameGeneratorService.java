@@ -53,7 +53,7 @@ public class NicknameGeneratorService {
             String nickname = generateRandomNickname();
 
             if (!userRepository.existsByNickname(nickname)) {
-                log.debug("유니크 닉네임 생성 완료: {} ({}번째 시도)", nickname, i + 1);
+                log.debug("유니크 닉네임 생성 완료: attempts={}", i + 1);
                 return nickname;
             }
         }
@@ -63,7 +63,7 @@ public class NicknameGeneratorService {
         int suffix = random.nextInt(10000);
         String nicknameWithSuffix = baseNickname + suffix;
 
-        log.warn("100번 재시도 후 숫자 접미사 추가: {}", nicknameWithSuffix);
+        log.warn("100번 재시도 후 숫자 접미사 추가");
         return nicknameWithSuffix;
     }
 
