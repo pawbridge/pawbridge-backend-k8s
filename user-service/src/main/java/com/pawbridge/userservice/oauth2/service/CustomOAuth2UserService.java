@@ -63,24 +63,18 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
             String name = userInfo.getName();
             String providerId = userInfo.getProviderId();
 
-            log.info("OAuth2 로그인 시도: email={}, provider=GOOGLE", email);
-
             // 5. 사용자 조회 또는 생성
             User user = userRepository.findByEmailAndProvider(email, "GOOGLE")
                     .orElseGet(() -> {
                         // LOCAL 계정 충돌 확인
                         if (userRepository.findByEmailAndProvider(email, "LOCAL").isPresent()) {
-                            log.warn("이메일 충돌: {} (LOCAL 계정이 이미 존재)", email);
+                            log.warn("OAuth2 계정 충돌: provider=LOCAL");
                             throw new OAuth2ProcessingException(
                                     "이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.");
                         }
 
-                        // 새 Google 사용자 생성
-                        log.info("새 Google 사용자 생성: email={}", email);
-
                         // 닉네임 자동 생성
                         String nickname = nicknameGeneratorService.generateUniqueNickname();
-                        log.info("OAuth2 신규 사용자 닉네임 생성: {}", nickname);
 
                         User newUser = User.createSocialUser(email, name, "GOOGLE", providerId, nickname);
 
@@ -95,18 +89,17 @@ public class CustomOAuth2UserService extends DefaultOAuth2UserService {
                         }
                     });
 
-            log.info("OAuth2 사용자 로드 완료: userId={}, email={}", user.getUserId(), user.getEmail());
+            log.debug("OAuth2 사용자 로드 완료: userId={}, provider=GOOGLE", user.getUserId());
 
             // 6. PrincipalDetails 반환 (UserDetails + OAuth2User)
             return new PrincipalDetails(user, oAuth2User.getAttributes());
 
         } catch (OAuth2AuthenticationException e) {
             // OAuth2 관련 예외는 그대로 전달
-            log.error("OAuth2 인증 실패: {}", e.getMessage());
             throw e;
         } catch (Exception e) {
             // 기타 예외는 OAuth2ProcessingException으로 래핑
-            log.error("OAuth2 처리 중 예상치 못한 오류: {}", e.getMessage(), e);
+            log.error("OAuth2 처리 중 예상치 못한 오류: errorType={}", e.getClass().getSimpleName());
             throw new OAuth2ProcessingException("로그인 처리 중 오류가 발생했습니다");
         }
     }

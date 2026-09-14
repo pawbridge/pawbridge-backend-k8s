@@ -47,8 +47,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
             PrincipalDetails principalDetails = (PrincipalDetails) authentication.getPrincipal();
             User user = principalDetails.getUser();
 
-            log.info("OAuth2 로그인 성공: userId={}, email={}, provider={}",
-                    user.getUserId(), user.getEmail(), user.getProvider());
+            log.info("OAuth2 로그인 성공: userId={}, provider={}", user.getUserId(), user.getProvider());
 
             // 2. JWT Access Token 생성 (기존 JwtProvider 재사용)
             String accessToken = jwtProvider.createAccessToken(user);
@@ -66,12 +65,12 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
                     .build()
                     .toUriString();
 
-            log.info("OAuth2 리다이렉트 완료: userId={}", user.getUserId());
+            log.debug("OAuth2 리다이렉트 준비: userId={}", user.getUserId());
 
             getRedirectStrategy().sendRedirect(request, response, targetUrl);
 
         } catch (Exception e) {
-            log.error("OAuth2 토큰 생성 실패: {}", e.getMessage(), e);
+            log.error("OAuth2 토큰 생성 실패: errorType={}", e.getClass().getSimpleName());
 
             // 에러 페이지로 리다이렉트
             String errorMessage = URLEncoder.encode(
@@ -100,7 +99,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
                         existingToken -> {
                             existingToken.updateToken(refreshToken, expiresAt);
                             refreshTokenRepository.save(existingToken);
-                            log.info("RefreshToken 업데이트: userId={}", userId);
+                            log.debug("RefreshToken 업데이트: userId={}", userId);
                         },
                         // 없으면 새로 생성
                         () -> {
@@ -110,7 +109,7 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
                                     .expiresAt(expiresAt)
                                     .build();
                             refreshTokenRepository.save(newRefreshToken);
-                            log.info("RefreshToken 생성: userId={}", userId);
+                            log.debug("RefreshToken 생성: userId={}", userId);
                         }
                 );
     }
