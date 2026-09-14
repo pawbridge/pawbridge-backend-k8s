@@ -54,19 +54,32 @@ class PetTravelPaginationMysqlTest {
         catalog=context.getBean(PetTravelCatalog.class);
         service=context.getBean(PetTravelService.class);
         catalog.saveRegions(Map.of("11","서울","26","부산"),Instant.EPOCH);
-        for (int i=0;i<20;i++) basic(String.valueOf(1000+i),"11","1");
+        for (int i=0;i<20;i++) basic(String.valueOf(1000+i),"11","1",new String[]{"12","14","28"}[i%3]);
         basic("9000","11","0"); // hidden target
         basic("9001","26","1"); // different region
+        // These titles sort before the attractions: filtering only a rendered page would fail.
+        for (var entry:Map.of("9100","38","9101","32","9102","39","9103","999","9104","").entrySet()) {
+            catalog.observeBasic(Map.of("contentid",entry.getKey(),"title","000 약국 또는 상점",
+                    "contenttypeid",entry.getValue(),"modifiedtime","20260913000000","showflag","1"),"11",Instant.EPOCH);
+        }
+        catalog.observeBasic(Map.of("contentid","9105","title","분류 미확인",
+                "modifiedtime","20260913000000","showflag","1"),"11",Instant.EPOCH);
         jdbc.update("INSERT INTO pet_travel_targets(provider,content_id,area_code,modified_time,shown,generation,pending,observed_at) "
                 +"VALUES ('KOREA_TOURISM_ORGANIZATION','1020','11','20260913000000',TRUE,1,FALSE,NOW()),"
                 +"('KOREA_TOURISM_ORGANIZATION','9002','11','20260913000000',TRUE,1,FALSE,NOW())");
         // One legacy visible snapshot is readable without basic_data; the other has no public data.
         jdbc.update("INSERT INTO pet_travel_places(provider,content_id,area_code,title,common_data,pet_data,visible,published_at) "
-                +"VALUES ('KOREA_TOURISM_ORGANIZATION','1020','11','공원',JSON_OBJECT('contentid','1020','title','공원'),JSON_OBJECT(),TRUE,NOW())");
+                +"VALUES ('KOREA_TOURISM_ORGANIZATION','1020','11','공원',JSON_OBJECT('contentid','1020','title','공원','contenttypeid','12'),JSON_OBJECT(),TRUE,NOW()),"
+                +"('KOREA_TOURISM_ORGANIZATION','9105','11','옛 공원',JSON_OBJECT('contentid','9105','title','옛 공원','contenttypeid','12'),JSON_OBJECT(),TRUE,NOW())");
     }
 
     private static void basic(String id,String region,String shown) {
-        catalog.observeBasic(Map.of("contentid",id,"title","공원","modifiedtime","20260913000000","showflag",shown),region,Instant.EPOCH);
+        basic(id,region,shown,"12");
+    }
+
+    private static void basic(String id,String region,String shown,String type) {
+        catalog.observeBasic(Map.of("contentid",id,"title","공원","contenttypeid",type,
+                "modifiedtime","20260913000000","showflag",shown),region,Instant.EPOCH);
     }
 
     @AfterAll static void close() { if(context!=null) context.close(); }
@@ -84,6 +97,12 @@ class PetTravelPaginationMysqlTest {
         assertThat(last.items()).extracting(PetTravelResponse.Place::contentId).containsExactly("1020");
         assertThat(service.places("11",Integer.MAX_VALUE).items()).isEmpty();
         assertThat(service.places("26",0).totalElements()).isEqualTo(1);
+    }
+
+    @Test void givenNonDiscoveryTypes__whenReadingDetail__thenStoredPlacesRemainAccessible() {
+        for (String id:java.util.List.of("9100","9101","9102","9103","9104","9105")) {
+            assertThat(service.detail(id).place().contentId()).isEqualTo(id);
+        }
     }
 
     @Test void givenConcurrentHideAfterCount__whenRead__thenOneResponseUsesSameSnapshot() throws Exception {

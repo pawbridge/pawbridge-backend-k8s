@@ -150,14 +150,23 @@ public class PetTravelCatalog {
     }
 
     public List<Place> places(String areaCode, int page) {
-        return jdbc.query(publicQuery() + " AND t.area_code=? ORDER BY "
+        return jdbc.query(publicQuery() + discoveryTypes() + " AND t.area_code=? ORDER BY "
                 + "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.title')),p.title),t.content_id LIMIT 10 OFFSET ?",
                 this::place, PROVIDER, areaCode, (long) page * 10);
     }
 
     public long countPlaces(String areaCode) {
-        return jdbc.queryForObject("SELECT COUNT(*) " + publicFrom()
+        return jdbc.queryForObject("SELECT COUNT(*) " + publicFrom() + discoveryTypes()
                 + " AND t.area_code=?", Long.class, PROVIDER, areaCode);
+    }
+
+    // Default discovery: attractions (12), cultural facilities (14), leisure/sports (28).
+    // Filter before pagination and use the identical predicate for the total count.
+    // Legacy snapshots are considered only when no newer basic record exists.
+    private String discoveryTypes() {
+        return " AND (CASE WHEN t.basic_data IS NOT NULL "
+                + "THEN JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')) "
+                + "ELSE JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid')) END) IN ('12','14','28')";
     }
 
     public Optional<Place> detail(String contentId) {
