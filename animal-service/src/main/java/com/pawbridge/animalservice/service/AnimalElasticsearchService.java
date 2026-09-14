@@ -44,6 +44,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AnimalElasticsearchService {
 
+    private static final int MAX_SEARCH_PAGE_SIZE = 100;
+    private static final int MAX_RESULT_WINDOW = 10_000;
+
     private final ElasticsearchOperations elasticsearchOperations;
     private final AnimalDocumentRepository animalDocumentRepository;
     private final AnimalDocumentMapper documentMapper;
@@ -206,6 +209,8 @@ public class AnimalElasticsearchService {
     public Page<AnimalResponse> searchAnimals(AnimalSearchRequest request, Pageable pageable) {
         log.debug("[ELASTICSEARCH] 통합 검색: {}, Pageable: {}", request, pageable);
 
+        validateSearchPageable(pageable);
+
         // 1. AnimalSearchRequest → AnimalSearchCondition 변환
         AnimalSearchCondition condition = convertToCondition(request, pageable);
 
@@ -233,6 +238,7 @@ public class AnimalElasticsearchService {
         // Bool Query 생성
         BoolQuery.Builder boolQuery = new BoolQuery.Builder();
         List<Query> mustQueries = new ArrayList<>();
+        List<Query> filterQueries = new ArrayList<>();
 
         // 1. 키워드 검색 (품종, 특징, 발견 장소, 설명)
         if (condition.getKeyword() != null && !condition.getKeyword().trim().isEmpty()) {
@@ -257,7 +263,7 @@ public class AnimalElasticsearchService {
                     .value(condition.getSpecies().trim())
                 )
             );
-            mustQueries.add(speciesQuery);
+            filterQueries.add(speciesQuery);
         }
 
         // 3. 품종 필터
@@ -268,7 +274,7 @@ public class AnimalElasticsearchService {
                     .query(condition.getBreed().trim())
                 )
             );
-            mustQueries.add(breedQuery);
+            filterQueries.add(breedQuery);
         }
 
         // 4. 상태 필터 (명시되지 않은 경우 입양 가능한 'PROTECT' 상태만 기본 노출)
@@ -279,7 +285,7 @@ public class AnimalElasticsearchService {
                     .value(condition.getStatus().trim())
                 )
             );
-            mustQueries.add(statusQuery);
+            filterQueries.add(statusQuery);
         } else {
             // 명시되지 않은 경우 입양 가능한 'NOTICE'(공고중), 'PROTECT'(보호중) 상태 기본 노출
             Query defaultStatusQuery = Query.of(q -> q
@@ -293,7 +299,7 @@ public class AnimalElasticsearchService {
                     )
                 )
             );
-            mustQueries.add(defaultStatusQuery);
+            filterQueries.add(defaultStatusQuery);
         }
 
         // 5. 성별 필터
@@ -304,7 +310,7 @@ public class AnimalElasticsearchService {
                     .value(condition.getGender().trim())
                 )
             );
-            mustQueries.add(genderQuery);
+            filterQueries.add(genderQuery);
         }
 
         // 6. 중성화 필터
@@ -315,7 +321,7 @@ public class AnimalElasticsearchService {
                     .value(condition.getNeuterStatus().trim())
                 )
             );
-            mustQueries.add(neuterQuery);
+            filterQueries.add(neuterQuery);
         }
 
         // 7. 보호소 ID 필터
@@ -326,7 +332,7 @@ public class AnimalElasticsearchService {
                     .value(condition.getShelterId())
                 )
             );
-            mustQueries.add(shelterQuery);
+            filterQueries.add(shelterQuery);
         }
 
         // 8. 보호소 주소 검색 (지역 검색)
@@ -338,7 +344,7 @@ public class AnimalElasticsearchService {
                     .operator(co.elastic.clients.elasticsearch._types.query_dsl.Operator.And)
                 )
             );
-            mustQueries.add(addressQuery);
+            filterQueries.add(addressQuery);
         }
 
         // 9. 나이 범위 (출생 연도 기준)
@@ -353,7 +359,7 @@ public class AnimalElasticsearchService {
                     )
                 )
             );
-            mustQueries.add(ageRangeQuery);
+            filterQueries.add(ageRangeQuery);
         } else if (condition.getMinBirthYear() != null) {
             // 최소만 있는 경우
             Query ageRangeQuery = Query.of(q -> q
@@ -364,7 +370,7 @@ public class AnimalElasticsearchService {
                     )
                 )
             );
-            mustQueries.add(ageRangeQuery);
+            filterQueries.add(ageRangeQuery);
         } else if (condition.getMaxBirthYear() != null) {
             // 최대만 있는 경우
             Query ageRangeQuery = Query.of(q -> q
@@ -375,12 +381,15 @@ public class AnimalElasticsearchService {
                     )
                 )
             );
-            mustQueries.add(ageRangeQuery);
+            filterQueries.add(ageRangeQuery);
         }
 
         // Bool Query에 조건 추가
         if (!mustQueries.isEmpty()) {
             boolQuery.must(mustQueries);
+        }
+        if (!filterQueries.isEmpty()) {
+            boolQuery.filter(filterQueries);
         }
 
         // Pageable 생성 (페이징 및 정렬)
@@ -528,15 +537,27 @@ public class AnimalElasticsearchService {
                 ? Sort.Direction.DESC
                 : Sort.Direction.ASC;
 
-        // 정렬 기준 (snake_case로 변환)
-        String sortBy = condition.getSortBy();
-        if ("createdAt".equals(sortBy)) sortBy = "created_at";
-        else if ("updatedAt".equals(sortBy)) sortBy = "updated_at";
-        else if ("noticeEndDate".equals(sortBy)) sortBy = "notice_end_date";
-        else if ("birthYear".equals(sortBy)) sortBy = "birth_year";
-        else if ("apmsDesertionNo".equals(sortBy)) sortBy = "apms_desertion_no";
-        
-        Sort sort = Sort.by(direction, sortBy);
+        String requestedSort = condition.getSortBy();
+        String sortBy = switch (requestedSort) {
+            case "createdAt" -> "created_at";
+            case "updatedAt" -> "updated_at";
+            case "noticeEndDate" -> "notice_end_date";
+            case "birthYear" -> "birth_year";
+            case "age" -> "birth_year";
+            case "apmsDesertionNo" -> "apms_desertion_no";
+            case "favoriteCount" -> "favorite_count";
+            default -> throw new IllegalArgumentException("지원하지 않는 정렬 기준입니다: " + requestedSort);
+        };
+
+        // 나이가 적은 순서는 출생 연도가 최근인 순서다.
+        if ("age".equals(requestedSort)) {
+            direction = direction.isAscending() ? Sort.Direction.DESC : Sort.Direction.ASC;
+        }
+
+        Sort sort = Sort.by(
+            new Sort.Order(direction, sortBy),
+            new Sort.Order(Sort.Direction.ASC, "id")
+        );
 
         return PageRequest.of(condition.getPage(), condition.getSize(), sort);
     }
@@ -618,5 +639,19 @@ public class AnimalElasticsearchService {
         }
 
         return builder.build();
+    }
+
+    private void validateSearchPageable(Pageable pageable) {
+        if (pageable.getPageSize() < 1 || pageable.getPageSize() > MAX_SEARCH_PAGE_SIZE) {
+            throw new IllegalArgumentException("페이지 크기는 1 이상 100 이하여야 합니다.");
+        }
+        if (pageable.getSort().stream().count() > 1) {
+            throw new IllegalArgumentException("정렬 기준은 하나만 지정할 수 있습니다.");
+        }
+
+        long lastResultExclusive = pageable.getOffset() + pageable.getPageSize();
+        if (lastResultExclusive > MAX_RESULT_WINDOW) {
+            throw new IllegalArgumentException("검색 결과는 최대 10,000건까지만 조회할 수 있습니다. 검색 조건을 좁혀주세요.");
+        }
     }
 }
