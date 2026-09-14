@@ -2,6 +2,7 @@ package com.pawbridge.animalservice.service;
 
 import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Operator;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import com.pawbridge.animalservice.document.AnimalDocument;
@@ -247,7 +248,17 @@ public class AnimalElasticsearchService {
             mustQueries.add(createKeywordQuery(condition.getKeyword().trim()));
         }
 
-        // 2. 축종 필터
+        // 2. 공고번호는 분석·부분·오타 검색 없이 완전 일치만 허용한다.
+        if (condition.getNoticeNo() != null && !condition.getNoticeNo().trim().isEmpty()) {
+            filterQueries.add(Query.of(q -> q
+                .term(t -> t
+                    .field("apms_notice_no")
+                    .value(condition.getNoticeNo().trim())
+                )
+            ));
+        }
+
+        // 3. 축종 필터
         if (condition.getSpecies() != null && !condition.getSpecies().trim().isEmpty()) {
             Query speciesQuery = Query.of(q -> q
                 .term(t -> t
@@ -258,18 +269,12 @@ public class AnimalElasticsearchService {
             filterQueries.add(speciesQuery);
         }
 
-        // 3. 품종 필터
+        // 4. 품종 검색: 정확 일치를 우선하고 오타 검색은 낮은 점수로 보조한다.
         if (condition.getBreed() != null && !condition.getBreed().trim().isEmpty()) {
-            Query breedQuery = Query.of(q -> q
-                .match(m -> m
-                    .field("breed")
-                    .query(condition.getBreed().trim())
-                )
-            );
-            filterQueries.add(breedQuery);
+            mustQueries.add(createBreedQuery(condition.getBreed().trim()));
         }
 
-        // 4. 상태 필터 (명시되지 않은 경우 입양 가능한 'PROTECT' 상태만 기본 노출)
+        // 5. 상태 필터. 공고번호 조회는 종료 상태도 찾을 수 있도록 기본 상태 제한을 적용하지 않는다.
         if (condition.getStatus() != null && !condition.getStatus().trim().isEmpty()) {
             Query statusQuery = Query.of(q -> q
                 .term(t -> t
@@ -278,7 +283,7 @@ public class AnimalElasticsearchService {
                 )
             );
             filterQueries.add(statusQuery);
-        } else {
+        } else if (condition.getNoticeNo() == null || condition.getNoticeNo().isBlank()) {
             // 명시되지 않은 경우 입양 가능한 'NOTICE'(공고중), 'PROTECT'(보호중) 상태 기본 노출
             Query defaultStatusQuery = Query.of(q -> q
                 .terms(t -> t
@@ -294,7 +299,7 @@ public class AnimalElasticsearchService {
             filterQueries.add(defaultStatusQuery);
         }
 
-        // 5. 성별 필터
+        // 6. 성별 필터
         if (condition.getGender() != null && !condition.getGender().trim().isEmpty()) {
             Query genderQuery = Query.of(q -> q
                 .term(t -> t
@@ -305,7 +310,7 @@ public class AnimalElasticsearchService {
             filterQueries.add(genderQuery);
         }
 
-        // 6. 중성화 필터
+        // 7. 중성화 필터
         if (condition.getNeuterStatus() != null && !condition.getNeuterStatus().trim().isEmpty()) {
             Query neuterQuery = Query.of(q -> q
                 .term(t -> t
@@ -316,7 +321,7 @@ public class AnimalElasticsearchService {
             filterQueries.add(neuterQuery);
         }
 
-        // 7. 보호소 ID 필터
+        // 8. 보호소 ID 필터
         if (condition.getShelterId() != null) {
             Query shelterQuery = Query.of(q -> q
                 .term(t -> t
@@ -327,7 +332,7 @@ public class AnimalElasticsearchService {
             filterQueries.add(shelterQuery);
         }
 
-        // 8. 보호소 주소 검색 (지역 검색)
+        // 9. 보호소 주소 검색 (지역 검색)
         if (condition.getShelterAddress() != null && !condition.getShelterAddress().trim().isEmpty()) {
             Query addressQuery = Query.of(q -> q
                 .match(m -> m
@@ -339,7 +344,7 @@ public class AnimalElasticsearchService {
             filterQueries.add(addressQuery);
         }
 
-        // 9. 나이 범위 (출생 연도 기준)
+        // 10. 나이 범위 (출생 연도 기준)
         if (condition.getMinBirthYear() != null && condition.getMaxBirthYear() != null) {
             // 최소/최대 둘 다 있는 경우
             Query ageRangeQuery = Query.of(q -> q
@@ -528,8 +533,6 @@ public class AnimalElasticsearchService {
 
     private Query createKeywordQuery(String keyword) {
         List<Query> evidenceQueries = List.of(
-            Query.of(q -> q.term(t -> t.field("apms_notice_no").value(keyword).boost(12.0f))),
-            Query.of(q -> q.term(t -> t.field("apms_desertion_no").value(keyword).boost(12.0f))),
             Query.of(q -> q.matchPhrase(m -> m.field("special_mark").query(keyword).boost(9.0f))),
             Query.of(q -> q.matchPhrase(m -> m.field("breed").query(keyword).boost(8.0f))),
             Query.of(q -> q.matchPhrase(m -> m.field("color").query(keyword).boost(7.0f))),
@@ -548,18 +551,37 @@ public class AnimalElasticsearchService {
                     "shelter_name^2",
                     "shelter_address^1.5"
                 )
+                .minimumShouldMatch("70%")
             )),
             Query.of(q -> q.multiMatch(m -> m
                 .query(keyword)
                 .type(TextQueryType.MostFields)
                 .fields("breed^5", "color^4", "special_mark^3", "shelter_name")
                 .fuzziness("AUTO")
+                .minimumShouldMatch("70%")
                 .boost(0.5f)
             ))
         );
 
         return Query.of(q -> q.bool(b -> b
             .should(evidenceQueries)
+            .minimumShouldMatch("1")
+        ));
+    }
+
+    private Query createBreedQuery(String breed) {
+        return Query.of(q -> q.bool(b -> b
+            .should(
+                Query.of(e -> e.term(t -> t.field("breed.keyword").value(breed).boost(10.0f))),
+                Query.of(e -> e.matchPhrase(m -> m.field("breed").query(breed).boost(7.0f))),
+                Query.of(e -> e.match(m -> m
+                    .field("breed")
+                    .query(breed)
+                    .operator(Operator.And)
+                    .fuzziness("AUTO")
+                    .boost(0.5f)
+                ))
+            )
             .minimumShouldMatch("1")
         ));
     }
@@ -577,8 +599,10 @@ public class AnimalElasticsearchService {
 
         String requestedSort = condition.getSortBy();
         if ("relevance".equals(requestedSort)) {
-            if (condition.getKeyword() == null || condition.getKeyword().isBlank()) {
-                throw new IllegalArgumentException("관련도순 정렬에는 검색어가 필요합니다.");
+            boolean hasKeyword = condition.getKeyword() != null && !condition.getKeyword().isBlank();
+            boolean hasBreed = condition.getBreed() != null && !condition.getBreed().isBlank();
+            if (!hasKeyword && !hasBreed) {
+                throw new IllegalArgumentException("관련도순 정렬에는 키워드나 품종이 필요합니다.");
             }
             return PageRequest.of(condition.getPage(), condition.getSize());
         }
@@ -619,6 +643,11 @@ public class AnimalElasticsearchService {
         // 키워드
         if (request.getKeyword() != null && !request.getKeyword().trim().isEmpty()) {
             builder.keyword(request.getKeyword().trim());
+        }
+
+        // 공고번호 (완전 일치)
+        if (request.getNoticeNo() != null && !request.getNoticeNo().trim().isEmpty()) {
+            builder.noticeNo(request.getNoticeNo().trim());
         }
 
         // 축종

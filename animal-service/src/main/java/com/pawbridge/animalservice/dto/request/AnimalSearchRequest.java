@@ -26,7 +26,7 @@ public class AnimalSearchRequest {
     private Species species;
 
     /**
-     * 품종 (부분 검색)
+     * 품종 (정확 일치 우선, 오타 허용)
      */
     private String breed;
 
@@ -72,10 +72,14 @@ public class AnimalSearchRequest {
     private String city;
 
     /**
-     * 키워드 검색 (품종 + 특징 + 발견장소 통합 검색)
-     * - breed, specialMark, happenPlace에서 OR 검색
+     * 키워드 검색 (품종, 색상, 특징, 발견 장소 등)
      */
     private String keyword;
+
+    /**
+     * 공고번호 (완전 일치)
+     */
+    private String noticeNo;
 
     /** 보호소 내부 ID (해당 보호소의 동물만 조회) */
     private Long shelterId;
