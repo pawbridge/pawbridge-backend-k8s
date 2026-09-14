@@ -19,6 +19,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Repository
 public class PetTravelCatalog {
     private static final String PROVIDER = "KOREA_TOURISM_ORGANIZATION";
+    private static final String DISCOVERY_CONTENT_TYPES = "('12','14','28')";
     private static final TypeReference<Map<String, String>> FIELDS = new TypeReference<>() {};
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -166,7 +167,7 @@ public class PetTravelCatalog {
     private String discoveryTypes() {
         return " AND (CASE WHEN t.basic_data IS NOT NULL "
                 + "THEN JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')) "
-                + "ELSE JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid')) END) IN ('12','14','28')";
+                + "ELSE JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid')) END) IN " + DISCOVERY_CONTENT_TYPES;
     }
 
     public Optional<Place> detail(String contentId) {
@@ -255,7 +256,9 @@ public class PetTravelCatalog {
     public List<Target> pending(int limit) {
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("Target limit must be 1..100");
         return jdbc.query("SELECT * FROM pet_travel_targets WHERE provider=? AND pending=TRUE AND shown=TRUE AND area_code IS NOT NULL "
-                + "ORDER BY detail_attempted_at,observed_at,content_id LIMIT ?", this::target, PROVIDER, limit);
+                + "ORDER BY CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(basic_data,'$.contenttypeid')) IN "
+                + DISCOVERY_CONTENT_TYPES + " THEN 0 ELSE 1 END,detail_attempted_at,observed_at,content_id LIMIT ?",
+                this::target, PROVIDER, limit);
     }
 
     /** Returns false if discovery changed while HTTP was in flight. An empty pet map is valid. */
