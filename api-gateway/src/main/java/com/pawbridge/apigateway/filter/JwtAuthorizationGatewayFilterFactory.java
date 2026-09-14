@@ -116,7 +116,7 @@ public class JwtAuthorizationGatewayFilterFactory
 
             // 화이트리스트 경로는 토큰 검증 스킵
             if (isWhitelisted(method, path)) {
-                log.info("화이트리스트 경로: {} {}", method, path);
+                log.debug("화이트리스트 경로: {} {}", method, path);
                 return chain.filter(exchange);
             }
 
@@ -124,12 +124,10 @@ public class JwtAuthorizationGatewayFilterFactory
             String token = extractToken(request);
 
             if (token == null) {
-                log.warn("Authorization 헤더 없음: {}", path);
                 return onError(exchange, "인증 토큰이 필요합니다.", HttpStatus.UNAUTHORIZED);
             }
 
             if (!jwtUtil.validateAccessToken(token)) {
-                log.warn("유효하지 않은 토큰: {}", path);
                 return onError(exchange, "유효하지 않거나 만료된 토큰입니다.", HttpStatus.UNAUTHORIZED);
             }
 
@@ -142,13 +140,11 @@ public class JwtAuthorizationGatewayFilterFactory
 
                 // ADMIN만 접근 가능한 경로 체크
                 if (isAdminOnlyPath(method, path) && !role.equals("ROLE_ADMIN")) {
-                    log.warn("관리자 전용 경로 접근 거부 - role: {}, path: {}", role, path);
                     return onError(exchange, "관리자 권한이 필요합니다.", HttpStatus.FORBIDDEN);
                 }
 
                 // ROLE_ADMIN, ROLE_SHELTER만 접근 가능한 경로 체크
                 if (isNonUserPath(method, path) && role.equals("ROLE_USER")) {
-                    log.warn("권한 부족 - role: {}, path: {}", role, path);
                     return onError(exchange, "권한이 부족합니다.", HttpStatus.FORBIDDEN);
                 }
 
@@ -164,21 +160,15 @@ public class JwtAuthorizationGatewayFilterFactory
                     String careRegNo = jwtUtil.getCareRegNoFromToken(token);
                     if (careRegNo != null && !careRegNo.isBlank()) {
                         requestBuilder.header("X-Care-Reg-No", careRegNo);
-                        log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, careRegNo: {}, path: {}",
-                                userId, email, role, careRegNo, path);
-                    } else {
-                        log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
                     }
-                } else {
-                    log.info("JWT 검증 성공 - userId: {}, email: {}, role: {}, path: {}", userId, email, role, path);
                 }
+                log.debug("JWT 검증 성공 - userId: {}, role: {}, path: {}", userId, role, path);
 
                 ServerHttpRequest modifiedRequest = requestBuilder.build();
 
                 return chain.filter(exchange.mutate().request(modifiedRequest).build());
 
             } catch (Exception e) {
-                log.error("토큰 파싱 실패: {}", e.getMessage());
                 return onError(exchange, "토큰 파싱에 실패했습니다.", HttpStatus.UNAUTHORIZED);
             }
         };
@@ -250,7 +240,7 @@ public class JwtAuthorizationGatewayFilterFactory
         response.setStatusCode(status);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
 
-        log.error("JWT 인가 실패 - message: {}, status: {}, path: {}",
+        log.warn("JWT 인가 실패 - message: {}, status: {}, path: {}",
                 message, status, exchange.getRequest().getURI().getPath());
 
         // 다른 서비스의 ResponseDTO와 동일한 구조로 에러 응답 생성

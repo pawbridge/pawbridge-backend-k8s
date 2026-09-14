@@ -78,7 +78,6 @@ public class UserServiceImpl implements UserService {
 
         // 7. 닉네임 자동 생성
         String nickname = nicknameGeneratorService.generateUniqueNickname();
-        log.info("자동 생성된 닉네임: {}", nickname);
 
         // 8. 비밀번호 암호화
         String encodedPassword = passwordEncoder.encode(requestDto.password());
@@ -106,18 +105,16 @@ public class UserServiceImpl implements UserService {
                     newNickname
             );
             savedUser = userRepository.save(user);
-            log.info("재생성된 닉네임: {}", newNickname);
         }
 
         // 11. 이메일 인증 정보 삭제
         try {
             emailVerificationService.clearVerification(requestDto.email());
         } catch (Exception e) {
-            log.warn("이메일 인증 정보 삭제 실패 (무시): {}", e.getMessage());
+            log.warn("이메일 인증 정보 삭제 실패 (무시): errorType={}", e.getClass().getSimpleName());
         }
 
-        log.info("회원가입 완료: email={}, nickname={}, role={}, careRegNo={}",
-                savedUser.getEmail(), savedUser.getNickname(), savedUser.getRole(), savedUser.getCareRegNo());
+        log.info("회원가입 완료: userId={}, role={}", savedUser.getUserId(), savedUser.getRole());
 
         return SignUpResponseDto.fromEntity(savedUser);
     }
@@ -172,7 +169,7 @@ public class UserServiceImpl implements UserService {
 
         // 2. 현재 닉네임과 동일하면 변경 불필요
         if (user.getNickname().equals(newNickname)) {
-            log.debug("동일한 닉네임으로 변경 시도, 변경 없음: {}", newNickname);
+            log.debug("동일한 닉네임으로 변경 시도, 변경 없음: userId={}", userId);
             return;
         }
 
@@ -185,10 +182,10 @@ public class UserServiceImpl implements UserService {
             user.updateNickname(newNickname);
             userRepository.save(user);
 
-            log.info("닉네임 변경 완료: userId={}, 새 닉네임={}", userId, newNickname);
+            log.info("닉네임 변경 완료: userId={}", userId);
         } catch (DataIntegrityViolationException e) {
             // DB 레벨에서 UNIQUE 제약 위반 시
-            log.warn("닉네임 중복 (DB 제약): {}", newNickname);
+            log.warn("닉네임 중복 (DB 제약): userId={}", userId);
             throw new NicknameDuplicateException();
         }
     }
@@ -225,7 +222,7 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public void updateUserByAdmin(Long userId, AdminUserUpdateRequest request) {
-        log.info("회원 수정 (관리자): userId={}, request={}", userId, request);
+        log.debug("회원 수정 요청 (관리자): userId={}", userId);
 
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new UserNotFoundException());
