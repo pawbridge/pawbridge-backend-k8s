@@ -104,8 +104,9 @@ public class ApmsSyncPlanFactory {
         if (execution.getStatus() != BatchStatus.COMPLETED
                 || execution.getStepExecutions().stream().anyMatch(step -> step.getSkipCount() != 0)) return false;
         // The older contract has no per-query evidence. Retain its existing full-success fallback.
-        return ApmsSyncPlan.LEGACY_CONTRACT.equals(contract)
-                || !ApmsQueryProgress.verifiedResults(execution, plan).isEmpty();
+        if (ApmsSyncPlan.LEGACY_CONTRACT.equals(contract)) return true;
+        var results = ApmsQueryProgress.verifiedResults(execution, plan);
+        return !results.isEmpty() && results.stream().allMatch(ApmsQueryProgress.Result::complete);
     }
 
     private static LocalDate earlier(LocalDate left, LocalDate right) {
