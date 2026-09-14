@@ -52,8 +52,20 @@ class AnimalShelterSearchTest {
         verify(operations).search(capture.capture(), eq(AnimalDocument.class));
         var query = capture.getValue().getQuery().bool();
         assertThat(query.must()).singleElement().satisfies(q -> {
-            assertThat(q.isMultiMatch()).isTrue();
-            assertThat(q.multiMatch().query()).isEqualTo("푸들");
+            assertThat(q.isBool()).isTrue();
+            assertThat(q.bool().minimumShouldMatch()).isEqualTo("1");
+            assertThat(q.bool().should()).anySatisfy(evidence -> {
+                assertThat(evidence.isMatchPhrase()).isTrue();
+                assertThat(evidence.matchPhrase().field()).isEqualTo("special_mark");
+                assertThat(evidence.matchPhrase().boost()).isEqualTo(9.0f);
+            });
+            assertThat(q.bool().should()).anySatisfy(evidence -> {
+                assertThat(evidence.isMultiMatch()).isTrue();
+                assertThat(evidence.multiMatch().query()).isEqualTo("푸들");
+                assertThat(evidence.multiMatch().type())
+                        .isEqualTo(co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType.MostFields);
+                assertThat(evidence.multiMatch().fields()).contains("description^4", "color^5");
+            });
         });
         assertThat(query.filter()).anySatisfy(q -> {
             assertThat(q.isTerm()).isTrue();
@@ -77,6 +89,32 @@ class AnimalShelterSearchTest {
         verify(operations).search(capture.capture(), eq(AnimalDocument.class));
         assertThat(capture.getValue().getQuery().bool().filter())
                 .noneMatch(q -> q.isTerm() && q.term().field().equals("shelter_id"));
+    }
+
+    @Test
+    void givenKeywordAndRelevanceSort__whenSearch__thenOrderByScoreRecencyAndStableId() {
+        emptyResult();
+
+        service.searchAnimals(AnimalSearchRequest.builder().keyword("흰색 말티즈 오른쪽 귀 검정").build(),
+                PageRequest.of(0, 21, Sort.by(Sort.Direction.DESC, "relevance")));
+
+        var capture = ArgumentCaptor.forClass(NativeQuery.class);
+        verify(operations).search(capture.capture(), eq(AnimalDocument.class));
+        var sortOptions = capture.getValue().getSortOptions();
+        assertThat(sortOptions).hasSize(3);
+        assertThat(sortOptions.get(0).isScore()).isTrue();
+        assertThat(sortOptions.get(0).score().order()).isEqualTo(co.elastic.clients.elasticsearch._types.SortOrder.Desc);
+        assertThat(sortOptions.get(1).field().field()).isEqualTo("created_at");
+        assertThat(sortOptions.get(2).field().field()).isEqualTo("id");
+    }
+
+    @Test
+    void givenNoKeywordAndRelevanceSort__whenSearch__thenRejectBeforeElasticsearch() {
+        assertThatThrownBy(() -> service.searchAnimals(AnimalSearchRequest.builder().build(),
+                PageRequest.of(0, 21, Sort.by(Sort.Direction.DESC, "relevance"))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("검색어가 필요");
+        verifyNoInteractions(operations);
     }
 
     @Test

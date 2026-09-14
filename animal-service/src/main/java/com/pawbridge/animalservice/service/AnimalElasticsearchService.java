@@ -1,7 +1,9 @@
 package com.pawbridge.animalservice.service;
 
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType;
 import com.pawbridge.animalservice.document.AnimalDocument;
 import com.pawbridge.animalservice.dto.AnimalSearchCondition;
 import com.pawbridge.animalservice.dto.request.AnimalSearchRequest;
@@ -240,19 +242,9 @@ public class AnimalElasticsearchService {
         List<Query> mustQueries = new ArrayList<>();
         List<Query> filterQueries = new ArrayList<>();
 
-        // 1. 키워드 검색 (품종, 특징, 발견 장소, 설명)
+        // 1. 키워드 검색: 고유 특징과 구조화된 정보의 정확 일치를 우선하고 오타 검색은 보조로 사용한다.
         if (condition.getKeyword() != null && !condition.getKeyword().trim().isEmpty()) {
-            String keyword = condition.getKeyword().trim();
-
-            // Multi-match query: 여러 필드에서 검색
-            Query multiMatchQuery = Query.of(q -> q
-                .multiMatch(m -> m
-                    .query(keyword)
-                    .fields("breed", "special_mark", "happen_place", "description", "shelter_name", "shelter_address")
-                    .fuzziness("AUTO")  // 오타 허용
-                )
-            );
-            mustQueries.add(multiMatchQuery);
+            mustQueries.add(createKeywordQuery(condition.getKeyword().trim()));
         }
 
         // 2. 축종 필터
@@ -396,11 +388,19 @@ public class AnimalElasticsearchService {
         Pageable pageable = createPageable(condition);
 
         // NativeQuery 생성
-        NativeQuery nativeQuery = NativeQuery.builder()
+        var nativeQueryBuilder = NativeQuery.builder()
             .withQuery(Query.of(q -> q.bool(boolQuery.build())))
             .withPageable(pageable)
-            .withTrackTotalHits(true) // 10,000건 이상 정확한 카운트 반환
-            .build();
+            .withTrackTotalHits(true); // 10,000건 이상 정확한 카운트 반환
+
+        if ("relevance".equals(condition.getSortBy())) {
+            nativeQueryBuilder
+                .withSort(s -> s.score(score -> score.order(SortOrder.Desc)))
+                .withSort(s -> s.field(field -> field.field("created_at").order(SortOrder.Desc)))
+                .withSort(s -> s.field(field -> field.field("id").order(SortOrder.Asc)));
+        }
+
+        NativeQuery nativeQuery = nativeQueryBuilder.build();
 
         // 검색 실행
         SearchHits<AnimalDocument> searchHits = elasticsearchOperations.search(nativeQuery, AnimalDocument.class);
@@ -526,6 +526,44 @@ public class AnimalElasticsearchService {
         return searchHits.getTotalHits();
     }
 
+    private Query createKeywordQuery(String keyword) {
+        List<Query> evidenceQueries = List.of(
+            Query.of(q -> q.term(t -> t.field("apms_notice_no").value(keyword).boost(12.0f))),
+            Query.of(q -> q.term(t -> t.field("apms_desertion_no").value(keyword).boost(12.0f))),
+            Query.of(q -> q.matchPhrase(m -> m.field("special_mark").query(keyword).boost(9.0f))),
+            Query.of(q -> q.matchPhrase(m -> m.field("breed").query(keyword).boost(8.0f))),
+            Query.of(q -> q.matchPhrase(m -> m.field("color").query(keyword).boost(7.0f))),
+            Query.of(q -> q.matchPhrase(m -> m.field("description").query(keyword).boost(7.0f))),
+            Query.of(q -> q.matchPhrase(m -> m.field("happen_place").query(keyword).boost(4.0f))),
+            Query.of(q -> q.matchPhrase(m -> m.field("shelter_name").query(keyword).boost(2.0f))),
+            Query.of(q -> q.multiMatch(m -> m
+                .query(keyword)
+                .type(TextQueryType.MostFields)
+                .fields(
+                    "special_mark^6",
+                    "breed^6",
+                    "color^5",
+                    "description^4",
+                    "happen_place^4",
+                    "shelter_name^2",
+                    "shelter_address^1.5"
+                )
+            )),
+            Query.of(q -> q.multiMatch(m -> m
+                .query(keyword)
+                .type(TextQueryType.MostFields)
+                .fields("breed^5", "color^4", "special_mark^3", "shelter_name")
+                .fuzziness("AUTO")
+                .boost(0.5f)
+            ))
+        );
+
+        return Query.of(q -> q.bool(b -> b
+            .should(evidenceQueries)
+            .minimumShouldMatch("1")
+        ));
+    }
+
     /**
      * Pageable 생성 (페이징 및 정렬)
      * @param condition 검색 조건
@@ -538,6 +576,13 @@ public class AnimalElasticsearchService {
                 : Sort.Direction.ASC;
 
         String requestedSort = condition.getSortBy();
+        if ("relevance".equals(requestedSort)) {
+            if (condition.getKeyword() == null || condition.getKeyword().isBlank()) {
+                throw new IllegalArgumentException("관련도순 정렬에는 검색어가 필요합니다.");
+            }
+            return PageRequest.of(condition.getPage(), condition.getSize());
+        }
+
         String sortBy = switch (requestedSort) {
             case "createdAt" -> "created_at";
             case "updatedAt" -> "updated_at";
