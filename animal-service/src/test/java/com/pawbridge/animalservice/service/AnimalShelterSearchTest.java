@@ -65,7 +65,20 @@ class AnimalShelterSearchTest {
                 assertThat(evidence.multiMatch().type())
                         .isEqualTo(co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType.MostFields);
                 assertThat(evidence.multiMatch().fields()).contains("description^4", "color^5");
+                assertThat(evidence.multiMatch().minimumShouldMatch()).isEqualTo("70%");
             });
+            assertThat(q.bool().should())
+                    .filteredOn(evidence -> evidence.isMultiMatch())
+                    .allSatisfy(evidence -> assertThat(evidence.multiMatch().minimumShouldMatch()).isEqualTo("70%"));
+            assertThat(q.bool().should()).anySatisfy(evidence -> {
+                assertThat(evidence.isMultiMatch()).isTrue();
+                assertThat(evidence.multiMatch().fuzziness()).isEqualTo("AUTO");
+                assertThat(evidence.multiMatch().boost()).isEqualTo(0.5f);
+            });
+            assertThat(q.bool().should())
+                    .noneMatch(evidence -> evidence.isTerm()
+                            && (evidence.term().field().equals("apms_notice_no")
+                            || evidence.term().field().equals("apms_desertion_no")));
         });
         assertThat(query.filter()).anySatisfy(q -> {
             assertThat(q.isTerm()).isTrue();
@@ -77,6 +90,55 @@ class AnimalShelterSearchTest {
             assertThat(q.term().field()).isEqualTo("species");
             assertThat(q.term().value().stringValue()).isEqualTo("DOG");
         });
+    }
+
+    @Test
+    void givenNoticeNumber__whenSearch__thenRequireExactNoticeNumberWithoutTextScoring() throws Exception {
+        emptyResult();
+        AnimalFacade facade = mock(AnimalFacade.class);
+        when(facade.searchAnimals(any(), any())).thenAnswer(a -> service.searchAnimals(a.getArgument(0), a.getArgument(1)));
+        var mvc = MockMvcBuilders.standaloneSetup(new AnimalController(facade))
+                .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver()).build();
+
+        mvc.perform(get("/api/v1/animals").param("noticeNo", "  경남-사천-2026-00027  "))
+                .andExpect(status().isOk());
+
+        var capture = ArgumentCaptor.forClass(NativeQuery.class);
+        verify(operations).search(capture.capture(), eq(AnimalDocument.class));
+        var query = capture.getValue().getQuery().bool();
+        assertThat(query.must()).isEmpty();
+        assertThat(query.filter()).noneMatch(filter -> filter.isTerms()
+                && filter.terms().field().equals("status"));
+        assertThat(query.filter()).anySatisfy(filter -> {
+            assertThat(filter.isTerm()).isTrue();
+            assertThat(filter.term().field()).isEqualTo("apms_notice_no");
+            assertThat(filter.term().value().stringValue()).isEqualTo("경남-사천-2026-00027");
+        });
+    }
+
+    @Test
+    void givenBreedTypoAndRelevanceSort__whenSearch__thenPreferExactBreedAndKeepFuzzyFallback() {
+        emptyResult();
+
+        service.searchAnimals(AnimalSearchRequest.builder().breed("마티즈").build(),
+                PageRequest.of(0, 21, Sort.by(Sort.Direction.DESC, "relevance")));
+
+        var capture = ArgumentCaptor.forClass(NativeQuery.class);
+        verify(operations).search(capture.capture(), eq(AnimalDocument.class));
+        var breedQuery = capture.getValue().getQuery().bool().must().get(0).bool();
+        assertThat(breedQuery.minimumShouldMatch()).isEqualTo("1");
+        assertThat(breedQuery.should()).anySatisfy(evidence -> {
+            assertThat(evidence.isTerm()).isTrue();
+            assertThat(evidence.term().field()).isEqualTo("breed.keyword");
+            assertThat(evidence.term().boost()).isEqualTo(10.0f);
+        });
+        assertThat(breedQuery.should()).anySatisfy(evidence -> {
+            assertThat(evidence.isMatch()).isTrue();
+            assertThat(evidence.match().field()).isEqualTo("breed");
+            assertThat(evidence.match().fuzziness()).isEqualTo("AUTO");
+            assertThat(evidence.match().boost()).isEqualTo(0.5f);
+        });
+        assertThat(capture.getValue().getSortOptions().get(0).isScore()).isTrue();
     }
 
     @Test
@@ -113,7 +175,7 @@ class AnimalShelterSearchTest {
         assertThatThrownBy(() -> service.searchAnimals(AnimalSearchRequest.builder().build(),
                 PageRequest.of(0, 21, Sort.by(Sort.Direction.DESC, "relevance"))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("검색어가 필요");
+                .hasMessageContaining("키워드나 품종");
         verifyNoInteractions(operations);
     }
 
