@@ -47,8 +47,8 @@ public final class ApmsQueryProgress {
             if (evidence.version() != 1 || evidence.results() == null
                     || !evidence.results().stream().map(Result::query).toList().equals(plan.queries())) return List.of();
             long incomplete = evidence.results().stream().filter(result -> !result.complete()).count();
-            if (incomplete != context.getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT)
-                    || (incomplete == 0) != (execution.getStatus() == BatchStatus.COMPLETED)) return List.of();
+            if (incomplete != context.getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT)) return List.of();
+            if (execution.getStatus() == BatchStatus.FAILED && incomplete == 0) return List.of();
             return List.copyOf(evidence.results());
         } catch (RuntimeException | JsonProcessingException exception) {
             return List.of();

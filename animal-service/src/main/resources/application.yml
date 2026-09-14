@@ -2,6 +2,11 @@ spring:
   application:
     name: animal-service
 
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
   # S3-compatible object storage (Cloudflare R2)
   cloud:
     aws:
@@ -50,6 +55,9 @@ spring:
 # Server Settings
 server:
   port: 8081
+  tomcat:
+    # Drain bounded rejected uploads so clients can receive the 413 response.
+    max-swallow-size: 12MB
   servlet:
     context-path: /
     encoding:
@@ -109,3 +117,28 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+
+# Independent photo archive; activate only after schema, optimizer and archive bucket are ready.
+apms-photo-archive:
+  enabled: ${APMS_PHOTO_ARCHIVE_ENABLED:false}
+  bucket: ${APMS_PHOTO_ARCHIVE_BUCKET:}
+  storage:
+    endpoint: ${APMS_PHOTO_ARCHIVE_ENDPOINT:}
+    region: ${APMS_PHOTO_ARCHIVE_REGION:auto}
+    access-key-id: ${APMS_PHOTO_ARCHIVE_ACCESS_KEY_ID:}
+    secret-access-key: ${APMS_PHOTO_ARCHIVE_SECRET_ACCESS_KEY:}
+  optimizer-url: ${APMS_PHOTO_OPTIMIZER_URL:}
+  internal-api-key: ${APMS_PHOTO_OPTIMIZER_INTERNAL_API_KEY:}
+  scan-size: ${APMS_PHOTO_ARCHIVE_SCAN_SIZE:50}
+  max-photos: ${APMS_PHOTO_ARCHIVE_MAX_PHOTOS:25}
+  max-run-seconds: ${APMS_PHOTO_ARCHIVE_MAX_RUN_SECONDS:300}
+  lease-seconds: ${APMS_PHOTO_ARCHIVE_LEASE_SECONDS:300}
+  recheck-seconds: ${APMS_PHOTO_ARCHIVE_RECHECK_SECONDS:604800}
+  interval-ms: ${APMS_PHOTO_ARCHIVE_INTERVAL_MS:900000}
+  initial-delay-ms: ${APMS_PHOTO_ARCHIVE_INITIAL_DELAY_MS:60000}
+
+# Separate APMS shelter master collection. Decoding key; enable schedule only after migration.
+shelter-directory:
+  service-key: ${SHELTER_DIRECTORY_SERVICE_KEY:}
+  schedule-enabled: ${SHELTER_DIRECTORY_SCHEDULE_ENABLED:false}
+  collection-cron: ${SHELTER_DIRECTORY_CRON:0 0 4 * * *}

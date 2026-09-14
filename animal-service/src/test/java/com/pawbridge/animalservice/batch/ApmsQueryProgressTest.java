@@ -36,6 +36,21 @@ class ApmsQueryProgressTest {
     }
 
     @Test
+    void givenCompletedCountMismatch__whenPlannedLater__thenKeepOnlyTheUnresolvedWindowRetryable() {
+        var partial = result(1, initial, Set.of(1));
+        partial.setStatus(BatchStatus.COMPLETED);
+        partial.getStepExecutions().stream()
+                .filter(step -> step.getStepName().equals("apmsCollectionVerificationStep"))
+                .findFirst().orElseThrow().setStatus(BatchStatus.COMPLETED);
+
+        var next = plan(END.plusDays(10), partial);
+
+        assertThat(start(next, JUNE)).isEqualTo(FIRST);
+        assertThat(start(next, JULY)).isEqualTo(LocalDate.of(2026, 8, 22));
+        assertThat(next.recentStart()).isEqualTo(LocalDate.of(2026, 8, 22));
+    }
+
+    @Test
     void givenUnresolvedRecentIntakes__whenAgedBeyondThirtyDays__thenKeepUnfilteredRecoveryUntilComplete() {
         var first = result(1, initial, Set.of(0, 1));
         var next = plan(END.plusDays(40), first);

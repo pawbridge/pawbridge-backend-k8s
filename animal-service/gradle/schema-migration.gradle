@@ -36,7 +36,7 @@ tasks.register('migrationMysqlTest', Test) {
     classpath = sourceSets.migrationTest.runtimeClasspath
     useJUnitPlatform {
         includeTags 'mysql'
-        excludeTags 'rehearsal'
+        excludeTags 'rehearsal', 'photo-http'
     }
     outputs.upToDateWhen { false }
 }
@@ -76,4 +76,13 @@ tasks.register('migrationDistribution', Sync) {
     into layout.buildDirectory.dir('migration')
     from(tasks.named('migrationJar')) { into 'lib' }
     from(configurations.migrationRuntimeClasspath) { into 'lib' }
+}
+
+// Opt-in: a guarded disposable MySQL plus the separately built photo optimizer.
+tasks.register('photoArchiveIntegrationTest', Test) {
+    group = 'verification'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'photo-http' }
+    outputs.upToDateWhen { false }
 }

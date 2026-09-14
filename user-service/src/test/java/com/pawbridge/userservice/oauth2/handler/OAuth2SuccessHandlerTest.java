@@ -25,6 +25,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
@@ -87,7 +88,26 @@ class OAuth2SuccessHandlerTest {
                 .contains("accessToken=" + accessToken)
                 .contains("refreshToken=" + refreshToken);
         assertThat(output)
+                .doesNotContain(user.getEmail())
+                .doesNotContain(user.getNickname())
                 .doesNotContain(accessToken)
                 .doesNotContain(refreshToken);
+    }
+
+    @Test
+    void givenTokenCreationFailure_whenHandled_thenErrorRedirectIsPreservedWithoutLoggingCause(CapturedOutput output)
+            throws Exception {
+        String privateMessage = "private-failure@example.test";
+        User user = User.builder().userId(7L).provider("GOOGLE").role(Role.ROLE_USER).build();
+        when(authentication.getPrincipal()).thenReturn(new PrincipalDetails(user, Map.of()));
+        when(jwtProvider.createAccessToken(user)).thenThrow(new IllegalStateException(privateMessage));
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        ArgumentCaptor<String> redirectUrl = ArgumentCaptor.forClass(String.class);
+        verify(redirectStrategy).sendRedirect(eq(request), eq(response), redirectUrl.capture());
+        assertThat(redirectUrl.getValue()).startsWith("https://www.pawbridge.kr/login?error=");
+        verifyNoInteractions(refreshTokenRepository);
+        assertThat(output).contains("IllegalStateException").doesNotContain(privateMessage);
     }
 }
