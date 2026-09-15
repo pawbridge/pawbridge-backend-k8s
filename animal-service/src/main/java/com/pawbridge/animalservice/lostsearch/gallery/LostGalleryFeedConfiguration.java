@@ -38,4 +38,10 @@ public class LostGalleryFeedConfiguration {
     LostGalleryFeed lostGalleryFeed(JdbcTemplate jdbc, ObjectMapper mapper, @Qualifier("lostGalleryPresigner") S3Presigner lostGalleryPresigner) {
         return new LostGalleryFeed(jdbc, mapper, lostGalleryPresigner);
     }
+    @Bean(destroyMethod = "close")
+    LostGallerySnapshots lostGallerySnapshots(ObjectMapper mapper, LostGalleryFeed feed,
+            @Qualifier("lostGalleryPresigner") S3Presigner signer,
+            @Value("${lost-gallery-feed.snapshot-directory:/tmp/pawbridge-gallery-snapshots}") String directory) throws java.io.IOException {
+        return new LostGallerySnapshots(mapper, feed::streamEntries, signer, java.nio.file.Path.of(directory), java.time.Clock.systemUTC());
+    }
 }

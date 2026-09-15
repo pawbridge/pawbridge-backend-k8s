@@ -44,6 +44,7 @@ public class LostGalleryFeed {
     @Transactional(readOnly = true, timeout = 120)
     public Result snapshot(String previousEtag) {
         Content content = readContent();
+        if (content.records().size() > 500) throw new IllegalStateException("Legacy feed exceeds page limit");
         String etag = fingerprint(json(content));
         if (etag.equals(previousEtag)) return new Result(etag, null);
         List<Photo> photos = content.photos().stream().map(photo -> {
@@ -53,7 +54,7 @@ public class LostGalleryFeed {
             return new Photo(photo.sha256(), url, photo.bytes(), photo.mime());
         }).toList();
         byte[] body = json(new Snapshot(true, content.records().size(), content.records(), photos));
-        if (body.length > MAX_BODY_BYTES) throw new IllegalStateException("Gallery snapshot exceeds transfer limit");
+        if (body.length > LostGallerySnapshots.PAGE_BYTES) throw new IllegalStateException("Gallery snapshot exceeds transfer limit");
         return new Result(etag, body);
     }
 
@@ -69,7 +70,7 @@ public class LostGalleryFeed {
             var photos = new LinkedHashMap<String, StoredPhoto>();
             long serializedBytes = 0;
             while (result.next()) {
-                if (records.size() == MAX_RECORDS) throw new IllegalStateException("Gallery record limit exceeded");
+                if (records.size() == 500) throw new IllegalStateException("Gallery record limit exceeded");
                 var photo = new StoredPhoto(result.getString("stored_sha256"), result.getString("object_key"),
                         result.getLong("stored_bytes"), result.getString("content_type"));
                 validatePhoto(photo);
@@ -86,11 +87,39 @@ public class LostGalleryFeed {
                     row.put(column, value);
                 }
                 serializedBytes += json(row).length + 1200L; // Reserve space for each bounded signed URL.
-                if (serializedBytes > MAX_BODY_BYTES) throw new IllegalStateException("Gallery snapshot exceeds transfer limit");
+                if (serializedBytes > LostGallerySnapshots.PAGE_BYTES) throw new IllegalStateException("Gallery snapshot exceeds transfer limit");
                 records.add(row);
             }
             if (records.isEmpty()) throw new IllegalStateException("Empty gallery snapshot is not publishable");
             return new Content(List.copyOf(records), List.copyOf(photos.values()));
+        });
+    }
+
+    /** One consistent DB read, consumed row by row before the snapshot is published. */
+    @Transactional(readOnly = true, timeout = 120, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public void streamEntries(java.util.function.Consumer<LostGallerySnapshots.Entry> consumer) {
+        String conflicts = "SELECT stored_sha256 FROM (" + SQL + ") source GROUP BY stored_sha256 "
+                + "HAVING MIN(stored_bytes) <> MAX(stored_bytes) OR MIN(content_type) <> MAX(content_type) LIMIT 1";
+        boolean conflict = Boolean.TRUE.equals(jdbc.query(connection -> {
+            var statement = connection.prepareStatement(conflicts);
+            statement.setQueryTimeout(20);
+            return statement;
+        }, (org.springframework.jdbc.core.ResultSetExtractor<Boolean>) java.sql.ResultSet::next));
+        if (conflict) throw new IllegalStateException("Conflicting photo integrity metadata");
+        jdbc.query(connection -> {
+            var statement = connection.prepareStatement(SQL);
+            statement.setQueryTimeout(20);
+            statement.setFetchSize(Integer.MIN_VALUE);
+            return statement;
+        }, (org.springframework.jdbc.core.RowCallbackHandler) result -> {
+            var photo = new StoredPhoto(result.getString("stored_sha256"), result.getString("object_key"),
+                    result.getLong("stored_bytes"), result.getString("content_type"));
+            validatePhoto(photo);
+            var row = new LinkedHashMap<String, Object>();
+            row.put("id", result.getLong("id")); row.put("species", result.getString("species"));
+            row.put("source_sha256", photo.sha256());
+            for (String field : LostGallerySnapshots.METADATA) row.put(field, result.getString(field));
+            consumer.accept(new LostGallerySnapshots.Entry(row, photo));
         });
     }
 

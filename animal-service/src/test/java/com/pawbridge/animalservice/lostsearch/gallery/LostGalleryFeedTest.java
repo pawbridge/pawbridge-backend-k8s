@@ -90,4 +90,41 @@ class LostGalleryFeedTest {
             assertThrows(IllegalStateException.class, () -> LostGalleryFeed.validatePhoto(photo));
         }
     }
+    @Test
+    void legacy_feed_stops_at_500_rows_and_stream_failure_closes_the_jdbc_cursor() throws Exception {
+        var source = mock(javax.sql.DataSource.class);
+        var connection = mock(java.sql.Connection.class);
+        var statement = mock(java.sql.PreparedStatement.class);
+        var result = mock(java.sql.ResultSet.class);
+        var conflicts = mock(java.sql.PreparedStatement.class);
+        var conflictResult = mock(java.sql.ResultSet.class);
+        when(source.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(LostGalleryFeed.SQL)).thenReturn(statement);
+        when(connection.prepareStatement(argThat(sql -> sql != null && sql.startsWith("SELECT stored_sha256")))).thenReturn(conflicts);
+        when(conflicts.executeQuery()).thenReturn(conflictResult);
+        when(statement.executeQuery()).thenReturn(result);
+        var row = new java.util.concurrent.atomic.AtomicInteger();
+        when(result.next()).thenAnswer(invocation -> row.incrementAndGet() <= 501);
+        when(result.getLong("id")).thenAnswer(invocation -> (long) row.get());
+        when(result.getLong("stored_bytes")).thenReturn(123L);
+        when(result.getString("stored_sha256")).thenReturn(sha);
+        when(result.getString("object_key")).thenReturn("apms/photos/" + sha + ".jpg");
+        when(result.getString("species")).thenReturn("DOG");
+        when(result.getString("content_type")).thenReturn("image/jpeg");
+        var feed = new LostGalleryFeed(new org.springframework.jdbc.core.JdbcTemplate(source), mapper, null);
+        assertThrows(IllegalStateException.class, feed::readContent);
+        assertEquals(501, row.get());
+        verify(result).close();
+        clearInvocations(result, statement);
+        row.set(0);
+        assertThrows(IllegalStateException.class, () -> feed.streamEntries(entry -> {
+            assertEquals(1L, entry.record().get("id"));
+            throw new IllegalStateException("consumer storage full");
+        }));
+        assertEquals(1, row.get());
+        verify(statement).setFetchSize(Integer.MIN_VALUE);
+        verify(result).close();
+        verify(statement).close();
+    }
+
 }
