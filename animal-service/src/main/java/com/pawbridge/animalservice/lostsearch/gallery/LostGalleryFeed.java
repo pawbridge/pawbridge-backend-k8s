@@ -17,7 +17,7 @@ public class LostGalleryFeed {
     static final int MAX_RECORDS = 100_000;
     static final int MAX_BODY_BYTES = 128 * 1024 * 1024;
     static final String SQL = """
-            SELECT a.id, a.species, a.happen_date, a.happen_place, a.color, a.special_mark, a.description,
+            SELECT a.id, a.species, a.status, a.happen_date, a.happen_place, a.color, a.special_mark, a.description,
                    p.object_key, p.stored_sha256, p.stored_bytes, p.content_type
             FROM apms_photo_archive p JOIN animals a ON a.id = p.animal_id
             WHERE p.state = 'READY' AND p.slot = 1
@@ -81,7 +81,7 @@ public class LostGalleryFeed {
                 row.put("id", result.getLong("id"));
                 row.put("species", result.getString("species"));
                 row.put("source_sha256", photo.sha256());
-                for (String column : List.of("happen_date", "happen_place", "color", "special_mark", "description")) {
+                for (String column : LostGallerySnapshots.METADATA) {
                     String value = result.getString(column);
                     if (value != null && value.length() > 10000) throw new IllegalStateException("Gallery metadata exceeds limit");
                     row.put(column, value);

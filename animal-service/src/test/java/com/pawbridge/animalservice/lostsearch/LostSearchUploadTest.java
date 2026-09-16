@@ -56,9 +56,9 @@ class LostSearchUploadTest {
 
     @Test
     void givenPhotoAboveBootDefaultButWithinFiveMiB__whenUploading__thenReachSearch() throws Exception {
-        when(client.search(any(), any(), any(), any(), any(), any())).thenReturn(new PythonLostSearchResponse(List.of()));
+        when(client.search(any(), any(), any(), any(), any(), any(), anyBoolean())).thenReturn(new PythonLostSearchResponse(List.of()));
         assertThat(upload(2 * 1024 * 1024).statusCode()).isEqualTo(200);
-        verify(client).search(any(), any(), any(), any(), any(), any());
+        verify(client).search(any(), any(), any(), any(), any(), any(), eq(false));
     }
 
     @Test

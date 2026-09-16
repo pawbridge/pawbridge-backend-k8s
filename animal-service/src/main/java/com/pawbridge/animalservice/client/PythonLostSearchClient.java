@@ -23,7 +23,8 @@ public interface PythonLostSearchClient {
             @RequestPart("species") String species,
             @RequestPart(value = "lostDate", required = false) String lostDate,
             @RequestPart(value = "region", required = false) String region,
-            @RequestPart(value = "description", required = false) String description);
+            @RequestPart(value = "description", required = false) String description,
+            @RequestPart("includeAdoptedOrReturned") boolean includeAdoptedOrReturned);
 
     // Only the Feign child context loads this class; it must not be component-scanned.
     class Configuration {

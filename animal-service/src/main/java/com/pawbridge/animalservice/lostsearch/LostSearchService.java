@@ -2,6 +2,7 @@ package com.pawbridge.animalservice.lostsearch;
 
 import com.pawbridge.animalservice.client.PythonLostSearchClient;
 import com.pawbridge.animalservice.entity.Animal;
+import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.enums.Species;
 import com.pawbridge.animalservice.mapper.AnimalMapper;
 import com.pawbridge.animalservice.repository.AnimalRepository;
@@ -24,6 +25,9 @@ public class LostSearchService {
     static final long MAX_IMAGE_BYTES = 5 * 1024 * 1024;
     private static final Set<String> EVIDENCE = Set.of("FOUND_ON_OR_AFTER_LOST_DATE",
             "DISCOVERY_PLACE_TEXT_MATCH", "REGISTERED_DESCRIPTION_TEXT_MATCH");
+    private static final Set<AnimalStatus> ACTIVE = Set.of(AnimalStatus.NOTICE, AnimalStatus.PROTECT);
+    private static final Set<AnimalStatus> ACTIVE_AND_RESOLVED = Set.of(
+            AnimalStatus.NOTICE, AnimalStatus.PROTECT, AnimalStatus.ADOPTED, AnimalStatus.RETURNED);
     private final PythonLostSearchClient client;
     private final AnimalRepository animals;
     private final AnimalMapper mapper;
@@ -65,7 +69,8 @@ public class LostSearchService {
             response = client.search(internalKey,
                     new FormData("application/octet-stream", "photo", request.getImage().getBytes()),
                     request.getSpecies().name(), request.getLostDate() == null ? null : request.getLostDate().toString(),
-                    normalize(request.getRegion()), normalize(request.getDescription()));
+                    normalize(request.getRegion()), normalize(request.getDescription()),
+                    request.isIncludeAdoptedOrReturned());
         } catch (FeignException ex) {
             if (ex.status() == 413) {
                 throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "사진은 5MiB 이하이어야 합니다");
@@ -92,8 +97,10 @@ public class LostSearchService {
                 .collect(Collectors.toMap(Animal::getId, Function.identity()));
         Map<Long, List<String>> evidence = response.candidates().stream().collect(Collectors.toMap(
                 PythonLostSearchResponse.Candidate::animalId, PythonLostSearchResponse.Candidate::matchedEvidence, (first, next) -> first));
+        Set<AnimalStatus> allowedStatuses = request.isIncludeAdoptedOrReturned() ? ACTIVE_AND_RESOLVED : ACTIVE;
         return new LostSearchResponse(ids.stream().filter(current::containsKey).map(current::get)
                 .filter(animal -> animal.getSpecies() == request.getSpecies())
+                .filter(animal -> allowedStatuses.contains(animal.getStatus()))
                 .map(animal -> new LostSearchResponse.Candidate(mapper.toDetailResponse(animal),
                         animal.getShelter() == null ? null : animal.getShelter().getPhone(), evidence.get(animal.getId())))
                 .toList());

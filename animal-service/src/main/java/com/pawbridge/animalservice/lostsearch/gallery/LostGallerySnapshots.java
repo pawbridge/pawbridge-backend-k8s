@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.lostsearch.gallery;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.animalservice.enums.AnimalStatus;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -21,7 +22,7 @@ public final class LostGallerySnapshots implements AutoCloseable {
     static final int MAX_PAGE = 500, PAGE_BYTES = 2 * 1024 * 1024, ROW_BYTES = 256 * 1024;
     static final long FILE_BYTES = 128L * 1024 * 1024;
     static final Duration TTL = Duration.ofHours(6);
-    static final List<String> METADATA = List.of("happen_date", "happen_place", "color", "special_mark", "description");
+    static final List<String> METADATA = List.of("status", "happen_date", "happen_place", "color", "special_mark", "description");
     public record Entry(Map<String, Object> record, LostGalleryFeed.StoredPhoto photo) {}
     public record Descriptor(String protocol, String snapshotId, String snapshotSha256, int count,
                              String cursor, long expiresAt) {}
@@ -210,6 +211,8 @@ public final class LostGallerySnapshots implements AutoCloseable {
             Object value = entry.record().get(field);
             if (value != null && (!(value instanceof String) || ((String)value).length() > 10000)) throw new IllegalStateException("Invalid gallery metadata");
         }
+        try { AnimalStatus.valueOf((String) entry.record().get("status")); }
+        catch (RuntimeException error) { throw new IllegalStateException("Invalid gallery status"); }
     }
     @Override public synchronized void close() throws IOException {
         try { for (Snapshot value : snapshots.values()) Files.deleteIfExists(value.file); snapshots.clear(); }

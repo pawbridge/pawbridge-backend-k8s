@@ -30,7 +30,7 @@ class LostGallerySnapshotsTest {
     }
     LostGallerySnapshots.Entry entry(int id, String description) {
         var row=new LinkedHashMap<String,Object>(); row.put("id",(long)id);row.put("species","DOG");row.put("source_sha256",SHA);
-        row.put("description",description);
+        row.put("status", "PROTECT"); row.put("description",description);
         return new LostGallerySnapshots.Entry(row,new LostGalleryFeed.StoredPhoto(SHA,"apms/photos/"+SHA+".jpg",123,"image/jpeg"));
     }
     @Test void frozen_snapshot_keeps_original_metadata_and_pages_are_complete_without_duplicates() throws Exception {
@@ -95,11 +95,12 @@ class LostGallerySnapshotsTest {
     @Test void fingerprint_matches_python_protocol_fixture_including_unicode_and_nulls() {
         var row = new LinkedHashMap<String, Object>();
         row.put("id", 7L); row.put("species", "DOG"); row.put("source_sha256", SHA);
+        row.put("status", "PROTECT");
         row.put("happen_date", "2026-09-15"); row.put("happen_place", "서울");
         row.put("color", "갈색"); row.put("special_mark", null); row.put("description", "");
         var entry = new LostGallerySnapshots.Entry(row,
                 new LostGalleryFeed.StoredPhoto(SHA, "apms/photos/" + SHA + ".jpg", 123, "image/jpeg"));
-        assertEquals("d5ed239d7a8903047d3b1ff24c5ac666d08ba05a38784fc6198723a67acab578", HexFormat.of().formatHex(LostGallerySnapshots.advance(LostGallerySnapshots.initialChain(), entry)));
+        assertEquals("25f0beaba9ab422cfe17d3be38b2555abd41182ce0885c67debd4e71d43d5dc3", HexFormat.of().formatHex(LostGallerySnapshots.advance(LostGallerySnapshots.initialChain(), entry)));
     }
     @Test void failed_source_does_not_publish_or_leave_partial_snapshot() throws Exception {
         try(var signer=signer();var store=new LostGallerySnapshots(mapper,c->{c.accept(entry(1,"a"));c.accept(entry(1,"duplicate"));},signer,directory,Clock.systemUTC())) {

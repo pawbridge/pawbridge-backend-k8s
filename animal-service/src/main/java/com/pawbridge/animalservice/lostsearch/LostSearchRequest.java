@@ -20,4 +20,5 @@ public class LostSearchRequest {
     private String region;
     @Size(max = 500)
     private String description;
+    private boolean includeAdoptedOrReturned;
 }
