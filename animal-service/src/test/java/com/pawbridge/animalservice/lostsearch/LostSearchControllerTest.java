@@ -10,9 +10,11 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.mockito.ArgumentCaptor;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -32,6 +34,20 @@ class LostSearchControllerTest {
         when(service.search(any())).thenReturn(new LostSearchResponse(List.of()));
         mvc.perform(multipart(PATH).file(photo()).param("species", "DOG").param("lostDate", ""))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.candidates").isEmpty());
+        var request = ArgumentCaptor.forClass(LostSearchRequest.class);
+        verify(service).search(request.capture());
+        assertThat(request.getValue().isIncludeAdoptedOrReturned()).isFalse();
+    }
+
+    @Test
+    void givenResolvedOption__whenSearch__thenBindExplicitSelection() throws Exception {
+        when(service.search(any())).thenReturn(new LostSearchResponse(List.of()));
+        mvc.perform(multipart(PATH).file(photo()).param("species", "DOG")
+                        .param("includeAdoptedOrReturned", "true"))
+                .andExpect(status().isOk());
+        var request = ArgumentCaptor.forClass(LostSearchRequest.class);
+        verify(service).search(request.capture());
+        assertThat(request.getValue().isIncludeAdoptedOrReturned()).isTrue();
     }
 
     @Test

@@ -34,7 +34,7 @@ class LostGalleryFeedTest {
         try (var signer = signer()) {
             var feed = new LostGalleryFeed(null, mapper, signer) {
                 @Override Content readContent() {
-                    return new Content(List.of(Map.of("id", 1, "species", "DOG", "source_sha256", sha,
+                    return new Content(List.of(Map.of("id", 1, "species", "DOG", "source_sha256", sha, "status", "PROTECT",
                                     "happen_place", "상주시")),
                             List.of(new StoredPhoto(sha, "apms/photos/" + sha + ".jpg", 123, "image/jpeg")));
                 }
@@ -43,6 +43,7 @@ class LostGalleryFeedTest {
             var json = mapper.readTree(first.body());
             assertTrue(json.get("complete").asBoolean());
             assertEquals(1, json.get("count").asInt());
+            assertEquals("PROTECT", json.get("records").get(0).get("status").asText());
             assertEquals("상주시", json.get("records").get(0).get("happen_place").asText());
             var url = URI.create(json.get("photos").get(0).get("url").asText());
             assertEquals("test.r2.cloudflarestorage.com", url.getHost());
@@ -110,6 +111,7 @@ class LostGalleryFeedTest {
         when(result.getString("stored_sha256")).thenReturn(sha);
         when(result.getString("object_key")).thenReturn("apms/photos/" + sha + ".jpg");
         when(result.getString("species")).thenReturn("DOG");
+        when(result.getString("status")).thenReturn("PROTECT");
         when(result.getString("content_type")).thenReturn("image/jpeg");
         var feed = new LostGalleryFeed(new org.springframework.jdbc.core.JdbcTemplate(source), mapper, null);
         assertThrows(IllegalStateException.class, feed::readContent);
@@ -119,6 +121,7 @@ class LostGalleryFeedTest {
         row.set(0);
         assertThrows(IllegalStateException.class, () -> feed.streamEntries(entry -> {
             assertEquals(1L, entry.record().get("id"));
+            assertEquals("PROTECT", entry.record().get("status"));
             throw new IllegalStateException("consumer storage full");
         }));
         assertEquals(1, row.get());

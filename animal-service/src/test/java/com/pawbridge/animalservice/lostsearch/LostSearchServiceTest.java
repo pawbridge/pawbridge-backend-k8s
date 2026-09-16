@@ -43,33 +43,54 @@ class LostSearchServiceTest {
         request.setLostDate(LocalDate.of(2026, 9, 8));
         request.setRegion("  상주시  ");
         request.setDescription("  흰색 귀  ");
-        when(client.search(anyString(), any(), anyString(), any(), any(), any())).thenReturn(new PythonLostSearchResponse(List.of()));
+        when(client.search(anyString(), any(), anyString(), any(), any(), any(), anyBoolean())).thenReturn(new PythonLostSearchResponse(List.of()));
         assertThat(service.search(request).candidates()).isEmpty();
         var file = ArgumentCaptor.forClass(feign.form.FormData.class);
-        verify(client).search(eq("test-key"), file.capture(), eq("DOG"), eq("2026-09-08"), eq("상주시"), eq("흰색 귀"));
+        verify(client).search(eq("test-key"), file.capture(), eq("DOG"), eq("2026-09-08"), eq("상주시"), eq("흰색 귀"), eq(false));
         assertThat(file.getValue().getFileName()).isEqualTo("photo");
         assertThat(file.getValue().getData()).containsExactly(1, 2, 3);
         verifyNoInteractions(animals);
     }
 
     @Test
-    void givenMissingChangedSpeciesAndEndedAnimals__whenSearch__thenKeepCurrentDataAndCandidateOrder() {
-        when(client.search(anyString(), any(), anyString(), any(), any(), any())).thenReturn(new PythonLostSearchResponse(List.of(
-                candidate(3L), candidate(99L), candidate(2L), candidate(1L), candidate(3L))));
+    void givenMissingChangedSpeciesAndEndedAnimals__whenDefaultSearch__thenReturnOnlyCurrentActiveAnimals() {
+        when(client.search(anyString(), any(), anyString(), any(), any(), any(), anyBoolean())).thenReturn(new PythonLostSearchResponse(List.of(
+                candidate(3L), candidate(99L), candidate(2L), candidate(4L), candidate(1L), candidate(5L), candidate(3L))));
         Animal adopted = animal(3L, Species.DOG);
         when(adopted.getStatus()).thenReturn(AnimalStatus.ADOPTED);
-        when(adopted.getHappenPlace()).thenReturn("실제 발견 장소");
-        Shelter shelter = mock(Shelter.class);
-        when(shelter.getPhone()).thenReturn("02-000-0000");
-        when(adopted.getShelter()).thenReturn(shelter);
         Animal first = animal(1L, Species.DOG);
         Animal changedSpecies = animal(2L, Species.CAT);
-        when(animals.findWithShelterByIdIn(List.of(3L, 99L, 2L, 1L))).thenReturn(List.of(first, changedSpecies, adopted));
+        Animal protectedAnimal = animal(4L, Species.DOG);
+        when(protectedAnimal.getStatus()).thenReturn(AnimalStatus.PROTECT);
+        when(protectedAnimal.getHappenPlace()).thenReturn("실제 발견 장소");
+        Shelter shelter = mock(Shelter.class);
+        when(shelter.getPhone()).thenReturn("02-000-0000");
+        when(protectedAnimal.getShelter()).thenReturn(shelter);
+        Animal euthanized = animal(5L, Species.DOG);
+        when(euthanized.getStatus()).thenReturn(AnimalStatus.EUTHANIZED);
+        when(animals.findWithShelterByIdIn(List.of(3L, 99L, 2L, 4L, 1L, 5L)))
+                .thenReturn(List.of(first, changedSpecies, adopted, protectedAnimal, euthanized));
         var results = service.search(request).candidates();
-        assertThat(results).extracting(c -> c.animal().getId()).containsExactly(3L, 1L);
-        assertThat(results.get(0).animal().getStatus()).isEqualTo(AnimalStatus.ADOPTED);
+        assertThat(results).extracting(c -> c.animal().getId()).containsExactly(4L, 1L);
         assertThat(results.get(0).animal().getHappenPlace()).isEqualTo("실제 발견 장소");
         assertThat(results.get(0).shelterPhone()).isEqualTo("02-000-0000");
+    }
+
+    @Test
+    void givenResolvedOption__whenSearch__thenIncludeAdoptedAndReturnedButExcludeDeath() {
+        request.setIncludeAdoptedOrReturned(true);
+        when(client.search(anyString(), any(), anyString(), any(), any(), any(), eq(true))).thenReturn(new PythonLostSearchResponse(List.of(
+                candidate(3L), candidate(4L), candidate(5L), candidate(1L))));
+        Animal adopted = animal(3L, Species.DOG);
+        when(adopted.getStatus()).thenReturn(AnimalStatus.ADOPTED);
+        Animal returned = animal(4L, Species.DOG);
+        when(returned.getStatus()).thenReturn(AnimalStatus.RETURNED);
+        Animal euthanized = animal(5L, Species.DOG);
+        when(euthanized.getStatus()).thenReturn(AnimalStatus.EUTHANIZED);
+        Animal active = animal(1L, Species.DOG);
+        when(animals.findWithShelterByIdIn(List.of(3L, 4L, 5L, 1L))).thenReturn(List.of(active, returned, euthanized, adopted));
+        assertThat(service.search(request).candidates()).extracting(c -> c.animal().getId()).containsExactly(3L, 4L, 1L);
+        verify(client).search(anyString(), any(), eq("DOG"), isNull(), isNull(), isNull(), eq(true));
     }
 
     @Test
@@ -103,7 +124,7 @@ class LostSearchServiceTest {
         var rawRequest = Request.create(Request.HttpMethod.POST, "http://localhost", Map.of(), new byte[0], StandardCharsets.UTF_8, null);
         var response = feign.Response.builder().status(upstream).reason("private-upstream").request(rawRequest)
                 .body("private-photo-or-key", StandardCharsets.UTF_8).build();
-        when(client.search(anyString(), any(), anyString(), any(), any(), any())).thenThrow(FeignException.errorStatus("search", response));
+        when(client.search(anyString(), any(), anyString(), any(), any(), any(), anyBoolean())).thenThrow(FeignException.errorStatus("search", response));
         assertThatThrownBy(() -> service.search(request)).isInstanceOfSatisfying(ResponseStatusException.class, e -> {
             assertThat(e.getStatusCode().value()).isEqualTo(expected);
             assertThat(e.getMessage()).doesNotContain("private-");
@@ -117,7 +138,7 @@ class LostSearchServiceTest {
         for (var response : new PythonLostSearchResponse[]{null, new PythonLostSearchResponse(null),
                 new PythonLostSearchResponse(List.of(new PythonLostSearchResponse.Candidate(1L, Double.NaN, List.of()))),
                 new PythonLostSearchResponse(List.of(new PythonLostSearchResponse.Candidate(1L, .8, List.of("UNKNOWN"))))}) {
-            when(client.search(anyString(), any(), anyString(), any(), any(), any())).thenReturn(response);
+            when(client.search(anyString(), any(), anyString(), any(), any(), any(), anyBoolean())).thenReturn(response);
             assertThatThrownBy(() -> service.search(request)).isInstanceOfSatisfying(ResponseStatusException.class,
                     e -> assertThat(e.getStatusCode().value()).isEqualTo(503));
         }
@@ -128,7 +149,7 @@ class LostSearchServiceTest {
     void givenInferenceInProgress__whenAnotherRequestArrives__thenRejectWithoutSecondCall() throws Exception {
         var entered = new java.util.concurrent.CountDownLatch(1);
         var release = new java.util.concurrent.CountDownLatch(1);
-        when(client.search(anyString(), any(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
+        when(client.search(anyString(), any(), anyString(), any(), any(), any(), anyBoolean())).thenAnswer(invocation -> {
             entered.countDown();
             if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("test timeout");
             return new PythonLostSearchResponse(List.of());
@@ -142,7 +163,7 @@ class LostSearchServiceTest {
             release.countDown();
         }
         assertThat(running.get(5, java.util.concurrent.TimeUnit.SECONDS).candidates()).isEmpty();
-        verify(client, times(1)).search(anyString(), any(), anyString(), any(), any(), any());
+        verify(client, times(1)).search(anyString(), any(), anyString(), any(), any(), any(), anyBoolean());
     }
 
     private static PythonLostSearchResponse.Candidate candidate(long id) {
@@ -153,6 +174,7 @@ class LostSearchServiceTest {
         Animal animal = mock(Animal.class);
         when(animal.getId()).thenReturn(id);
         when(animal.getSpecies()).thenReturn(species);
+        when(animal.getStatus()).thenReturn(AnimalStatus.NOTICE);
         return animal;
     }
 }

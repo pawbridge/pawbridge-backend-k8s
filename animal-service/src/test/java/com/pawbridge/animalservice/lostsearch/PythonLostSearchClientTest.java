@@ -52,17 +52,19 @@ class PythonLostSearchClientTest {
                     .run(context -> {
                         var client = context.getBean(PythonLostSearchClient.class);
                         var result = client.search("test-key", new FormData("application/octet-stream", "photo", "photo-bytes".getBytes()),
-                                "DOG", "2026-09-08", "상주시", "갈색 귀");
+                                "DOG", "2026-09-08", "상주시", "갈색 귀", true);
                         assertThat(result.candidates()).extracting(PythonLostSearchResponse.Candidate::animalId).containsExactly(7L);
                         assertThat(type.get()).startsWith("multipart/form-data;");
                         assertThat(key.get()).isEqualTo("test-key");
                         assertThat(body.get()).contains("name=\"image\"", "filename=\"photo\"", "photo-bytes",
-                                "name=\"species\"", "DOG", "name=\"lostDate\"", "2026-09-08", "상주시", "갈색 귀");
+                                "name=\"species\"", "DOG", "name=\"lostDate\"", "2026-09-08", "상주시", "갈색 귀",
+                                "name=\"includeAdoptedOrReturned\"", "true");
                         var factory = context.getBean(FeignClientFactory.class);
                         assertThat(factory.getInstance("python-lost-search", Logger.Level.class)).isEqualTo(Logger.Level.NONE);
                         assertThat(factory.getInstance("python-lost-search", Request.Options.class).isFollowRedirects()).isFalse();
-                        client.search("test-key", new FormData("application/octet-stream", "photo", new byte[]{1}), "CAT", null, null, null);
+                        client.search("test-key", new FormData("application/octet-stream", "photo", new byte[]{1}), "CAT", null, null, null, false);
                         assertThat(body.get()).doesNotContain("name=\"lostDate\"", "name=\"region\"", "name=\"description\"");
+                        assertThat(body.get()).contains("name=\"includeAdoptedOrReturned\"", "false");
                     });
         } finally { server.stop(0); }
     }
