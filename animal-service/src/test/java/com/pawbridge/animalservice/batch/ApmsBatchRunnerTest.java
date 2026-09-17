@@ -8,7 +8,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParametersInvalidException;
-import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.launch.JobLauncher;
 
 import javax.sql.DataSource;
@@ -17,7 +16,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -31,7 +29,7 @@ class ApmsBatchRunnerTest {
     @Mock private PreparedStatement releaseStatement;
     @Mock private ResultSet acquireResult;
     @Mock private ResultSet releaseResult;
-    @Mock private JobExplorer explorer;
+    @Mock private ApmsBatchExecutionRecovery executionRecovery;
     @Mock private JobLauncher launcher;
     @Mock private Job job;
     @Mock private ApmsSyncPlanFactory planFactory;
@@ -39,7 +37,7 @@ class ApmsBatchRunnerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        runner = new ApmsBatchRunner(dataSource, explorer, launcher, job, planFactory);
+        runner = new ApmsBatchRunner(dataSource, executionRecovery, launcher, job, planFactory);
         when(dataSource.getConnection()).thenReturn(connection);
     }
 
@@ -47,7 +45,7 @@ class ApmsBatchRunnerTest {
     void givenLockOwnedElsewhere__whenRun__thenRejectWithoutLaunchingOrReleasing() throws Exception {
         acquired(0);
         assertThatThrownBy(runner::run).isInstanceOf(ApmsBatchRunner.AlreadyRunningException.class);
-        verifyNoInteractions(explorer, launcher);
+        verifyNoInteractions(executionRecovery, launcher);
         verify(connection, never()).prepareStatement("SELECT RELEASE_LOCK(?)");
         verify(connection).close();
     }
@@ -58,7 +56,7 @@ class ApmsBatchRunnerTest {
         assertThatThrownBy(runner::run).isInstanceOf(ApmsBatchRunner.UnavailableException.class);
         verify(connection).abort(any());
         verify(connection).close();
-        verifyNoInteractions(explorer, launcher);
+        verifyNoInteractions(executionRecovery, launcher);
     }
 
     @Test
@@ -66,7 +64,8 @@ class ApmsBatchRunnerTest {
         acquired(1);
         released(1);
         when(job.getName()).thenReturn("apmsAnimalSyncJob");
-        when(explorer.findRunningJobExecutions("apmsAnimalSyncJob")).thenReturn(Set.of(new JobExecution(1L)));
+        when(executionRecovery.recoverOrReject("apmsAnimalSyncJob"))
+                .thenThrow(new ApmsBatchExecutionRecovery.ActiveExecutionMetadataException(1L));
         assertThatThrownBy(runner::run).isInstanceOf(ApmsBatchRunner.UnavailableException.class);
         verifyNoInteractions(launcher);
         verify(releaseStatement).executeQuery();
@@ -93,9 +92,9 @@ class ApmsBatchRunnerTest {
         var execution = new JobExecution(7L);
         when(launcher.run(eq(job), any())).thenReturn(execution);
         assertThat(runner.run()).isSameAs(execution);
-        var order = inOrder(acquireStatement, explorer, launcher, releaseStatement, connection);
+        var order = inOrder(acquireStatement, executionRecovery, launcher, releaseStatement, connection);
         order.verify(acquireStatement).executeQuery();
-        order.verify(explorer).findRunningJobExecutions("apmsAnimalSyncJob");
+        order.verify(executionRecovery).recoverOrReject("apmsAnimalSyncJob");
         order.verify(launcher).run(eq(job), argThat(parameters -> parameters.getString("requestId") != null
                 && ApmsSyncPlan.from(parameters).end().equals(java.time.LocalDate.of(2026, 9, 10))));
         order.verify(releaseStatement).executeQuery();
@@ -130,7 +129,7 @@ class ApmsBatchRunnerTest {
         assertThatThrownBy(runner::run).isInstanceOf(ApmsBatchRunner.UnavailableException.class);
         verify(connection).abort(any());
         verify(connection).close();
-        verifyNoInteractions(explorer, launcher);
+        verifyNoInteractions(executionRecovery, launcher);
     }
 
     @Test
@@ -149,7 +148,7 @@ class ApmsBatchRunnerTest {
         var day = java.time.LocalDate.of(2026, 9, 10);
         when(planFactory.create("apmsAnimalSyncJob")).thenReturn(new ApmsSyncPlan(day.minusDays(30), day.minusDays(30).withDayOfMonth(1), day.minusDays(30), day));
         when(job.getName()).thenReturn("apmsAnimalSyncJob");
-        when(explorer.findRunningJobExecutions("apmsAnimalSyncJob")).thenReturn(Set.of());
+        when(executionRecovery.recoverOrReject("apmsAnimalSyncJob")).thenReturn(0);
     }
 
     private void acquired(Integer value) throws Exception {
