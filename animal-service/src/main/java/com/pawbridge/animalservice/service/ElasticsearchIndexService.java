@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.service;
 
 import com.pawbridge.animalservice.document.AnimalDocument;
+import com.pawbridge.animalservice.batch.ApmsBatchProperties;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.exception.ConcurrentRequestException;
 import com.pawbridge.animalservice.repository.AnimalDocumentRepository;
@@ -14,7 +15,6 @@ import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.document.Document;
 import org.springframework.data.elasticsearch.core.query.UpdateQuery;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
 import org.springframework.data.elasticsearch.core.IndexOperations;
 import org.springframework.data.elasticsearch.core.index.AliasActions;
@@ -31,17 +31,17 @@ import java.util.Objects;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.Executor;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -60,11 +60,7 @@ public class ElasticsearchIndexService {
     private final ElasticsearchOperations elasticsearchOperations;
     private final RedissonClient redissonClient;
     private final PlatformTransactionManager transactionManager;
-
-    // Step 2 병렬 인덱싱용 — ApmsAnimalBatchJob에서 정의한 batchTaskExecutor 주입
-    @Autowired
-    @Qualifier("batchTaskExecutor")
-    private Executor batchTaskExecutor;
+    private final ApmsBatchProperties batchProperties;
 
     private static final int BATCH_SIZE = 1000;  // 배치 크기
     private static final String REINDEX_LOCK_KEY = "lock:reindexAllAnimals";
@@ -73,16 +69,15 @@ public class ElasticsearchIndexService {
     /**
      * 전체 동물 데이터를 Elasticsearch에 배치 인덱싱 (기존 동작 호환)
      */
-    @Transactional(readOnly = true)
     public long indexAllAnimals() {
         return indexAnimalsToTarget("animals");
     }
 
     /**
      * 지정된 대상 인덱스에 데이터 병렬 적재
-     * - 페이지별로 CompletableFuture 생성 → batchTaskExecutor 스레드 풀에서 병렬 실행
+     * - 페이지별 작업을 전용 fixed-size worker pool에서 병렬 실행
      * - 각 스레드: TransactionTemplate(readOnly)으로 독립 트랜잭션 → DB 조회 → ES 벌크 인덱싱
-     * - 한 페이지라도 실패 시 CompletionException → IllegalStateException → 상위에서 신규 인덱스 롤백 삭제
+     * - 한 페이지라도 실패하거나 전체 제한 시간을 넘기면 Step 실패로 전파
      */
     private long indexAnimalsToTarget(String targetIndexName) {
         log.info("[ELASTICSEARCH] 대상 인덱스 [{}]에 데이터 적재 시작 (배치 크기: {})", targetIndexName, BATCH_SIZE);
@@ -97,16 +92,15 @@ public class ElasticsearchIndexService {
         }
 
         int totalPages = (int) Math.ceil((double) totalCount / BATCH_SIZE);
-        AtomicLong indexedCount = new AtomicLong(0);
         AtomicInteger completedPages = new AtomicInteger(0);
 
         TransactionTemplate readOnlyTx = new TransactionTemplate(transactionManager);
         readOnlyTx.setReadOnly(true);
 
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        List<Callable<Integer>> tasks = new ArrayList<>();
         for (int page = 0; page < totalPages; page++) {
             final int p = page;
-            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+            tasks.add(() -> {
                 Pageable pageable = PageRequest.of(p, BATCH_SIZE);
 
                 // 각 스레드에서 독립 readOnly 트랜잭션으로 DB 조회
@@ -129,24 +123,62 @@ public class ElasticsearchIndexService {
                                 .build())
                         .collect(Collectors.toList());
                 elasticsearchOperations.bulkUpdate(updateQueries, coordinates);
-                indexedCount.addAndGet(documents.size());
                 log.info("[ELASTICSEARCH] 배치 {}/{} 완료: {} 건",
                         completedPages.incrementAndGet(), totalPages, documents.size());
-
-            }, batchTaskExecutor);
-            futures.add(future);
+                return documents.size();
+            });
         }
 
+        ExecutorService executor = newIndexExecutor();
         try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } catch (CompletionException e) {
+            List<Future<Integer>> futures = executor.invokeAll(tasks,
+                    Math.max(1L, batchProperties.getElasticsearchIndexTimeout().toMillis()), TimeUnit.MILLISECONDS);
+            long indexedCount = 0;
+            for (Future<Integer> future : futures) {
+                if (future.isCancelled()) {
+                    throw new ElasticsearchIndexTimeoutException(batchProperties.getElasticsearchIndexTimeout());
+                }
+                indexedCount += future.get();
+            }
+            log.info("[ELASTICSEARCH] 적재 완료: 총 {} 건", indexedCount);
+            return indexedCount;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Elasticsearch 배치 인덱싱이 중단되었습니다.", e);
+        } catch (CancellationException e) {
+            throw new ElasticsearchIndexTimeoutException(batchProperties.getElasticsearchIndexTimeout());
+        } catch (ExecutionException e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             log.error("[ELASTICSEARCH] 병렬 인덱싱 중 실패 발생 - 중단합니다.", cause);
             throw new IllegalStateException("병렬 배치 인덱싱 실패 - 데이터 유실 방지를 위해 중단합니다.", cause);
+        } finally {
+            executor.shutdownNow();
+            try {
+                boolean terminated = executor.awaitTermination(
+                        Math.max(1L, batchProperties.getElasticsearchCancellationWait().toMillis()),
+                        TimeUnit.MILLISECONDS);
+                if (!terminated) {
+                    log.error("[ELASTICSEARCH] 취소 후에도 인덱싱 작업이 종료되지 않았습니다");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
+    }
 
-        log.info("[ELASTICSEARCH] 적재 완료: 총 {} 건", indexedCount.get());
-        return indexedCount.get();
+    private ExecutorService newIndexExecutor() {
+        AtomicInteger threadSequence = new AtomicInteger();
+        return Executors.newFixedThreadPool(batchProperties.getElasticsearchParallelism(), runnable -> {
+            Thread thread = new Thread(runnable, "es-index-" + threadSequence.incrementAndGet());
+            thread.setDaemon(false);
+            return thread;
+        });
+    }
+
+    public static class ElasticsearchIndexTimeoutException extends IllegalStateException {
+        public ElasticsearchIndexTimeoutException(java.time.Duration timeout) {
+            super("Elasticsearch 전체 인덱싱 제한 시간을 초과했습니다: " + timeout);
+        }
     }
 
     /**

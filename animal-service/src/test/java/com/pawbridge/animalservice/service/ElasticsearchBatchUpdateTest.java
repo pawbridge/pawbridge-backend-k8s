@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.service;
 
+import com.pawbridge.animalservice.batch.ApmsBatchProperties;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.enums.AnimalStatus;
 import com.pawbridge.animalservice.enums.ApiSource;
@@ -10,19 +11,19 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.redisson.api.RedissonClient;
 import org.springframework.batch.support.transaction.ResourcelessTransactionManager;
-import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
 import org.springframework.data.elasticsearch.core.query.UpdateQuery;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -34,8 +35,7 @@ class ElasticsearchBatchUpdateTest {
         var documents = mock(AnimalDocumentRepository.class);
         var operations = mock(ElasticsearchOperations.class);
         var service = new ElasticsearchIndexService(animals, documents, operations, mock(RedissonClient.class),
-                new ResourcelessTransactionManager());
-        ReflectionTestUtils.setField(service, "batchTaskExecutor", new SyncTaskExecutor());
+                new ResourcelessTransactionManager(), new ApmsBatchProperties());
         var animal = Animal.builder().id(42L).apmsDesertionNo("old-intake").apmsNoticeNo("old-notice")
                 .status(AnimalStatus.ADOPTED).apiSource(ApiSource.APMS_ANIMAL).apmsProcessState("종료(입양)")
                 .happenDate(LocalDate.of(2026, 7, 15)).apmsUpdatedAt(LocalDateTime.of(2026, 8, 23, 15, 21, 46)).build();
@@ -58,5 +58,28 @@ class ElasticsearchBatchUpdateTest {
         });
         verifyNoMoreInteractions(operations);
         verifyNoInteractions(documents);
+    }
+
+    @Test
+    void givenBulkUpdateExceedsConfiguredDeadline__whenBatchIndexes__thenFailStepAndInterruptWorker() throws Exception {
+        var animals = mock(AnimalRepository.class);
+        var documents = mock(AnimalDocumentRepository.class);
+        var operations = mock(ElasticsearchOperations.class);
+        var properties = new ApmsBatchProperties();
+        properties.setElasticsearchIndexTimeout(Duration.ofMillis(30));
+        properties.setElasticsearchCancellationWait(Duration.ofSeconds(1));
+        var service = new ElasticsearchIndexService(animals, documents, operations, mock(RedissonClient.class),
+                new ResourcelessTransactionManager(), properties);
+        var animal = Animal.builder().id(42L).status(AnimalStatus.PROTECT).apiSource(ApiSource.APMS_ANIMAL).build();
+        when(animals.count()).thenReturn(1L);
+        when(animals.findAllWithShelter(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(animal)));
+        doAnswer(invocation -> {
+            Thread.sleep(10_000);
+            return null;
+        }).when(operations).bulkUpdate(anyList(), eq(IndexCoordinates.of("animals")));
+
+        assertThatThrownBy(service::indexAllAnimals)
+                .isInstanceOf(ElasticsearchIndexService.ElasticsearchIndexTimeoutException.class)
+                .hasMessageContaining("PT0.03S");
     }
 }
