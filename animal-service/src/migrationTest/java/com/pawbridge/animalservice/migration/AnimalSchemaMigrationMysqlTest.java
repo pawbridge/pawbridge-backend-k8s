@@ -61,7 +61,7 @@ class AnimalSchemaMigrationMysqlTest {
             statement.execute("DROP TABLE IF EXISTS flyway_schema_history");
             statement.execute("DROP TABLE IF EXISTS migration_probe");
             // Reverse dependency order; fixed allowlist confined to this guarded test schema.
-            for (String table : List.of("pet_travel_pet_details", "pet_travel_pet_collection_state", "shelter_public_information", "apms_photo_archive", "apms_photo_scan", "pet_travel_places", "pet_travel_targets", "pet_travel_regions",
+            for (String table : List.of("pet_travel_images", "pet_travel_visit_details", "pet_travel_pet_details", "pet_travel_pet_collection_state", "shelter_public_information", "apms_photo_archive", "apms_photo_scan", "pet_travel_places", "pet_travel_targets", "pet_travel_regions",
                     "pet_travel_collection_state", "pet_travel_collection_runs", "pet_travel_request_budgets",
                     "BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ",
                     "BATCH_JOB_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION_CONTEXT", "BATCH_STEP_EXECUTION",
@@ -104,7 +104,7 @@ class AnimalSchemaMigrationMysqlTest {
             try (var rows = statement.executeQuery("SELECT COUNT(*) FROM information_schema.TABLES "
                     + "WHERE TABLE_SCHEMA = 'pawbridge_animal'")) {
                 assertThat(rows.next()).isTrue();
-                assertThat(rows.getInt(1)).isEqualTo(29); // V1 17 + V2 6 + V4 2 + V5 1 + V6 2 + Flyway history.
+                assertThat(rows.getInt(1)).isEqualTo(31); // V1 17 + V2 6 + V4 2 + V5 1 + V6 2 + V7 2 + Flyway history.
             }
             for (String table : List.of("BATCH_JOB_SEQ", "BATCH_JOB_EXECUTION_SEQ", "BATCH_STEP_EXECUTION_SEQ")) {
                 try (var rows = statement.executeQuery("SELECT ID, UNIQUE_KEY FROM " + table)) {
@@ -171,7 +171,7 @@ class AnimalSchemaMigrationMysqlTest {
         var time = Instant.parse("2026-09-12T00:00:00Z");
         catalog.saveRegions(Map.of("11", "서울"), time);
         catalog.observeBasic(Map.of("contentid","100","title","서울 공원","addr1","서울",
-                "modifiedtime","20260912000000","showflag","1"),"11",time);
+                "contenttypeid","12","modifiedtime","20260912000000","showflag","1"),"11",time);
         assertThat(catalog.regions().get(0).completedAt()).isNull();
         assertThat(catalog.places("11")).hasSize(1);
         var before=new PetTravelService(catalog).detail("100");
@@ -206,7 +206,7 @@ class AnimalSchemaMigrationMysqlTest {
     void hiding_invalidates_inflight_details_and_reappearance_requires_publication() {
         var catalog = catalog();
         var time = Instant.parse("2026-09-12T00:00:00Z");
-        var common = Map.of("contentid", "100", "title", "공원");
+        var common = Map.of("contentid", "100", "contenttypeid", "12", "title", "공원");
         catalog.observe("100", "11", "20260912000000", true, null, null, time, false);
         catalog.publish(catalog.pending(10).get(0), common, Map.of(), time);
         catalog.observe("100", "11", "20260913000000", true, null, null, time, true);
@@ -228,7 +228,7 @@ class AnimalSchemaMigrationMysqlTest {
         catalog.observe("10000000000000000000", "11", "20260912000000", true, null, "Type3", time, false);
         assertThat(catalog.pending(10)).hasSize(1);
         var target = catalog.pending(10).get(0);
-        var common = Map.of("contentid", target.contentId(), "title", "공원");
+        var common = Map.of("contentid", target.contentId(), "contenttypeid", "12", "title", "공원");
         assertThat(catalog.publish(target, common, Map.of(), time)).isTrue();
         assertThat(catalog.publish(target, common, Map.of(), time)).isFalse();
         catalog.observe(target.contentId(), "11", "20260911000000", false, null, "Type2", time, false);
@@ -253,7 +253,8 @@ class AnimalSchemaMigrationMysqlTest {
     void bulk_conditions_are_public_before_common_details_but_unknown_ids_never_become_places() {
         var catalog=catalog();var now=Instant.now();
         catalog.saveRegions(Map.of("11","서울"),now);
-        catalog.observeBasic(Map.of("contentid","123","title","공원","modifiedtime","20260913000000","showflag","1"),"11",now);
+        catalog.observeBasic(Map.of("contentid","123","contenttypeid","12","title","공원",
+                "modifiedtime","20260913000000","showflag","1"),"11",now);
         catalog.savePetPage(catalog.petCollectionState(),new TourApiClient.Page(List.of(
                 Map.of("contentid","123","acmpyNeedMtr","목줄 필수"),
                 Map.of("contentid","999","acmpyNeedMtr","가방 필수")),2),now,now.plusSeconds(86400));
@@ -348,6 +349,65 @@ class AnimalSchemaMigrationMysqlTest {
         var detail=new PetTravelService(catalog).detail("123");
         assertThat(detail.petInformationStatus()).isEqualTo("READY");
         assertThat(detail.petInformationAvailable()).isFalse();
+    }
+
+    @Test
+    void visit_resources_publish_independently_and_become_stale_after_source_change() {
+        var catalog=catalog();var now=Instant.parse("2026-09-16T00:00:00Z");
+        var basic=new java.util.HashMap<>(Map.of("contentid","123","contenttypeid","12","title","공원",
+                "modifiedtime","20260916000000","showflag","1"));
+        catalog.observeBasic(basic,"11",now);
+        var introTarget=catalog.pendingVisitDetails(PetTravelCatalog.VisitResource.INTRO,10).get(0);
+        var infoTarget=catalog.pendingVisitDetails(PetTravelCatalog.VisitResource.INFO,10).get(0);
+        var imageTarget=catalog.pendingVisitDetails(PetTravelCatalog.VisitResource.IMAGES,10).get(0);
+        assertThat(catalog.saveVisitIntro(introTarget,List.of(Map.of("contentid","123","contenttypeid","12",
+                "usetime","09:00~18:00")),now)).isTrue();
+        assertThat(catalog.saveVisitInformation(infoTarget,List.of(Map.of("contentid","123","contenttypeid","12",
+                "infoname","입장료","infotext","무료")),now)).isTrue();
+        assertThat(catalog.saveVisitImages(imageTarget,List.of(
+                Map.of("contentid","123","serialnum","1","imgname","전경","originimgurl",
+                        "https://tong.visitkorea.or.kr/cms/resource/1/a.jpg","cpyrhtDivCd","Type1"),
+                Map.of("contentid","123","serialnum","2","imgname","제외","originimgurl",
+                        "https://tong.visitkorea.or.kr/cms/resource/1/b.jpg","cpyrhtDivCd","Type2")),now)).isTrue();
+        var ready=new PetTravelService(catalog).detail("123");
+        assertThat(ready.visitInformation().usageHours()).isEqualTo("09:00~18:00");
+        assertThat(ready.visitInformation().additionalItems()).containsExactly(
+                new com.pawbridge.animalservice.travel.PetTravelResponse.InformationItem("입장료","무료"));
+        assertThat(ready.visitInformation().status()).isEqualTo("READY");
+        assertThat(ready.images()).extracting(com.pawbridge.animalservice.travel.PetTravelResponse.Image::name)
+                .containsExactly("전경");
+        assertThat(ready.imagesStatus()).isEqualTo("READY");
+        for (var resource : PetTravelCatalog.VisitResource.values())
+            assertThat(catalog.pendingVisitDetails(resource,1)).isEmpty();
+
+        basic.put("modifiedtime","20260917000000");
+        catalog.observeBasic(basic,"11",now.plusSeconds(60));
+        var stale=new PetTravelService(catalog).detail("123");
+        assertThat(stale.visitInformation().status()).isEqualTo("STALE");
+        assertThat(stale.imagesStatus()).isEqualTo("STALE");
+        for (var resource : PetTravelCatalog.VisitResource.values())
+            assertThat(catalog.pendingVisitDetails(resource,1)).hasSize(1);
+    }
+
+    @Test
+    void empty_visit_resource_responses_are_ready_snapshots_not_permanent_retries() {
+        var catalog=catalog();var now=Instant.parse("2026-09-16T00:00:00Z");
+        catalog.observeBasic(Map.of("contentid","124","contenttypeid","28","title","레포츠 시설",
+                "modifiedtime","20260916000000","showflag","1"),"11",now);
+
+        assertThat(catalog.saveVisitIntro(catalog.pendingVisitDetails(PetTravelCatalog.VisitResource.INTRO,1).get(0),
+                List.of(),now)).isTrue();
+        assertThat(catalog.saveVisitInformation(catalog.pendingVisitDetails(PetTravelCatalog.VisitResource.INFO,1).get(0),
+                List.of(),now)).isTrue();
+        assertThat(catalog.saveVisitImages(catalog.pendingVisitDetails(PetTravelCatalog.VisitResource.IMAGES,1).get(0),
+                List.of(),now)).isTrue();
+
+        var detail=new PetTravelService(catalog).detail("124");
+        assertThat(detail.visitInformation().status()).isEqualTo("READY");
+        assertThat(detail.visitInformation().additionalItems()).isEmpty();
+        assertThat(detail.imagesStatus()).isEqualTo("READY");
+        assertThat(detail.images()).isEmpty();
+        assertThat(catalog.hasPendingVisitDetails()).isFalse();
     }
 
     private PetTravelCatalog catalog() {
@@ -510,18 +570,22 @@ class AnimalSchemaMigrationMysqlTest {
         var properties=new TourApiProperties(); properties.setEnabled(true);
         when(client.fetch(TourApiClient.Operation.REGIONS,"")).thenReturn(List.of(Map.of("code","36110","name","세종특별자치시")));
         when(client.fetchPage(TourApiClient.Operation.SYNC,"0",1)).thenReturn(new TourApiClient.Page(List.of(),0));
-        var healthy=Map.of("contentid","123","title","세종 공원","lDongRegnCd","36110","modifiedtime","20260912000000","showflag","1");
-        var missing=Map.of("contentid","124","title","미확인 공원","areacode","8","modifiedtime","20260912000000","showflag","1");
+        var healthy=Map.of("contentid","123","contenttypeid","12","title","세종 공원","lDongRegnCd","36110",
+                "modifiedtime","20260912000000","showflag","1");
+        var missing=Map.of("contentid","124","contenttypeid","12","title","미확인 공원","areacode","8",
+                "modifiedtime","20260912000000","showflag","1");
         when(client.fetchPage(TourApiClient.Operation.SYNC,"1",1)).thenReturn(new TourApiClient.Page(List.of(healthy,missing),2));
         when(client.fetch(TourApiClient.Operation.COMMON,"123")).thenReturn(List.of(Map.of("contentid","123","title","세종 공원")));
         when(client.fetch(TourApiClient.Operation.PET,"123")).thenReturn(List.of());
+        when(client.fetchDetail(any(),anyString(),anyString())).thenReturn(List.of());
         assertThat(collector(catalog,client,properties).collect().status()).isEqualTo("PARTIAL");
         assertThat(catalog.hasUnresolvedRegions()).isTrue();
         assertThat(catalog.collectionState().errorCode()).isEqualTo("REGION_UNRESOLVED");
         assertThat(catalog.collectionState().phase()).isEqualTo("HIDDEN");
         assertThat(new PetTravelService(catalog).places("36110").items()).hasSize(1);
         verify(client,never()).fetch(TourApiClient.Operation.COMMON,"124");
-        var recovered=Map.of("contentid","124","title","복구 공원","lDongRegnCd","36110","modifiedtime","20260912000000","showflag","1");
+        var recovered=Map.of("contentid","124","contenttypeid","12","title","복구 공원","lDongRegnCd","36110",
+                "modifiedtime","20260912000000","showflag","1");
         when(client.fetchPage(TourApiClient.Operation.SYNC,"1",1)).thenReturn(new TourApiClient.Page(List.of(healthy,recovered),2));
         when(client.fetch(TourApiClient.Operation.COMMON,"124")).thenReturn(List.of(Map.of("contentid","124","title","복구 공원")));
         when(client.fetch(TourApiClient.Operation.PET,"124")).thenReturn(List.of());
@@ -538,7 +602,8 @@ class AnimalSchemaMigrationMysqlTest {
         var time=Instant.parse("2026-09-12T00:00:00Z");
         var runId="00000000-0000-0000-0000-000000000001";
         catalog.saveRegions(Map.of("11","서울"),time);
-        catalog.observeBasic(Map.of("contentid","100","title","기존 장소","modifiedtime","20260912000000","showflag","1"),"11",time);
+        catalog.observeBasic(Map.of("contentid","100","contenttypeid","12","title","기존 장소",
+                "modifiedtime","20260912000000","showflag","1"),"11",time);
         catalog.publish(catalog.pending(1).get(0),Map.of("contentid","100","title","기존 장소"),Map.of(),time);
         catalog.startRun(runId,time);
         catalog.checkpoint("SHOWN",2);
@@ -563,9 +628,11 @@ class AnimalSchemaMigrationMysqlTest {
         assertThat(catalog.detail("100").orElseThrow().publishedAt()).isEqualTo(time);
         when(client.fetch(TourApiClient.Operation.REGIONS,"")).thenReturn(List.of(Map.of("code","11","name","서울")));
         when(client.fetchPage(TourApiClient.Operation.SYNC,"1",2)).thenReturn(new TourApiClient.Page(List.of(
-                Map.of("contentid","101","title","새 장소","lDongRegnCd","11","modifiedtime","20260912000000","showflag","1")),101));
+                Map.of("contentid","101","contenttypeid","12","title","새 장소","lDongRegnCd","11",
+                        "modifiedtime","20260912000000","showflag","1")),101));
         when(client.fetch(TourApiClient.Operation.COMMON,"101")).thenReturn(List.of(Map.of("contentid","101","title","새 장소")));
         when(client.fetch(TourApiClient.Operation.PET,"101")).thenReturn(List.of());
+        when(client.fetchDetail(any(),anyString(),anyString())).thenReturn(List.of());
         assertThat(collector(catalog,client,properties).collect().status()).isEqualTo("COMPLETED");
         verify(client,never()).fetchPage(TourApiClient.Operation.SYNC,"1",1);
         assertThat(catalog.places("11")).hasSize(2);

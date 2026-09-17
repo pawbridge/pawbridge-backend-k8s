@@ -10,6 +10,7 @@ class PetTravelConfigurationTest {
         var properties=new TourApiProperties();
         assertThat(properties.getMaxPagesPerRun()).isEqualTo(10);
         assertThat(properties.getMaxDetailsPerRun()).isEqualTo(18);
+        assertThat(properties.getMaxVisitDetailsPerRun()).isEqualTo(18);
         assertThat(properties.getDailyRequestLimit()).isEqualTo(900);
         assertThat(properties.getDetailRefreshDays()).isEqualTo(14);
         assertThat(properties.isBulkPetEnabled()).isFalse();
@@ -19,16 +20,24 @@ class PetTravelConfigurationTest {
     @Test void givenRefreshOverride__whenBound__thenUseConfiguredDays() {
         var environment=new org.springframework.core.env.StandardEnvironment();
         environment.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("test",
-                java.util.Map.of("tourapi.detail-refresh-days","21","tourapi.max-details-per-run","19","tourapi.daily-request-limit","950")));
+                java.util.Map.of("tourapi.detail-refresh-days","21","tourapi.max-details-per-run","19",
+                        "tourapi.max-visit-details-per-run","20","tourapi.daily-request-limit","950")));
         var properties=org.springframework.boot.context.properties.bind.Binder.get(environment)
                 .bind("tourapi",org.springframework.boot.context.properties.bind.Bindable.of(TourApiProperties.class)).get();
         assertThat(properties.getDetailRefreshDays()).isEqualTo(21);
         assertThat(properties.getMaxDetailsPerRun()).isEqualTo(19);
+        assertThat(properties.getMaxVisitDetailsPerRun()).isEqualTo(20);
         assertThat(properties.getDailyRequestLimit()).isEqualTo(950);
     }
     @Test void givenNonpositiveRefreshDays__whenConfigured__thenReject() {
         for (int days : new int[]{0,-1}) {
             assertThatThrownBy(()->new TourApiProperties().setDetailRefreshDays(days))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+    @Test void givenVisitDetailBatchOutsideBounds__whenConfigured__thenReject() {
+        for (int limit : new int[]{0,101}) {
+            assertThatThrownBy(()->new TourApiProperties().setMaxVisitDetailsPerRun(limit))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }

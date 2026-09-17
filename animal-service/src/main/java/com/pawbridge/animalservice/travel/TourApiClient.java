@@ -33,10 +33,20 @@ public class TourApiClient {
     private static final Set<String> FIELDS = Set.of("code", "name", "contentid", "title", "addr1", "overview", "firstimage", "cpyrhtDivCd",
             "acmpyTypeCd", "acmpyPsblCpam", "acmpyNeedMtr", "etcAcmpyInfo",
             "relaAcdntRiskMtr", "relaPosesFclty", "relaFrnshPrdlst", "areacode", "sigungucode",
-            "modifiedtime", "showflag", "addr2", "contenttypeid", "mapx", "mapy", "lDongRegnCd", "lDongSignguCd");
+            "modifiedtime", "showflag", "addr2", "contenttypeid", "mapx", "mapy", "lDongRegnCd", "lDongSignguCd",
+            "chkbabycarriage", "chkcreditcard", "heritage1", "heritage2", "heritage3", "infocenter", "opendate",
+            "parking", "restdate", "usetime", "expagerange", "expguide", "useseason",
+            "chkbabycarriageculture", "chkcreditcardculture", "discountinfo", "infocenterculture", "parkingculture",
+            "parkingfee", "restdateculture", "usefee", "usetimeculture", "scale", "spendtime",
+            "chkcreditcardleports", "expagerangeleports", "infocenterleports", "openperiod", "parkingleports",
+            "parkingfeeleports", "reservation", "restdateleports", "scaleleports", "usefeeleports",
+            "usetimeleports", "infoname", "infotext", "fldgubun",
+            "serialnum", "imgname", "originimgurl", "smallimageurl");
     public enum Operation {
         REGIONS("ldongCode2", 50, Service.PET), PLACES("areaBasedList2", 10, Service.PET),
         COMMON("detailCommon2", 1, Service.KOREAN), PET("detailPetTour2", 1, Service.KOREAN),
+        INTRO("detailIntro2", 1, Service.KOREAN), INFO("detailInfo2", 100, Service.KOREAN),
+        IMAGES("detailImage2", 100, Service.KOREAN),
         SYNC("petTourSyncList2", 100, Service.PET), PET_BULK("detailPetTour2", 100, Service.KOREAN);
         final String path;
         final int rows;
@@ -67,12 +77,24 @@ public class TourApiClient {
     }
 
     public List<Map<String, String>> fetch(Operation operation, String argument) {
-        return fetchPage(operation, argument, 1).items();
+        return fetchPage(operation, argument, null, 1).items();
+    }
+
+    public List<Map<String, String>> fetchDetail(Operation operation, String contentId, String contentTypeId) {
+        if (operation != Operation.INTRO && operation != Operation.INFO && operation != Operation.IMAGES)
+            throw PetTravelException.unavailable();
+        var page = fetchPage(operation, contentId, contentTypeId, 1);
+        if (page.totalCount() != page.items().size()) throw PetTravelException.unavailable();
+        return page.items();
     }
 
     public record Page(List<Map<String, String>> items, int totalCount) {}
 
     public Page fetchPage(Operation operation, String argument, int pageNo) {
+        return fetchPage(operation, argument, null, pageNo);
+    }
+
+    private Page fetchPage(Operation operation, String argument, String contentTypeId, int pageNo) {
         CompletableFuture<HttpResponse<byte[]>> pending = null;
         try {
             if (!properties.isEnabled()) throw PetTravelException.unavailable();
@@ -98,6 +120,11 @@ public class TourApiClient {
             } else if (operation != Operation.REGIONS && operation != Operation.PET_BULK) {
                 if (!argument.matches("[0-9]{1,20}")) throw PetTravelException.unavailable();
                 query.put("contentId", argument);
+                if (operation == Operation.INTRO || operation == Operation.INFO) {
+                    if (contentTypeId == null || !contentTypeId.matches("12|14|28")) throw PetTravelException.unavailable();
+                    query.put("contentTypeId", contentTypeId);
+                }
+                if (operation == Operation.IMAGES) query.put("imageYN", "Y");
             }
             var encoded = query.entrySet().stream().map(e -> encode(e.getKey()) + "=" + encode(e.getValue()))
                     .collect(java.util.stream.Collectors.joining("&"));
@@ -109,7 +136,8 @@ public class TourApiClient {
             if (response.statusCode() != 200) throw PetTravelException.unavailable();
             var items = parse(response.body(), operation, key);
             int total = items.size();
-            if (operation == Operation.SYNC || operation == Operation.PET_BULK) {
+            if (operation == Operation.SYNC || operation == Operation.PET_BULK
+                    || operation == Operation.INTRO || operation == Operation.INFO || operation == Operation.IMAGES) {
                 var count = mapper.readTree(response.body()).path("response").path("body").path("totalCount");
                 if (!count.asText().matches("[0-9]{1,8}")) throw PetTravelException.unavailable();
                 total = Integer.parseInt(count.asText());
@@ -166,13 +194,23 @@ public class TourApiClient {
                     if (!values.getOrDefault("code", "").matches("[0-9]{2,5}") || values.getOrDefault("name", "").isBlank())
                         throw PetTravelException.unavailable();
                 } else if (!values.getOrDefault("contentid", "").matches("[0-9]{1,20}")
-                        || (operation != Operation.PET && operation != Operation.PET_BULK && operation != Operation.SYNC && values.getOrDefault("title", "").isBlank())) {
+                        || ((operation == Operation.PLACES || operation == Operation.COMMON)
+                        && values.getOrDefault("title", "").isBlank())) {
                     throw PetTravelException.unavailable();
                 }
                 result.add(Map.copyOf(values));
             }
             if (operation == Operation.PET_BULK
                     && result.stream().map(row -> row.get("contentid")).distinct().count() != result.size())
+                throw PetTravelException.unavailable();
+            if ((operation == Operation.INTRO || operation == Operation.INFO || operation == Operation.IMAGES)
+                    && result.stream().anyMatch(row -> !row.get("contentid").equals(result.get(0).get("contentid"))))
+                throw PetTravelException.unavailable();
+            if (operation == Operation.IMAGES
+                    && result.stream().map(row -> row.get("serialnum")).anyMatch(value -> value == null || !value.matches("[A-Za-z0-9_-]{1,32}")))
+                throw PetTravelException.unavailable();
+            if (operation == Operation.IMAGES
+                    && result.stream().map(row -> row.get("serialnum")).distinct().count() != result.size())
                 throw PetTravelException.unavailable();
             return List.copyOf(result);
         } catch (Exception exception) {

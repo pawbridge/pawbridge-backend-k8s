@@ -98,4 +98,31 @@ class PetTravelBulkCollectorTest {
         verify(catalog,never()).savePetPage(any(),any(),any(),any());
         verify(client,never()).fetch(eq(TourApiClient.Operation.REGIONS),anyString());
     }
+
+    @Test void givenIntroFailure__whenCollectVisitResources__thenInformationAndImagesStillPublish() throws Exception {
+        var visit=new PetTravelCatalog.VisitTarget("123","12","20260913000000",1);
+        when(catalog.pendingVisitDetails(eq(PetTravelCatalog.VisitResource.INTRO),anyInt())).thenReturn(List.of(visit));
+        when(catalog.pendingVisitDetails(eq(PetTravelCatalog.VisitResource.INFO),anyInt())).thenReturn(List.of(visit));
+        when(catalog.pendingVisitDetails(eq(PetTravelCatalog.VisitResource.IMAGES),anyInt())).thenReturn(List.of(visit));
+        when(client.fetchDetail(TourApiClient.Operation.INTRO,"123","12")).thenThrow(PetTravelException.unavailable());
+        var info=List.of(Map.of("contentid","123","contenttypeid","12","infoname","안내","infotext","설명"));
+        when(client.fetchDetail(TourApiClient.Operation.INFO,"123","12")).thenReturn(info);
+        when(client.fetchDetail(TourApiClient.Operation.IMAGES,"123","12")).thenReturn(List.of());
+        assertThat(collector.collect().status()).isEqualTo("PARTIAL");
+        verify(catalog).visitDetailFailed(PetTravelCatalog.VisitResource.INTRO,visit,now);
+        verify(catalog).saveVisitInformation(visit,info,now);
+        verify(catalog).saveVisitImages(visit,List.of(),now);
+    }
+
+    @Test void givenIntroQuotaExhausted__whenCollectVisitResources__thenOtherOperationBudgetsContinue() throws Exception {
+        var visit=new PetTravelCatalog.VisitTarget("123","12","20260913000000",1);
+        when(catalog.pendingVisitDetails(any(),anyInt())).thenReturn(List.of(visit));
+        when(catalog.reserveRequest(eq("INTRO"),any(),anyInt())).thenReturn(false);
+        when(client.fetchDetail(TourApiClient.Operation.INFO,"123","12")).thenReturn(List.of());
+        when(client.fetchDetail(TourApiClient.Operation.IMAGES,"123","12")).thenReturn(List.of());
+        assertThat(collector.collect().status()).isEqualTo("PARTIAL");
+        verify(client,never()).fetchDetail(TourApiClient.Operation.INTRO,"123","12");
+        verify(client).fetchDetail(TourApiClient.Operation.INFO,"123","12");
+        verify(client).fetchDetail(TourApiClient.Operation.IMAGES,"123","12");
+    }
 }

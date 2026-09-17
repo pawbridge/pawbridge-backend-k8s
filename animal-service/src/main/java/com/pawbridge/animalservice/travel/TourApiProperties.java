@@ -28,6 +28,7 @@ public class TourApiProperties {
     private int dailyRequestLimit = 900;
     private int maxPagesPerRun = 10;
     private int maxDetailsPerRun = 18;
+    private int maxVisitDetailsPerRun = 18;
     private int detailRefreshDays = 14;
     public int getDetailRefreshDays() { return detailRefreshDays; }
     public void setDetailRefreshDays(int value) {
@@ -43,6 +44,11 @@ public class TourApiProperties {
     public void setMaxDetailsPerRun(int value) {
         if (value < 1 || value > 100) throw new IllegalArgumentException("Detail limit must be 1..100");
         maxDetailsPerRun = value;
+    }
+    public int getMaxVisitDetailsPerRun() { return maxVisitDetailsPerRun; }
+    public void setMaxVisitDetailsPerRun(int value) {
+        if (value < 1 || value > 100) throw new IllegalArgumentException("Visit detail limit must be 1..100");
+        maxVisitDetailsPerRun = value;
     }
 
     public boolean isEnabled() { return enabled; }
