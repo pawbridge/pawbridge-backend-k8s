@@ -105,7 +105,9 @@ public class PetTravelCollector {
                         detailFailures++;
                     }
                 }
-                if (inventoryCompleted && catalog.pending(1).isEmpty() && petError==null) {
+                String visitError=collectVisitDetails(connection,counts);
+                boolean visitPending=catalog.hasPendingVisitDetails();
+                if (inventoryCompleted && catalog.pending(1).isEmpty() && !visitPending && petError==null && visitError==null) {
                     if (catalog.hasUnresolvedRegions()) {
                         // Keep unresolved rows durable, publish healthy rows, and retry discovery next run.
                         catalog.finishRun(id,"PARTIAL","REGION_UNRESOLVED",counts[0],counts[1],counts[2],clock.instant());
@@ -114,9 +116,10 @@ public class PetTravelCollector {
                     catalog.finishRun(id,"COMPLETED",null,counts[0],counts[1],counts[2],clock.instant());
                     return new Result("COMPLETED",counts[0],counts[1],counts[2]);
                 }
+                String error=petError!=null?petError:detailFailures>0?"DETAIL_FAILED":visitError;
+                catalog.finishRun(id,"PARTIAL",error,counts[0],counts[1],counts[2],clock.instant());
+                return new Result("PARTIAL",counts[0],counts[1],counts[2]);
             }
-            catalog.finishRun(id,"PARTIAL",petError!=null?petError:detailFailures>0?"DETAIL_FAILED":null,counts[0],counts[1],counts[2],clock.instant());
-            return new Result("PARTIAL",counts[0],counts[1],counts[2]);
         } catch (BudgetExhausted exception) {
             catalog.finishRun(id,"QUOTA","REQUEST_BUDGET",counts[0],counts[1],counts[2],clock.instant());
             return new Result("QUOTA",counts[0],counts[1],counts[2]);
@@ -125,6 +128,42 @@ public class PetTravelCollector {
             // Do not retain upstream URL/credential-bearing causes in Batch metadata.
             throw new IllegalStateException("TRAVEL_COLLECTION_FAILED");
         }
+    }
+
+    /** Independent per-operation work queues keep one provider detail failure from blocking the others. */
+    private String collectVisitDetails(Connection connection, int[] counts) throws Exception {
+        boolean failed=false;
+        boolean quota=false;
+        for (var resource : PetTravelCatalog.VisitResource.values()) {
+            var operation=switch (resource) {
+                case INTRO -> TourApiClient.Operation.INTRO;
+                case INFO -> TourApiClient.Operation.INFO;
+                case IMAGES -> TourApiClient.Operation.IMAGES;
+            };
+            for (var target : catalog.pendingVisitDetails(resource,properties.getMaxVisitDetailsPerRun())) {
+                try {
+                    reserve(connection,operation,counts);
+                    var rows=client.fetchDetail(operation,target.contentId(),target.contentTypeId());
+                    if (!lock(connection,"SELECT IS_USED_LOCK(?)=CONNECTION_ID()"))
+                        throw new IllegalStateException("TRAVEL_LOCK_LOST");
+                    switch (resource) {
+                        case INTRO -> catalog.saveVisitIntro(target,rows,clock.instant());
+                        case INFO -> catalog.saveVisitInformation(target,rows,clock.instant());
+                        case IMAGES -> catalog.saveVisitImages(target,rows,clock.instant());
+                    }
+                } catch (BudgetExhausted exception) {
+                    quota=true;
+                    break;
+                } catch (Exception exception) {
+                    if ("TRAVEL_LOCK_LOST".equals(exception.getMessage())) throw exception;
+                    catalog.visitDetailFailed(resource,target,clock.instant());
+                    failed=true;
+                }
+            }
+        }
+        if (quota) return "VISIT_DETAIL_QUOTA";
+        if (failed) return "VISIT_DETAIL_FAILED";
+        return catalog.hasPendingVisitDetails()?"VISIT_DETAIL_PENDING":null;
     }
 
     /** Separate provider operation/budget: a failed bulk page never triggers N individual requests. */

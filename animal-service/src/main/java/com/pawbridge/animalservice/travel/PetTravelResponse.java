@@ -21,12 +21,27 @@ public final class PetTravelResponse {
     }
     public record Conditions(String areas, String allowedAnimals, String requirements, String otherInformation,
                              String risks, String facilities, String providedItems) {}
+    public record InformationItem(String name, String text) {}
+    public record VisitInformation(String contentTypeId, String informationCenter, String openPeriod,
+                                   String usageHours, String restDate, String parking, String parkingFee,
+                                   String usageFee, String reservation, String ageRange, String experienceGuide,
+                                   String usageSeason, String scale, String estimatedDuration,
+                                   String discountInformation, List<InformationItem> additionalItems,
+                                   String status, Instant fetchedAt) {}
+    public record Image(String originalUrl, String thumbnailUrl, String name, String copyrightType) {}
     public record Detail(Place place, String overview, Conditions conditions, boolean petInformationAvailable,
-                         String source, Instant fetchedAt, Instant petInformationFetchedAt, String petInformationStatus) {
+                         String source, Instant fetchedAt, Instant petInformationFetchedAt, String petInformationStatus,
+                         VisitInformation visitInformation, List<Image> images, String imagesStatus,
+                         Instant imagesFetchedAt) {
         public Detail(Place place,String overview,Conditions conditions,boolean petInformationAvailable,
                       String source,Instant fetchedAt,Instant petInformationFetchedAt) {
             this(place,overview,conditions,petInformationAvailable,source,fetchedAt,petInformationFetchedAt,
-                    petInformationFetchedAt == null ? "PREPARING" : "READY");
+                    petInformationFetchedAt == null ? "PREPARING" : "READY",null,List.of(),"PREPARING",null);
+        }
+        public Detail(Place place,String overview,Conditions conditions,boolean petInformationAvailable,
+                      String source,Instant fetchedAt,Instant petInformationFetchedAt,String petInformationStatus) {
+            this(place,overview,conditions,petInformationAvailable,source,fetchedAt,petInformationFetchedAt,
+                    petInformationStatus,null,List.of(),"PREPARING",null);
         }
     }
 }

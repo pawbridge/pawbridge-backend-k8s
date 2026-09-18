@@ -118,4 +118,27 @@ class PetTravelServiceTest {
         var data=new HashMap<>(row());data.put("cpyrhtDivCd","Type1");if(image!=null)data.put("firstimage",image);
         detail(data,Map.of());assertThat(service.detail("123").place().imageUrl()).isNull();
     }
+
+    @Test
+    void givenVisitDetails__whenRead__thenNormalizeUsefulFieldsAndExposeOnlyPermittedPhotos() {
+        var common=new HashMap<>(row());common.put("contenttypeid","12");
+        var intro=Map.of("contentid","123","contenttypeid","12","infocenter","02-123-4567",
+                "usetime","09:00~18:00","restdate","월요일","parking","가능",
+                "expguide","해설 프로그램","useseason","연중");
+        var information=List.of(Map.of("contentid","123","contenttypeid","12","infoname","입장료","infotext","무료"));
+        var images=List.of(
+                new PetTravelCatalog.Image("1","전경","https://tong.visitkorea.or.kr/cms/resource/1/a.jpg",
+                        "https://tong.visitkorea.or.kr/cms/resource/1/a-small.jpg","Type1",0),
+                new PetTravelCatalog.Image("2","제외","https://tong.visitkorea.or.kr/cms/resource/1/b.jpg",null,"Type2",1));
+        when(catalog.detail("123")).thenReturn(Optional.of(new PetTravelCatalog.Place(common,Map.of(),now,now,"READY",
+                intro,information,images,now,now,now,"READY","READY")));
+        var response=service.detail("123");
+        assertThat(response.visitInformation().informationCenter()).isEqualTo("02-123-4567");
+        assertThat(response.visitInformation().usageHours()).isEqualTo("09:00~18:00");
+        assertThat(response.visitInformation().experienceGuide()).isEqualTo("해설 프로그램");
+        assertThat(response.visitInformation().usageSeason()).isEqualTo("연중");
+        assertThat(response.visitInformation().additionalItems()).containsExactly(new PetTravelResponse.InformationItem("입장료","무료"));
+        assertThat(response.images()).extracting(PetTravelResponse.Image::name).containsExactly("전경");
+        assertThat(response.imagesStatus()).isEqualTo("READY");
+    }
 }

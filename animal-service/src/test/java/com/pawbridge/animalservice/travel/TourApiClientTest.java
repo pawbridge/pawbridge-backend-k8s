@@ -60,6 +60,50 @@ class TourApiClientTest {
     }
 
     @Test
+    void givenVisitResources__whenFetch__thenUseContentTypeOnlyWhereRequiredAndRetainFields() {
+        properties.setKoreanServiceKey("koreanSynthetic1234%2B%2F%3D");
+        reply(200, bulkPayload("[{\"contentid\":\"123\",\"contenttypeid\":\"12\",\"usetime\":\"09:00~18:00\"," +
+                "\"expguide\":\"해설 프로그램\",\"useseason\":\"연중\"}]",1));
+        assertThat(client.fetchDetail(TourApiClient.Operation.INTRO,"123","12").get(0))
+                .containsEntry("usetime","09:00~18:00")
+                .containsEntry("expguide","해설 프로그램")
+                .containsEntry("useseason","연중");
+        var request=ArgumentCaptor.forClass(HttpRequest.class);
+        verify(http).sendAsync(request.capture(),any(HttpResponse.BodyHandler.class));
+        assertThat(request.getValue().uri().getPath()).endsWith("/detailIntro2");
+        assertThat(request.getValue().uri().getRawQuery()).contains("contentId=123","contentTypeId=12","numOfRows=1");
+
+        reset(http);
+        reply(200, bulkPayload("[{\"contentid\":\"123\",\"contenttypeid\":\"12\",\"serialnum\":\"1\",\"infoname\":\"안내\",\"infotext\":\"설명\"}]",1));
+        assertThat(client.fetchDetail(TourApiClient.Operation.INFO,"123","12").get(0)).containsEntry("infoname","안내");
+
+        reset(http);
+        reply(200, bulkPayload("[{\"contentid\":\"123\",\"serialnum\":\"1\",\"originimgurl\":\"https://tong.visitkorea.or.kr/cms/resource/1/a.jpg\",\"cpyrhtDivCd\":\"Type1\"}]",1));
+        assertThat(client.fetchDetail(TourApiClient.Operation.IMAGES,"123","12").get(0)).containsEntry("serialnum","1");
+        request=ArgumentCaptor.forClass(HttpRequest.class);
+        verify(http).sendAsync(request.capture(),any(HttpResponse.BodyHandler.class));
+        assertThat(request.getValue().uri().getPath()).endsWith("/detailImage2");
+        assertThat(request.getValue().uri().getRawQuery()).contains("contentId=123","imageYN=Y","numOfRows=100")
+                .doesNotContain("contentTypeId");
+    }
+
+    @Test
+    void givenVisitResourceMoreThanOnePage__whenFetch__thenRejectPartialSnapshot() {
+        properties.setKoreanServiceKey(KEY);
+        reply(200,bulkPayload("[{\"contentid\":\"123\",\"contenttypeid\":\"12\",\"serialnum\":\"1\",\"infoname\":\"안내\"}]",101));
+        assertThatThrownBy(()->client.fetchDetail(TourApiClient.Operation.INFO,"123","12"))
+                .hasMessage("UNAVAILABLE");
+    }
+
+    @Test
+    void givenVisitResourceHasNoRows__whenFetch__thenAcceptSuccessfulEmptySnapshot() {
+        properties.setKoreanServiceKey(KEY);
+        reply(200,("{\"response\":{\"header\":{\"resultCode\":\"0000\"},\"body\":{\"totalCount\":0,"
+                + "\"items\":\"\"}}}").getBytes(StandardCharsets.UTF_8));
+        assertThat(client.fetchDetail(TourApiClient.Operation.INTRO,"123","28")).isEmpty();
+    }
+
+    @Test
     void givenDuplicateBulkIdentities__whenFetch__thenRejectPage() {
         properties.setBulkPetEnabled(true);properties.setBulkServiceKey(KEY);
         reply(200,bulkPayload("[{\"contentid\":\"123\"},{\"contentid\":\"123\"}]",2));

@@ -46,6 +46,25 @@ public class PetTravelService {
                 .orElseThrow(() -> new PetTravelException(PetTravelException.Code.NOT_FOUND));
         var row = snapshot.common();
         var conditions = snapshot.pet();
+        var intro=snapshot.intro();
+        var additional=snapshot.information().stream()
+                .map(item->new PetTravelResponse.InformationItem(value(item,"infoname"),value(item,"infotext")))
+                .filter(item->item.name()!=null && item.text()!=null).toList();
+        var visitInformation=new PetTravelResponse.VisitInformation(value(row,"contenttypeid"),
+                first(intro,"infocenter","infocenterculture","infocenterleports"),
+                first(intro,"opendate","openperiod"),
+                first(intro,"usetime","usetimeculture","usetimeleports"),
+                first(intro,"restdate","restdateculture","restdateleports"),
+                first(intro,"parking","parkingculture","parkingleports"),
+                first(intro,"parkingfee","parkingfeeleports"),first(intro,"usefee","usefeeleports"),
+                value(intro,"reservation"),first(intro,"expagerange","expagerangeleports"),
+                value(intro,"expguide"),value(intro,"useseason"),first(intro,"scale","scaleleports"),
+                value(intro,"spendtime"),value(intro,"discountinfo"),additional,snapshot.visitInformationStatus(),
+                latest(snapshot.introFetchedAt(),snapshot.informationFetchedAt()));
+        var images=snapshot.images().stream().map(image -> new PetTravelResponse.Image(
+                        providerImageUrl(image.originalUrl(),image.copyrightType()),
+                        providerImageUrl(image.thumbnailUrl(),image.copyrightType()),image.name(),image.copyrightType()))
+                .filter(image->image.originalUrl()!=null).toList();
         return new PetTravelResponse.Detail(place(row), value(row, "overview"),
                 new PetTravelResponse.Conditions(value(conditions, "acmpyTypeCd"), value(conditions, "acmpyPsblCpam"),
                         value(conditions, "acmpyNeedMtr"), value(conditions, "etcAcmpyInfo"),
@@ -54,7 +73,7 @@ public class PetTravelService {
                         "relaAcdntRiskMtr", "relaPosesFclty", "relaFrnshPrdlst")
                         .anyMatch(field -> value(conditions, field) != null),
                 "KOREA_TOURISM_ORGANIZATION", snapshot.basicFetchedAt() == null ? snapshot.publishedAt() : snapshot.basicFetchedAt(),
-                snapshot.publishedAt(),snapshot.detailStatus());
+                snapshot.publishedAt(),snapshot.detailStatus(),visitInformation,images,snapshot.imagesStatus(),snapshot.imagesFetchedAt());
     }
 
     private PetTravelResponse.Place place(Map<String, String> row) {
@@ -65,8 +84,11 @@ public class PetTravelService {
     // from another record or fetch an image per card. Frontend supplies attribution.
     private static String imageUrl(Map<String, String> row) {
         var copyright = value(row, "cpyrhtDivCd");
+        return providerImageUrl(value(row,"firstimage"),copyright);
+    }
+
+    private static String providerImageUrl(String image, String copyright) {
         if (!"Type1".equals(copyright) && !"Type3".equals(copyright)) return null;
-        var image = value(row, "firstimage");
         if (image == null) return null;
         try {
             var uri = URI.create(image);
@@ -80,6 +102,20 @@ public class PetTravelService {
         } catch (IllegalArgumentException exception) {
             return null;
         }
+    }
+
+    private static String first(Map<String,String> row, String... keys) {
+        for (var key : keys) {
+            var value=value(row,key);
+            if (value!=null) return value;
+        }
+        return null;
+    }
+
+    private static java.time.Instant latest(java.time.Instant first, java.time.Instant second) {
+        if (first==null) return second;
+        if (second==null) return first;
+        return first.isAfter(second)?first:second;
     }
 
     private static String value(Map<String, String> row, String key) {

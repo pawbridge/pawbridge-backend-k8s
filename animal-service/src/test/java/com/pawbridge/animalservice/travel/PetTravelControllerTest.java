@@ -80,4 +80,24 @@ class PetTravelControllerTest {
         mvc.perform(get("/api/v1/places/123")).andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PET_TRAVEL_NOT_FOUND"));
     }
+
+    @Test
+    void givenStoredVisitDetails__whenGetDetail__thenSerializeInformationAndGalleryContract() throws Exception {
+        var place = new PetTravelResponse.Place("123", "서울 공원", "서울", null);
+        var conditions = new PetTravelResponse.Conditions(null, "소형견", "목줄", null, null, null, null);
+        var visit = new PetTravelResponse.VisitInformation("12", "02-123-4567", "연중", "09:00~18:00",
+                "월요일", "가능", null, "무료", null, null, "해설 프로그램", "연중", null, null,
+                null, List.of(new PetTravelResponse.InformationItem("입장료", "무료")), "READY", Instant.EPOCH);
+        when(service.detail("123")).thenReturn(new PetTravelResponse.Detail(place, "소개", conditions, true,
+                "KOREA_TOURISM_ORGANIZATION", Instant.EPOCH, Instant.EPOCH, "READY", visit,
+                List.of(new PetTravelResponse.Image("https://tong.visitkorea.or.kr/cms/resource/1/a.jpg",
+                        null, "전경", "Type1")), "READY", Instant.EPOCH));
+
+        mvc.perform(get("/api/v1/places/123")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.visitInformation.usageHours").value("09:00~18:00"))
+                .andExpect(jsonPath("$.visitInformation.experienceGuide").value("해설 프로그램"))
+                .andExpect(jsonPath("$.visitInformation.additionalItems[0].name").value("입장료"))
+                .andExpect(jsonPath("$.images[0].name").value("전경"))
+                .andExpect(jsonPath("$.imagesStatus").value("READY"));
+    }
 }

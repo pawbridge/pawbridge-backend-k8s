@@ -21,6 +21,7 @@ public class PetTravelCatalog {
     private static final String PROVIDER = "KOREA_TOURISM_ORGANIZATION";
     private static final String DISCOVERY_CONTENT_TYPES = "('12','14','28')";
     private static final TypeReference<Map<String, String>> FIELDS = new TypeReference<>() {};
+    private static final TypeReference<List<Map<String, String>>> FIELD_LIST = new TypeReference<>() {};
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final TransactionTemplate transaction;
@@ -34,10 +35,33 @@ public class PetTravelCatalog {
     public record Region(String code, String name, Instant fetchedAt, Instant completedAt) {}
     public record Target(String contentId, String areaCode, String modifiedTime, boolean shown,
                          String imageUrl, String copyrightType, long generation, boolean pending) {}
+    public enum VisitResource {
+        INTRO("intro_source_modified_time", "intro_attempted_at", "intro_error"),
+        INFO("info_source_modified_time", "info_attempted_at", "info_error"),
+        IMAGES("image_source_modified_time", "image_attempted_at", "image_error");
+        final String revisionColumn;
+        final String attemptedColumn;
+        final String errorColumn;
+        VisitResource(String revisionColumn, String attemptedColumn, String errorColumn) {
+            this.revisionColumn=revisionColumn;this.attemptedColumn=attemptedColumn;this.errorColumn=errorColumn;
+        }
+    }
+    public record VisitTarget(String contentId, String contentTypeId, String modifiedTime, long generation) {}
+    public record Image(String serialNumber, String name, String originalUrl, String thumbnailUrl,
+                        String copyrightType, int displayOrder) {}
     public record Place(Map<String, String> common, Map<String, String> pet, Instant publishedAt,
-                        Instant basicFetchedAt, String detailStatus) {
+                        Instant basicFetchedAt, String detailStatus, Map<String,String> intro,
+                        List<Map<String,String>> information, List<Image> images,
+                        Instant introFetchedAt, Instant informationFetchedAt, Instant imagesFetchedAt,
+                        String visitInformationStatus, String imagesStatus) {
         public Place(Map<String,String> common, Map<String,String> pet, Instant publishedAt) {
-            this(common,pet,publishedAt,publishedAt,publishedAt == null ? "PREPARING" : "READY");
+            this(common,pet,publishedAt,publishedAt,publishedAt == null ? "PREPARING" : "READY",
+                    Map.of(),List.of(),List.of(),null,null,null,"PREPARING","PREPARING");
+        }
+        public Place(Map<String,String> common, Map<String,String> pet, Instant publishedAt,
+                     Instant basicFetchedAt, String detailStatus) {
+            this(common,pet,publishedAt,basicFetchedAt,detailStatus,Map.of(),List.of(),List.of(),
+                    null,null,null,"PREPARING","PREPARING");
         }
     }
     public record CollectionState(String phase, int nextPage, String errorCode, Instant completedAt) {}
@@ -133,10 +157,17 @@ public class PetTravelCatalog {
         transaction.executeWithoutResult(status -> {
             // Failed rows stay retryable, but must not hold every other place's refresh indefinitely.
             if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pet_travel_targets "
-                    + "WHERE provider=? AND shown=TRUE AND pending=TRUE AND area_code IS NOT NULL AND detail_error IS NULL)",
+                    + "WHERE provider=? AND shown=TRUE AND pending=TRUE AND area_code IS NOT NULL AND detail_error IS NULL "
+                    + "AND (JSON_EXTRACT(basic_data,'$.contenttypeid') IS NULL OR "
+                    + "JSON_UNQUOTE(JSON_EXTRACT(basic_data,'$.contenttypeid')) IN " + DISCOVERY_CONTENT_TYPES + "))",
                     Boolean.class,PROVIDER))) return;
             jdbc.update("UPDATE pet_travel_targets t JOIN pet_travel_places p ON p.provider=t.provider AND p.content_id=t.content_id "
-                    + "SET t.pending=TRUE WHERE t.shown=TRUE AND p.published_at<?", Timestamp.from(cutoff));
+                    + "SET t.pending=TRUE WHERE t.shown=TRUE AND p.published_at<? "
+                    + "AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')),"
+                    + "JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid'))) IS NULL OR "
+                    + "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')),"
+                    + "JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid'))) IN " + DISCOVERY_CONTENT_TYPES + ")",
+                    Timestamp.from(cutoff));
         });
     }
 
@@ -171,14 +202,19 @@ public class PetTravelCatalog {
     }
 
     public Optional<Place> detail(String contentId) {
-        return jdbc.query(publicQuery() + " AND t.content_id=?",
-                this::place, PROVIDER, contentId).stream().findFirst();
+        return jdbc.query(publicQuery() + " AND t.content_id=?", this::place, PROVIDER, contentId).stream()
+                .findFirst().map(place -> new Place(place.common(),place.pet(),place.publishedAt(),place.basicFetchedAt(),
+                        place.detailStatus(),place.intro(),place.information(),images(contentId),place.introFetchedAt(),
+                        place.informationFetchedAt(),place.imagesFetchedAt(),place.visitInformationStatus(),place.imagesStatus()));
     }
 
     private String publicQuery() {
-        return "SELECT t.basic_data,t.basic_fetched_at,t.image_url,t.copyright_type,t.pending,t.detail_error,"
+        return "SELECT t.basic_data,t.basic_fetched_at,t.image_url,t.copyright_type,t.pending,t.detail_error,t.modified_time,"
                 + "p.common_data,q.pet_data,q.fetched_at AS pet_fetched_at,q.source AS pet_source,"
-                + "q.valid_until AS pet_valid_until,t.pet_changed_at " + publicFrom();
+                + "q.valid_until AS pet_valid_until,t.pet_changed_at,v.intro_data,v.info_data,"
+                + "v.intro_source_modified_time,v.info_source_modified_time,v.image_source_modified_time,"
+                + "v.intro_fetched_at,v.info_fetched_at,v.image_fetched_at,v.intro_error,v.info_error,v.image_error "
+                + publicFrom();
     }
 
     private String publicFrom() {
@@ -186,6 +222,7 @@ public class PetTravelCatalog {
                 + "LEFT JOIN pet_travel_places p ON p.provider=t.provider AND p.content_id=t.content_id AND p.visible=TRUE "
                 + "LEFT JOIN pet_travel_pet_details q ON q.provider=t.provider AND q.content_id=t.content_id "
                 + "AND (t.pet_valid_after IS NULL OR q.fetched_at>=t.pet_valid_after) "
+                + "LEFT JOIN pet_travel_visit_details v ON v.provider=t.provider AND v.content_id=t.content_id "
                 + "WHERE t.provider=? AND t.shown=TRUE AND t.area_code IS NOT NULL "
                 + "AND (t.basic_data IS NOT NULL OR p.content_id IS NOT NULL)";
     }
@@ -256,9 +293,106 @@ public class PetTravelCatalog {
     public List<Target> pending(int limit) {
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("Target limit must be 1..100");
         return jdbc.query("SELECT * FROM pet_travel_targets WHERE provider=? AND pending=TRUE AND shown=TRUE AND area_code IS NOT NULL "
-                + "ORDER BY CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(basic_data,'$.contenttypeid')) IN "
-                + DISCOVERY_CONTENT_TYPES + " THEN 0 ELSE 1 END,detail_attempted_at,observed_at,content_id LIMIT ?",
+                + "AND (JSON_EXTRACT(basic_data,'$.contenttypeid') IS NULL OR "
+                + "JSON_UNQUOTE(JSON_EXTRACT(basic_data,'$.contenttypeid')) IN " + DISCOVERY_CONTENT_TYPES + ") "
+                + "ORDER BY detail_attempted_at,observed_at,content_id LIMIT ?",
                 this::target, PROVIDER, limit);
+    }
+
+    public List<VisitTarget> pendingVisitDetails(VisitResource resource, int limit) {
+        if (limit < 1 || limit > 100) throw new IllegalArgumentException("Visit detail limit must be 1..100");
+        String sql="SELECT t.content_id,JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')) content_type_id,"
+                + "t.modified_time,t.generation FROM pet_travel_targets t "
+                + "LEFT JOIN pet_travel_visit_details v ON v.provider=t.provider AND v.content_id=t.content_id "
+                + "WHERE t.provider=? AND t.shown=TRUE AND t.area_code IS NOT NULL "
+                + "AND JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')) IN " + DISCOVERY_CONTENT_TYPES + " "
+                + "AND (v." + resource.revisionColumn + " IS NULL OR v." + resource.revisionColumn + "<>t.modified_time) "
+                + "ORDER BY v." + resource.attemptedColumn + ",t.observed_at,t.content_id LIMIT ?";
+        return jdbc.query(sql,(row,index)->new VisitTarget(row.getString("content_id"),row.getString("content_type_id"),
+                row.getString("modified_time"),row.getLong("generation")),PROVIDER,limit);
+    }
+
+    public boolean hasPendingVisitDetails() {
+        for (var resource : VisitResource.values()) if (!pendingVisitDetails(resource,1).isEmpty()) return true;
+        return false;
+    }
+
+    public boolean saveVisitIntro(VisitTarget expected, List<Map<String,String>> rows, Instant fetchedAt) {
+        if (rows.size()>1) throw new IllegalArgumentException("Invalid intro response");
+        validateVisitRows(expected,rows,true);
+        return saveVisitResource(expected,VisitResource.INTRO,json(rows.isEmpty()?Map.of():rows.get(0)),fetchedAt);
+    }
+
+    public boolean saveVisitInformation(VisitTarget expected, List<Map<String,String>> rows, Instant fetchedAt) {
+        validateVisitRows(expected,rows,true);
+        return saveVisitResource(expected,VisitResource.INFO,jsonList(rows),fetchedAt);
+    }
+
+    public boolean saveVisitImages(VisitTarget expected, List<Map<String,String>> rows, Instant fetchedAt) {
+        validateVisitRows(expected,rows,false);
+        if (rows.stream().map(row->row.get("serialnum")).distinct().count()!=rows.size())
+            throw new IllegalArgumentException("Duplicate image identity");
+        return Boolean.TRUE.equals(transaction.execute(status -> {
+            if (!matchesLockedTarget(expected)) return false;
+            ensureVisitDetails(expected);
+            jdbc.update("DELETE FROM pet_travel_images WHERE provider=? AND content_id=?",PROVIDER,expected.contentId());
+            int order=0;
+            for (var row : rows) {
+                String copyright=row.get("cpyrhtDivCd");
+                String original=row.get("originimgurl");
+                if (!("Type1".equals(copyright) || "Type3".equals(copyright)) || original==null || original.isBlank()) continue;
+                jdbc.update("INSERT INTO pet_travel_images(provider,content_id,serial_number,image_name,original_url,"
+                                + "thumbnail_url,copyright_type,display_order,fetched_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                        PROVIDER,expected.contentId(),row.get("serialnum"),row.get("imgname"),original,
+                        row.get("smallimageurl"),copyright,order++,Timestamp.from(fetchedAt));
+            }
+            jdbc.update("UPDATE pet_travel_visit_details SET image_source_modified_time=?,image_fetched_at=?,"
+                            + "image_attempted_at=?,image_error=NULL WHERE provider=? AND content_id=?",
+                    expected.modifiedTime(),Timestamp.from(fetchedAt),Timestamp.from(fetchedAt),PROVIDER,expected.contentId());
+            return true;
+        }));
+    }
+
+    public void visitDetailFailed(VisitResource resource, VisitTarget target, Instant attemptedAt) {
+        transaction.executeWithoutResult(status -> {
+            if (!matchesLockedTarget(target)) return;
+            ensureVisitDetails(target);
+            jdbc.update("UPDATE pet_travel_visit_details SET " + resource.attemptedColumn + "=?,"
+                            + resource.errorColumn + "='DETAIL_FAILED' WHERE provider=? AND content_id=?",
+                    Timestamp.from(attemptedAt),PROVIDER,target.contentId());
+        });
+    }
+
+    private boolean saveVisitResource(VisitTarget expected, VisitResource resource, String json, Instant fetchedAt) {
+        return Boolean.TRUE.equals(transaction.execute(status -> {
+            if (!matchesLockedTarget(expected)) return false;
+            ensureVisitDetails(expected);
+            String dataColumn=resource==VisitResource.INTRO?"intro_data":"info_data";
+            String fetchedColumn=resource==VisitResource.INTRO?"intro_fetched_at":"info_fetched_at";
+            jdbc.update("UPDATE pet_travel_visit_details SET " + dataColumn + "=?," + resource.revisionColumn + "=?,"
+                            + fetchedColumn + "=?," + resource.attemptedColumn + "=?," + resource.errorColumn
+                            + "=NULL WHERE provider=? AND content_id=?",json,expected.modifiedTime(),Timestamp.from(fetchedAt),
+                    Timestamp.from(fetchedAt),PROVIDER,expected.contentId());
+            return true;
+        }));
+    }
+
+    private void validateVisitRows(VisitTarget expected, List<Map<String,String>> rows, boolean requireContentType) {
+        for (var row : rows) if (!expected.contentId().equals(row.get("contentid"))
+                || (requireContentType && !expected.contentTypeId().equals(row.get("contenttypeid"))))
+            throw new IllegalArgumentException("Mismatched visit detail");
+    }
+
+    private boolean matchesLockedTarget(VisitTarget expected) {
+        var current=lockedTarget(expected.contentId());
+        return current.shown() && current.generation()==expected.generation()
+                && current.modifiedTime().equals(expected.modifiedTime());
+    }
+
+    private void ensureVisitDetails(VisitTarget target) {
+        jdbc.update("INSERT INTO pet_travel_visit_details(provider,content_id,content_type_id) VALUES (?,?,?) "
+                        + "ON DUPLICATE KEY UPDATE content_type_id=VALUES(content_type_id)",
+                PROVIDER,target.contentId(),target.contentTypeId());
     }
 
     /** Returns false if discovery changed while HTTP was in flight. An empty pet map is valid. */
@@ -338,8 +472,42 @@ public class PetTravelCatalog {
         String detailStatus=bulk ? (stale ? "STALE" : "READY")
                 : row.getString("detail_error") != null ? (published == null ? "FAILED" : "STALE")
                 : published == null ? "PREPARING" : row.getBoolean("pending") ? "STALE" : "READY";
+        var intro=row.getString("intro_data")==null?Map.<String,String>of():fields(row.getString("intro_data"));
+        var information=row.getString("info_data")==null?List.<Map<String,String>>of():fieldList(row.getString("info_data"));
+        var introFetched=instant(row,"intro_fetched_at");
+        var infoFetched=instant(row,"info_fetched_at");
+        var imageFetched=instant(row,"image_fetched_at");
+        String modified=row.getString("modified_time");
+        String introStatus=resourceStatus(introFetched,row.getString("intro_source_modified_time"),modified,row.getString("intro_error"));
+        String infoStatus=resourceStatus(infoFetched,row.getString("info_source_modified_time"),modified,row.getString("info_error"));
+        String visitStatus=combineStatuses(introStatus,infoStatus);
+        String imageStatus=resourceStatus(imageFetched,row.getString("image_source_modified_time"),modified,row.getString("image_error"));
         return new Place(Map.copyOf(common),row.getString("pet_data") == null ? Map.of() : fields(row.getString("pet_data")),
-                published,instant(row,"basic_fetched_at"),detailStatus);
+                published,instant(row,"basic_fetched_at"),detailStatus,intro,information,List.of(),introFetched,infoFetched,
+                imageFetched,visitStatus,imageStatus);
+    }
+
+    private List<Image> images(String contentId) {
+        return jdbc.query("SELECT serial_number,image_name,original_url,thumbnail_url,copyright_type,display_order "
+                        + "FROM pet_travel_images WHERE provider=? AND content_id=? ORDER BY display_order,serial_number",
+                (row,index)->new Image(row.getString("serial_number"),row.getString("image_name"),
+                        row.getString("original_url"),row.getString("thumbnail_url"),row.getString("copyright_type"),
+                        row.getInt("display_order")),PROVIDER,contentId);
+    }
+
+    private static String resourceStatus(Instant fetchedAt, String sourceModifiedTime, String currentModifiedTime, String error) {
+        if (fetchedAt==null) return error==null?"PREPARING":"FAILED";
+        if (!java.util.Objects.equals(sourceModifiedTime,currentModifiedTime) || error!=null) return "STALE";
+        return "READY";
+    }
+
+    private static String combineStatuses(String first, String second) {
+        if (first.equals("READY") && second.equals("READY")) return "READY";
+        if (first.equals("STALE") || second.equals("STALE")) return "STALE";
+        if ((first.equals("READY") && !second.equals("READY")) || (second.equals("READY") && !first.equals("READY")))
+            return "PARTIAL";
+        if (first.equals("FAILED") || second.equals("FAILED")) return "FAILED";
+        return "PREPARING";
     }
 
     private String json(Map<String, String> fields) {
@@ -347,8 +515,18 @@ public class PetTravelCatalog {
         catch (Exception exception) { throw new IllegalArgumentException("Invalid travel fields"); }
     }
 
+    private String jsonList(List<Map<String,String>> fields) {
+        try { return mapper.writeValueAsString(fields); }
+        catch (Exception exception) { throw new IllegalArgumentException("Invalid travel fields"); }
+    }
+
     private Map<String, String> fields(String json) {
         try { return Map.copyOf(mapper.readValue(json, FIELDS)); }
+        catch (Exception exception) { throw new IllegalStateException("Invalid stored travel fields"); }
+    }
+
+    private List<Map<String,String>> fieldList(String json) {
+        try { return mapper.readValue(json,FIELD_LIST).stream().map(Map::copyOf).toList(); }
         catch (Exception exception) { throw new IllegalStateException("Invalid stored travel fields"); }
     }
 
