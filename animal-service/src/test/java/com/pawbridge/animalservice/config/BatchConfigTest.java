@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.config;
 
 import com.pawbridge.animalservice.batch.ApmsBatchRunner;
+import com.pawbridge.animalservice.batch.ApmsBatchExecutionRecovery;
 import com.pawbridge.animalservice.batch.ApmsSyncPlanFactory;
 import com.pawbridge.animalservice.repository.AnimalRepository;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ class BatchConfigTest {
         var statement = mock(PreparedStatement.class);
         var result = mock(ResultSet.class);
         var defaultLauncher = mock(JobLauncher.class);
+        var executionRecovery = mock(ApmsBatchExecutionRecovery.class);
         var executionThread = new AtomicReference<Thread>();
         when(source.getConnection()).thenReturn(connection);
         when(connection.prepareStatement(anyString())).thenReturn(statement);
@@ -56,6 +58,7 @@ class BatchConfigTest {
             context.registerBean(Job.class, () -> job);
             context.registerBean("jobLauncher", JobLauncher.class, () -> defaultLauncher);
             context.registerBean(AnimalRepository.class, () -> mock(AnimalRepository.class));
+            context.registerBean(ApmsBatchExecutionRecovery.class, () -> executionRecovery);
             context.register(BatchConfig.class, ApmsBatchRunner.class, ApmsSyncPlanFactory.class);
             context.refresh();
             var execution = context.getBean(ApmsBatchRunner.class).run();

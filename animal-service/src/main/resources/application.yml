@@ -30,6 +30,8 @@ spring:
       initialize-schema: always
     job:
       enabled: false  # REST API로 수동 실행
+  lifecycle:
+    timeout-per-shutdown-phase: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:330s}
 
   # JPA Batch Settings
   jpa:
@@ -55,6 +57,7 @@ spring:
 # Server Settings
 server:
   port: 8081
+  shutdown: graceful
   tomcat:
     # Drain bounded rejected uploads so clients can receive the 413 response.
     max-swallow-size: 12MB
@@ -98,6 +101,11 @@ apms:
   api:
     base-url: ${APMS_API_BASE_URL}
     service-key: ${APMS_API_SERVICE_KEY}
+  batch:
+    stale-execution-threshold: ${APMS_BATCH_STALE_EXECUTION_THRESHOLD:10m}
+    elasticsearch-index-timeout: ${APMS_BATCH_ELASTICSEARCH_INDEX_TIMEOUT:4m}
+    elasticsearch-cancellation-wait: ${APMS_BATCH_ELASTICSEARCH_CANCELLATION_WAIT:35s}
+    elasticsearch-parallelism: ${APMS_BATCH_ELASTICSEARCH_PARALLELISM:4}
 
 pawbridge:
   storage:

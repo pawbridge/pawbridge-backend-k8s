@@ -3,7 +3,6 @@ package com.pawbridge.animalservice.batch;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParametersBuilder;
-import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
@@ -19,16 +18,16 @@ import java.util.UUID;
 public class ApmsBatchRunner {
     private static final String LOCK_NAME = "pawbridge_animal.apmsAnimalSyncJob";
     private final DataSource dataSource;
-    private final JobExplorer jobExplorer;
+    private final ApmsBatchExecutionRecovery executionRecovery;
     private final JobLauncher jobLauncher;
     private final Job apmsAnimalSyncJob;
     private final ApmsSyncPlanFactory planFactory;
 
-    public ApmsBatchRunner(DataSource dataSource, JobExplorer jobExplorer,
+    public ApmsBatchRunner(DataSource dataSource, ApmsBatchExecutionRecovery executionRecovery,
                            @Qualifier("apmsJobLauncher") JobLauncher jobLauncher,
                            Job apmsAnimalSyncJob, ApmsSyncPlanFactory planFactory) {
         this.dataSource = dataSource;
-        this.jobExplorer = jobExplorer;
+        this.executionRecovery = executionRecovery;
         this.jobLauncher = jobLauncher;
         this.apmsAnimalSyncJob = apmsAnimalSyncJob;
         this.planFactory = planFactory;
@@ -51,14 +50,9 @@ public class ApmsBatchRunner {
                 throw new AlreadyRunningException();
             }
             try {
-                // A lost lock session must not silently restart an orphaned execution.
-                boolean running;
                 try {
-                    running = !jobExplorer.findRunningJobExecutions(apmsAnimalSyncJob.getName()).isEmpty();
+                    executionRecovery.recoverOrReject(apmsAnimalSyncJob.getName());
                 } catch (RuntimeException exception) {
-                    throw new UnavailableException();
-                }
-                if (running) {
                     throw new UnavailableException();
                 }
                 // The explicitly qualified APMS launcher holds this thread until completion.
