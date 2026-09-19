@@ -17,6 +17,35 @@ Read the closest `AGENTS.md` before changing files. A more specific nested
 - Never describe a local edit, test, image build, or manifest render as a live
   deployment or production verification.
 
+## UI and Figma Work
+
+- Before changing or creating a PawBridge screen, inspect the current deployed
+  screen, the latest approved Figma baseline, and the connected design system.
+- Reuse the current header, footer, content width, navigation, typography,
+  colors, and shared components before designing page-specific content.
+- When a matching asset exists in the connected Figma design system, use its
+  linked component or variant instance. Do not redraw, detach, or copy it into
+  raw frames merely to reproduce the same appearance.
+- If a reusable pattern is missing, add or extend the appropriate design-system
+  component before repeating it across screens. Bind component-controlled
+  color, spacing, typography, radius, stroke, and state values to the existing
+  variables and styles instead of hardcoding them in screen frames.
+- Before reporting a Figma screen complete, audit component instance links and
+  variable or style bindings in addition to visual similarity. A detached copy
+  is not design-system reuse.
+- Label structural explorations as structure concepts. Do not present them as
+  completed designs.
+- Preserve existing Figma screens. Create comparison or successor pages and
+  record the page, version, status, and implementation state in Figma history.
+- Create desktop and mobile layouts for the full page, including the header and
+  footer. Cover normal, loading, empty, error, selected-filter, and overflow
+  states when the flow can reach them.
+- Before reporting a Figma task complete, render and inspect every changed
+  desktop and mobile frame for clipping, alignment, spacing, responsive
+  behavior, and consistency with the current baseline.
+- Keep Figma approval separate from frontend implementation. Do not describe a
+  concept as implemented, merged, deployed, or production-verified.
+
 ## Git and Pull Requests
 
 - Use the latest `origin/dev` as the default base unless the user explicitly
@@ -76,6 +105,22 @@ Read the closest `AGENTS.md` before changing files. A more specific nested
   validation, isolated reindex tests, and live alias cutover evidence.
 - If a required runtime or tool is unavailable, report an environment blocker;
   do not call the code verified and do not install tools without approval.
+
+## Troubleshooting Records
+
+- After completing a feature, record actual development, test, or deployment
+  troubleshooting in the owning project's existing Obsidian structure without
+  waiting for another request.
+- Record the symptom and trigger, impact, confirmed cause and evidence,
+  attempted actions, applied fix, verification result, unresolved issues, and
+  prevention follow-up.
+- Separate suspected causes from confirmed causes, proposals from applied
+  changes, and local verification from production verification. Do not record
+  an unresolved issue as fixed.
+- Do not create an empty troubleshooting note when no troubleshooting occurred.
+  Redact credentials, tokens, signed URLs, and other secret values.
+- Keep projects separate, link the record from the relevant existing document,
+  and read the saved file back before reporting the documentation complete.
 
 ## Secrets and Deployment
 
