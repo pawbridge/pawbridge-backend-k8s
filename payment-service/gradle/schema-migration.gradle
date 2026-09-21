@@ -9,7 +9,7 @@ sourceSets {
 configurations {
     migrationTestImplementation.extendsFrom migrationImplementation
     migrationTestImplementation.extendsFrom implementation
-    migrationTestRuntimeOnly.extendsFrom migrationRuntimeOnly
+    migrationTestRuntimeOnly.extendsFrom migrationRuntimeOnly, runtimeOnly
 }
 
 dependencies {
@@ -17,6 +17,8 @@ dependencies {
     migrationImplementation 'org.flywaydb:flyway-core'
     migrationRuntimeOnly 'org.flywaydb:flyway-mysql'
     migrationRuntimeOnly 'com.mysql:mysql-connector-j'
+    migrationRuntimeOnly 'org.flywaydb:flyway-database-postgresql'
+    migrationRuntimeOnly 'org.postgresql:postgresql'
     migrationTestImplementation 'org.springframework.boot:spring-boot-starter-test'
     migrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -26,7 +28,7 @@ tasks.register('migrationTest', Test) {
     group = 'verification'
     testClassesDirs = sourceSets.migrationTest.output.classesDirs
     classpath = sourceSets.migrationTest.runtimeClasspath
-    useJUnitPlatform { excludeTags 'mysql' }
+    useJUnitPlatform { excludeTags 'mysql', 'postgresql', 'postgresql-http' }
 }
 
 tasks.register('migrationMysqlTest', Test) {
@@ -76,4 +78,36 @@ tasks.register('migrationDistribution', Sync) {
     into layout.buildDirectory.dir('migration')
     from(tasks.named('migrationJar')) { into 'lib' }
     from(configurations.migrationRuntimeClasspath) { into 'lib' }
+}
+
+// Explicit opt-in: never uses the API's configured database or starts background workers.
+tasks.register('migrationPostgresqlTest', Test) {
+    group = 'verification'
+    description = 'Validates PostgreSQL mappings and business writes on a guarded disposable database.'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'postgresql' }
+    maxHeapSize = '256m'
+    outputs.upToDateWhen { false }
+}
+
+['info', 'validate', 'migrate'].each { command ->
+    tasks.register("schemaPostgresql${command.capitalize()}", JavaExec) {
+        group = 'database'
+        classpath = sourceSets.migration.runtimeClasspath
+        mainClass = 'com.pawbridge.paymentservice.migration.PaymentPostgresqlMigration'
+        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+        args command
+    }
+}
+
+// Isolated HTTP checks never run as part of the ordinary migration/unit suite.
+tasks.register('migrationPostgresqlHttpTest', Test) {
+    description = 'Runs full Spring/HTTP workflows against an explicitly guarded disposable PostgreSQL.'
+    group = 'verification'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'postgresql-http' }
+    maxHeapSize = '384m'
+    outputs.upToDateWhen { false }
 }
