@@ -1,6 +1,8 @@
 package com.pawbridge.userservice.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -47,6 +49,7 @@ public class OutboxEvent {
     private String topic;
 
     @Column(name = "payload", nullable = false, columnDefinition = "JSON")
+    @JdbcTypeCode(SqlTypes.JSON)
     private String payload;
 
     @CreatedDate

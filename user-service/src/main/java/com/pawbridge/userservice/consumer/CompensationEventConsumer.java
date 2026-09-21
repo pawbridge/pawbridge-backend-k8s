@@ -39,7 +39,7 @@ public class CompensationEventConsumer {
                     compensationEventHandler.rollbackFavoriteRemoved(event);
                     break;
                 default:
-                    log.warn("[COMPENSATION] Unknown compensation type: {}", event.getCompensationType());
+                    throw new IllegalArgumentException("Unknown compensation type: " + event.getCompensationType());
             }
 
             // 수동 커밋
@@ -47,8 +47,7 @@ public class CompensationEventConsumer {
 
         } catch (Exception e) {
             log.error("[COMPENSATION] Failed to process compensation event: {}", e.getMessage());
-            // 실패 시 재시도하지 않고 로그만 남김 (데드레터 큐로 이동하도록 설정 가능)
-            acknowledgment.acknowledge();
+            throw new IllegalStateException("Failed to process compensation event", e);
         }
     }
 }

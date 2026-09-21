@@ -23,13 +23,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Page<User> findByCareRegNoAndRole(String careRegNo, Role role, Pageable pageable);
 
-    Optional<User> findByEmail(String email);
+    @Query("select u from User u where lower(u.email) = lower(:email)")
+    Optional<User> findByEmail(@Param("email") String email);
 
     /**
      * 이메일과 Provider로 사용자 조회
      * OAuth2 로그인 시 사용 (LOCAL과 GOOGLE을 구분하기 위함)
      */
-    Optional<User> findByEmailAndProvider(String email, String provider);
+    @Query("select u from User u where lower(u.email) = lower(:email) and lower(u.provider) = lower(:provider)")
+    Optional<User> findByEmailAndProvider(@Param("email") String email, @Param("provider") String provider);
 
     /**
      * Provider와 ProviderId로 사용자 조회
@@ -40,17 +42,20 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /**
      * 이메일과 provider로 존재 여부 확인
      */
-    boolean existsByEmailAndProvider(String email, String provider);
+    @Query("select (count(u) > 0) from User u where lower(u.email) = lower(:email) and lower(u.provider) = lower(:provider)")
+    boolean existsByEmailAndProvider(@Param("email") String email, @Param("provider") String provider);
 
     /**
      * 닉네임 중복 확인
      */
-    boolean existsByNickname(String nickname);
+    @Query("select (count(u) > 0) from User u where lower(u.nickname) = lower(:nickname)")
+    boolean existsByNickname(@Param("nickname") String nickname);
 
     /**
      * 닉네임으로 사용자 조회
      */
-    Optional<User> findByNickname(String nickname);
+    @Query("select u from User u where lower(u.nickname) = lower(:nickname)")
+    Optional<User> findByNickname(@Param("nickname") String nickname);
 
     /**
      * 일별 가입자 수 통계 (관리자용)

@@ -1,6 +1,7 @@
 package com.pawbridge.userservice.service;
 
 import com.pawbridge.userservice.client.AnimalServiceClient;
+import com.pawbridge.userservice.persistence.PostgresqlRollbackCharsetViolation;
 import com.pawbridge.userservice.dto.response.SignupPeriodsResponse;
 import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
@@ -95,6 +96,9 @@ public class UserServiceImpl implements UserService {
         try {
             savedUser = userRepository.save(user);
         } catch (DataIntegrityViolationException e) {
+            if (PostgresqlRollbackCharsetViolation.matches(e)) {
+                throw e;
+            }
             log.warn("닉네임 중복 발생 (동시성), 재생성 시도");
             // 닉네임 중복으로 인한 실패 시 재시도
             String newNickname = nicknameGeneratorService.generateUniqueNickname();
@@ -184,6 +188,9 @@ public class UserServiceImpl implements UserService {
 
             log.info("닉네임 변경 완료: userId={}", userId);
         } catch (DataIntegrityViolationException e) {
+            if (PostgresqlRollbackCharsetViolation.matches(e)) {
+                throw e;
+            }
             // DB 레벨에서 UNIQUE 제약 위반 시
             log.warn("닉네임 중복 (DB 제약): userId={}", userId);
             throw new NicknameDuplicateException();
