@@ -28,7 +28,7 @@ public class ApmsBatchExecutionRecovery {
     private final ApmsBatchProperties properties;
 
     /**
-     * Called only while the caller owns the process-wide MySQL named lock.
+     * Called only while the caller owns the database session lock shared by APMS and shelter collection.
      * A recently updated execution is rejected instead of being rewritten; an old
      * running execution is a process orphan and is closed so a new full upsert can converge.
      */

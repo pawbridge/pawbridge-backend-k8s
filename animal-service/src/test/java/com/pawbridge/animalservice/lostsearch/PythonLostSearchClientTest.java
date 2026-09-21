@@ -68,4 +68,33 @@ class PythonLostSearchClientTest {
                     });
         } finally { server.stop(0); }
     }
+    @Test
+    void recommendation_uses_the_gpu_service_url_and_internal_auth_without_sending_an_image() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicReference<String> received = new AtomicReference<>();
+        server.createContext("/internal/animals/73/similar", exchange -> {
+            received.set(exchange.getRequestMethod() + " " + exchange.getRequestURI().getRawQuery()
+                    + " " + exchange.getRequestHeaders().getFirst("X-Internal-Api-Key")
+                    + " " + exchange.getRequestBody().readAllBytes().length);
+            byte[] response = "[9,4]".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(
+                    FeignAutoConfiguration.class, HttpMessageConvertersAutoConfiguration.class))
+                    .withUserConfiguration(Root.class)
+                    .withPropertyValues("python-ai-service.url=http://127.0.0.1:1",
+                            "lost-search.python-url=http://127.0.0.1:" + server.getAddress().getPort())
+                    .run(context -> {
+                        PythonLostSearchClient client = context.getBean(PythonLostSearchClient.class);
+                        assertThat(client.recommend("test-key", 73L, "DOG")).containsExactly(9L, 4L);
+                        assertThat(received.get()).isEqualTo("GET species=DOG test-key 0");
+                    });
+        } finally { server.stop(0); }
+    }
+
 }

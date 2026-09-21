@@ -1,6 +1,10 @@
 package com.pawbridge.animalservice.client;
 
 import com.pawbridge.animalservice.lostsearch.PythonLostSearchResponse;
+import java.util.List;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import feign.Logger;
 import feign.Request;
 import feign.Retryer;
@@ -25,6 +29,12 @@ public interface PythonLostSearchClient {
             @RequestPart(value = "region", required = false) String region,
             @RequestPart(value = "description", required = false) String description,
             @RequestPart("includeAdoptedOrReturned") boolean includeAdoptedOrReturned);
+
+    @GetMapping("/internal/animals/{animalId}/similar")
+    List<Long> recommend(
+            @RequestHeader("X-Internal-Api-Key") String key,
+            @PathVariable("animalId") Long animalId,
+            @RequestParam("species") String species);
 
     // Only the Feign child context loads this class; it must not be component-scanned.
     class Configuration {

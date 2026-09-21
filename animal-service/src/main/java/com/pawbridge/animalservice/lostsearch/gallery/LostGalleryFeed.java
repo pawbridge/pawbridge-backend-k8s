@@ -2,6 +2,7 @@ package com.pawbridge.animalservice.lostsearch.gallery;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.security.MessageDigest;
+import com.pawbridge.animalservice.persistence.AnimalSqlDialect;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
@@ -62,8 +63,8 @@ public class LostGalleryFeed {
         return jdbc.query(connection -> {
             var statement = connection.prepareStatement(SQL);
             statement.setQueryTimeout(20);
-            // MySQL cursor streaming bounds memory while assembling the response.
-            statement.setFetchSize(Integer.MIN_VALUE);
+            // Driver-specific cursor batch; enclosing read transaction enables PostgreSQL streaming.
+            statement.setFetchSize(AnimalSqlDialect.from(connection).streamingFetchSize());
             return statement;
         }, result -> {
             var records = new ArrayList<Map<String, Object>>();
@@ -109,7 +110,7 @@ public class LostGalleryFeed {
         jdbc.query(connection -> {
             var statement = connection.prepareStatement(SQL);
             statement.setQueryTimeout(20);
-            statement.setFetchSize(Integer.MIN_VALUE);
+            statement.setFetchSize(AnimalSqlDialect.from(connection).streamingFetchSize());
             return statement;
         }, (org.springframework.jdbc.core.RowCallbackHandler) result -> {
             var photo = new StoredPhoto(result.getString("stored_sha256"), result.getString("object_key"),

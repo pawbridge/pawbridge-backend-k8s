@@ -1,5 +1,8 @@
 package com.pawbridge.animalservice.batch;
 
+import com.pawbridge.animalservice.persistence.CollectionSessionLock;
+import com.pawbridge.animalservice.persistence.CollectionSessionLock.Operation;
+
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobParametersBuilder;
@@ -13,7 +16,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
 
-/** Serializes requests across application instances using a dedicated MySQL session. */
+/** Serializes requests across application instances using a dedicated database session. */
 @Component
 public class ApmsBatchRunner {
     private static final String LOCK_NAME = "pawbridge_animal.apmsAnimalSyncJob";
@@ -37,7 +40,7 @@ public class ApmsBatchRunner {
         try (Connection connection = dataSource.getConnection()) {
             Integer acquired;
             try {
-                acquired = lockQuery(connection, "SELECT GET_LOCK(?, 0)");
+                acquired = CollectionSessionLock.query(connection, LOCK_NAME, Operation.ACQUIRE);
             } catch (SQLException exception) {
                 discard(connection);
                 throw new UnavailableException();
@@ -66,23 +69,10 @@ public class ApmsBatchRunner {
         }
     }
 
-    private Integer lockQuery(Connection connection, String sql) throws SQLException {
-        try (var statement = connection.prepareStatement(sql)) {
-            statement.setString(1, LOCK_NAME);
-            statement.setQueryTimeout(5);
-            try (var result = statement.executeQuery()) {
-                if (!result.next()) {
-                    return null;
-                }
-                Number value = (Number) result.getObject(1);
-                return value == null ? null : value.intValue();
-            }
-        }
-    }
 
     private void release(Connection connection) {
         try {
-            if (Integer.valueOf(1).equals(lockQuery(connection, "SELECT RELEASE_LOCK(?)"))) {
+            if (Integer.valueOf(1).equals(CollectionSessionLock.query(connection, LOCK_NAME, Operation.RELEASE))) {
                 return;
             }
         } catch (SQLException exception) {

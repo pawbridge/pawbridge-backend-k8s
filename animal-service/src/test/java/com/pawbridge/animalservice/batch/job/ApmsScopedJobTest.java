@@ -64,6 +64,8 @@ class ApmsScopedJobTest {
             context.registerBean(PlatformTransactionManager.class, ResourcelessTransactionManager::new);
             context.registerBean(ApmsApiClient.class, () -> api);
             context.registerBean(ShelterRepository.class, () -> shelters);
+            context.registerBean(com.pawbridge.animalservice.search.SearchDocumentWriter.class,
+                    () -> mock(com.pawbridge.animalservice.search.SearchDocumentWriter.class));
             context.registerBean(AnimalItemProcessor.class, () -> processor);
             context.registerBean(AnimalItemWriter.class, () -> writer);
             context.registerBean(ElasticsearchIndexService.class, () -> index);

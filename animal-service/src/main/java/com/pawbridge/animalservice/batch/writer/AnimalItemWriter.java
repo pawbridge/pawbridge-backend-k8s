@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.batch.writer;
 
+import com.pawbridge.animalservice.search.SearchDocumentWriter;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.repository.AnimalRepository;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,8 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 public class AnimalItemWriter implements ItemWriter<Animal> {
+
+    private final SearchDocumentWriter searchDocuments;
 
     private final AnimalRepository animalRepository;
 
@@ -68,6 +71,11 @@ public class AnimalItemWriter implements ItemWriter<Animal> {
                         existing.getImageUrl2(),
                         existing.getStatus()
                 );
+            }
+
+            if (searchDocuments.enabled()) {
+                animalRepository.flush();
+                for (Animal animal:chunk.getItems()) searchDocuments.animal(animal.getId());
             }
 
             stopWatch.stop();

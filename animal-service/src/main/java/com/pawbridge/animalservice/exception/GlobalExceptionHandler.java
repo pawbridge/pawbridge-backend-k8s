@@ -1,5 +1,7 @@
 package com.pawbridge.animalservice.exception;
 
+import com.pawbridge.animalservice.persistence.PostgresqlRollbackCharsetViolation;
+
 import com.pawbridge.animalservice.util.ResponseDto;
 import com.pawbridge.animalservice.chatbot.exception.ChatbotRateLimitExceededException;
 import lombok.extern.slf4j.Slf4j;
@@ -179,6 +181,11 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<ResponseDto<Void>> handleDataAccessException(DataAccessException ex) {
+        if (PostgresqlRollbackCharsetViolation.matches(ex)) {
+            return ResponseEntity.badRequest().body(ResponseDto.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error("Database error: {}", ex.getMessage(), ex);
 
         return ResponseEntity
@@ -198,6 +205,11 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ResponseDto<Void>> handleException(Exception ex) {
+        if (PostgresqlRollbackCharsetViolation.matches(ex)) {
+            return ResponseEntity.badRequest().body(ResponseDto.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error("Unexpected error occurred: {}", ex.getMessage(), ex);
 
         return ResponseEntity

@@ -718,7 +718,8 @@ class AnimalSchemaMigrationMysqlTest {
         jdbc.update("INSERT INTO shelters(id,care_reg_no,name,created_at) VALUES (72,'123456789012346','누락 보충 보호소',NOW())");
         var mapper = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
         var client = mock(com.pawbridge.animalservice.shelter.ShelterDirectoryClient.class);
-        var store = new com.pawbridge.animalservice.shelter.ShelterDirectoryStore(jdbc, mapper);
+        var store = new com.pawbridge.animalservice.shelter.ShelterDirectoryStore(jdbc, mapper,
+                new com.pawbridge.animalservice.search.SearchDocumentWriter(null,java.util.Optional.empty()));
         var collector = new com.pawbridge.animalservice.shelter.ShelterDirectoryCollector(source, client, store);
         when(client.collect()).thenReturn(List.of(Map.of("careRegNo","123456789012345","careNm","공공 이름",
                 "careAddr","새 주소","careTel","공공 전화","lat","37.5","lng","127","weekOprStime","09:00"),

@@ -14,6 +14,9 @@ public enum ErrorCode {
 
     // Animal 관련 에러 (404)
     ANIMAL_NOT_FOUND("ANIMAL_NOT_FOUND", "동물을 찾을 수 없습니다", HttpStatus.NOT_FOUND),
+    SEARCH_PROJECTION_PENDING("SEARCH_PROJECTION_PENDING", "검색 정보를 갱신 중입니다. 잠시 후 다시 시도해주세요", HttpStatus.SERVICE_UNAVAILABLE),
+
+    RECOMMENDATION_UNAVAILABLE("RECOMMENDATION_UNAVAILABLE", "추천 자료를 준비 중입니다. 잠시 후 다시 시도해 주세요", HttpStatus.SERVICE_UNAVAILABLE),
 
     // Shelter 관련 에러 (404)
     SHELTER_NOT_FOUND("SHELTER_NOT_FOUND", "보호소를 찾을 수 없습니다", HttpStatus.NOT_FOUND),

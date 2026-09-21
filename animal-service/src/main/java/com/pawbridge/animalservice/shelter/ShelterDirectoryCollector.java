@@ -1,5 +1,8 @@
 package com.pawbridge.animalservice.shelter;
 
+import com.pawbridge.animalservice.persistence.CollectionSessionLock;
+import com.pawbridge.animalservice.persistence.CollectionSessionLock.Operation;
+
 import java.sql.Connection;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -19,7 +22,7 @@ public class ShelterDirectoryCollector {
     public int collect() throws Exception {
         try (var connection=source.getConnection()) {
             boolean acquired;
-            try { acquired=lock(connection,"SELECT GET_LOCK(?,0)"); }
+            try { acquired=Integer.valueOf(1).equals(CollectionSessionLock.query(connection,LOCK,Operation.ACQUIRE)); }
             catch (Exception exception) { connection.abort(Runnable::run); throw exception; }
             if (!acquired) throw new IllegalStateException("SHELTER_DIRECTORY_BUSY");
             try {
@@ -37,15 +40,9 @@ public class ShelterDirectoryCollector {
                 }
             } finally {
                 try {
-                    if (!lock(connection,"SELECT RELEASE_LOCK(?)")) connection.abort(Runnable::run);
+                    if (!Integer.valueOf(1).equals(CollectionSessionLock.query(connection,LOCK,Operation.RELEASE))) connection.abort(Runnable::run);
                 } catch (Exception exception) { connection.abort(Runnable::run); }
             }
-        }
-    }
-    private boolean lock(Connection connection,String sql) throws Exception {
-        try (var statement=connection.prepareStatement(sql)) {
-            statement.setString(1,LOCK); statement.setQueryTimeout(5);
-            try(var rs=statement.executeQuery()) { return rs.next() && rs.getInt(1)==1; }
         }
     }
 }

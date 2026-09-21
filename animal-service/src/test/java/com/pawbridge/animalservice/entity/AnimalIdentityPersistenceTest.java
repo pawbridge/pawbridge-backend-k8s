@@ -1,5 +1,7 @@
 package com.pawbridge.animalservice.entity;
 
+import com.pawbridge.animalservice.search.SearchDocumentWriter;
+import java.util.Optional;
 import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import com.pawbridge.animalservice.batch.ApmsSyncPlanFactory;
 import com.pawbridge.animalservice.batch.processor.AnimalItemProcessor;
@@ -89,7 +91,7 @@ class AnimalIdentityPersistenceTest {
 
         entityManager.clear();
         incoming.updateStatus(AnimalStatus.PROTECT);
-        new AnimalItemWriter(animalRepository).write(new Chunk<>(incoming));
+        new AnimalItemWriter(new SearchDocumentWriter(null,Optional.empty()),animalRepository).write(new Chunk<>(incoming));
         entityManager.flush();
         entityManager.clear();
 
@@ -106,7 +108,7 @@ class AnimalIdentityPersistenceTest {
     void givenOldProtectedAnimal__whenModifiedSnapshotReplayed__thenUpdateSameIdentityWithoutDuplicates() throws Exception {
         Shelter shelter = shelter();
         var processor = new AnimalItemProcessor(animalRepository, shelterRepository);
-        var writer = new AnimalItemWriter(animalRepository);
+        var writer = new AnimalItemWriter(new SearchDocumentWriter(null,Optional.empty()),animalRepository);
         var initial = ApmsAnimal.builder()
                 .desertionNo("old-intake").noticeNo("old-notice").happenDt("20260715")
                 .noticeSdt("20260715").noticeEdt("20260725").updTm("2026-07-15 10:00:00.0")

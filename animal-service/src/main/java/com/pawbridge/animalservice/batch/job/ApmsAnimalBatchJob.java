@@ -1,6 +1,9 @@
 package com.pawbridge.animalservice.batch.job;
 
 import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
+import com.pawbridge.animalservice.batch.ApmsQueryProgress;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobExecutionListener;
 import com.pawbridge.animalservice.batch.processor.AnimalItemProcessor;
 import com.pawbridge.animalservice.batch.reader.ApmsItemReader;
 import com.pawbridge.animalservice.batch.tasklet.ShelterPrepTasklet;
@@ -13,6 +16,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.batch.core.Job;
+import org.springframework.batch.core.job.builder.FlowBuilder;
+import org.springframework.batch.core.job.builder.FlowJobBuilder;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
@@ -29,7 +37,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 /**
  * APMS API 동기화 Batch Job 설정
  * - APMS API로부터 유기동물 데이터를 조회하여 DB에 저장
- * - 저장 완료 후 Elasticsearch에 자동 인덱싱
+ * - ES 모드는 저장 후 인덱싱, PostgreSQL 모드는 청크 트랜잭션에서 검색 문서 반영
  */
 @Slf4j
 @Configuration
@@ -42,7 +50,6 @@ public class ApmsAnimalBatchJob {
     private final ApmsItemReader apmsItemReader;
     private final AnimalItemProcessor animalItemProcessor;
     private final AnimalItemWriter animalItemWriter;
-    private final ElasticsearchIndexService elasticsearchIndexService;
     private final ShelterPrepTasklet shelterPrepTasklet;
 
     // BatchExecutorConfig에서 정의 — 순환 참조 방지를 위해 분리
@@ -55,23 +62,33 @@ public class ApmsAnimalBatchJob {
     /**
      * APMS 동물 동기화 Job
      * - Step 0: 보호소 사전 저장 (ShelterPrepTasklet)
-     * - Step 1: APMS API → MySQL 저장 (Step 0 성공 시에만 실행)
-     * - Step 2: MySQL → Elasticsearch 인덱싱
+     * - Step 1: APMS API → 선택한 관계형 DB 저장 (Step 0 성공 시에만 실행)
+     * - Step 2: ES 모드에서만 Elasticsearch 인덱싱
      *
      * Step Flow: Step 0 FAILED → Job 즉시 종료 (Step 1, 2 실행 안 함)
      */
     @Bean
-    public Job apmsAnimalSyncJob() {
-        return new JobBuilder("apmsAnimalSyncJob", jobRepository)
-                .start(shelterPrepStep())
-                    .on("FAILED").fail()  // Job FAILED + 재시작 가능 (.end()는 COMPLETED로 숨김)
-                .from(shelterPrepStep())
-                    .on("*").to(apmsAnimalSyncStep())
-                .from(apmsAnimalSyncStep())
-                    .next(elasticsearchIndexStep())
-                    .next(apmsCollectionVerificationStep())
-                .end()
-                .build();
+    public Job apmsAnimalSyncJob(
+            @Value("${pawbridge.animal-query.backend:elasticsearch}") String backend,
+            @Qualifier("elasticsearchIndexStep") ObjectProvider<Step> elasticsearchStep) {
+        FlowBuilder<FlowJobBuilder> flow = new JobBuilder("apmsAnimalSyncJob", jobRepository)
+                .listener(new JobExecutionListener() {
+                    @Override
+                    public void beforeJob(JobExecution execution) {
+                        execution.getExecutionContext().putString(ApmsQueryProgress.BACKEND_KEY, backend);
+                    }
+                })
+                .start(shelterPrepStep()).on("FAILED").fail()
+                .from(shelterPrepStep()).on("*").to(apmsAnimalSyncStep())
+                .from(apmsAnimalSyncStep());
+        if ("elasticsearch".equals(backend)) {
+            flow.next(elasticsearchStep.getObject());
+        } else if (!"postgresql".equals(backend)) {
+            throw new IllegalArgumentException("Unknown animal query backend: " + backend);
+        }
+        // PostgreSQL search documents already commit with each shelter/animal write.
+        // A separate ES indexing step must not run after the PostgreSQL cutover.
+        return flow.next(apmsCollectionVerificationStep()).end().build();
     }
 
     /**
@@ -114,7 +131,8 @@ public class ApmsAnimalBatchJob {
      * - doc_as_upsert: true → 신규 문서는 insert, 기존 문서는 partial update
      */
     @Bean
-    public Step elasticsearchIndexStep() {
+    @ConditionalOnProperty(prefix="pawbridge.animal-query", name="backend", havingValue="elasticsearch", matchIfMissing=true)
+    public Step elasticsearchIndexStep(ElasticsearchIndexService elasticsearchIndexService) {
         return new StepBuilder("elasticsearchIndexStep", jobRepository)
                 .tasklet((contribution, chunkContext) -> {
                     log.info("[BATCH] Elasticsearch 인덱싱 Step 시작");

@@ -1,5 +1,8 @@
 package com.pawbridge.animalservice.travel;
 
+import com.pawbridge.animalservice.persistence.CollectionSessionLock;
+import com.pawbridge.animalservice.persistence.CollectionSessionLock.Operation;
+
 import java.sql.Connection;
 import java.time.Clock;
 import java.time.Duration;
@@ -32,13 +35,13 @@ public class PetTravelCollector {
         if (!properties.isEnabled()) throw new IllegalStateException("TRAVEL_COLLECTION_DISABLED");
         try (var connection=dataSource.getConnection()) {
             boolean acquired;
-            try { acquired=lock(connection, "SELECT GET_LOCK(?,0)"); }
+            try { acquired=Integer.valueOf(1).equals(CollectionSessionLock.query(connection,LOCK,Operation.ACQUIRE)); }
             catch (Exception exception) { connection.abort(Runnable::run); throw new IllegalStateException("TRAVEL_LOCK_UNAVAILABLE"); }
             if (!acquired) throw new IllegalStateException("TRAVEL_COLLECTION_BUSY");
             try { return collectLocked(connection); }
             finally {
                 try {
-                    if (!lock(connection, "SELECT RELEASE_LOCK(?)")) connection.abort(Runnable::run);
+                    if (!Integer.valueOf(1).equals(CollectionSessionLock.query(connection,LOCK,Operation.RELEASE))) connection.abort(Runnable::run);
                 } catch (Exception exception) { connection.abort(Runnable::run); }
             }
         }
@@ -144,7 +147,7 @@ public class PetTravelCollector {
                 try {
                     reserve(connection,operation,counts);
                     var rows=client.fetchDetail(operation,target.contentId(),target.contentTypeId());
-                    if (!lock(connection,"SELECT IS_USED_LOCK(?)=CONNECTION_ID()"))
+                    if (!Integer.valueOf(1).equals(CollectionSessionLock.query(connection,LOCK,Operation.OWNED)))
                         throw new IllegalStateException("TRAVEL_LOCK_LOST");
                     switch (resource) {
                         case INTRO -> catalog.saveVisitIntro(target,rows,clock.instant());
@@ -176,7 +179,7 @@ public class PetTravelCollector {
                 reserve(connection,TourApiClient.Operation.PET_BULK,counts);
                 var startedAt=clock.instant();
                 var page=client.fetchPage(TourApiClient.Operation.PET_BULK,"",state.nextPage());
-                if (!lock(connection,"SELECT IS_USED_LOCK(?)=CONNECTION_ID()"))
+                if (!Integer.valueOf(1).equals(CollectionSessionLock.query(connection,LOCK,Operation.OWNED)))
                     throw new IllegalStateException("TRAVEL_LOCK_LOST");
                 catalog.savePetPage(state,page,startedAt,startedAt.plus(Duration.ofDays(properties.getDetailRefreshDays())));
                 if ((long)state.nextPage()*100>=page.totalCount()) return null;
@@ -194,15 +197,9 @@ public class PetTravelCollector {
     }
 
     private void reserve(Connection connection,TourApiClient.Operation operation,int[] counts) throws Exception {
-        if (!lock(connection,"SELECT IS_USED_LOCK(?)=CONNECTION_ID()")) throw new IllegalStateException("TRAVEL_LOCK_LOST");
+        if (!Integer.valueOf(1).equals(CollectionSessionLock.query(connection,LOCK,Operation.OWNED))) throw new IllegalStateException("TRAVEL_LOCK_LOST");
         if (!catalog.reserveRequest(operation.name(),LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul"))),
                 properties.getDailyRequestLimit())) throw new BudgetExhausted();
         counts[0]++;
-    }
-    private boolean lock(Connection connection,String sql) throws Exception {
-        try (var statement=connection.prepareStatement(sql)) {
-            statement.setString(1,LOCK); statement.setQueryTimeout(5);
-            try (var result=statement.executeQuery()) { return result.next() && result.getInt(1)==1 && !result.wasNull(); }
-        }
     }
 }
