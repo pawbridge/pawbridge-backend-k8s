@@ -1,0 +1,25 @@
+# Explicit migration profile; default runtime remains unchanged until approved cutover.
+spring:
+  datasource:
+    url: ${PAYMENT_POSTGRESQL_JDBC_URL}
+    username: ${PAYMENT_POSTGRESQL_USERNAME}
+    password: ${PAYMENT_POSTGRESQL_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      schema: pawbridge_payment
+      connection-init-sql: SET TIME ZONE 'UTC'
+      maximum-pool-size: ${PAYMENT_POSTGRESQL_POOL_MAX:5}
+      minimum-idle: ${PAYMENT_POSTGRESQL_POOL_MIN:0}
+      connection-timeout: 5000
+      validation-timeout: 1000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: pawbridge_payment
+        jdbc.time_zone: UTC
+  sql:
+    init:
+      mode: never
