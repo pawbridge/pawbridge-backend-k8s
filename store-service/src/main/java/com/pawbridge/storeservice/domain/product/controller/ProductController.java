@@ -1,7 +1,7 @@
 package com.pawbridge.storeservice.domain.product.controller;
 
 import com.pawbridge.storeservice.domain.product.dto.*;
-import com.pawbridge.storeservice.domain.product.service.ProductSearchService;
+import com.pawbridge.storeservice.domain.product.service.ProductSearch;
 import com.pawbridge.storeservice.domain.product.service.ProductService;
 import com.pawbridge.storeservice.domain.product.facade.ProductFacade;
 import lombok.RequiredArgsConstructor;
@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.*;
 public class ProductController {
 
     private final ProductService productService;
-    private final ProductSearchService productSearchService;
+    private final ProductSearch productSearchService;
     private final ProductFacade productFacade;
 
     @PostMapping

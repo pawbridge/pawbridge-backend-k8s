@@ -104,6 +104,22 @@ class StoreSchemaMigrationMysqlTest {
             }
             try (var factory = metadata.buildMetadata().buildSessionFactory()) {
                 assertThat(factory.isOpen()).isTrue();
+                // PostgreSQL JSON binding must remain compatible with the default MySQL runtime.
+                String payload = "{\"name\":\"보호자\",\"amount\":123}";
+                try (org.hibernate.Session session = factory.openSession()) {
+                    org.hibernate.Transaction transaction = session.beginTransaction();
+                    session.persist(com.pawbridge.storeservice.common.entity.Outbox.builder().aggregateType("TEST").aggregateId("1").eventType("TEST_CREATED").payload(payload).build());
+
+                    transaction.commit();
+                }
+                try (Connection jsonConnection = connection(); java.sql.Statement jsonStatement = jsonConnection.createStatement();
+                        java.sql.ResultSet jsonRows = jsonStatement.executeQuery("SELECT JSON_TYPE(payload), JSON_TYPE(JSON_EXTRACT(payload,'$.amount')) FROM outbox")) {
+                    assertThat(jsonRows.next()).isTrue();
+                    assertThat(jsonRows.getString(1)).isEqualTo("OBJECT");
+                    assertThat(jsonRows.getString(2)).isEqualTo("INTEGER");
+                }
+
+
             }
         } finally {
             StandardServiceRegistryBuilder.destroy(registry);

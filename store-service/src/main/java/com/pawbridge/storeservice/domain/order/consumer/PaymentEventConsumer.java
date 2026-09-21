@@ -35,17 +35,17 @@ public class PaymentEventConsumer {
             // 1. Debezium 'payload' Field Extraction (if wrapped)
             // If the SMT is configured to unwrap, 'payload' might be the root.
             // If 'payload' field contains a String (escaped JSON), parse it again.
-            if (root.has("payload") && root.get("payload").isTextual()) {
+            if (root != null && root.has("payload") && root.get("payload").isTextual()) {
                 String payloadString = root.get("payload").asText();
                 root = objectMapper.readTree(payloadString);
-            } else if (root.has("payload") && root.get("payload").isObject()) {
+            } else if (root != null && root.has("payload") && root.get("payload").isObject()) {
                 root = root.get("payload");
             }
             
             // 2. Extract Fields (TossPaymentResponse structure)
-            if (!root.has("orderId") || !root.has("status")) {
-                log.warn("Invalid Payment Event Format (missing orderId or status): {}", message);
-                return;
+            if (root == null || !root.path("orderId").isTextual() || root.path("orderId").asText().isBlank()
+                    || !root.path("status").isTextual() || root.path("status").asText().isBlank()) {
+                throw new IllegalArgumentException("Payment event requires orderId and status");
             }
 
             String orderId = root.path("orderId").asText();
@@ -64,8 +64,10 @@ public class PaymentEventConsumer {
 
         } catch (JsonProcessingException e) {
             log.error("Payment Event Parsing Failed", e);
-        } catch (Exception e) {
+            throw new IllegalArgumentException("Payment Event Parsing Failed", e);
+        } catch (RuntimeException e) {
             log.error("Payment Event Processing Failed", e);
+            throw e;
         }
     }
 

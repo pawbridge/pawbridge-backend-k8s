@@ -27,7 +27,8 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-public class ProductSearchService {
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="pawbridge.search.backend",havingValue="elasticsearch",matchIfMissing=true)
+public class ProductSearchService implements ProductSearch {
 
     private final ElasticsearchOperations elasticsearchOperations;
     private final String productSearchIndex;
