@@ -71,3 +71,40 @@ API `bootJar`와 `migrationDistribution` 생성도 통과했다. API JAR에는 F
 3. 전용 마이그레이션 계정과 배포 전 Job을 연결한다. 실패하면 새 애플리케이션 배포를 막는다.
 4. 서비스 전환 시 Hibernate를 `validate`로 통일한다. 기존 `update` 실행과 마이그레이션이 경쟁하지 않도록 순서를 정한다.
 5. 운영 변경 승인 후에만 migrate를 실행한다. MySQL DDL 실패 시 자동 롤백을 가정하지 않는다.
+
+
+## PostgreSQL 전환 검증 (운영 전환 전)
+
+`application-postgresql.yml`은 `COMMUNITY_POSTGRESQL_JDBC_URL`,
+`COMMUNITY_POSTGRESQL_USERNAME`, `COMMUNITY_POSTGRESQL_PASSWORD`를 명시한 경우에만 사용한다.
+기존 기본 MySQL 프로필은 유지한다. Hikari는 서비스별 풀(기본 최대 5, 최소 0),
+스키마 `pawbridge_community`, Hibernate `validate`, OSIV 비활성화를 사용한다.
+이 수치는 테스트 출발점이며 전체 파드 수를 반영한 운영 연결 예산이 아니다.
+
+PostgreSQL SQL은 `src/migration/resources/db/postgresql`에 분리하고,
+API 시작 시 자동 실행하지 않는다. 로컬 리허설 runner는
+`COMMUNITY_PG_MIGRATION_JDBC_URL`, `COMMUNITY_PG_MIGRATION_USERNAME`,
+`COMMUNITY_PG_MIGRATION_PASSWORD`를 사용한다.
+URL은 `jdbc:postgresql://127.0.0.1:<port>/pawbridge` 형식의 루프백 대상만 허용한다.
+DB 관리자가 빈 `pawbridge_community` 스키마를 먼저 준비해야 하며,
+`schemaPostgresqlMigrate`에는 URL과 정확히 같은 `COMMUNITY_PG_MIGRATION_CONFIRM_TARGET`이 필요하다.
+`schemaPostgresqlInfo`, `schemaPostgresqlValidate`도 제공한다.
+데이터 적재·운영 계정·CDC·운영 접속 URL 확장은 별도 전환 작업이다.
+
+실제 DB 검증은 `COMMUNITY_PG_MIGRATION_TEST_PORT`와 전용 DB가 필요하다.
+`migration_test_guard.guard`에 `services-pg-disposable` 단일 행이 있어야만
+테스트가 자기 스키마를 재생성한다. **운영 DB에 이 표식을 만들지 않는다.**
+다른 서비스 스키마나 운영 자원은 테스트 대상으로 지정하지 않는다.
+
+```bash
+bash ./gradlew migrationTest migrationPostgresqlTest bootJar migrationDistribution
+```
+
+MySQL 이력·DDL을 덮어쓰지 않는다. 기존 ID를 적재한 뒤에는 모든 identity sequence를
+현재 최대 ID 다음으로 정렬하고 신규 INSERT를 검증해야 한다. 현재 테스트는 빈 target의
+DDL·실제 JPA 저장/조회/롤백 검증이며 전체 운영 데이터 이관 완료를 뜻하지 않는다.
+문자열 정렬·동등 비교가 MySQL collation과 완전히 같다는 보장도 없으므로 실제 데이터로
+대소문자·악센트·공백과 고유키 충돌을 이관 전 점검한다.
+
+이 프로필은 관계형 DB 연결의 리허설용이다. 현재 ES 검색 어댑터와 관련 소비자/스케줄러는
+아직 교체 전이므로, 이 프로필만으로 ES 제거가 완료되지는 않는다.

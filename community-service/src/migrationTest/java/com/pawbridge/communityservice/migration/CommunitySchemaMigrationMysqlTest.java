@@ -96,6 +96,30 @@ class CommunitySchemaMigrationMysqlTest {
             }
             try (var factory = metadata.buildMetadata().buildSessionFactory()) {
                 assertThat(factory.isOpen()).isTrue();
+                // PostgreSQL JSON binding must remain compatible with the default MySQL runtime.
+                String payload = "{\"name\":\"보호자\",\"amount\":123}";
+                try (org.hibernate.Session session = factory.openSession()) {
+                    org.hibernate.Transaction transaction = session.beginTransaction();
+                    session.persist(com.pawbridge.communityservice.domain.entity.OutboxEvent.builder().eventId("json-test").aggregateType("Post").aggregateId("1").type("POST_CREATED").payload(payload).createdAt(java.time.LocalDateTime.of(2026,9,20,12,0)).build());
+                    session.persist(com.pawbridge.communityservice.domain.entity.Post.builder().authorId(7L)
+                            .title("사진").content("검증").boardType(com.pawbridge.communityservice.domain.entity.BoardType.MISSING)
+                            .imageUrls(java.util.List.of("https://example.test/강아지.jpg"))
+                            .createdAt(java.time.LocalDateTime.of(2026,9,20,12,0)).updatedAt(java.time.LocalDateTime.of(2026,9,20,12,0)).build());
+                    transaction.commit();
+                }
+                try (Connection jsonConnection = connection(); java.sql.Statement jsonStatement = jsonConnection.createStatement();
+                        java.sql.ResultSet jsonRows = jsonStatement.executeQuery("SELECT JSON_TYPE(payload), JSON_TYPE(JSON_EXTRACT(payload,'$.amount')) FROM outbox_events")) {
+                    assertThat(jsonRows.next()).isTrue();
+                    assertThat(jsonRows.getString(1)).isEqualTo("OBJECT");
+                    assertThat(jsonRows.getString(2)).isEqualTo("INTEGER");
+                }
+                try (Connection jsonConnection = connection(); java.sql.Statement jsonStatement = jsonConnection.createStatement();
+                        java.sql.ResultSet jsonRows = jsonStatement.executeQuery("SELECT JSON_TYPE(image_urls), JSON_UNQUOTE(JSON_EXTRACT(image_urls,'$[0]')) FROM posts")) {
+                    assertThat(jsonRows.next()).isTrue();
+                    assertThat(jsonRows.getString(1)).isEqualTo("ARRAY");
+                    assertThat(jsonRows.getString(2)).isEqualTo("https://example.test/강아지.jpg");
+                }
+
             }
         } finally {
             StandardServiceRegistryBuilder.destroy(registry);

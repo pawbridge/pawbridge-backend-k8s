@@ -26,6 +26,7 @@ import java.util.Map;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="pawbridge.search.backend",havingValue="elasticsearch",matchIfMissing=true)
 public class PostEventConsumer {
 
     private final PostEventHandler postEventHandler;

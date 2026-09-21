@@ -24,6 +24,7 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="pawbridge.search.backend",havingValue="elasticsearch",matchIfMissing=true)
 public class SyncScheduler {
 
     private final PostRepository postRepository;
