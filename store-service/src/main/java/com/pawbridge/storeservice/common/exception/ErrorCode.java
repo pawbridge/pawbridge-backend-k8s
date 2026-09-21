@@ -7,12 +7,15 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
 
     // Common
+    UNSUPPORTED_INPUT_CHARACTER(HttpStatus.BAD_REQUEST, "C007", "일부 이모지 등 지원하지 않는 문자를 제외해 주세요."),
     INVALID_INPUT_VALUE(HttpStatus.BAD_REQUEST, "C001", "Invalid Input Value"),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "C002", "Method Not Allowed"),
     ENTITY_NOT_FOUND(HttpStatus.NOT_FOUND, "C003", "Entity Not Found"),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "C004", "Server Error"),
     INVALID_TYPE_VALUE(HttpStatus.BAD_REQUEST, "C005", "Invalid Type Value"),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "C006", "Access is Denied"),
+
+    SEARCH_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "P006", "Search temporarily unavailable"),
 
     // Product
     PRODUCT_NOT_FOUND(HttpStatus.NOT_FOUND, "P001", "Product not found"),

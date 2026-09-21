@@ -7,7 +7,6 @@ import com.pawbridge.storeservice.common.repository.OutboxRepository;
 import com.pawbridge.storeservice.domain.product.dto.ProductEventPayload;
 import com.pawbridge.storeservice.domain.product.entity.Product;
 import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +19,6 @@ import java.time.LocalDateTime;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ProductOutboxService {
 
     static final String PRODUCT_SEARCH_AGGREGATE_TYPE = "product-sku";
@@ -28,17 +26,31 @@ public class ProductOutboxService {
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
     private final ProductSKUService productSKUService;
+    private final java.util.Optional<com.pawbridge.storeservice.search.PostgresqlSearchDocuments> searchDocuments;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProductOutboxService(OutboxRepository repository,ObjectMapper mapper,ProductSKUService skuService,
+            java.util.Optional<com.pawbridge.storeservice.search.PostgresqlSearchDocuments> documents) {
+        this.outboxRepository=repository;this.objectMapper=mapper;this.productSKUService=skuService;this.searchDocuments=documents;
+    }
+    public ProductOutboxService(OutboxRepository repository,ObjectMapper mapper,ProductSKUService skuService) {
+        this(repository,mapper,skuService,java.util.Optional.empty());
+    }
+
 
     /**
      * 한 상품의 검색 projection 전체를 같은 시점의 snapshot으로 발행한다.
      * 대표 SKU는 최저가, 동가이면 낮은 SKU ID 규칙으로 매번 다시 계산한다.
      */
+    @org.springframework.transaction.annotation.Transactional
     public void publishProductSnapshot(Product product) {
         if (product.getSkus().isEmpty()) {
+            searchDocuments.ifPresent(documents -> documents.delete(product.getId()));
             return;
         }
 
         ProductSKU primarySku = productSKUService.findPrimarySku(product.getSkus());
+        searchDocuments.ifPresent(documents -> documents.write(product.getId(),primarySku.getId(),product.getName(),primarySku.generateOptionName()));
         int totalStockQuantity = product.getSkus().stream()
                 .mapToInt(ProductSKU::getStockQuantity)
                 .sum();
