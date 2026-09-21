@@ -1,0 +1,27 @@
+[
+  {
+    "schema": "pawbridge_animal",
+    "charset": "utf8mb3",
+    "collation": "utf8mb3_general_ci"
+  },
+  {
+    "schema": "pawbridge_community",
+    "charset": "utf8mb3",
+    "collation": "utf8mb3_general_ci"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "charset": "utf8mb3",
+    "collation": "utf8mb3_general_ci"
+  },
+  {
+    "schema": "pawbridge_store",
+    "charset": "utf8mb3",
+    "collation": "utf8mb3_general_ci"
+  },
+  {
+    "schema": "pawbridge_user",
+    "charset": "utf8mb3",
+    "collation": "utf8mb3_general_ci"
+  }
+]
