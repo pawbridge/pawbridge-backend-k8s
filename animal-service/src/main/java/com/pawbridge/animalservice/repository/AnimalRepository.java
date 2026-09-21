@@ -99,6 +99,8 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
      */
     Page<Animal> findByShelterId(Long shelterId, Pageable pageable);
 
+    Page<Animal> findByShelterIdAndApiSource(Long shelterId, ApiSource apiSource, Pageable pageable);
+
     /**
      * 보호소 ID + 축종으로 조회
      * @param shelterId 보호소 ID
