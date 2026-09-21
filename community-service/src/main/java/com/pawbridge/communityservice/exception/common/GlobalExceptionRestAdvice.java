@@ -1,5 +1,7 @@
 package com.pawbridge.communityservice.exception.common;
 
+import com.pawbridge.communityservice.persistence.PostgresqlRollbackCharsetViolation;
+
 import com.pawbridge.communityservice.util.ResponseDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.TypeMismatchException;
@@ -45,14 +47,29 @@ public class GlobalExceptionRestAdvice {
 
     @ExceptionHandler
     public ResponseEntity<ResponseDTO<Void>> dbException(DataAccessException e) {
+        if (PostgresqlRollbackCharsetViolation.matches(e)) {
+            return ResponseEntity.badRequest().body(ResponseDTO.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error(e.getMessage(), e);
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ResponseDTO.errorWithMessage(HttpStatus.INTERNAL_SERVER_ERROR, "서버 에러!"));
     }
 
+    @ExceptionHandler(com.pawbridge.communityservice.search.InvalidSearchInputException.class)
+    public ResponseEntity<ResponseDTO<Void>> invalidSearchInput(com.pawbridge.communityservice.search.InvalidSearchInputException e) {
+        return ResponseEntity.badRequest().body(ResponseDTO.errorWithMessage(HttpStatus.BAD_REQUEST,"검색 입력을 확인해 주세요."));
+    }
+
     @ExceptionHandler
     public ResponseEntity<ResponseDTO<Void>> serverException(RuntimeException e) {
+        if (PostgresqlRollbackCharsetViolation.matches(e)) {
+            return ResponseEntity.badRequest().body(ResponseDTO.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error(e.getMessage(), e);
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)

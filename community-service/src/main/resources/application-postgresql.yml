@@ -1,0 +1,38 @@
+# Explicit migration profile; default runtime remains unchanged until approved cutover.
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.elasticsearch.ReactiveElasticsearchClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ReactiveElasticsearchRepositoriesAutoConfiguration
+  datasource:
+    url: ${COMMUNITY_POSTGRESQL_JDBC_URL}
+    username: ${COMMUNITY_POSTGRESQL_USERNAME}
+    password: ${COMMUNITY_POSTGRESQL_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      schema: pawbridge_community
+      connection-init-sql: SET TIME ZONE 'UTC'
+      maximum-pool-size: ${COMMUNITY_POSTGRESQL_POOL_MAX:5}
+      minimum-idle: ${COMMUNITY_POSTGRESQL_POOL_MIN:0}
+      connection-timeout: 5000
+      validation-timeout: 1000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: pawbridge_community
+        jdbc.time_zone: UTC
+  sql:
+    init:
+      mode: never
+
+pawbridge:
+  search:
+    backend: postgresql
+    rebuild-enabled: ${SEARCH_REBUILD_ENABLED:false}
