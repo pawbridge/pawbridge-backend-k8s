@@ -3,6 +3,8 @@ package com.pawbridge.animalservice.travel;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
+import com.pawbridge.animalservice.persistence.AnimalSqlDialect;
+import org.springframework.util.function.SingletonSupplier;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -23,11 +25,13 @@ public class PetTravelCatalog {
     private static final TypeReference<Map<String, String>> FIELDS = new TypeReference<>() {};
     private static final TypeReference<List<Map<String, String>>> FIELD_LIST = new TypeReference<>() {};
     private final JdbcTemplate jdbc;
+    private final SingletonSupplier<AnimalSqlDialect> dialect;
     private final ObjectMapper mapper;
     private final TransactionTemplate transaction;
 
     public PetTravelCatalog(JdbcTemplate jdbc, ObjectMapper mapper, PlatformTransactionManager manager) {
         this.jdbc = jdbc;
+        this.dialect = SingletonSupplier.of(() -> AnimalSqlDialect.from(jdbc));
         this.mapper = mapper;
         this.transaction = new TransactionTemplate(manager);
     }
@@ -93,13 +97,16 @@ public class PetTravelCatalog {
                         + "WHERE provider=? AND content_id=? AND cycle_id=?)",Boolean.class,PROVIDER,contentId,expected.cycleId())))
                     throw new IllegalStateException("PET_INVENTORY_CHANGED");
                 jdbc.update("INSERT INTO pet_travel_pet_details(provider,content_id,pet_data,source,fetched_at,valid_until,cycle_id) "
-                        + "VALUES (?,?,?,'BULK',?,?,?) ON DUPLICATE KEY UPDATE pet_data=VALUES(pet_data),source='BULK',"
+                        + "VALUES (?,?," + dialect.get().jsonParameter() + ",'BULK',?,?,?) " + dialect.get().sql(
+                        "ON DUPLICATE KEY UPDATE pet_data=VALUES(pet_data),source='BULK',"
                         + "fetched_at=VALUES(fetched_at),valid_until=VALUES(valid_until),cycle_id=VALUES(cycle_id)",
+                        "ON CONFLICT (provider,content_id) DO UPDATE SET pet_data=EXCLUDED.pet_data,source='BULK',"
+                        + "fetched_at=EXCLUDED.fetched_at,valid_until=EXCLUDED.valid_until,cycle_id=EXCLUDED.cycle_id"),
                         PROVIDER,contentId,json(row),Timestamp.from(fetchedAt),Timestamp.from(validUntil),expected.cycleId());
             }
             boolean complete=(long)expected.nextPage()*100>=page.totalCount();
             jdbc.update("UPDATE pet_travel_pet_collection_state SET next_page=?,expected_total=?,cycle_id=?,"
-                    + "completed_at=IF(?,?,completed_at),error_code=NULL WHERE id=1",
+                    + "completed_at=CASE WHEN ? THEN ? ELSE completed_at END,error_code=NULL WHERE id=1",
                     complete?1:expected.nextPage()+1,complete?null:page.totalCount(),
                     complete?java.util.UUID.randomUUID().toString():expected.cycleId(),complete,Timestamp.from(fetchedAt));
         });
@@ -124,7 +131,7 @@ public class PetTravelCatalog {
     public boolean reserveRequest(String operation, java.time.LocalDate day, int limit) {
         return Boolean.TRUE.equals(transaction.execute(status -> {
             jdbc.update("INSERT INTO pet_travel_request_budgets(request_day,operation,used) VALUES (?,?,0) "
-                    + "ON DUPLICATE KEY UPDATE used=used", java.sql.Date.valueOf(day), operation);
+                    + dialect.get().sql("ON DUPLICATE KEY UPDATE used=used", "ON CONFLICT (request_day,operation) DO NOTHING"), java.sql.Date.valueOf(day), operation);
             return jdbc.update("UPDATE pet_travel_request_budgets SET used=used+1 "
                     + "WHERE request_day=? AND operation=? AND used<?", java.sql.Date.valueOf(day), operation, limit) == 1;
         }));
@@ -158,21 +165,23 @@ public class PetTravelCatalog {
             // Failed rows stay retryable, but must not hold every other place's refresh indefinitely.
             if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pet_travel_targets "
                     + "WHERE provider=? AND shown=TRUE AND pending=TRUE AND area_code IS NOT NULL AND detail_error IS NULL "
-                    + "AND (JSON_EXTRACT(basic_data,'$.contenttypeid') IS NULL OR "
-                    + "JSON_UNQUOTE(JSON_EXTRACT(basic_data,'$.contenttypeid')) IN " + DISCOVERY_CONTENT_TYPES + "))",
+                    + "AND (" + dialect.get().jsonValue("basic_data", "contenttypeid") + " IS NULL OR "
+                    + dialect.get().jsonText("basic_data", "contenttypeid") + " IN " + DISCOVERY_CONTENT_TYPES + "))",
                     Boolean.class,PROVIDER))) return;
-            jdbc.update("UPDATE pet_travel_targets t JOIN pet_travel_places p ON p.provider=t.provider AND p.content_id=t.content_id "
-                    + "SET t.pending=TRUE WHERE t.shown=TRUE AND p.published_at<? "
-                    + "AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')),"
-                    + "JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid'))) IS NULL OR "
-                    + "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')),"
-                    + "JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid'))) IN " + DISCOVERY_CONTENT_TYPES + ")",
+            jdbc.update(dialect.get().sql(
+                    "UPDATE pet_travel_targets t JOIN pet_travel_places p ON p.provider=t.provider AND p.content_id=t.content_id SET t.pending=TRUE ",
+                    "UPDATE pet_travel_targets t SET pending=TRUE FROM pet_travel_places p ")
+                    + "WHERE p.provider=t.provider AND p.content_id=t.content_id AND t.shown=TRUE AND p.published_at<? "
+                    + "AND (COALESCE(" + dialect.get().jsonText("t.basic_data", "contenttypeid") + ","
+                    + dialect.get().jsonText("p.common_data", "contenttypeid") + ") IS NULL OR "
+                    + "COALESCE(" + dialect.get().jsonText("t.basic_data", "contenttypeid") + ","
+                    + dialect.get().jsonText("p.common_data", "contenttypeid") + ") IN " + DISCOVERY_CONTENT_TYPES + ")",
                     Timestamp.from(cutoff));
         });
     }
 
     public List<Region> regions() {
-        return jdbc.query("SELECT * FROM pet_travel_regions ORDER BY CAST(code AS UNSIGNED)",
+        return jdbc.query("SELECT * FROM pet_travel_regions ORDER BY " + dialect.get().sql("CAST(code AS UNSIGNED)", "CAST(code AS INTEGER)"),
                 (row, index) -> new Region(row.getString("code"), row.getString("name"),
                         instant(row, "fetched_at"), instant(row, "completed_at")));
     }
@@ -183,7 +192,7 @@ public class PetTravelCatalog {
 
     public List<Place> places(String areaCode, int page) {
         return jdbc.query(publicQuery() + discoveryTypes() + " AND t.area_code=? ORDER BY "
-                + "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.title')),p.title),t.content_id LIMIT 10 OFFSET ?",
+                + "COALESCE(" + dialect.get().jsonText("t.basic_data", "title") + ",p.title),t.content_id LIMIT 10 OFFSET ?",
                 this::place, PROVIDER, areaCode, (long) page * 10);
     }
 
@@ -197,8 +206,8 @@ public class PetTravelCatalog {
     // Legacy snapshots are considered only when no newer basic record exists.
     private String discoveryTypes() {
         return " AND (CASE WHEN t.basic_data IS NOT NULL "
-                + "THEN JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')) "
-                + "ELSE JSON_UNQUOTE(JSON_EXTRACT(p.common_data,'$.contenttypeid')) END) IN " + DISCOVERY_CONTENT_TYPES;
+                + "THEN " + dialect.get().jsonText("t.basic_data", "contenttypeid") + " "
+                + "ELSE " + dialect.get().jsonText("p.common_data", "contenttypeid") + " END) IN " + DISCOVERY_CONTENT_TYPES;
     }
 
     public Optional<Place> detail(String contentId) {
@@ -236,7 +245,7 @@ public class PetTravelCatalog {
                     row.get("firstimage"),row.get("cpyrhtDivCd"),now,false);
             var current=lockedTarget(row.get("contentid"));
             if (!current.modifiedTime().equals(row.get("modifiedtime"))) return;
-            jdbc.update("UPDATE pet_travel_targets SET basic_data=?,basic_fetched_at=? WHERE provider=? AND content_id=?",
+            jdbc.update("UPDATE pet_travel_targets SET basic_data=" + dialect.get().jsonParameter() + ",basic_fetched_at=? WHERE provider=? AND content_id=?",
                     json(row),Timestamp.from(now),PROVIDER,current.contentId());
         });
     }
@@ -253,7 +262,8 @@ public class PetTravelCatalog {
         });
         transaction.executeWithoutResult(status -> regions.forEach((code, name) -> jdbc.update(
                 "INSERT INTO pet_travel_regions(code,name,fetched_at) VALUES (?,?,?) "
-                        + "ON DUPLICATE KEY UPDATE name=VALUES(name), fetched_at=VALUES(fetched_at)",
+                        + dialect.get().sql("ON DUPLICATE KEY UPDATE name=VALUES(name), fetched_at=VALUES(fetched_at)",
+                        "ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,fetched_at=EXCLUDED.fetched_at"),
                 code, name, Timestamp.from(fetchedAt))));
     }
 
@@ -265,10 +275,10 @@ public class PetTravelCatalog {
             throw new IllegalArgumentException("Invalid discovery metadata");
         }
         transaction.executeWithoutResult(status -> {
-            // ON DUPLICATE KEY obtains the same row lock as the following SELECT FOR UPDATE.
+            // Insert (or wait for a concurrent insert), then lock the existing target before comparing revisions.
             jdbc.update("INSERT INTO pet_travel_targets(provider,content_id,area_code,modified_time,shown,"
                     + "image_url,copyright_type,generation,pending,observed_at) VALUES (?,?,?,?,?,?,?,0,TRUE,?) "
-                    + "ON DUPLICATE KEY UPDATE content_id=content_id", PROVIDER, contentId, areaCode, modifiedTime,
+                    + dialect.get().sql("ON DUPLICATE KEY UPDATE content_id=content_id", "ON CONFLICT (provider,content_id) DO NOTHING"), PROVIDER, contentId, areaCode, modifiedTime,
                     shown, imageUrl, copyrightType, Timestamp.from(observedAt));
             var previous = lockedTarget(contentId);
             if (modifiedTime.compareTo(previous.modifiedTime()) < 0) return;
@@ -281,11 +291,11 @@ public class PetTravelCatalog {
                 jdbc.update("UPDATE pet_travel_targets SET pet_changed_at=? WHERE provider=? AND content_id=?",
                         Timestamp.from(observedAt),PROVIDER,contentId);
             jdbc.update("UPDATE pet_travel_targets SET area_code=?,modified_time=?,shown=?,image_url=?,"
-                    + "copyright_type=?,generation=generation+1,pending=?,observed_at=?,detail_error=IF(?,NULL,detail_error) WHERE provider=? AND content_id=?",
+                    + "copyright_type=?,generation=generation+1,pending=?,observed_at=?,detail_error=CASE WHEN ? THEN NULL ELSE detail_error END WHERE provider=? AND content_id=?",
                     areaCode, modifiedTime, shown, imageUrl, copyrightType, pending, Timestamp.from(observedAt),
                     shown && !previous.shown(), PROVIDER, contentId);
             // Reappearance cannot republish stale hidden details; publish() alone makes them visible.
-            jdbc.update("UPDATE pet_travel_places SET visible=IF(?,visible,FALSE), image_url=?,copyright_type=? "
+            jdbc.update("UPDATE pet_travel_places SET visible=CASE WHEN ? THEN visible ELSE FALSE END, image_url=?,copyright_type=? "
                     + "WHERE provider=? AND content_id=?", shown, imageUrl, copyrightType, PROVIDER, contentId);
         });
     }
@@ -293,21 +303,21 @@ public class PetTravelCatalog {
     public List<Target> pending(int limit) {
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("Target limit must be 1..100");
         return jdbc.query("SELECT * FROM pet_travel_targets WHERE provider=? AND pending=TRUE AND shown=TRUE AND area_code IS NOT NULL "
-                + "AND (JSON_EXTRACT(basic_data,'$.contenttypeid') IS NULL OR "
-                + "JSON_UNQUOTE(JSON_EXTRACT(basic_data,'$.contenttypeid')) IN " + DISCOVERY_CONTENT_TYPES + ") "
-                + "ORDER BY detail_attempted_at,observed_at,content_id LIMIT ?",
+                + "AND (" + dialect.get().jsonValue("basic_data", "contenttypeid") + " IS NULL OR "
+                + dialect.get().jsonText("basic_data", "contenttypeid") + " IN " + DISCOVERY_CONTENT_TYPES + ") "
+                + "ORDER BY (detail_attempted_at IS NOT NULL),detail_attempted_at,observed_at,content_id LIMIT ?",
                 this::target, PROVIDER, limit);
     }
 
     public List<VisitTarget> pendingVisitDetails(VisitResource resource, int limit) {
         if (limit < 1 || limit > 100) throw new IllegalArgumentException("Visit detail limit must be 1..100");
-        String sql="SELECT t.content_id,JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')) content_type_id,"
+        String sql="SELECT t.content_id," + dialect.get().jsonText("t.basic_data", "contenttypeid") + " content_type_id,"
                 + "t.modified_time,t.generation FROM pet_travel_targets t "
                 + "LEFT JOIN pet_travel_visit_details v ON v.provider=t.provider AND v.content_id=t.content_id "
                 + "WHERE t.provider=? AND t.shown=TRUE AND t.area_code IS NOT NULL "
-                + "AND JSON_UNQUOTE(JSON_EXTRACT(t.basic_data,'$.contenttypeid')) IN " + DISCOVERY_CONTENT_TYPES + " "
+                + "AND " + dialect.get().jsonText("t.basic_data", "contenttypeid") + " IN " + DISCOVERY_CONTENT_TYPES + " "
                 + "AND (v." + resource.revisionColumn + " IS NULL OR v." + resource.revisionColumn + "<>t.modified_time) "
-                + "ORDER BY v." + resource.attemptedColumn + ",t.observed_at,t.content_id LIMIT ?";
+                + "ORDER BY (v." + resource.attemptedColumn + " IS NOT NULL),v." + resource.attemptedColumn + ",t.observed_at,t.content_id LIMIT ?";
         return jdbc.query(sql,(row,index)->new VisitTarget(row.getString("content_id"),row.getString("content_type_id"),
                 row.getString("modified_time"),row.getLong("generation")),PROVIDER,limit);
     }
@@ -369,7 +379,7 @@ public class PetTravelCatalog {
             ensureVisitDetails(expected);
             String dataColumn=resource==VisitResource.INTRO?"intro_data":"info_data";
             String fetchedColumn=resource==VisitResource.INTRO?"intro_fetched_at":"info_fetched_at";
-            jdbc.update("UPDATE pet_travel_visit_details SET " + dataColumn + "=?," + resource.revisionColumn + "=?,"
+            jdbc.update("UPDATE pet_travel_visit_details SET " + dataColumn + "=" + dialect.get().jsonParameter() + "," + resource.revisionColumn + "=?,"
                             + fetchedColumn + "=?," + resource.attemptedColumn + "=?," + resource.errorColumn
                             + "=NULL WHERE provider=? AND content_id=?",json,expected.modifiedTime(),Timestamp.from(fetchedAt),
                     Timestamp.from(fetchedAt),PROVIDER,expected.contentId());
@@ -391,7 +401,8 @@ public class PetTravelCatalog {
 
     private void ensureVisitDetails(VisitTarget target) {
         jdbc.update("INSERT INTO pet_travel_visit_details(provider,content_id,content_type_id) VALUES (?,?,?) "
-                        + "ON DUPLICATE KEY UPDATE content_type_id=VALUES(content_type_id)",
+                        + dialect.get().sql("ON DUPLICATE KEY UPDATE content_type_id=VALUES(content_type_id)",
+                        "ON CONFLICT (provider,content_id) DO UPDATE SET content_type_id=EXCLUDED.content_type_id"),
                 PROVIDER,target.contentId(),target.contentTypeId());
     }
 
@@ -415,14 +426,20 @@ public class PetTravelCatalog {
             var current = lockedTarget(expected.contentId());
             if (!current.shown() || !current.pending() || current.areaCode() == null || current.generation() != expected.generation()) return false;
             jdbc.update("INSERT INTO pet_travel_places(provider,content_id,area_code,title,common_data,pet_data,"
-                    + "image_url,copyright_type,visible,published_at) VALUES (?,?,?,?,?,?,?, ?,TRUE,?) "
-                    + "ON DUPLICATE KEY UPDATE area_code=VALUES(area_code),title=VALUES(title),common_data=VALUES(common_data),"
+                    + "image_url,copyright_type,visible,published_at) VALUES (?,?,?,?," + dialect.get().jsonParameter() + ","
+                    + dialect.get().jsonParameter() + ",?,?,TRUE,?) " + dialect.get().sql(
+                    "ON DUPLICATE KEY UPDATE area_code=VALUES(area_code),title=VALUES(title),common_data=VALUES(common_data),"
                     + "pet_data=IF(?,VALUES(pet_data),pet_data),image_url=VALUES(image_url),copyright_type=VALUES(copyright_type),"
-                    + "visible=TRUE,published_at=VALUES(published_at)", PROVIDER, current.contentId(), current.areaCode(),
+                    + "visible=TRUE,published_at=VALUES(published_at)",
+                    "ON CONFLICT (provider,content_id) DO UPDATE SET area_code=EXCLUDED.area_code,title=EXCLUDED.title,"
+                    + "common_data=EXCLUDED.common_data,pet_data=CASE WHEN ? THEN EXCLUDED.pet_data ELSE pet_travel_places.pet_data END,"
+                    + "image_url=EXCLUDED.image_url,copyright_type=EXCLUDED.copyright_type,visible=TRUE,published_at=EXCLUDED.published_at"), PROVIDER, current.contentId(), current.areaCode(),
                     common.get("title"), commonJson, petJson, current.imageUrl(), current.copyrightType(), Timestamp.from(fetchedAt),includesPet);
             if (includesPet)
-                jdbc.update("INSERT INTO pet_travel_pet_details(provider,content_id,pet_data,source,fetched_at) VALUES (?,?,?,'LEGACY',?) "
-                        + "ON DUPLICATE KEY UPDATE pet_data=VALUES(pet_data),source='LEGACY',fetched_at=VALUES(fetched_at),valid_until=NULL,cycle_id=NULL",
+                jdbc.update("INSERT INTO pet_travel_pet_details(provider,content_id,pet_data,source,fetched_at) VALUES (?,?," + dialect.get().jsonParameter() + ",'LEGACY',?) "
+                        + dialect.get().sql("ON DUPLICATE KEY UPDATE pet_data=VALUES(pet_data),source='LEGACY',fetched_at=VALUES(fetched_at),valid_until=NULL,cycle_id=NULL",
+                        "ON CONFLICT (provider,content_id) DO UPDATE SET pet_data=EXCLUDED.pet_data,source='LEGACY',"
+                        + "fetched_at=EXCLUDED.fetched_at,valid_until=NULL,cycle_id=NULL"),
                         PROVIDER,current.contentId(),petJson,Timestamp.from(fetchedAt));
             jdbc.update("UPDATE pet_travel_targets SET pending=FALSE,detail_error=NULL,detail_attempted_at=? WHERE provider=? AND content_id=?",
                     Timestamp.from(fetchedAt),PROVIDER,current.contentId());

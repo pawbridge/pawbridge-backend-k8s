@@ -1,6 +1,8 @@
 package com.pawbridge.animalservice.photo;
 
 import java.util.List;
+import com.pawbridge.animalservice.persistence.AnimalSqlDialect;
+import org.springframework.util.function.SingletonSupplier;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +13,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /** Only short database transactions; network I/O belongs to PhotoArchiveWorker. */
 public class PhotoArchiveStore {
     private final JdbcTemplate jdbc;
+    private final SingletonSupplier<AnimalSqlDialect> dialect;
     private final TransactionTemplate transaction;
     private static final String APMS = "api_source='APMS_ANIMAL' AND apms_desertion_no IS NOT NULL";
     public record Claim(long animalId, int slot, long generation, String token, String sourceUrl, int attempts) {}
@@ -18,14 +21,16 @@ public class PhotoArchiveStore {
 
     public PhotoArchiveStore(JdbcTemplate jdbc, PlatformTransactionManager manager) {
         this.jdbc = jdbc;
+        this.dialect = SingletonSupplier.of(() -> AnimalSqlDialect.from(jdbc));
         transaction = new TransactionTemplate(manager);
         transaction.setTimeout(15);
     }
 
     public int discover(int limit) {
         return Objects.requireNonNull(transaction.execute(tx -> {
-            jdbc.update("INSERT IGNORE INTO apms_photo_scan(id,new_cursor,sweep_cursor) "
-                    + "SELECT 1,COALESCE(MAX(id),0),COALESCE(MAX(id),0) FROM animals WHERE " + APMS);
+            jdbc.update(dialect.get().sql("INSERT IGNORE", "INSERT") + " INTO apms_photo_scan(id,new_cursor,sweep_cursor) "
+                    + "SELECT 1,COALESCE(MAX(id),0),COALESCE(MAX(id),0) FROM animals WHERE " + APMS
+                    + dialect.get().sql("", " ON CONFLICT (id) DO NOTHING"));
             long[] cursors = jdbc.queryForObject("SELECT new_cursor,sweep_cursor FROM apms_photo_scan WHERE id=1 FOR UPDATE",
                     (row, n) -> new long[]{row.getLong(1), row.getLong(2)});
             List<AnimalSource> added = sources("id>? ORDER BY id ASC", cursors[0], limit);
@@ -76,13 +81,13 @@ public class PhotoArchiveStore {
                     + "WHERE a.api_source='APMS_ANIMAL' AND p.source_url IS NOT NULL AND "
                     + "((p.state IN ('PENDING','RETRY','READY') AND p.next_attempt_at<=CURRENT_TIMESTAMP(6)) "
                     + "OR (p.state='PROCESSING' AND p.lease_until<=CURRENT_TIMESTAMP(6))) "
-                    + "ORDER BY " + order + " LIMIT 1 FOR UPDATE SKIP LOCKED",
+                    + "ORDER BY " + order + " LIMIT 1 " + dialect.get().sql("FOR UPDATE SKIP LOCKED", "FOR UPDATE OF p SKIP LOCKED"),
                     (row, n) -> new Claim(row.getLong("animal_id"), row.getInt("slot"), row.getLong("generation"),
                             UUID.randomUUID().toString(), row.getString("source_url"), row.getInt("attempts")));
             if (candidates.isEmpty()) return Optional.empty();
             var claim = candidates.get(0);
             jdbc.update("UPDATE apms_photo_archive SET state='PROCESSING',lease_token=?,"
-                            + "lease_until=TIMESTAMPADD(SECOND,?,CURRENT_TIMESTAMP(6)) WHERE animal_id=? AND slot=?",
+                            + "lease_until=" + dialect.get().secondsFromNow() + " WHERE animal_id=? AND slot=?",
                     claim.token(), leaseSeconds, claim.animalId(), claim.slot());
             return Optional.of(claim);
         });
@@ -91,14 +96,17 @@ public class PhotoArchiveStore {
     public boolean complete(Claim claim, ArchivedPhoto photo, int recheckSeconds) {
         // Compare against the current Animal source as well as the discovered generation.
         // A batch update can have committed before discovery visits that animal again.
-        return jdbc.update("UPDATE apms_photo_archive p JOIN animals a ON a.id=p.animal_id SET "
-                        + "p.state='READY',p.attempts=0,p.error_code=NULL,p.lease_token=NULL,p.lease_until=NULL,"
-                        + "p.next_attempt_at=TIMESTAMPADD(SECOND,?,CURRENT_TIMESTAMP(6)),"
-                        + "p.archived_source_url=p.source_url,p.source_sha256=?,p.stored_sha256=?,p.object_key=?,"
-                        + "p.content_type=?,p.stored_bytes=?,p.width=?,p.height=?,p.recipe=?,p.archived_at=CURRENT_TIMESTAMP(6) "
-                        + "WHERE p.animal_id=? AND p.slot=? AND p.generation=? AND p.lease_token=? "
+        return jdbc.update(dialect.get().sql("UPDATE apms_photo_archive p JOIN animals a ON a.id=p.animal_id SET ",
+                        "UPDATE apms_photo_archive p SET ")
+                        + "state='READY',attempts=0,error_code=NULL,lease_token=NULL,lease_until=NULL,"
+                        + "next_attempt_at=" + dialect.get().secondsFromNow() + ","
+                        + "archived_source_url=p.source_url,source_sha256=?,stored_sha256=?,object_key=?,"
+                        + "content_type=?,stored_bytes=?,width=?,height=?,recipe=?,archived_at=CURRENT_TIMESTAMP(6) "
+                        + dialect.get().sql("", "FROM animals a ") + "WHERE p.animal_id=? AND p.slot=? AND p.generation=? AND p.lease_token=? "
                         + "AND p.lease_until>CURRENT_TIMESTAMP(6) AND a.api_source='APMS_ANIMAL' "
-                        + "AND BINARY p.source_url=BINARY TRIM(CASE p.slot WHEN 1 THEN a.image_url ELSE a.image_url2 END)",
+                        + "AND a.id=p.animal_id AND " + dialect.get().sql(
+                                "BINARY p.source_url=BINARY TRIM(CASE p.slot WHEN 1 THEN a.image_url ELSE a.image_url2 END)",
+                                "p.source_url COLLATE \"C\"=TRIM(CASE p.slot WHEN 1 THEN a.image_url ELSE a.image_url2 END) COLLATE \"C\""),
                 recheckSeconds, photo.sourceHash(), photo.storedHash(), photo.objectKey(), photo.contentType(),
                 photo.bytes().length, photo.width(), photo.height(), photo.recipe(),
                 claim.animalId(), claim.slot(), claim.generation(), claim.token()) == 1;
@@ -106,7 +114,7 @@ public class PhotoArchiveStore {
 
     public boolean retry(Claim claim, String code, int seconds) {
         return jdbc.update("UPDATE apms_photo_archive SET state='RETRY',attempts=attempts+1,error_code=?,"
-                        + "next_attempt_at=TIMESTAMPADD(SECOND,?,CURRENT_TIMESTAMP(6)),lease_token=NULL,lease_until=NULL "
+                        + "next_attempt_at=" + dialect.get().secondsFromNow() + ",lease_token=NULL,lease_until=NULL "
                         + "WHERE animal_id=? AND slot=? AND generation=? AND lease_token=? AND lease_until>CURRENT_TIMESTAMP(6)",
                 code, seconds, claim.animalId(), claim.slot(), claim.generation(), claim.token()) == 1;
     }

@@ -1,6 +1,7 @@
 sourceSets {
     migration
     migrationTest {
+        java.srcDir rootProject.file("../infrastructure/migration-tests/java")
         compileClasspath += sourceSets.migration.output + sourceSets.main.output
         runtimeClasspath += sourceSets.migration.output + sourceSets.main.output
     }
@@ -9,7 +10,7 @@ sourceSets {
 configurations {
     migrationTestImplementation.extendsFrom migrationImplementation
     migrationTestImplementation.extendsFrom implementation
-    migrationTestRuntimeOnly.extendsFrom migrationRuntimeOnly
+    migrationTestRuntimeOnly.extendsFrom migrationRuntimeOnly, runtimeOnly
 }
 
 dependencies {
@@ -17,6 +18,8 @@ dependencies {
     migrationImplementation 'org.flywaydb:flyway-core'
     migrationRuntimeOnly 'org.flywaydb:flyway-mysql'
     migrationRuntimeOnly 'com.mysql:mysql-connector-j'
+    migrationRuntimeOnly 'org.flywaydb:flyway-database-postgresql'
+    migrationRuntimeOnly 'org.postgresql:postgresql'
     migrationTestImplementation 'org.springframework.boot:spring-boot-starter-test'
     migrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -26,7 +29,51 @@ tasks.register('migrationTest', Test) {
     group = 'verification'
     testClassesDirs = sourceSets.migrationTest.output.classesDirs
     classpath = sourceSets.migrationTest.runtimeClasspath
-    useJUnitPlatform { excludeTags 'mysql' }
+    useJUnitPlatform { excludeTags 'mysql', 'postgresql', 'postgresql-http' }
+}
+
+tasks.register('migrationPostgresqlTest', Test) {
+    description = 'Checks PostgreSQL and 1024-dimensional schema on a guarded disposable local database.'
+    group = 'verification'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'postgresql' }
+    maxHeapSize = '256m'
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('postgresqlSearchComparison', JavaExec) {
+    description = 'Opt-in comparison using a bounded public fixture and guarded disposable PostgreSQL.'
+    group = 'verification'
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    mainClass = 'com.pawbridge.animalservice.migration.AnimalPostgresqlSearchComparison'
+    maxHeapSize = '256m'
+    if (project.hasProperty('searchFixture') && project.hasProperty('searchReport')) {
+        args project.property('searchFixture'), project.property('searchReport')
+        if (project.hasProperty('koreanAnalysis')) args 'nori'
+    }
+}
+
+tasks.register('postgresqlSearchLoad', JavaExec) {
+    description = 'Opt-in bounded public-text load rehearsal on the guarded disposable PostgreSQL only.'
+    group = 'verification'
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    mainClass = 'com.pawbridge.animalservice.migration.AnimalPostgresqlSearchLoad'
+    maxHeapSize = '256m'
+    if (project.hasProperty('loadFixture') && project.hasProperty('loadReport')) {
+        args project.property('loadFixture'), project.property('loadReport')
+    }
+}
+
+['info', 'validate', 'migrate'].each { command ->
+    tasks.register("schemaPostgresql${command.capitalize()}", JavaExec) {
+        group = 'database'
+        description = "Runs isolated local PostgreSQL schema ${command}, without API or workers."
+        classpath = sourceSets.migration.runtimeClasspath
+        mainClass = 'com.pawbridge.animalservice.migration.AnimalPostgresqlMigration'
+        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+        args command
+    }
 }
 
 tasks.register('migrationMysqlTest', Test) {
@@ -84,5 +131,15 @@ tasks.register('photoArchiveIntegrationTest', Test) {
     testClassesDirs = sourceSets.migrationTest.output.classesDirs
     classpath = sourceSets.migrationTest.runtimeClasspath
     useJUnitPlatform { includeTags 'photo-http' }
+    outputs.upToDateWhen { false }
+}
+
+// Full HTTP/ORM workflows; requires a guarded disposable database.
+tasks.register('migrationPostgresqlHttpTest', Test) {
+    group = 'verification'
+    testClassesDirs = sourceSets.migrationTest.output.classesDirs
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'postgresql-http' }
+    maxHeapSize = '384m'
     outputs.upToDateWhen { false }
 }

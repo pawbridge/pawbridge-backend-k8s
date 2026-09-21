@@ -39,6 +39,9 @@ class ApmsBatchRunnerTest {
     void setUp() throws Exception {
         runner = new ApmsBatchRunner(dataSource, executionRecovery, launcher, job, planFactory);
         when(dataSource.getConnection()).thenReturn(connection);
+        java.sql.DatabaseMetaData metadata = mock(java.sql.DatabaseMetaData.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getDatabaseProductName()).thenReturn("MySQL");
     }
 
     @Test

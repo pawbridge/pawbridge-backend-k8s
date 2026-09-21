@@ -44,6 +44,8 @@ dependencies {
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'com.mysql:mysql-connector-j'
+	implementation 'org.postgresql:postgresql'
+	implementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
 	annotationProcessor 'org.projectlombok:lombok'
 	implementation 'org.springframework.boot:spring-boot-starter-data-elasticsearch'
 	implementation 'org.redisson:redisson-spring-boot-starter:3.45.0'

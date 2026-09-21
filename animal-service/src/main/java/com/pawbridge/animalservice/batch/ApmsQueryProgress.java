@@ -11,9 +11,11 @@ import java.util.List;
 
 /** Collection evidence only. A query becomes a checkpoint after ingestion and indexing succeed. */
 public final class ApmsQueryProgress {
+    public static final String BACKEND_KEY = "apms.sync.searchBackend";
     public static final String CONTEXT_KEY = "apms.sync.queryResults";
     private static final ObjectMapper JSON = new ObjectMapper().registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    private static final List<String> POSTGRESQL_DATA_STEPS = List.of("shelterPrepStep", "apmsAnimalSyncStep");
     private static final List<String> DATA_STEPS = List.of("shelterPrepStep", "apmsAnimalSyncStep", "elasticsearchIndexStep");
 
     private ApmsQueryProgress() { }
@@ -31,9 +33,12 @@ public final class ApmsQueryProgress {
 
     public static List<Result> verifiedResults(JobExecution execution, ApmsSyncPlan plan) {
         if (execution.getStatus() != BatchStatus.COMPLETED && execution.getStatus() != BatchStatus.FAILED) return List.of();
-        if (execution.getStepExecutions().size() != DATA_STEPS.size() + 1) return List.of();
+        String backend = execution.getExecutionContext().getString(BACKEND_KEY, "elasticsearch");
+        if (!backend.equals("elasticsearch") && !backend.equals("postgresql")) return List.of();
+        List<String> dataSteps = backend.equals("postgresql") ? POSTGRESQL_DATA_STEPS : DATA_STEPS;
+        if (execution.getStepExecutions().size() != dataSteps.size() + 1) return List.of();
         if (execution.getStepExecutions().stream().anyMatch(step -> step.getSkipCount() != 0)) return List.of();
-        for (String name : DATA_STEPS) {
+        for (String name : dataSteps) {
             var steps = execution.getStepExecutions().stream().filter(step -> name.equals(step.getStepName())).toList();
             if (steps.size() != 1 || steps.get(0).getStatus() != BatchStatus.COMPLETED) return List.of();
         }

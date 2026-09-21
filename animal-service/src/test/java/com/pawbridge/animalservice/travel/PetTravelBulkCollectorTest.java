@@ -24,9 +24,12 @@ class PetTravelBulkCollectorTest {
         properties.setEnabled(true);properties.setBulkPetEnabled(true);
         var connection=mock(Connection.class);var statement=mock(PreparedStatement.class);var result=mock(ResultSet.class);
         when(source.getConnection()).thenReturn(connection);
+        java.sql.DatabaseMetaData metadata = mock(java.sql.DatabaseMetaData.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getDatabaseProductName()).thenReturn("MySQL");
         when(connection.prepareStatement(anyString())).thenReturn(statement);
         when(statement.executeQuery()).thenReturn(result);
-        when(result.next()).thenReturn(true);when(result.getInt(1)).thenReturn(1);
+        when(result.next()).thenReturn(true);when(result.getObject(1)).thenReturn(1);
         when(catalog.reserveRequest(anyString(),any(),anyInt())).thenReturn(true);
         when(catalog.petCollectionState()).thenReturn(start);
         when(catalog.collectionState()).thenReturn(new PetTravelCatalog.CollectionState("SHOWN",1,null,null));
@@ -92,7 +95,7 @@ class PetTravelBulkCollectorTest {
 
     @Test void givenLockLostDuringBulkHttp__whenResponseArrives__thenDoNotCommitOrContinue() throws Exception {
         var result=source.getConnection().prepareStatement("").executeQuery();
-        when(result.getInt(1)).thenReturn(1,1,0,0);
+        when(result.getObject(1)).thenReturn(1,1,0,0);
         when(client.fetchPage(TourApiClient.Operation.PET_BULK,"",1)).thenReturn(new TourApiClient.Page(List.of(),0));
         assertThatThrownBy(collector::collect).hasMessage("TRAVEL_COLLECTION_FAILED").hasNoCause();
         verify(catalog,never()).savePetPage(any(),any(),any(),any());

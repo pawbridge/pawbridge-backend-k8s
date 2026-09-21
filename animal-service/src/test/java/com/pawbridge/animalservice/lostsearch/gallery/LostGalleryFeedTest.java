@@ -100,6 +100,9 @@ class LostGalleryFeedTest {
         var conflicts = mock(java.sql.PreparedStatement.class);
         var conflictResult = mock(java.sql.ResultSet.class);
         when(source.getConnection()).thenReturn(connection);
+        java.sql.DatabaseMetaData metadata = mock(java.sql.DatabaseMetaData.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getDatabaseProductName()).thenReturn("MySQL");
         when(connection.prepareStatement(LostGalleryFeed.SQL)).thenReturn(statement);
         when(connection.prepareStatement(argThat(sql -> sql != null && sql.startsWith("SELECT stored_sha256")))).thenReturn(conflicts);
         when(conflicts.executeQuery()).thenReturn(conflictResult);

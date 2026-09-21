@@ -1,5 +1,7 @@
 package com.pawbridge.animalservice.batch.tasklet;
 
+import com.pawbridge.animalservice.search.SearchDocumentWriter;
+import java.util.Optional;
 import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Shelter;
@@ -21,7 +23,7 @@ class ShelterPrepTaskletTest {
         var snapshot = mock(ApmsAnimalSnapshot.class);
         var repository = mock(ShelterRepository.class);
         when(snapshot.animals()).thenThrow(new IllegalStateException("provider error"));
-        assertThatThrownBy(() -> new ShelterPrepTasklet(snapshot, repository).execute(null, null))
+        assertThatThrownBy(() -> new ShelterPrepTasklet(new SearchDocumentWriter(null,Optional.empty()),snapshot, repository).execute(null, null))
                 .isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(repository);
     }
@@ -31,7 +33,7 @@ class ShelterPrepTaskletTest {
         var snapshot = mock(ApmsAnimalSnapshot.class);
         var repository = mock(ShelterRepository.class);
         when(snapshot.animals()).thenReturn(List.of());
-        assertThat(new ShelterPrepTasklet(snapshot, repository).execute(null, null)).isEqualTo(RepeatStatus.FINISHED);
+        assertThat(new ShelterPrepTasklet(new SearchDocumentWriter(null,Optional.empty()),snapshot, repository).execute(null, null)).isEqualTo(RepeatStatus.FINISHED);
         verify(repository, never()).saveAll(any());
     }
 
@@ -42,7 +44,7 @@ class ShelterPrepTaskletTest {
         var repository = mock(ShelterRepository.class);
         when(snapshot.animals()).thenReturn(List.of(ApmsAnimal.builder().desertionNo("old")
                 .happenDt("20260715").careRegNo("new-shelter").careNm("Test shelter").careAddr("Test address").build()));
-        new ShelterPrepTasklet(snapshot, repository).execute(null, null);
+        new ShelterPrepTasklet(new SearchDocumentWriter(null,Optional.empty()),snapshot, repository).execute(null, null);
         ArgumentCaptor<List<Shelter>> saved = ArgumentCaptor.forClass(List.class);
         verify(repository).saveAll(saved.capture());
         assertThat(saved.getValue()).extracting(Shelter::getCareRegNo).containsExactly("new-shelter");

@@ -19,12 +19,15 @@ class ShelterDirectoryCollectorTest {
     ShelterDirectoryCollector collector=new ShelterDirectoryCollector(source,client,store);
     @BeforeEach void setup() throws Exception {
         when(source.getConnection()).thenReturn(connection);
+        java.sql.DatabaseMetaData metadata = mock(java.sql.DatabaseMetaData.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getDatabaseProductName()).thenReturn("MySQL");
         when(connection.prepareStatement(anyString())).thenReturn(statement);
         when(statement.executeQuery()).thenReturn(result);
-        when(result.next()).thenReturn(true); when(result.getInt(1)).thenReturn(1);
+        when(result.next()).thenReturn(true); when(result.getObject(1)).thenReturn(1);
     }
     @Test void givenAnimalJobOwnsLock_whenCollecting_thenDoesNotCallApiOrWrite() throws Exception {
-        when(result.getInt(1)).thenReturn(0);
+        when(result.getObject(1)).thenReturn(0);
         assertThatThrownBy(collector::collect).hasMessage("SHELTER_DIRECTORY_BUSY");
         verifyNoInteractions(client,store); verify(connection,never()).commit();
     }

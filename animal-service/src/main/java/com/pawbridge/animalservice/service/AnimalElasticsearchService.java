@@ -27,6 +27,7 @@ import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.stereotype.Service;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.time.LocalDate;
 import java.time.Year;
@@ -44,8 +45,9 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(prefix = "pawbridge.animal-query", name = "backend", havingValue = "elasticsearch", matchIfMissing = true)
 @RequiredArgsConstructor
-public class AnimalElasticsearchService {
+public class AnimalElasticsearchService implements AnimalQueryService {
 
     private static final int MAX_SEARCH_PAGE_SIZE = 100;
     private static final int MAX_RESULT_WINDOW = 10_000;

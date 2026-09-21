@@ -1,5 +1,7 @@
 package com.pawbridge.animalservice.service;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+
 import com.pawbridge.animalservice.document.AnimalDocument;
 import com.pawbridge.animalservice.batch.ApmsBatchProperties;
 import com.pawbridge.animalservice.entity.Animal;
@@ -52,6 +54,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(prefix="pawbridge.animal-query", name="backend", havingValue="elasticsearch", matchIfMissing=true)
 @RequiredArgsConstructor
 public class ElasticsearchIndexService {
 

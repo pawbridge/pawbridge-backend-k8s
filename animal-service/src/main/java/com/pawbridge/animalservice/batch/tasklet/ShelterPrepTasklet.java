@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.batch.tasklet;
 
+import com.pawbridge.animalservice.search.SearchDocumentWriter;
 import com.pawbridge.animalservice.batch.ApmsAnimalSnapshot;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.entity.Shelter;
@@ -31,6 +32,8 @@ import java.util.stream.Collectors;
 @Component
 @RequiredArgsConstructor
 public class ShelterPrepTasklet implements Tasklet {
+
+    private final SearchDocumentWriter searchDocuments;
 
     private final ApmsAnimalSnapshot snapshot;
     private final ShelterRepository shelterRepository;
@@ -74,6 +77,10 @@ public class ShelterPrepTasklet implements Tasklet {
 
         if (!newShelters.isEmpty()) {
             shelterRepository.saveAll(newShelters);
+            if (searchDocuments.enabled()) {
+                shelterRepository.flush();
+                for (Shelter shelter:newShelters) searchDocuments.shelter(shelter.getId());
+            }
             log.info("[BATCH Step 0] 신규 보호소 {} 건 저장 완료 (기존: {} 건 유지)",
                     newShelters.size(), existingCareRegNos.size());
         } else {
