@@ -269,17 +269,17 @@ class AnimalPostgresqlQueryTest {
             assertThat(jdbc.queryForObject("SELECT count(*) FROM animal_search_documents",Long.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT count(*) FROM animals WHERE search_dirty",Long.class)).isEqualTo(6);
             assertThat(analyzed.searchAnimals(new AnimalSearchRequest(),PageRequest.of(0,20)).getTotalElements()).isEqualTo(4);
-            assertThat(projector.refreshAnimals(2)).isEqualTo(2);
+            assertThat(projector.refreshDirtyAnimals(2)).isEqualTo(2);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM animals WHERE search_dirty",Long.class)).isEqualTo(4);
             assertThatThrownBy(()->analyzed.searchAnimals(request,relevance())).isInstanceOf(SearchProjectionPendingException.class);
-            assertThat(projector.refreshAnimals(100)).isEqualTo(4);
-            assertThat(projector.refreshShelters(100)).isEqualTo(2);
+            assertThat(projector.refreshDirtyAnimals(100)).isEqualTo(4);
+            assertThat(projector.refreshDirtyShelters(100)).isEqualTo(2);
             assertThat(ids(analyzed.searchAnimals(request,relevance()))).containsExactlyInAnyOrder(1L,2L);
-            assertThat(projector.refreshAnimals(100)).isZero();
-            assertThatThrownBy(()->projector.refreshAnimals(101)).isInstanceOf(IllegalArgumentException.class);
+            assertThat(projector.refreshDirtyAnimals(100)).isZero();
+            assertThatThrownBy(()->projector.refreshDirtyAnimals(101)).isInstanceOf(IllegalArgumentException.class);
             // Live eligibility/favorite changes don't need text re-analysis.
             jdbc.update("UPDATE animals SET status='ADOPTED',favorite_count=4 WHERE id=1");
-            assertThat(projector.refreshAnimals(100)).isZero();
+            assertThat(projector.refreshDirtyAnimals(100)).isZero();
             assertThat(ids(analyzed.searchAnimals(request,relevance()))).containsExactly(2L);
             assertThat(ids(analyzed.searchAnimals(AnimalSearchRequest.builder().keyword("검정").noticeNo("MAN-1").build(),relevance())))
                     .containsExactly(1L);
@@ -476,7 +476,7 @@ class AnimalPostgresqlQueryTest {
     }
 
     @Test
-    void shelter_changes_refresh_once_and_analysis_version_mismatch_fails_closed() throws Exception {
+    void shelter_pending_blocks_search_while_version_corruption_is_repaired_by_audit() throws Exception {
         try (KoreanSearchAnalyzer analyzer=new KoreanSearchAnalyzer()) {
             PostgresqlSearchProjector projector=new PostgresqlSearchProjector(source,analyzer);
             projector.refreshShelters(100);projector.refreshAnimals(100);
@@ -488,8 +488,9 @@ class AnimalPostgresqlQueryTest {
             assertThat(projector.refreshShelters(100)).isEqualTo(1);
             assertThat(ids(analyzed.searchAnimals(request,relevance()))).containsExactlyInAnyOrder(1L,2L);
             jdbc.update("UPDATE animal_search_documents SET analyzer_version='old-version' WHERE animal_id=1");
-            assertThatThrownBy(()->analyzed.searchAnimals(request,relevance()))
-                    .isInstanceOf(SearchProjectionPendingException.class);
+            // A direct document mutation bypasses normal source writes; the audit owns detection.
+            assertThat(ids(analyzed.searchAnimals(request,relevance()))).containsExactlyInAnyOrder(1L,2L);
+            assertThat(projector.refreshDirtyAnimals(100)).isZero();
             assertThat(projector.refreshAnimals(100)).isEqualTo(1);
             assertThat(ids(analyzed.searchAnimals(request,relevance()))).containsExactlyInAnyOrder(1L,2L);
         }
@@ -572,8 +573,10 @@ class AnimalPostgresqlQueryTest {
             jdbc.update("UPDATE shelter_search_documents SET analyzer_version='old-version' WHERE shelter_id=1");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM animals WHERE search_dirty",Long.class)).isZero();
             AnimalQueryService analyzed=analyzedQuery(analyzer);
-            assertThatThrownBy(()->analyzed.searchAnimals(AnimalSearchRequest.builder().keyword("보호소").build(),relevance()))
-                    .isInstanceOf(SearchProjectionPendingException.class);
+            // No request-time integrity scan: until audit, an out-of-band deletion can omit a match.
+            assertThat(analyzed.searchAnimals(AnimalSearchRequest.builder().keyword("보호소").build(),relevance()).getTotalElements()).isEqualTo(3);
+            assertThat(projector.refreshDirtyAnimals(100)).isZero();
+            assertThat(projector.refreshDirtyShelters(100)).isZero();
             assertThat(ids(analyzed.searchAnimals(AnimalSearchRequest.builder().keyword("갈색").region("부산").build(),relevance())))
                     .containsExactly(5L);
             assertThat(projector.refreshAnimals(100)).isEqualTo(2);

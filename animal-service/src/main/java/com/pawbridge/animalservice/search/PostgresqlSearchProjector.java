@@ -24,14 +24,24 @@ public final class PostgresqlSearchProjector {
     }
 
     public int refreshAnimals(int limit) {
+        return refreshAnimals(limit,true);
+    }
+
+    public int refreshDirtyAnimals(int limit) {
+        return refreshAnimals(limit,false);
+    }
+
+    private int refreshAnimals(int limit, boolean audit) {
         validate(limit);
+        String pending=audit?"search_dirty OR NOT EXISTS (SELECT 1 FROM animal_search_documents d "
+                +"WHERE d.animal_id=a.id AND d.source_revision=a.search_revision AND d.analyzer_version=?)":"search_dirty";
+        Object[] parameters=audit?new Object[]{KoreanSearchAnalyzer.VERSION,limit}:new Object[]{limit};
         return transaction.execute(status -> {
             limits();
             // Lock source first: UPDATE/DELETE and other projectors use the same lock order.
             List<Map<String,Object>> rows=jdbc.queryForList("SELECT id,search_revision,breed,color,special_mark,description,happen_place "
-                    +"FROM animals a WHERE search_dirty OR NOT EXISTS (SELECT 1 FROM animal_search_documents d "
-                    +"WHERE d.animal_id=a.id AND d.source_revision=a.search_revision AND d.analyzer_version=?) "
-                    +"ORDER BY id LIMIT ? FOR UPDATE OF a SKIP LOCKED",KoreanSearchAnalyzer.VERSION,limit);
+                    +"FROM animals a WHERE "+pending
+                    +" ORDER BY id LIMIT ? FOR UPDATE OF a SKIP LOCKED",parameters);
             for(Map<String,Object> row:rows) {
                 SearchDocumentWriter.writeAnimal(jdbc,analyzer,row);
             }
@@ -40,14 +50,23 @@ public final class PostgresqlSearchProjector {
     }
 
     public int refreshShelters(int limit) {
+        return refreshShelters(limit,true);
+    }
+
+    public int refreshDirtyShelters(int limit) {
+        return refreshShelters(limit,false);
+    }
+
+    private int refreshShelters(int limit, boolean audit) {
         validate(limit);
+        String pending=audit?"search_dirty OR NOT EXISTS (SELECT 1 FROM shelter_search_documents d "
+                +"WHERE d.shelter_id=s.id AND d.source_revision=s.search_revision AND d.analyzer_version=?)":"search_dirty";
+        Object[] parameters=audit?new Object[]{KoreanSearchAnalyzer.VERSION,limit}:new Object[]{limit};
         // Separate transaction from animals: no cross-entity lock order inversion.
         return transaction.execute(status -> {
             limits();
             List<Map<String,Object>> rows=jdbc.queryForList("SELECT id,search_revision,name,address FROM shelters s "
-                    +"WHERE search_dirty OR NOT EXISTS (SELECT 1 FROM shelter_search_documents d "
-                    +"WHERE d.shelter_id=s.id AND d.source_revision=s.search_revision AND d.analyzer_version=?) "
-                    +"ORDER BY id LIMIT ? FOR UPDATE OF s SKIP LOCKED",KoreanSearchAnalyzer.VERSION,limit);
+                    +"WHERE "+pending+" ORDER BY id LIMIT ? FOR UPDATE OF s SKIP LOCKED",parameters);
             for(Map<String,Object> row:rows) {
                 SearchDocumentWriter.writeShelter(jdbc,analyzer,row);
             }
