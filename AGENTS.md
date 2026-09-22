@@ -1,143 +1,142 @@
-# PawBridge Backend Agent Guide
+# PawBridge 백엔드 에이전트 지침
 
-## Scope
+## 적용 범위
 
-This file applies to the entire `pawbridge-backend-k8s` repository.
-Read the closest `AGENTS.md` before changing files. A more specific nested
-`AGENTS.md` may add or override rules for its directory.
+이 파일은 `pawbridge-backend-k8s` 저장소 전체에 적용한다.
+파일을 수정하기 전에 해당 경로에서 가장 가까운 `AGENTS.md`를 읽는다.
+하위 디렉터리의 더 구체적인 `AGENTS.md`는 해당 디렉터리의 규칙을 추가하거나 재정의할 수 있다.
 
-## Source of Truth
+## 판단 근거와 문서 정본
 
-- Verify current facts from Git, source code, tests, and deployed resources.
-- Treat Obsidian `Projects/pawbridge` notes as the canonical home for project
-  plans, decisions, migration records, and investigation notes.
-- Keep repository Markdown only when it must version with code, such as the
-  root README, PR template, this guide, or an executable runbook tied to a
-  concrete script or manifest.
-- Never describe a local edit, test, image build, or manifest render as a live
-  deployment or production verification.
+- 현재 사실은 Git, 소스 코드, 테스트, 배포된 리소스로 확인한다.
+- 프로젝트 계획, 결정, 마이그레이션 기록, 조사 기록의 정본은 Obsidian의
+  `Projects/pawbridge` 노트다.
+- 저장소에는 코드와 함께 버전 관리해야 하는 Markdown만 둔다. 루트 README,
+  PR 템플릿, 이 지침, 구체적인 스크립트나 매니페스트에 연결된 실행 절차서가 이에 해당한다.
+- 로컬 수정, 테스트, 이미지 빌드, 매니페스트 렌더링을 실제 배포나 운영 검증으로 표현하지 않는다.
 
-## UI and Figma Work
+## UI 및 Figma 작업
 
-- Before changing or creating a PawBridge screen, inspect the current deployed
-  screen, the latest approved Figma baseline, and the connected design system.
-- Reuse the current header, footer, content width, navigation, typography,
-  colors, and shared components before designing page-specific content.
-- When a matching asset exists in the connected Figma design system, use its
-  linked component or variant instance. Do not redraw, detach, or copy it into
-  raw frames merely to reproduce the same appearance.
-- If a reusable pattern is missing, add or extend the appropriate design-system
-  component before repeating it across screens. Bind component-controlled
-  color, spacing, typography, radius, stroke, and state values to the existing
-  variables and styles instead of hardcoding them in screen frames.
-- Before reporting a Figma screen complete, audit component instance links and
-  variable or style bindings in addition to visual similarity. A detached copy
-  is not design-system reuse.
-- Label structural explorations as structure concepts. Do not present them as
-  completed designs.
-- Preserve existing Figma screens. Create comparison or successor pages and
-  record the page, version, status, and implementation state in Figma history.
-- Create desktop and mobile layouts for the full page, including the header and
-  footer. Cover normal, loading, empty, error, selected-filter, and overflow
-  states when the flow can reach them.
-- Before reporting a Figma task complete, render and inspect every changed
-  desktop and mobile frame for clipping, alignment, spacing, responsive
-  behavior, and consistency with the current baseline.
-- Keep Figma approval separate from frontend implementation. Do not describe a
-  concept as implemented, merged, deployed, or production-verified.
+- PawBridge 화면을 만들거나 수정하기 전에 현재 운영 화면, 가장 최근에 승인된
+  Figma 기준본, 연결된 디자인 시스템을 확인한다.
+- 페이지 고유 내용을 설계하기 전에 기존 헤더, 푸터, 콘텐츠 너비, 내비게이션,
+  타이포그래피, 색상, 공통 컴포넌트를 재사용한다.
+- 연결된 Figma 디자인 시스템에 맞는 자산이 있으면 연결된 컴포넌트나 변형 인스턴스를 사용한다.
+  외형만 재현하려고 다시 그리거나, 연결을 해제하거나, 일반 프레임으로 복사하지 않는다.
+- 재사용할 패턴이 없으면 여러 화면에 반복하기 전에 해당 디자인 시스템 컴포넌트를 추가하거나 확장한다.
+  컴포넌트가 관리하는 색상, 간격, 타이포그래피, 모서리 반경, 테두리, 상태 값은
+  화면 프레임에 직접 고정하지 말고 기존 변수와 스타일에 연결한다.
+- Figma 화면 완료를 보고하기 전에 외형뿐 아니라 컴포넌트 인스턴스 연결과
+  변수·스타일 바인딩도 점검한다. 연결을 해제한 복사본은 디자인 시스템 재사용이 아니다.
+- 구조를 탐색하는 시안에는 구조 콘셉트임을 표시한다. 완성된 디자인으로 제시하지 않는다.
+- 기존 Figma 화면을 보존한다. 비교본이나 후속 버전 페이지를 만들고,
+  페이지, 버전, 상태, 구현 여부를 Figma 이력에 기록한다.
+- 헤더와 푸터를 포함한 전체 페이지의 데스크톱·모바일 레이아웃을 만든다.
+  해당 흐름에서 발생할 수 있는 정상, 로딩, 빈 결과, 오류, 필터 선택, 영역 넘침 상태를 다룬다.
+- Figma 작업 완료를 보고하기 전에 변경한 모든 데스크톱·모바일 프레임을 렌더링한다.
+  잘림, 정렬, 간격, 반응형 동작, 현재 기준본과의 일관성을 확인한다.
+- Figma 승인과 프론트엔드 구현을 구분한다.
+  콘셉트를 구현·병합·배포·운영 검증까지 완료한 것으로 표현하지 않는다.
 
-## Git and Pull Requests
+## 작업 단위 일괄 승인
 
-- Use the latest `origin/dev` as the default base unless the user explicitly
-  selects another base.
-- Before creating or switching a branch or worktree, verify whether the remote
-  base ref is current, record the exact base SHA, inspect `HEAD...base`
-  divergence and the base-relative effective diff, then show the proposed base,
-  branch name, and worktree path and wait for approval. If the remote could not
-  be refreshed, report that limitation instead of calling the ref current.
-- One branch equals one pull request with one primary review purpose.
-- Do not mix feature work, bug fixes, refactoring, CI, documentation cleanup,
-  data repair, or deployment changes unless they are inseparable parts of one
-  explicit contract. Explain any exception before implementation.
-- Use a clean worktree based on `origin/dev` when the current worktree already
-  contains changes. Do not stash, reset, discard, or rewrite user changes
-  without explicit approval.
-- Never stage a dirty repository with `git add -A` or `git add .`. Stage only
-  the exact paths owned by the current PR.
-- Do not commit CRLF-only changes, generated build output, IDE files, logs,
-  dumps, credentials, changes whose normalized content is already on the base,
-  or untracked copies of paths already tracked with the same base content.
-- Use branch prefixes that state the change type: `feat/`, `fix/`, `ci/`,
-  `docs/`, or `chore/`.
-- Use a concise `type: Korean noun phrase` commit title and show the exact title
-  before committing, then wait for approval.
-- Before pushing, show the exact push command and wait for approval.
-- Before creating a PR, show the exact command, Korean PR title, and full PR
-  body, then wait for approval.
-- Use `.github/PULL_REQUEST_TEMPLATE.md` and check only items proven by the
-  actual diff and verification evidence.
-- Do not force-push, rewrite shared history, or merge without explicit approval.
+- 이 절은 사용자가 승인한 PawBridge 한정 예외다. 이 저장소와 연결 작업 폴더에서는
+  전역 지침의 Git 작업별 재승인 대신 아래 절차를 따른다. 다른 프로젝트에는 적용하지 않는다.
+- 시작할 때 목적, 변경 범위, 대상 저장소, 기준 브랜치와 SHA, 작업 브랜치와 폴더,
+  검증 방법, 커밋·푸시·PR 생성 포함 여부를 묶어서 제시하고 한 번 승인받는다.
+- 승인에 포함된 브랜치·작업 폴더 생성 또는 전환, 구현, 검증, 일반 커밋,
+  해당 기능 브랜치 푸시, PR 생성과 해당 PR 제목·본문 수정은 매번 다시 묻지 않는다.
+  커밋 제목과 PR 설명은 실제 변경·검증 결과에 맞게 작성하고 실행 결과를 보고한다.
+- 구현 요청만으로 커밋·푸시·PR 생성 권한을 추정하지 않는다. 이미 제시한 일괄 범위에
+  대한 사용자의 승인은 같은 작업의 후속 턴에도 유지하며, 턴 전환만으로 재승인받지 않는다.
+- 범위·대상 저장소·기준 브랜치가 달라지면 변경 부분만 다시 승인받는다.
+  리뷰 요청·멘션·댓글 등 다른 사람에게 보내는 메시지는 일괄 승인에 포함하지 않는다.
+- 병합과 운영 배포는 검증 결과, 대상, 롤백 방법을 제시한 뒤 최종 승인받는다.
+  사용자가 두 단계를 명시적으로 묶어 승인했다면 단계마다 다시 묻지 않는다.
+- 파괴적 작업, 데이터 삭제·일회성 데이터 변경, 운영 비밀값 변경은 별도 승인 대상이다.
+  강제 푸시와 공유 이력 재작성은 금지한다. 일괄 승인은 main/dev 직접 푸시나
+  도구의 샌드박스·권한 제한 우회를 허용하지 않는다.
+- 기존 작업 폴더에서 이어갈 때도 이 저장소 기준본의 최신 승인 규칙을 확인한다.
+  과거 AGENTS.md 사본의 단계별 재승인 문구를 현재 합의로 취급하지 않는다.
 
-## Change Boundaries
+## Git 및 PR
 
-- Prefer a service-scoped PR. A change spanning services must follow one
-  concrete API, event, or data contract and include all protection required to
-  keep that contract reviewable.
-- Keep unrelated cleanup and opportunistic refactoring out of a functional PR.
-- Treat files under `infrastructure/` as runtime contracts. Inspect connector,
-  topic, mapping, and reindex changes together with affected producers and
-  consumers. Keep independently deployable changes in separate PRs; combine
-  them only when one explicit contract requires atomic review and rollout.
-- Keep destructive or one-time data scripts out of application resources by
-  default. Put load-test fixtures under the owning test project and require an
-  explicit safety guard for scripts that truncate, delete, reindex, or replay.
+- 사용자가 다른 기준을 명시하지 않으면 최신 `origin/dev`를 기본 기준 브랜치로 사용한다.
+- 브랜치나 작업 폴더를 생성·전환하기 전에 원격 기준 참조가 최신인지 확인하고,
+  정확한 기준 SHA, `HEAD...base`의 분기 차이, 기준 대비 실제 변경 내역을 확인한다.
+  기준 브랜치, 작업 브랜치 이름, 작업 폴더 경로는 위 일괄 승인에 포함해 제시한다.
+  정확히 같은 범위가 이미 승인됐다면 다시 묻지 않는다.
+  원격 참조를 갱신하지 못했다면 최신이라고 표현하지 말고 확인 한계를 보고한다.
+- 브랜치 하나는 주된 검토 목적이 하나인 PR 하나에 대응한다.
+- 하나의 명시적 계약에서 분리할 수 없는 경우를 제외하고 기능 개발, 버그 수정,
+  리팩터링, CI, 문서 정리, 데이터 보정, 배포 변경을 섞지 않는다. 예외는 구현 전에 설명한다.
+- 현재 작업 폴더에 변경이 있으면 `origin/dev`를 기준으로 깨끗한 별도 작업 폴더를 사용한다.
+  명시적 승인 없이 사용자 변경을 임시 보관하거나, 초기화하거나, 버리거나, 덮어쓰지 않는다.
+- 변경이 있는 저장소에서 `git add -A`나 `git add .`로 일괄 스테이징하지 않는다.
+  현재 PR이 담당하는 정확한 경로만 스테이징한다.
+- CRLF만 바뀐 변경, 생성된 빌드 결과, IDE 파일, 로그, 덤프, 인증정보,
+  정규화한 내용이 이미 기준 브랜치와 같은 변경, 동일한 기준 내용으로 이미 추적되는
+  경로의 미추적 복사본은 커밋하지 않는다.
+- 브랜치 접두사는 변경 유형에 맞게 `feat/`, `fix/`, `ci/`, `docs/`, `chore/`를 사용한다.
+- 커밋 제목은 간결한 `type: 한글 명사구` 형식으로 쓰고, PR 제목과 본문도 한글로 작성한다.
+  커밋·푸시·PR 생성은 위 일괄 승인 절차를 따른다. 승인된 단계마다 별도 승인 절차를 추가하지 않는다.
+- `.github/PULL_REQUEST_TEMPLATE.md`를 사용하고 실제 변경 내역과 검증 근거로
+  입증한 항목만 체크한다.
+- 강제 푸시와 공유 이력 재작성은 금지한다. 병합은 위 최종 승인 후에만 수행한다.
 
-## Verification
+## 변경 범위
 
-- This repository has no root Gradle project. Run the Java version and wrapper
-  declared by the target service from that service directory, for example
-  `cd store-service && bash ./gradlew test`.
-- Run the narrowest relevant test first, then the target service test suite
-  when risk justifies it.
-- For Kafka and Outbox changes, verify topic, key, headers, payload shape,
-  retry/acknowledgment behavior, connector configuration, and failure paths.
-- For MySQL-to-Elasticsearch changes, distinguish code tests, manifest
-  validation, isolated reindex tests, and live alias cutover evidence.
-- If a required runtime or tool is unavailable, report an environment blocker;
-  do not call the code verified and do not install tools without approval.
+- 서비스 단위 PR을 우선한다. 여러 서비스에 걸친 변경은 하나의 구체적인 API,
+  이벤트 또는 데이터 계약을 따라야 하며, 그 계약을 검토하는 데 필요한 보호 조치를 모두 포함한다.
+- 기능 PR에 무관한 정리나 기회성 리팩터링을 넣지 않는다.
+- `infrastructure/` 아래 파일은 실행 환경의 계약으로 취급한다.
+  커넥터, 토픽, 매핑, 재색인 변경을 영향받는 생산자·소비자와 함께 검토한다.
+  독립 배포가 가능한 변경은 PR을 분리한다. 하나의 명시적 계약 때문에 함께 검토하고
+  배포해야 하는 경우에만 묶는다.
+- 파괴적이거나 일회성인 데이터 스크립트는 기본적으로 애플리케이션 리소스 밖에 둔다.
+  부하 테스트용 데이터는 해당 테스트 프로젝트에 둔다.
+  전체 비우기, 삭제, 재색인, 재처리 스크립트에는 명시적인 안전장치를 둔다.
 
-## Troubleshooting Records
+## 검증
 
-- After completing a feature, record actual development, test, or deployment
-  troubleshooting in the owning project's existing Obsidian structure without
-  waiting for another request.
-- Record the symptom and trigger, impact, confirmed cause and evidence,
-  attempted actions, applied fix, verification result, unresolved issues, and
-  prevention follow-up.
-- Separate suspected causes from confirmed causes, proposals from applied
-  changes, and local verification from production verification. Do not record
-  an unresolved issue as fixed.
-- Do not create an empty troubleshooting note when no troubleshooting occurred.
-  Redact credentials, tokens, signed URLs, and other secret values.
-- Keep projects separate, link the record from the relevant existing document,
-  and read the saved file back before reporting the documentation complete.
+- 이 저장소에는 루트 Gradle 프로젝트가 없다. 대상 서비스가 선언한 Java 버전과
+  Gradle Wrapper를 해당 서비스 디렉터리에서 실행한다.
+  예: `cd store-service && bash ./gradlew test`.
+- 관련성이 있는 가장 좁은 테스트부터 실행하고, 위험도가 요구하면 대상 서비스 전체 테스트로 넓힌다.
+- Kafka·Outbox 변경은 토픽, 키, 헤더, 페이로드 구조, 재시도·확인 응답 동작,
+  커넥터 설정, 실패 경로를 검증한다.
+- MySQL에서 Elasticsearch로 이어지는 변경은 코드 테스트, 매니페스트 검증,
+  격리된 재색인 테스트, 운영 별칭 전환 근거를 구분한다.
+- 필요한 실행 환경이나 도구를 사용할 수 없으면 환경상 차단 요인으로 보고한다.
+  코드를 검증했다고 표현하지 않으며, 승인 없이 도구를 설치하지 않는다.
 
-## Secrets and Deployment
+## 문제 해결 기록
 
-- Never commit runtime `.env` files, Kubernetes Secret values, R2 credentials,
-  registry tokens, kubeconfigs, database dumps, or redaction output containing
-  secrets. A reviewed `.env.example` containing no secret is allowed.
-- Secret and credential fields in templates and examples must use placeholders.
-  Safe public endpoints, bucket names, service names, and feature defaults may
-  use real version-controlled values.
-- Building or pushing an image and changing a manifest are separate from
-  deploying it. Live Kubernetes, Kafka Connect, database, and Cloudflare
-  mutations require explicit approval, a rollback path, and post-change checks.
+- 기능 완료 후 실제 개발·테스트·배포 중 발생한 문제 해결 과정을 해당 프로젝트의
+  기존 Obsidian 구조에 기록한다. 별도 요청을 기다리지 않는다.
+- 증상과 발생 계기, 영향, 확인된 원인과 근거, 시도한 조치, 적용한 수정,
+  검증 결과, 미해결 사항, 재발 방지 후속 작업을 기록한다.
+- 추정 원인과 확인된 원인, 제안과 적용된 변경, 로컬 검증과 운영 검증을 구분한다.
+  미해결 문제를 해결된 것으로 기록하지 않는다.
+- 문제 해결 과정이 없었다면 빈 기록을 만들지 않는다.
+  인증정보, 토큰, 서명된 URL 등 비밀값은 제거한다.
+- 프로젝트별 기록을 분리하고 관련 기존 문서에서 연결한다.
+  문서화 완료를 보고하기 전에 저장한 파일을 다시 읽어 확인한다.
 
-## Documentation Cleanup
+## 비밀정보 및 배포
 
-- Before deleting repository documentation, confirm that reusable information
-  is preserved in Obsidian or in a version-coupled runbook that remains beside
-  the code.
-- Perform documentation cleanup in a dedicated PR and verify links, secret
-  candidates, and references to removed paths.
+- 실행 환경의 `.env` 파일, Kubernetes Secret 값, R2 인증정보, 레지스트리 토큰,
+  kubeconfig, 데이터베이스 덤프, 비밀값이 남은 마스킹 결과는 커밋하지 않는다.
+  검토를 거쳐 비밀값이 없는 `.env.example`은 허용한다.
+- 템플릿과 예시의 비밀값·인증정보 필드는 자리표시자를 사용한다.
+  공개해도 되는 엔드포인트, 버킷 이름, 서비스 이름, 기능 기본값은
+  버전 관리 중인 실제 값을 사용할 수 있다.
+- 이미지 빌드·푸시와 매니페스트 수정은 실제 배포와 별개다.
+  운영 Kubernetes, Kafka Connect, 데이터베이스, Cloudflare 변경에는
+  명시적 승인, 롤백 경로, 변경 후 확인이 필요하다.
+
+## 문서 정리
+
+- 저장소 문서를 삭제하기 전에 재사용할 정보를 Obsidian이나 코드 옆에 남는
+  버전 연계 실행 절차서에 보존했는지 확인한다.
+- 문서 정리는 전용 PR로 진행하고 링크, 비밀값 후보, 삭제된 경로를 참조하는 부분을 확인한다.
