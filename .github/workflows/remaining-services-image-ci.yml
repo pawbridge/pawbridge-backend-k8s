@@ -4,7 +4,10 @@ on:
   pull_request:
     branches:
       - dev
+      - main
     paths:
+      - ".github/scripts/assert_dev_environment.py"
+      - ".github/scripts/test_assert_dev_environment.py"
       - ".github/migrations/**"
       - ".github/scripts/update_migration_image_pair.py"
       - ".github/scripts/test_update_migration_image_pair.py"

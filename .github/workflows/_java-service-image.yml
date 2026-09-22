@@ -58,25 +58,25 @@ jobs:
             user-service)
               display_name="User Service"
               image_repository="dorosiya/pawbridge-user-service"
-              values_file="environments/dev/values/user-service.yaml"
+              values_file="environments/dev/isolated-values/user-service.yaml"
               chart="charts/user-service"
               ;;
             animal-service)
               display_name="Animal Service"
               image_repository="dorosiya/pawbridge-animal-service"
-              values_file="environments/dev/values/animal-service.yaml"
+              values_file="environments/dev/isolated-values/animal-service.yaml"
               chart="charts/animal-service"
               ;;
             community-service)
               display_name="Community Service"
               image_repository="dorosiya/pawbridge-community-service"
-              values_file="environments/dev/values/community-service.yaml"
+              values_file="environments/dev/isolated-values/community-service.yaml"
               chart="charts/community-service"
               ;;
             payment-service)
               display_name="Payment Service"
               image_repository="dorosiya/pawbridge-payment-service"
-              values_file="environments/dev/values/payment-service.yaml"
+              values_file="environments/dev/isolated-values/payment-service.yaml"
               chart="charts/payment-service"
               ;;
             *)
@@ -245,6 +245,12 @@ jobs:
           echo "sha=$infra_dev_sha" >> "$GITHUB_OUTPUT"
           echo "Checked out Infra dev SHA: $infra_dev_sha"
 
+      - name: Require isolated dev destination
+        if: inputs.publish && github.ref == 'refs/heads/dev'
+        env:
+          TARGET_SERVICE: ${{ inputs.service }}
+        run: python3 .github/scripts/assert_dev_environment.py infra "$TARGET_SERVICE"
+
       - name: Update service image reference
         if: inputs.publish && github.ref == 'refs/heads/dev'
         env:
@@ -287,10 +293,10 @@ jobs:
           fi
 
           git diff --check
-          helm lint "$CHART" --namespace pawbridge --values "$VALUES_FILE"
+          helm lint "$CHART" --namespace pawbridge-dev --values "$VALUES_FILE"
           rendered="$(helm template "${{ inputs.service }}" "$CHART" \
             --values "$VALUES_FILE" \
-            --namespace pawbridge --show-only templates/deployment.yaml)"
+            --namespace pawbridge-dev --show-only templates/deployment.yaml)"
           expected_image="image: \"$IMAGE_REPOSITORY@$IMAGE_DIGEST\""
 
           if ! grep -Fq "$expected_image" <<<"$rendered"; then
