@@ -168,17 +168,13 @@ public class PostgresqlAnimalQueryService implements AnimalQueryService {
         return new PageImpl<>(content,pageable,total);
     }
 
-    /** Never return a partial keyword result while an import or repair is incomplete. */
+    /** Normal writes publish source and search terms together. Only known pending
+     * source rows belong on the request path; document integrity is audited separately. */
     private void requirePrepared(Conditions conditions) {
         String filters=conditions.where.isEmpty()?"TRUE":String.join(" AND ",conditions.where);
-        conditions.parameters.addValue("analyzerVersion",KoreanSearchAnalyzer.VERSION);
         Boolean pending=jdbc.queryForObject("SELECT EXISTS(SELECT 1"+FROM
-                +"LEFT JOIN animal_search_documents ad ON ad.animal_id=a.id WHERE ("+filters+")"
-                +" AND (a.search_dirty OR ad.animal_id IS NULL OR ad.source_revision<>a.search_revision"
-                +" OR ad.analyzer_version<>:analyzerVersion)) OR EXISTS(SELECT 1 FROM shelters s"
-                +" LEFT JOIN shelter_search_documents sd ON sd.shelter_id=s.id"
-                +" WHERE (s.search_dirty OR sd.shelter_id IS NULL OR sd.source_revision<>s.search_revision"
-                +" OR sd.analyzer_version<>:analyzerVersion) AND EXISTS(SELECT 1 FROM animals a"
+                +"WHERE ("+filters+") AND a.search_dirty) OR EXISTS(SELECT 1 FROM shelters s"
+                +" WHERE s.search_dirty AND EXISTS(SELECT 1 FROM animals a"
                 +" WHERE a.shelter_id=s.id AND ("+filters+")))",conditions.parameters,Boolean.class);
         if (Boolean.TRUE.equals(pending)) throw new SearchProjectionPendingException();
     }

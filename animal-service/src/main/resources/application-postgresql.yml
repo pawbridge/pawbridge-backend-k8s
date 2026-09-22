@@ -43,5 +43,10 @@ pawbridge:
   animal-query:
     backend: postgresql
     analyzed-text: true
+    # API pods maintain pending rows and audit exceptional document corruption.
+    # Non-web batch processes do not start these schedules.
+    projection-schedule-enabled: true
+    projection-delay-ms: 2000
+    projection-audit-delay-ms: 60000
   recommendation:
     backend: postgresql
