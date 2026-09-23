@@ -190,6 +190,7 @@ jobs:
           fetch-depth: 0
 
       - name: Require isolated dev destination
+        working-directory: ${{ github.workspace }}
         if: github.event_name == 'push'
         env:
           TARGET_SERVICE: store-service
@@ -260,7 +261,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          branch="chore/store-image-${GITHUB_SHA:0:12}"
+          branch="chore/store-dev-image-${GITHUB_SHA:0:12}"
           title="chore: Store Service 이미지 digest 갱신"
           values_file="environments/dev/isolated-values/store-service.yaml"
 
@@ -436,13 +437,13 @@ jobs:
             --state open \
             --limit 100 \
             --json number,headRefName,body \
-            --jq '.[] | select(.headRefName | test("^chore/store-image-[0-9a-f]{12}$")) | select((.body // "") | contains("<!-- pawbridge-automation: store-service-image -->")) | [.number, .headRefName] | @tsv')"
+            --jq '.[] | select(.headRefName | test("^chore/store-dev-image-[0-9a-f]{12}$")) | select((.body // "") | contains("<!-- pawbridge-automation: store-service-image -->")) | [.number, .headRefName] | @tsv')"
           while IFS=$'\t' read -r obsolete_number obsolete_branch; do
             if [ -z "$obsolete_number" ] || [ "$obsolete_branch" = "$branch" ]; then
               continue
             fi
 
-            obsolete_sha="${obsolete_branch#chore/store-image-}"
+            obsolete_sha="${obsolete_branch#chore/store-dev-image-}"
             comparison_status="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
               "/repos/$GITHUB_REPOSITORY/compare/$obsolete_sha...$GITHUB_SHA" \
               --jq '.status')"

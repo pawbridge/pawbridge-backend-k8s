@@ -114,6 +114,7 @@ jobs:
           fetch-depth: 0
 
       - name: Require isolated dev destination
+        working-directory: ${{ github.workspace }}
         if: github.event_name == 'push'
         env:
           TARGET_SERVICE: api-gateway
@@ -181,7 +182,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          branch="chore/api-gateway-image-${GITHUB_SHA:0:12}"
+          branch="chore/api-gateway-dev-image-${GITHUB_SHA:0:12}"
           title="chore: API Gateway 이미지 digest 갱신"
           values_file="environments/dev/isolated-values/api-gateway.yaml"
 
@@ -348,13 +349,13 @@ jobs:
             --state open \
             --limit 100 \
             --json number,headRefName,body \
-            --jq '.[] | select(.headRefName | test("^chore/api-gateway-image-[0-9a-f]{12}$")) | select((.body // "") | contains("<!-- pawbridge-automation: api-gateway-image -->")) | [.number, .headRefName] | @tsv')"
+            --jq '.[] | select(.headRefName | test("^chore/api-gateway-dev-image-[0-9a-f]{12}$")) | select((.body // "") | contains("<!-- pawbridge-automation: api-gateway-image -->")) | [.number, .headRefName] | @tsv')"
           while IFS=$'\t' read -r obsolete_number obsolete_branch; do
             if [ -z "$obsolete_number" ] || [ "$obsolete_branch" = "$branch" ]; then
               continue
             fi
 
-            obsolete_sha="${obsolete_branch#chore/api-gateway-image-}"
+            obsolete_sha="${obsolete_branch#chore/api-gateway-dev-image-}"
             comparison_status="$(GH_TOKEN="$BACKEND_GITHUB_TOKEN" gh api \
               "/repos/$GITHUB_REPOSITORY/compare/$obsolete_sha...$GITHUB_SHA" \
               --jq '.status')"

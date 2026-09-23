@@ -329,7 +329,7 @@ jobs:
             exit 1
           fi
 
-          branch="chore/${SERVICE_DIRECTORY}-image-${GITHUB_SHA:0:12}"
+          branch="chore/${SERVICE_DIRECTORY}-dev-image-${GITHUB_SHA:0:12}"
           title="chore: ${SERVICE_NAME} 이미지 digest 갱신"
           marker="<!-- pawbridge-automation: ${SERVICE_DIRECTORY}-image -->"
           infra_owner="${INFRA_REPOSITORY%%/*}"
@@ -531,7 +531,7 @@ jobs:
             --state open \
             --limit 100 \
             --json number,headRefName,headRefOid,headRepositoryOwner,isCrossRepository,body,isDraft \
-            --jq ".[] | select(.isCrossRepository == false) | select(.headRepositoryOwner.login == \"$infra_owner\") | select(.headRefName | test(\"^chore/${SERVICE_DIRECTORY}-image-[0-9a-f]{12}$\")) | select((.body // \"\") | contains(\"$marker\")) | [.number, .headRefName, .headRefOid, .isDraft] | @tsv")"
+            --jq ".[] | select(.isCrossRepository == false) | select(.headRepositoryOwner.login == \"$infra_owner\") | select(.headRefName | test(\"^chore/${SERVICE_DIRECTORY}-dev-image-[0-9a-f]{12}$\")) | select((.body // \"\") | contains(\"$marker\")) | [.number, .headRefName, .headRefOid, .isDraft] | @tsv")"
           while IFS=$'\t' read -r obsolete_number obsolete_branch obsolete_head_oid obsolete_is_draft; do
             if [ -z "$obsolete_number" ] || [ "$obsolete_branch" = "$branch" ]; then
               continue
