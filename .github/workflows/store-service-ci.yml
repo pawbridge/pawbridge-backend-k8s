@@ -4,7 +4,10 @@ on:
   pull_request:
     branches:
       - dev
+      - main
     paths:
+      - ".github/scripts/assert_dev_environment.py"
+      - ".github/scripts/test_assert_dev_environment.py"
       - ".github/migrations/**"
       - ".github/scripts/update_migration_image_pair.py"
       - ".github/scripts/test_update_migration_image_pair.py"
@@ -186,6 +189,12 @@ jobs:
           path: infra
           fetch-depth: 0
 
+      - name: Require isolated dev destination
+        if: github.event_name == 'push'
+        env:
+          TARGET_SERVICE: store-service
+        run: python3 .github/scripts/assert_dev_environment.py infra "$TARGET_SERVICE"
+
       - name: Update Store image reference
         if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
         working-directory: ${{ github.workspace }}
@@ -195,7 +204,7 @@ jobs:
           MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
         run: >-
           python3 .github/scripts/update_migration_image_pair.py
-          infra/environments/dev/values/store-service.yaml
+          infra/environments/dev/isolated-values/store-service.yaml
           --repository dorosiya/pawbridge-store-service
           --tag "$STORE_IMAGE_TAG"
           --digest "$STORE_IMAGE_DIGEST" --migration-digest "$MIGRATION_DIGEST"
@@ -211,7 +220,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          values_file="environments/dev/values/store-service.yaml"
+          values_file="environments/dev/isolated-values/store-service.yaml"
           first_hash="$(git hash-object "$values_file")"
           python3 "$GITHUB_WORKSPACE/.github/scripts/update_migration_image_pair.py" \
             "$values_file" \
@@ -226,10 +235,10 @@ jobs:
           fi
 
           git diff --check
-          helm lint charts/store-service --namespace pawbridge --values "$values_file"
+          helm lint charts/store-service --namespace pawbridge-dev --values "$values_file"
           rendered="$(helm template store-service charts/store-service \
             --values "$values_file" \
-            --namespace pawbridge --show-only templates/deployment.yaml)"
+            --namespace pawbridge-dev --show-only templates/deployment.yaml)"
           expected_image="image: \"$STORE_IMAGE_REPOSITORY@$STORE_IMAGE_DIGEST\""
 
           if ! grep -Fq "$expected_image" <<<"$rendered"; then
@@ -253,7 +262,7 @@ jobs:
 
           branch="chore/store-image-${GITHUB_SHA:0:12}"
           title="chore: Store Service 이미지 digest 갱신"
-          values_file="environments/dev/values/store-service.yaml"
+          values_file="environments/dev/isolated-values/store-service.yaml"
 
           check_store_freshness() {
             local changed_files
