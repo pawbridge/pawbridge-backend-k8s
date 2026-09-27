@@ -55,7 +55,7 @@ public class ShelterDiscoveryService {
                 SELECT s.id, s.care_reg_no, s.name, s.address, s.phone, COUNT(*) AS protected_count
                 """ + matching + """
                 GROUP BY s.id, s.care_reg_no, s.name, s.address, s.phone
-                ORDER BY s.name ASC, s.id ASC LIMIT :limit OFFSET :offset
+                ORDER BY protected_count DESC, s.name ASC, s.id ASC LIMIT :limit OFFSET :offset
                 """, params, (row, index) -> new ShelterDiscoveryResponse(
                 row.getLong("id"), row.getString("care_reg_no"), row.getString("name"),
                 row.getString("address"), row.getString("phone"), row.getLong("protected_count"), List.of()));

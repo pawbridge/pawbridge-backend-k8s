@@ -206,6 +206,27 @@ class AnimalPostgresqlQueryTest {
         assertThat(first.protectedCount()).isEqualTo(4);
         assertThat(first.animals().stream().map(a -> a.id()).toList()).containsExactly(2L, 7L, 8L);
     }
+
+    @Test void shelter_discovery_orders_filtered_protected_counts_then_name_and_id_across_pages() {
+        jdbc.update("INSERT INTO shelters(id,created_at,care_reg_no,name,address) VALUES "
+                + "(3,NOW(),'seoul-3','가 보호소','서울특별시'),"
+                + "(4,NOW(),'seoul-4','가 보호소','서울특별시')");
+        for (long id : new long[]{7, 8}) animal(id, "PROTECT", "믹스견", "검정", "특징", today, 3, 2024);
+        for (long id : new long[]{9, 10}) animal(id, "PROTECT", "믹스견", "검정", "특징", today, 4, 2024);
+        animal(11, "ADOPTED", "믹스견", "검정", "특징", today, 3, 2024);
+        animal(12, "PROTECT", "믹스견", "검정", "특징", today.minusDays(30), 4, 2024);
+        var discovery = new com.pawbridge.animalservice.service.ShelterDiscoveryService(source);
+
+        assertThat(discovery.discover("", "", today.minusDays(29), today, 0, 12).getContent())
+                .extracting(s -> s.id() + ":" + s.protectedCount())
+                .containsExactly("3:2", "4:2", "2:1", "1:1");
+        assertThat(discovery.discover("", "", today.minusDays(29), today, 0, 2).getContent())
+                .extracting(s -> s.id()).containsExactly(3L, 4L);
+        assertThat(discovery.discover("", "", today.minusDays(29), today, 1, 2).getContent())
+                .extracting(s -> s.id()).containsExactly(2L, 1L);
+        assertThat(discovery.discover("", "서울", today, today, 0, 12).getContent())
+                .extracting(s -> s.id()).containsExactly(3L, 4L, 1L);
+    }
     private PageRequest relevance() { return PageRequest.of(0,20,Sort.by(Sort.Direction.DESC,"relevance")); }
 
     @Test
