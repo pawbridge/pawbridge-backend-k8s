@@ -90,6 +90,11 @@ public class PostgresqlAnimalQueryService implements AnimalQueryService {
         conditions.equal("a.gender","gender",request.getGender());
         conditions.equal("a.neuter_status","neuter",request.getNeuterStatus());
         conditions.equal("a.shelter_id","shelter",request.getShelterId());
+        if (request.getIntakeFrom() != null || request.getIntakeTo() != null) {
+            IntakeDateRange range = new IntakeDateRange(request.getIntakeFrom(), request.getIntakeTo());
+            conditions.where.add("a.happen_date BETWEEN :intakeFrom AND :intakeTo");
+            conditions.parameters.addValue("intakeFrom", range.from()).addValue("intakeTo", range.to());
+        }
         if (request.getStatus() != null) conditions.equal("a.status","status",request.getStatus());
         else if (notice == null) conditions.where.add("a.status IN ('NOTICE','PROTECT')");
         int year = LocalDate.now().getYear();
@@ -291,6 +296,7 @@ public class PostgresqlAnimalQueryService implements AnimalQueryService {
         }
         String column=switch(property) {
             case "createdAt", "created_at" -> "a.created_at";
+            case "happenDate", "happen_date" -> "a.happen_date";
             case "updatedAt", "updated_at" -> "a.updated_at";
             case "noticeEndDate", "notice_end_date" -> "a.notice_end_date";
             case "birthYear", "birth_year", "age" -> "a.birth_year";

@@ -212,6 +212,9 @@ public class AnimalElasticsearchService implements AnimalQueryService {
      * @return Page<AnimalResponse>
      */
     public Page<AnimalResponse> searchAnimals(AnimalSearchRequest request, Pageable pageable) {
+        if (request.getIntakeFrom() != null || request.getIntakeTo() != null) {
+            throw new IllegalArgumentException("접수일 기간 검색은 PostgreSQL 조회 환경에서 지원합니다.");
+        }
         log.debug("[ELASTICSEARCH] 통합 검색: {}, Pageable: {}", request, pageable);
 
         validateSearchPageable(pageable);

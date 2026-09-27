@@ -154,6 +154,58 @@ class AnimalPostgresqlQueryTest {
                 breed,color,mark,date,today.atTime(1,0),birthYear,"https://example.test/"+id+".jpg");
     }
     private List<Long> ids(Page<AnimalResponse> page) { return page.getContent().stream().map(AnimalResponse::getId).toList(); }
+
+    @Test void shelter_discovery_and_animal_results_share_inclusive_intake_boundaries() {
+        var discovery = new com.pawbridge.animalservice.service.ShelterDiscoveryService(source);
+        var shelters = discovery.discover("", "", today.minusDays(29), today, 0, 12);
+        assertThat(shelters.getTotalElements()).isEqualTo(2);
+        assertThat(shelters.getContent()).allSatisfy(s -> {
+            var results = query.searchAnimals(AnimalSearchRequest.builder().shelterId(s.id())
+                    .status(AnimalStatus.PROTECT).intakeFrom(today.minusDays(29)).intakeTo(today).build(),
+                    PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "happenDate")));
+            assertThat(results.getTotalElements()).isEqualTo(s.protectedCount());
+            assertThat(s.animals().stream().map(a -> a.id()).toList()).isEqualTo(ids(results));
+        });
+        assertThat(discovery.discover("", "부산", today.minusDays(29), today, 0, 12)
+                .getContent().get(0).animals().get(0).id()).isEqualTo(5L);
+        assertThat(discovery.discover("%", "", today.minusDays(29), today, 0, 12).getTotalElements()).isZero();
+        assertThat(discovery.discover("", "", today.minusDays(29), today, 1, 1).getNumber()).isEqualTo(1);
+        assertThatIllegalArgumentException().isThrownBy(() -> discovery.discover("", "", today, today, 0, 25));
+        assertThatIllegalArgumentException().isThrownBy(() -> query.searchAnimals(
+                AnimalSearchRequest.builder().intakeFrom(today).build(), PageRequest.of(0, 20)));
+    }
+
+    @Test void daily_observation_preserves_first_state_and_distinguishes_zero_from_absence() {
+        jdbc.execute("TRUNCATE shelter_daily_observations");
+        jdbc.update("INSERT INTO shelters(id,created_at,care_reg_no,name,address) VALUES (3,NOW(),'empty','빈 보호소','서울')");
+        var recorder = new com.pawbridge.animalservice.service.ShelterObservationRecorder(source);
+        var discovery = new com.pawbridge.animalservice.service.ShelterDiscoveryService(source);
+        LocalDate recordedDate = jdbc.queryForObject(
+                "SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Seoul')::date", LocalDate.class);
+        assertThat(recorder.recordToday()).isEqualTo(3);
+        jdbc.update("UPDATE animals SET status='ADOPTED' WHERE id=2");
+        assertThat(recorder.recordToday()).isZero();
+        assertThat(discovery.observations(1, recordedDate.minusDays(29), recordedDate))
+                .singleElement().satisfies(point -> {
+                    assertThat(point.protectedCount()).isEqualTo(1);
+                    assertThat(point.date()).isEqualTo(recordedDate);
+                });
+        assertThat(discovery.observations(2, recordedDate, recordedDate))
+                .singleElement().satisfies(point -> assertThat(point.protectedCount()).isEqualTo(2));
+        assertThat(discovery.observations(3, recordedDate, recordedDate))
+                .singleElement().satisfies(point -> assertThat(point.protectedCount()).isZero());
+        assertThat(discovery.observations(1, recordedDate.minusDays(1), recordedDate.minusDays(1))).isEmpty();
+        assertThatThrownBy(() -> discovery.observations(999, recordedDate, recordedDate))
+                .isInstanceOf(com.pawbridge.animalservice.exception.ShelterNotFoundException.class);
+    }
+
+    @Test void shelter_previews_are_bounded_and_ties_have_stable_order() {
+        for (long id = 7; id <= 9; id++) animal(id, "PROTECT", "믹스견", "검정", "특징", today, 1, 2024);
+        var discovery = new com.pawbridge.animalservice.service.ShelterDiscoveryService(source);
+        var first = discovery.discover("서울", "", today, today, 0, 12).getContent().get(0);
+        assertThat(first.protectedCount()).isEqualTo(4);
+        assertThat(first.animals().stream().map(a -> a.id()).toList()).containsExactly(2L, 7L, 8L);
+    }
     private PageRequest relevance() { return PageRequest.of(0,20,Sort.by(Sort.Direction.DESC,"relevance")); }
 
     @Test

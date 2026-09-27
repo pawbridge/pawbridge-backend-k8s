@@ -83,4 +83,10 @@ public class AnimalSearchRequest {
 
     /** 보호소 내부 ID (해당 보호소의 동물만 조회) */
     private Long shelterId;
+
+    @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+    private java.time.LocalDate intakeFrom;
+
+    @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE)
+    private java.time.LocalDate intakeTo;
 }
