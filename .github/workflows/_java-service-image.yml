@@ -411,7 +411,7 @@ jobs:
 
           ## Summary
 
-          Backend \`dev\`에서 발행된 ${SERVICE_NAME} 이미지를 dev 환경의 불변 digest로 고정합니다.
+          Backend \`dev\`에서 발행된 ${SERVICE_NAME} 이미지를 로컬 개발환경용 이미지 메타데이터에 불변 digest로 기록합니다.
 
           ## Changes
 
@@ -423,7 +423,7 @@ jobs:
           ## Impact
 
           - API / Data: 변경 없음
-          - Configuration / Deployment: 이 Draft PR을 머지하면 dev 선언 상태가 새 ${SERVICE_NAME} 이미지를 가리킵니다. Argo 자동 동기화가 켜져 있으면 병합 후 배포가 시작됩니다.
+          - Configuration / Deployment: 이 Draft PR은 로컬 개발환경의 이미지 메타데이터만 갱신합니다. 병합 후 최신 인프라 dev를 받아 local_dev.py prepare로 images.env를 갱신하고 해당 Compose 서비스를 재기동해야 새 이미지가 반영됩니다. 병합 자체로 배포되지 않습니다.
 
           ## Verification
 
@@ -438,7 +438,7 @@ jobs:
           ## Out of Scope
 
           - PR 자동 Ready/merge
-          - Argo CD 동기화와 실제 Kubernetes 배포
+          - 로컬 Compose 자동 재기동과 운영 Kubernetes 배포
 
           ## Checklist
 
