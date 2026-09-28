@@ -1,6 +1,7 @@
 package com.pawbridge.communityservice.service;
 
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
+import com.pawbridge.communityservice.domain.entity.BoardType;
 import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
 import com.pawbridge.communityservice.dto.response.PostResponse;
 import org.springframework.data.domain.Page;
@@ -23,6 +24,8 @@ public interface PostService {
     PostResponse getPost(Long postId);
 
     List<PostResponse> getAllPosts();
+
+    Page<PostResponse> getPostsByBoardTypes(List<BoardType> boardTypes, Pageable pageable);
 
     // ========== 관리자 전용 메서드 ==========
 

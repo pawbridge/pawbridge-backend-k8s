@@ -2,6 +2,7 @@ package com.pawbridge.communityservice.service;
 
 import com.pawbridge.communityservice.client.UserServiceClient;
 import com.pawbridge.communityservice.domain.entity.Post;
+import com.pawbridge.communityservice.domain.entity.BoardType;
 import com.pawbridge.communityservice.domain.repository.PostRepository;
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
 import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
@@ -211,6 +212,13 @@ public class PostServiceImpl implements PostService {
                     return PostResponse.fromEntity(post, authorNickname);
                 })
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<PostResponse> getPostsByBoardTypes(List<BoardType> boardTypes, Pageable pageable) {
+        return postRepository.findByBoardTypeInAndDeletedAtIsNull(boardTypes, pageable)
+                .map(post -> PostResponse.fromEntity(post, getUserNickname(post.getAuthorId())));
     }
 
     /**

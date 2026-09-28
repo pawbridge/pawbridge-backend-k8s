@@ -91,6 +91,17 @@ DB 관리자가 빈 `pawbridge_community` 스키마를 먼저 준비해야 하�
 `schemaPostgresqlInfo`, `schemaPostgresqlValidate`도 제공한다.
 데이터 적재·운영 계정·CDC·운영 접속 URL 확장은 별도 전환 작업이다.
 
+### 전용 동물 제보 V4 배포 선행조건
+
+`V4__animal_reports.sql`은 새 `animal_reports` 테이블과 조회 인덱스를 추가한다.
+기존 `posts` 행은 변경하거나 삭제하지 않는다. `postgresql` 프로필은 Hibernate
+`validate`이므로 **V4 적용과 `pawbridge_community_app`의 새 테이블 SELECT/INSERT/UPDATE
+권한 확인 전에 새 Community 이미지를 배포하면 기동이 실패할 수 있다.**
+현재 인프라 차트의 `schemaMigration` Job은 MySQL 전용이며 기본 비활성이다.
+그 Job을 PostgreSQL V4에 그대로 사용하지 않는다. 검증된 PostgreSQL 전용 migration
+실행 경로와 변경 전 백업, 실패 시 앱 이미지 롤백 경로를 별도로 승인받아야 한다.
+테이블에 저장된 새 제보가 생긴 뒤에는 V4를 무조건 되돌리지 않는다.
+
 실제 DB 검증은 `COMMUNITY_PG_MIGRATION_TEST_PORT`와 전용 DB가 필요하다.
 `migration_test_guard.guard`에 `services-pg-disposable` 단일 행이 있어야만
 테스트가 자기 스키마를 재생성한다. **운영 DB에 이 표식을 만들지 않는다.**

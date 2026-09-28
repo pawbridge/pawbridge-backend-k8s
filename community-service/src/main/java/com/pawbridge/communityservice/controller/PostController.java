@@ -1,6 +1,7 @@
 package com.pawbridge.communityservice.controller;
 
 import com.pawbridge.communityservice.domain.entity.BoardType;
+import com.pawbridge.communityservice.domain.repository.AnimalReportRepository;
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
 import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
 import com.pawbridge.communityservice.dto.response.PostResponse;
@@ -9,8 +10,10 @@ import com.pawbridge.communityservice.util.ResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -26,6 +29,7 @@ import java.util.List;
 public class PostController {
 
     private final PostService postService;
+    private final AnimalReportRepository reportRepository;
 
     /**
      * 게시글 생성
@@ -66,6 +70,11 @@ public class PostController {
             @RequestParam(value = "content", required = false) String content,
             @RequestPart(value = "files", required = false) MultipartFile[] files,
             @RequestHeader("X-User-Id") Long userId) {
+
+        if (reportRepository.existsById(postId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "실종·목격 제보는 전용 수정 화면에서 수정해 주세요.");
+        }
 
         UpdatePostRequest request = new UpdatePostRequest(title, content);
         PostResponse postResponse = postService.updatePost(postId, request, files, userId);
