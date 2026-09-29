@@ -136,15 +136,8 @@ public class FavoriteServiceImpl implements FavoriteService {
                 .collect(Collectors.toList());
 
         // 4. FeignClient로 animal-service에서 동물 정보 일괄 조회
-        List<AnimalResponse> animals = new ArrayList<>();
-        try {
-            animals = animalServiceClient.getAnimalsByIds(animalIds);
-            log.info("Fetched {} animals from animal-service for user {}", animals.size(), userId);
-        } catch (Exception e) {
-            log.error("Failed to fetch animals from animal-service for user {}", userId, e);
-            // Circuit Breaker 패턴: 실패 시에도 찜 목록은 반환 (동물 정보 없이)
-            // 또는 예외를 던져서 프론트엔드에 에러 전달
-        }
+        List<AnimalResponse> animals = animalServiceClient.getAnimalsByIds(animalIds);
+        log.info("Fetched {} animals from animal-service for user {}", animals.size(), userId);
 
         // 5. animalId를 키로 하는 Map 생성 (O(1) 조회)
         Map<Long, AnimalResponse> animalMap = animals.stream()
@@ -157,7 +150,7 @@ public class FavoriteServiceImpl implements FavoriteService {
                     if (animal != null) {
                         return FavoriteWithAnimalDto.of(favorite, animal);
                     } else {
-                        // 동물 정보가 없는 경우 (삭제되었거나 조회 실패)
+                        // 정상 조회 결과에 동물이 없는 경우
                         log.warn("Animal not found for favoriteId={}, animalId={}",
                                 favorite.getFavoriteId(), favorite.getAnimalId());
                         return FavoriteWithAnimalDto.ofWithoutAnimal(favorite);
