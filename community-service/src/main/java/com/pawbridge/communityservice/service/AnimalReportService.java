@@ -1,13 +1,10 @@
 package com.pawbridge.communityservice.service;
 
+import com.pawbridge.communityservice.client.UserServiceClient;
 import com.pawbridge.communityservice.domain.entity.AnimalReport;
-import com.pawbridge.communityservice.domain.entity.BoardType;
 import com.pawbridge.communityservice.domain.repository.AnimalReportRepository;
 import com.pawbridge.communityservice.dto.request.CreateAnimalReportRequest;
-import com.pawbridge.communityservice.dto.request.CreatePostRequest;
-import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
 import com.pawbridge.communityservice.dto.response.AnimalReportResponse;
-import com.pawbridge.communityservice.dto.response.PostResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -22,85 +19,95 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class AnimalReportService {
     private static final long MAX_PHOTO_BYTES = 10L * 1024 * 1024;
 
-    private final PostService postService;
     private final AnimalReportRepository reportRepository;
+    private final S3Service s3Service;
+    private final UserServiceClient userServiceClient;
 
     @Transactional
     public AnimalReportResponse create(CreateAnimalReportRequest request, MultipartFile[] photos, Long authorId) {
         validate(request, photos);
-        PostResponse post = postService.createPost(
-                new CreatePostRequest(title(request), request.description().trim(), boardType(request.kind())),
-                photos, authorId);
-        AnimalReport detail = reportRepository.save(new AnimalReport(
-                post.postId(), request.kind(), request.occurredOn(), optional(request.approximateTime()),
-                request.region().trim(), optional(request.landmark()), request.species().trim(),
-                optional(request.animalName()), optional(request.coatColor()), optional(request.animalSize()),
-                optional(request.distinguishingFeatures()), optional(request.direction())));
-        return new AnimalReportResponse(post, detail, false);
+        if (authorId == null || authorId <= 0) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        }
+
+        List<String> imageUrls = s3Service.uploadReportImages(photos);
+        try {
+            AnimalReport saved = reportRepository.saveAndFlush(new AnimalReport(
+                    authorId, request.kind(), request.description().trim(), imageUrls,
+                    request.occurredOn(), optional(request.approximateTime()), request.region().trim(),
+                    optional(request.landmark()), request.species().trim(), optional(request.animalName()),
+                    optional(request.coatColor()), optional(request.animalSize()),
+                    optional(request.distinguishingFeatures()), optional(request.direction())));
+            return response(saved);
+        } catch (RuntimeException failure) {
+            imageUrls.forEach(s3Service::deleteFile);
+            throw failure;
+        }
     }
 
     @Transactional
-    public AnimalReportResponse update(Long postId, CreateAnimalReportRequest request,
+    public AnimalReportResponse update(Long reportId, CreateAnimalReportRequest request,
                                        MultipartFile[] photos, Long authorId) {
         validate(request, photos);
         if (photos != null && photos.length > 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "등록 후 사진 교체는 아직 지원하지 않습니다.");
         }
-        AnimalReport detail = reportRepository.findById(postId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        if (detail.getKind() != request.kind()) {
+        AnimalReport report = findVisible(reportId);
+        requireAuthor(report, authorId);
+        if (report.getKind() != request.kind()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "제보 종류는 변경할 수 없습니다.");
         }
-        PostResponse post = postService.updatePost(postId,
-                new UpdatePostRequest(title(request), request.description().trim()), null, authorId);
-        detail.update(request.kind(), request.occurredOn(), optional(request.approximateTime()),
+        report.update(request.description().trim(), request.occurredOn(), optional(request.approximateTime()),
                 request.region().trim(), optional(request.landmark()), request.species().trim(),
                 optional(request.animalName()), optional(request.coatColor()), optional(request.animalSize()),
                 optional(request.distinguishingFeatures()), optional(request.direction()));
-        return new AnimalReportResponse(post, detail, false);
+        return response(report);
+    }
+
+    @Transactional
+    public void delete(Long reportId, Long authorId) {
+        AnimalReport report = findVisible(reportId);
+        requireAuthor(report, authorId);
+        report.delete();
     }
 
     @Transactional(readOnly = true)
-    public AnimalReportResponse get(Long postId) {
-        PostResponse post = postService.getPost(postId);
-        requireReportBoard(post);
-        AnimalReport detail = reportRepository.findById(postId).orElse(null);
-        return new AnimalReportResponse(post, detail, detail == null);
+    public AnimalReportResponse get(Long reportId) {
+        return response(findVisible(reportId));
     }
 
     @Transactional(readOnly = true)
-    public Page<AnimalReportResponse> list(Pageable pageable) {
-        Page<PostResponse> posts = postService.getPostsByBoardTypes(List.of(BoardType.MISSING, BoardType.REPORT), pageable);
-        Map<Long, AnimalReport> details = reportRepository.findAllById(
-                posts.getContent().stream().map(PostResponse::postId).toList()).stream()
-                .collect(Collectors.toMap(AnimalReport::getPostId, Function.identity()));
-        return posts.map(post -> new AnimalReportResponse(
-                post, details.get(post.postId()), !details.containsKey(post.postId())));
+    public Page<AnimalReportResponse> list(AnimalReport.Kind kind, String keyword, Pageable pageable) {
+        String normalized = keyword == null || keyword.isBlank() ? null : keyword.trim().toLowerCase(Locale.ROOT);
+        return reportRepository.searchVisible(kind, normalized, pageable).map(this::response);
     }
 
-    private static void requireReportBoard(PostResponse post) {
-        if (post.boardType() != BoardType.MISSING && post.boardType() != BoardType.REPORT) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+    private AnimalReport findVisible(Long reportId) {
+        return reportRepository.findByReportIdAndDeletedAtIsNull(reportId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+    }
+
+    private static void requireAuthor(AnimalReport report, Long authorId) {
+        if (authorId == null || !report.getAuthorId().equals(authorId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
         }
     }
 
-    private static BoardType boardType(AnimalReport.Kind kind) {
-        return kind == AnimalReport.Kind.MISSING ? BoardType.MISSING : BoardType.REPORT;
-    }
-
-    private static String title(CreateAnimalReportRequest request) {
-        String prefix = request.kind() == AnimalReport.Kind.MISSING ? "실종" : "목격 제보";
-        return prefix + " · " + request.region().trim() + " · " + request.species().trim();
+    private AnimalReportResponse response(AnimalReport report) {
+        String nickname;
+        try {
+            nickname = userServiceClient.getUserNickname(report.getAuthorId());
+        } catch (RuntimeException unavailable) {
+            nickname = "사용자" + report.getAuthorId();
+        }
+        return AnimalReportResponse.from(report, nickname);
     }
 
     private static String optional(String value) {
@@ -114,9 +121,9 @@ public class AnimalReportService {
                 || blankOrTooLong(request.description(), 10000)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "필수 제보 정보를 확인해 주세요.");
         }
-        if (title(request).length() > 200 || tooLong(request.approximateTime(), 40)
-                || tooLong(request.landmark(), 200) || tooLong(request.animalName(), 80)
-                || tooLong(request.coatColor(), 100) || tooLong(request.animalSize(), 40)
+        if (tooLong(request.approximateTime(), 40) || tooLong(request.landmark(), 200)
+                || tooLong(request.animalName(), 80) || tooLong(request.coatColor(), 100)
+                || tooLong(request.animalSize(), 40)
                 || tooLong(request.distinguishingFeatures(), 500) || tooLong(request.direction(), 200)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "제보 내용의 글자 수를 확인해 주세요.");
         }

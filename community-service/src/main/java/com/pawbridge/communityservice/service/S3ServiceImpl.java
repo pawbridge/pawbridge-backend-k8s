@@ -58,6 +58,15 @@ public class S3ServiceImpl implements S3Service {
      */
     @Override
     public List<String> uploadImages(MultipartFile[] files) {
+        return uploadFiles(files, false);
+    }
+
+    @Override
+    public List<String> uploadReportImages(MultipartFile[] files) {
+        return uploadFiles(files, true);
+    }
+
+    private List<String> uploadFiles(MultipartFile[] files, boolean reportPhoto) {
         List<String> uploadedUrls = new ArrayList<>();
 
         if (files == null || files.length == 0) {
@@ -70,9 +79,10 @@ public class S3ServiceImpl implements S3Service {
             }
 
             try {
-                String uploadedUrl = uploadSingleFile(file);
+                String uploadedUrl = uploadSingleFile(file, reportPhoto);
                 uploadedUrls.add(uploadedUrl);
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
+                if (reportPhoto) uploadedUrls.forEach(this::deleteFile);
                 log.error("파일 업로드 실패: {}", file.getOriginalFilename(), e);
                 throw new RuntimeException("파일 업로드 중 오류가 발생했습니다", e);
             }
@@ -84,7 +94,7 @@ public class S3ServiceImpl implements S3Service {
     /**
      * 단일 파일을 S3에 업로드
      */
-    private String uploadSingleFile(MultipartFile file) throws IOException {
+    private String uploadSingleFile(MultipartFile file, boolean reportPhoto) throws IOException {
         // 파일 타입 검증 (이미지 + 영상)
         validateFileType(file);
 
@@ -96,7 +106,8 @@ public class S3ServiceImpl implements S3Service {
 
         // 이미지와 영상 저장 경로 분리
         String contentType = file.getContentType();
-        String folder = isVideoType(contentType) ? "posts/videos/" : "posts/images/";
+        String folder = reportPhoto ? "reports/images/"
+                : isVideoType(contentType) ? "posts/videos/" : "posts/images/";
         String uniqueFilename = folder + UUID.randomUUID() + extension;
 
         // S3에 업로드

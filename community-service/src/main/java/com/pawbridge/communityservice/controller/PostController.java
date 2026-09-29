@@ -1,7 +1,6 @@
 package com.pawbridge.communityservice.controller;
 
 import com.pawbridge.communityservice.domain.entity.BoardType;
-import com.pawbridge.communityservice.domain.repository.AnimalReportRepository;
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
 import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
 import com.pawbridge.communityservice.dto.response.PostResponse;
@@ -29,14 +28,14 @@ import java.util.List;
 public class PostController {
 
     private final PostService postService;
-    private final AnimalReportRepository reportRepository;
 
     /**
      * 게시글 생성
      * - multipart/form-data로 개별 필드 + 미디어 파일 받음
      * - title: 게시글 제목
      * - content: 게시글 내용
-     * - boardType: 게시판 타입 (MISSING, PROTECTION, REPORT, ADOPTION)
+     * - boardType: 게시판 타입 (PROTECTION, ADOPTION, COMMUNICATION)
+     * - MISSING/REPORT는 독립 제보 API(/api/v1/reports)에서만 작성
      * - files: 미디어 파일 배열 (이미지 + 영상, 선택)
      */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -47,6 +46,10 @@ public class PostController {
             @RequestPart(value = "files", required = false) MultipartFile[] files,
             @RequestHeader("X-User-Id") Long userId) {
 
+        if (boardType == BoardType.MISSING || boardType == BoardType.REPORT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "실종·목격 제보는 전용 등록 화면에서 작성해 주세요.");
+        }
         CreatePostRequest request = new CreatePostRequest(title, content, boardType);
         PostResponse postResponse = postService.createPost(request, files, userId);
         ResponseDTO<PostResponse> response = ResponseDTO.okWithData(postResponse, "게시글이 생성되었습니다.");
@@ -70,11 +73,6 @@ public class PostController {
             @RequestParam(value = "content", required = false) String content,
             @RequestPart(value = "files", required = false) MultipartFile[] files,
             @RequestHeader("X-User-Id") Long userId) {
-
-        if (reportRepository.existsById(postId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "실종·목격 제보는 전용 수정 화면에서 수정해 주세요.");
-        }
 
         UpdatePostRequest request = new UpdatePostRequest(title, content);
         PostResponse postResponse = postService.updatePost(postId, request, files, userId);

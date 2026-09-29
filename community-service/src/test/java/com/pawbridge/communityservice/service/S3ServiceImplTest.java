@@ -15,9 +15,11 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class S3ServiceImplTest {
@@ -53,6 +55,33 @@ class S3ServiceImplTest {
         assertThat(request.bucket()).isEqualTo(BUCKET_NAME);
         assertThat(request.key()).startsWith("posts/images/").endsWith(".png");
         assertThat(uploadedUrls).containsExactly(PUBLIC_BASE_URL + "/" + request.key());
+    }
+
+    @Test
+    void givenReportPhoto_whenUpload__thenUseReportObjectPrefix() {
+        MockMultipartFile image = new MockMultipartFile("photos", "puppy.png", "image/png", new byte[]{1, 2, 3});
+
+        s3Service.uploadReportImages(new MockMultipartFile[]{image});
+
+        ArgumentCaptor<PutObjectRequest> requestCaptor = ArgumentCaptor.forClass(PutObjectRequest.class);
+        verify(s3Client).putObject(requestCaptor.capture(), any(RequestBody.class));
+        assertThat(requestCaptor.getValue().key()).startsWith("reports/images/").endsWith(".png");
+    }
+
+    @Test
+    void givenSecondReportPhotoFails_whenUpload_thenRemoveFirstUploadedObject() {
+        MockMultipartFile first = new MockMultipartFile("photos", "first.png", "image/png", new byte[]{1});
+        MockMultipartFile second = new MockMultipartFile("photos", "second.png", "image/png", new byte[]{2});
+        when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(null)
+                .thenThrow(new IllegalStateException("storage unavailable"));
+
+        assertThatThrownBy(() -> s3Service.uploadReportImages(new MockMultipartFile[]{first, second}))
+                .isInstanceOf(RuntimeException.class);
+
+        ArgumentCaptor<DeleteObjectRequest> deleted = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+        verify(s3Client).deleteObject(deleted.capture());
+        assertThat(deleted.getValue().key()).startsWith("reports/images/").endsWith(".png");
     }
 
     @Test

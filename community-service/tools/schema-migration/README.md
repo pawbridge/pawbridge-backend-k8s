@@ -93,8 +93,11 @@ DB 관리자가 빈 `pawbridge_community` 스키마를 먼저 준비해야 하�
 
 ### 전용 동물 제보 V4 배포 선행조건
 
-`V4__animal_reports.sql`은 새 `animal_reports` 테이블과 조회 인덱스를 추가한다.
-기존 `posts` 행은 변경하거나 삭제하지 않는다. `postgresql` 프로필은 Hibernate
+`V4__animal_reports.sql`은 `posts`와 연결되지 않는 독립 `animal_reports` 테이블과
+제보 종류·작성 시각 조회 인덱스를 추가한다. `report_id`가 제보의 기본키이고
+`author_id`는 작성자 식별값이다. 기존 `posts` 행은 변경하거나 삭제하지 않는다.
+기존 `MISSING`/`REPORT` 게시글은 새 `/api/reports` 목록으로 이관되지 않는다.
+`postgresql` 프로필은 Hibernate
 `validate`이므로 **V4 적용과 `pawbridge_community_app`의 새 테이블 SELECT/INSERT/UPDATE
 권한 확인 전에 새 Community 이미지를 배포하면 기동이 실패할 수 있다.**
 현재 인프라 차트의 `schemaMigration` Job은 MySQL 전용이며 기본 비활성이다.

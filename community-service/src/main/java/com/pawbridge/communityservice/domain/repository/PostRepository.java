@@ -1,7 +1,6 @@
 package com.pawbridge.communityservice.domain.repository;
 
 import com.pawbridge.communityservice.domain.entity.Post;
-import com.pawbridge.communityservice.domain.entity.BoardType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -19,8 +18,6 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     // Soft delete되지 않은 게시글만 조회 (최신순)
     List<Post> findByDeletedAtIsNullOrderByCreatedAtDesc();
-
-    Page<Post> findByBoardTypeInAndDeletedAtIsNull(List<BoardType> boardTypes, Pageable pageable);
 
     // Soft delete되지 않은 게시글만 조회 (페이징)
     Page<Post> findByDeletedAtIsNull(Pageable pageable);
