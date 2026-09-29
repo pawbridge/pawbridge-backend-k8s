@@ -114,6 +114,13 @@ DB 관리자가 빈 `pawbridge_community` 스키마를 먼저 준비해야 하�
 bash ./gradlew migrationTest migrationPostgresqlTest bootJar migrationDistribution
 ```
 
+전용 제보의 HTTP 리허설은 위 테스트가 V4까지 적용한 **같은 일회용 DB**를 사용한다.
+`migration_test_guard.guard`의 단일 값을 `http-rehearsal`로 바꾼 뒤
+`PG_HTTP_TEST_PORT`에 해당 로컬 포트를 지정하고
+`bash ./gradlew migrationPostgresqlHttpTest`를 실행한다.
+이 테스트는 실제 Spring HTTP와 PostgreSQL을 사용하지만 사용자 조회와 R2 저장소는 모의 객체로 대체한다.
+운영 DB나 다른 프로젝트의 PostgreSQL 컨테이너에 보호 표식을 만들지 않는다.
+
 MySQL 이력·DDL을 덮어쓰지 않는다. 기존 ID를 적재한 뒤에는 모든 identity sequence를
 현재 최대 ID 다음으로 정렬하고 신규 INSERT를 검증해야 한다. 현재 테스트는 빈 target의
 DDL·실제 JPA 저장/조회/롤백 검증이며 전체 운영 데이터 이관 완료를 뜻하지 않는다.

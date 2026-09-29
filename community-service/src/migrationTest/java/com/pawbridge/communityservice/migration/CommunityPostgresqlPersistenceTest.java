@@ -71,7 +71,7 @@ class CommunityPostgresqlPersistenceTest {
                 .applySetting("hibernate.physical_naming_strategy","org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy")
                 .build();
         MetadataSources metadata = new MetadataSources(registry);
-        for (Class<?> entity : java.util.List.of(Post.class,Comment.class,OutboxEvent.class,ProcessedEvent.class)) metadata.addAnnotatedClass(entity);
+        for (Class<?> entity : java.util.List.of(Post.class,Comment.class,OutboxEvent.class,ProcessedEvent.class,AnimalReport.class)) metadata.addAnnotatedClass(entity);
         factory = metadata.buildMetadata().buildSessionFactory();
     }
 
@@ -133,6 +133,32 @@ class CommunityPostgresqlPersistenceTest {
     }
 
     @Test
+    void animal_report_v4_supports_persistence_and_soft_delete_without_changing_posts() {
+        AnimalReport report = new AnimalReport(7L, AnimalReport.Kind.SIGHTING, "공원에서 발견", java.util.List.of("https://example.test/dog.jpg"),
+                NOW.toLocalDate(), "오후", "서울 마포구", "공원", "강아지", null, "갈색", "소형", "파란 목줄", "북쪽");
+        org.springframework.test.util.ReflectionTestUtils.setField(report,"createdAt",NOW);
+        org.springframework.test.util.ReflectionTestUtils.setField(report,"updatedAt",NOW);
+        commit(session -> session.persist(report));
+        assertThat(report.getReportId()).isPositive();
+        assertThat(jdbc.queryForObject("SELECT json_typeof(image_urls) FROM animal_reports WHERE report_id=?",String.class,report.getReportId())).isEqualTo("array");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM posts",Long.class)).isZero();
+        try (Session session = factory.openSession()) {
+            AnimalReport loaded = session.find(AnimalReport.class,report.getReportId());
+            assertThat(loaded.getKind()).isEqualTo(AnimalReport.Kind.SIGHTING);
+            assertThat(loaded.getImageUrls()).containsExactly("https://example.test/dog.jpg");
+            com.pawbridge.communityservice.domain.repository.AnimalReportRepository repository =
+                    new JpaRepositoryFactory(session).getRepository(com.pawbridge.communityservice.domain.repository.AnimalReportRepository.class);
+            assertThat(repository.searchVisible(AnimalReport.Kind.SIGHTING,"마포",org.springframework.data.domain.PageRequest.of(0,10)).getTotalElements()).isEqualTo(1);
+        }
+        commit(session -> session.find(AnimalReport.class,report.getReportId()).delete());
+        try (Session session = factory.openSession()) {
+            com.pawbridge.communityservice.domain.repository.AnimalReportRepository repository =
+                    new JpaRepositoryFactory(session).getRepository(com.pawbridge.communityservice.domain.repository.AnimalReportRepository.class);
+            assertThat(repository.findByReportIdAndDeletedAtIsNull(report.getReportId())).isEmpty();
+        }
+    }
+
+    @Test
     void korean_search_recovers_missing_documents_and_returns_connections_before_nickname_lookup() {
         Post post=Post.builder().authorId(7L).title("지산이를 찾습니다").content("서울에서 보호 중")
                 .boardType(BoardType.MISSING).createdAt(NOW).updatedAt(NOW).build();
@@ -184,7 +210,10 @@ class CommunityPostgresqlPersistenceTest {
             assertThat(jdbc.queryForObject("SELECT title FROM posts",String.class)).isEqualTo(post.getTitle());
             assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events",Integer.class)).isEqualTo(1);
             assertThat(source.getHikariPoolMXBean().getActiveConnections()).isZero();
-        } finally { terms.close(); }
+        } finally {
+            jdbc.execute("ALTER TABLE post_search_documents DROP CONSTRAINT IF EXISTS reject_terms");
+            terms.close();
+        }
     }
 
 }
