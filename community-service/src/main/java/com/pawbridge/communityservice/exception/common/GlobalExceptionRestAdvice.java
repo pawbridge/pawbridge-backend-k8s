@@ -17,6 +17,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -61,6 +62,14 @@ public class GlobalExceptionRestAdvice {
     @ExceptionHandler(com.pawbridge.communityservice.search.InvalidSearchInputException.class)
     public ResponseEntity<ResponseDTO<Void>> invalidSearchInput(com.pawbridge.communityservice.search.InvalidSearchInputException e) {
         return ResponseEntity.badRequest().body(ResponseDTO.errorWithMessage(HttpStatus.BAD_REQUEST,"검색 입력을 확인해 주세요."));
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ResponseDTO<Void>> responseStatus(ResponseStatusException e) {
+        HttpStatus status = HttpStatus.valueOf(e.getStatusCode().value());
+        String message = status.is4xxClientError() ? e.getReason() : null;
+        return ResponseEntity.status(status).body(ResponseDTO.errorWithMessage(status,
+                message == null ? "요청을 처리하지 못했습니다." : message));
     }
 
     @ExceptionHandler

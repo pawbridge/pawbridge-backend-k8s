@@ -47,6 +47,8 @@ public class JwtAuthorizationGatewayFilterFactory
             "GET:/api/v1/posts/read/*",
             "GET:/api/v1/posts/read",
             "GET:/api/v1/posts/search",
+            "GET:/api/v1/reports",
+            "GET:/api/v1/reports/*",
             "GET:/api/v1/comments/posts/read/*",
             "GET:/api/v1/animals",
             "GET:/api/v1/animals/*",

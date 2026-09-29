@@ -91,6 +91,20 @@ DB 관리자가 빈 `pawbridge_community` 스키마를 먼저 준비해야 하�
 `schemaPostgresqlInfo`, `schemaPostgresqlValidate`도 제공한다.
 데이터 적재·운영 계정·CDC·운영 접속 URL 확장은 별도 전환 작업이다.
 
+### 전용 동물 제보 V4 배포 선행조건
+
+`V4__animal_reports.sql`은 `posts`와 연결되지 않는 독립 `animal_reports` 테이블과
+제보 종류·작성 시각 조회 인덱스를 추가한다. `report_id`가 제보의 기본키이고
+`author_id`는 작성자 식별값이다. 기존 `posts` 행은 변경하거나 삭제하지 않는다.
+기존 `MISSING`/`REPORT` 게시글은 새 `/api/reports` 목록으로 이관되지 않는다.
+`postgresql` 프로필은 Hibernate
+`validate`이므로 **V4 적용과 `pawbridge_community_app`의 새 테이블 SELECT/INSERT/UPDATE
+권한 확인 전에 새 Community 이미지를 배포하면 기동이 실패할 수 있다.**
+현재 인프라 차트의 `schemaMigration` Job은 MySQL 전용이며 기본 비활성이다.
+그 Job을 PostgreSQL V4에 그대로 사용하지 않는다. 검증된 PostgreSQL 전용 migration
+실행 경로와 변경 전 백업, 실패 시 앱 이미지 롤백 경로를 별도로 승인받아야 한다.
+테이블에 저장된 새 제보가 생긴 뒤에는 V4를 무조건 되돌리지 않는다.
+
 실제 DB 검증은 `COMMUNITY_PG_MIGRATION_TEST_PORT`와 전용 DB가 필요하다.
 `migration_test_guard.guard`에 `services-pg-disposable` 단일 행이 있어야만
 테스트가 자기 스키마를 재생성한다. **운영 DB에 이 표식을 만들지 않는다.**
@@ -99,6 +113,13 @@ DB 관리자가 빈 `pawbridge_community` 스키마를 먼저 준비해야 하�
 ```bash
 bash ./gradlew migrationTest migrationPostgresqlTest bootJar migrationDistribution
 ```
+
+전용 제보의 HTTP 리허설은 위 테스트가 V4까지 적용한 **같은 일회용 DB**를 사용한다.
+`migration_test_guard.guard`의 단일 값을 `http-rehearsal`로 바꾼 뒤
+`PG_HTTP_TEST_PORT`에 해당 로컬 포트를 지정하고
+`bash ./gradlew migrationPostgresqlHttpTest`를 실행한다.
+이 테스트는 실제 Spring HTTP와 PostgreSQL을 사용하지만 사용자 조회와 R2 저장소는 모의 객체로 대체한다.
+운영 DB나 다른 프로젝트의 PostgreSQL 컨테이너에 보호 표식을 만들지 않는다.
 
 MySQL 이력·DDL을 덮어쓰지 않는다. 기존 ID를 적재한 뒤에는 모든 identity sequence를
 현재 최대 ID 다음으로 정렬하고 신규 INSERT를 검증해야 한다. 현재 테스트는 빈 target의

@@ -101,9 +101,9 @@ spring:
         - id: community-service
           uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
           predicates:
-            - Path=/api/posts/**, /api/comments/**, /api/v1/posts/**, /api/v1/comments/**
+            - Path=/api/posts/**, /api/comments/**, /api/reports, /api/reports/**, /api/v1/posts/**, /api/v1/comments/**, /api/v1/reports, /api/v1/reports/**
           filters:
-            - RewritePath=/api/(?<segment>posts/?.*|comments/?.*), /api/v1/${segment}
+            - RewritePath=/api/(?<segment>posts/?.*|comments/?.*|reports/?.*), /api/v1/${segment}
             - JwtAuthorization
 
         # Store Service (Product - Public GET, Protected POST) - 순서 중요

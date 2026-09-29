@@ -2,6 +2,7 @@ package com.pawbridge.communityservice.service;
 
 import com.pawbridge.communityservice.client.UserServiceClient;
 import com.pawbridge.communityservice.domain.entity.Post;
+import com.pawbridge.communityservice.domain.entity.BoardType;
 import com.pawbridge.communityservice.domain.repository.PostRepository;
 import com.pawbridge.communityservice.dto.request.CreatePostRequest;
 import com.pawbridge.communityservice.dto.request.UpdatePostRequest;
@@ -13,8 +14,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -47,6 +50,10 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional
     public PostResponse createPost(CreatePostRequest request, MultipartFile[] images, Long authorId) {
+        if (request.boardType() == BoardType.MISSING || request.boardType() == BoardType.REPORT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "실종·목격 제보는 전용 API로 등록해 주세요.");
+        }
         // 1. 미디어 파일 S3 업로드 (이미지 + 영상)
         List<String> imageUrls = s3Service.uploadImages(images);
 

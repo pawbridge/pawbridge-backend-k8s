@@ -59,7 +59,27 @@ class CommunityPostgresqlHttpTest {
     }
     @BeforeEach void remoteBoundaries() {
         when(storage.uploadImages(any())).thenReturn(List.of());
+        when(storage.uploadReportImages(org.mockito.ArgumentMatchers.isNull())).thenReturn(List.of());
         when(users.getUserNickname(anyLong())).thenReturn("격리 검증 회원");
+    }
+
+    @Test void animal_report_http_flow_uses_v4_and_hides_soft_deleted_reports() {
+        ResponseEntity<JsonNode> created=reportWrite(HttpMethod.POST,"/api/v1/reports","공원에서 발견",101);
+        assertThat(created.getStatusCode().is2xxSuccessful()).isTrue();
+        long id=created.getBody().path("data").path("reportId").asLong();
+        assertThat(id).isPositive();
+        assertThat(created.getBody().path("data").path("kind").asText()).isEqualTo("SIGHTING");
+        assertThat(http.getForEntity("/api/v1/reports/"+id,JsonNode.class).getStatusCode()).isEqualTo(HttpStatus.OK);
+        ResponseEntity<JsonNode> listed=http.getForEntity("/api/v1/reports?kind=SIGHTING&keyword=마포",JsonNode.class);
+        assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(listed.getBody().path("data").path("content").toString()).contains("\"reportId\":"+id);
+        assertThat(reportWrite(HttpMethod.PUT,"/api/v1/reports/"+id,"권한 없는 수정",102).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(reportWrite(HttpMethod.PUT,"/api/v1/reports/"+id,"위치 갱신",101).getStatusCode()).isEqualTo(HttpStatus.OK);
+        HttpHeaders headers=new HttpHeaders();headers.set("X-User-Id","101");
+        assertThat(http.exchange("/api/v1/reports/"+id,HttpMethod.DELETE,new HttpEntity<>(headers),JsonNode.class)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(http.getForEntity("/api/v1/reports/"+id,JsonNode.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM animal_reports WHERE report_id=? AND deleted_at IS NOT NULL",Long.class,id)).isEqualTo(1);
     }
     @Test void create_update_delete_keep_http_search_and_outbox_consistent() {
         ResponseEntity<JsonNode> created=write(HttpMethod.POST,"/api/v1/posts","하얀 강아지",101);
@@ -95,6 +115,15 @@ class CommunityPostgresqlHttpTest {
     private ResponseEntity<JsonNode> write(HttpMethod method,String path,String title,long user) {
         HttpHeaders headers=new HttpHeaders();headers.setContentType(MediaType.MULTIPART_FORM_DATA);headers.set("X-User-Id",Long.toString(user));
         MultiValueMap<String,Object> fields=new LinkedMultiValueMap<>();fields.add("title",title);fields.add("content","격리 데이터베이스 검증");fields.add("boardType","ADOPTION");
+        return http.exchange(path,method,new HttpEntity<>(fields,headers),JsonNode.class);
+    }
+    private ResponseEntity<JsonNode> reportWrite(HttpMethod method,String path,String description,long user) {
+        HttpHeaders headers=new HttpHeaders();headers.setContentType(MediaType.MULTIPART_FORM_DATA);headers.set("X-User-Id",Long.toString(user));
+        HttpHeaders partHeaders=new HttpHeaders();partHeaders.setContentType(MediaType.APPLICATION_JSON);
+        String report="{\"kind\":\"SIGHTING\",\"occurredOn\":\"2026-09-20\",\"region\":\"서울 마포구\","
+                +"\"species\":\"강아지\",\"description\":\""+description+"\"}";
+        MultiValueMap<String,Object> fields=new LinkedMultiValueMap<>();
+        fields.add("report",new HttpEntity<>(report,partHeaders));
         return http.exchange(path,method,new HttpEntity<>(fields,headers),JsonNode.class);
     }
 }
