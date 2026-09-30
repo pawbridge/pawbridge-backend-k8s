@@ -30,6 +30,7 @@ import java.util.List;
 @NoArgsConstructor
 public class AnimalReport {
     public enum Kind { MISSING, SIGHTING }
+    public enum AnimalType { DOG, CAT, OTHER }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -59,6 +60,16 @@ public class AnimalReport {
 
     @Column(name = "region", nullable = false, length = 120)
     private String region;
+
+    @Column(name = "province", length = 40)
+    private String province;
+
+    @Column(name = "district", length = 40)
+    private String district;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "animal_type", length = 16)
+    private AnimalType animalType;
 
     @Column(name = "landmark", length = 200)
     private String landmark;
@@ -130,5 +141,11 @@ public class AnimalReport {
 
     public void delete() {
         this.deletedAt = LocalDateTime.now();
+    }
+
+    public void classify(String province, String district, AnimalType animalType) {
+        this.province = province;
+        this.district = district;
+        this.animalType = animalType;
     }
 }

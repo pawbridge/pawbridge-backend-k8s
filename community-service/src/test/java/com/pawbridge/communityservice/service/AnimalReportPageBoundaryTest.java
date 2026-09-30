@@ -13,7 +13,7 @@ class AnimalReportPageBoundaryTest {
     void givenOversizedPage_whenListing_thenRejectBeforeRepositoryCall() {
         AnimalReportService service = mock(AnimalReportService.class);
 
-        assertThatThrownBy(() -> new AnimalReportController(service).list(0, 51, null, null))
+        assertThatThrownBy(() -> new AnimalReportController(service).list(0, 51, null, null, null, null, null, null, null))
                 .isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(service);
     }

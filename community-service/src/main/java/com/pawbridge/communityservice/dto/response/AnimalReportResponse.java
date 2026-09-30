@@ -25,7 +25,10 @@ public record AnimalReportResponse(
         String distinguishingFeatures,
         String direction,
         LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String province,
+        String district,
+        AnimalReport.AnimalType animalType
 ) {
     public static AnimalReportResponse from(AnimalReport report, String authorNickname) {
         String label = report.getKind() == AnimalReport.Kind.MISSING ? "실종" : "목격 제보";
@@ -35,6 +38,7 @@ public record AnimalReportResponse(
                 report.getOccurredOn(), report.getApproximateTime(), report.getRegion(),
                 report.getLandmark(), report.getSpecies(), report.getAnimalName(),
                 report.getCoatColor(), report.getAnimalSize(), report.getDistinguishingFeatures(),
-                report.getDirection(), report.getCreatedAt(), report.getUpdatedAt());
+                report.getDirection(), report.getCreatedAt(), report.getUpdatedAt(),
+                report.getProvince(), report.getDistrict(), report.getAnimalType());
     }
 }
