@@ -6,6 +6,9 @@ import com.pawbridge.communityservice.domain.repository.AnimalReportRepository;
 import com.pawbridge.communityservice.dto.request.CreateAnimalReportRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -128,6 +131,21 @@ class AnimalReportServiceTest {
 
         assertThat(page.getTotalElements()).isEqualTo(13);
         assertThat(page.getContent()).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "   "})
+    void givenMissingOrBlankKeyword_whenListing_thenUseEmptyTextParameter(String keyword) {
+        var pageable = PageRequest.of(0, 12);
+        when(reportRepository.searchVisible(AnimalReport.Kind.SIGHTING, "", pageable))
+                .thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        var page = service.list(AnimalReport.Kind.SIGHTING, keyword, pageable);
+
+        assertThat(page.getContent()).isEmpty();
+        verify(reportRepository).searchVisible(AnimalReport.Kind.SIGHTING, "", pageable);
+        verifyNoInteractions(s3Service, userServiceClient);
     }
 
     @Test

@@ -16,7 +16,7 @@ public interface AnimalReportRepository extends JpaRepository<AnimalReport, Long
             SELECT r FROM AnimalReport r
             WHERE r.deletedAt IS NULL
               AND (:kind IS NULL OR r.kind = :kind)
-              AND (:keyword IS NULL OR LOCATE(:keyword, LOWER(r.description)) > 0
+              AND (:keyword = '' OR LOCATE(:keyword, LOWER(r.description)) > 0
                 OR LOCATE(:keyword, LOWER(r.region)) > 0
                 OR LOCATE(:keyword, LOWER(r.species)) > 0
                 OR LOCATE(:keyword, LOWER(r.animalName)) > 0
