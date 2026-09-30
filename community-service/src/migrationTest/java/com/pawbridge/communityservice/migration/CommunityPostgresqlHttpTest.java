@@ -8,6 +8,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -61,6 +64,32 @@ class CommunityPostgresqlHttpTest {
         when(storage.uploadImages(any())).thenReturn(List.of());
         when(storage.uploadReportImages(org.mockito.ArgumentMatchers.isNull())).thenReturn(List.of());
         when(users.getUserNickname(anyLong())).thenReturn("격리 검증 회원");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings={" ", "   "})
+    void missing_empty_or_blank_keyword_keeps_public_report_lists_available(String keyword) {
+        ResponseEntity<JsonNode> created=reportWrite(HttpMethod.POST,"/api/v1/reports","검색어 없는 목록 검증",101);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.OK);
+        long id=created.getBody().path("data").path("reportId").asLong();
+        for(String kind : new String[]{null, "SIGHTING", "MISSING"}) {
+            var uri=org.springframework.web.util.UriComponentsBuilder.fromPath("/api/v1/reports")
+                    .queryParam("size",50);
+            if(kind!=null)uri.queryParam("kind",kind);
+            if(keyword!=null)uri.queryParam("keyword",keyword);
+            ResponseEntity<JsonNode> listed=http.getForEntity(uri.build().toUriString(),JsonNode.class);
+            assertThat(listed.getStatusCode()).as("kind=%s, keyword=%s",kind,keyword).isEqualTo(HttpStatus.OK);
+            String countSql="SELECT count(*) FROM animal_reports WHERE deleted_at IS NULL";
+            long expected=kind==null ? jdbc.queryForObject(countSql,Long.class)
+                    : jdbc.queryForObject(countSql+" AND report_kind=?",Long.class,kind);
+            assertThat(listed.getBody().path("data").path("totalElements").asLong()).isEqualTo(expected);
+            if(!"MISSING".equals(kind)) {
+                assertThat(listed.getBody().path("data").path("content").toString()).contains("\"reportId\":"+id);
+            } else {
+                assertThat(listed.getBody().path("data").path("content").toString()).doesNotContain("\"reportId\":"+id);
+            }
+        }
     }
 
     @Test void animal_report_http_flow_uses_v4_and_hides_soft_deleted_reports() {

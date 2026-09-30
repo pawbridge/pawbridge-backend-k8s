@@ -85,7 +85,7 @@ public class AnimalReportService {
 
     @Transactional(readOnly = true)
     public Page<AnimalReportResponse> list(AnimalReport.Kind kind, String keyword, Pageable pageable) {
-        String normalized = keyword == null || keyword.isBlank() ? null : keyword.trim().toLowerCase(Locale.ROOT);
+        String normalized = keyword == null || keyword.isBlank() ? "" : keyword.trim().toLowerCase(Locale.ROOT);
         return reportRepository.searchVisible(kind, normalized, pageable).map(this::response);
     }
 
