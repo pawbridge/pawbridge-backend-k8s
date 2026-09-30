@@ -41,8 +41,8 @@ class AnimalRecommendationServiceTest {
         Animal second = animal(5, Species.DOG, AnimalStatus.NOTICE);
         when(animals.findWithShelterByIdIn(List.of(4L, 2L, 3L, 5L))).thenReturn(List.of(second,
                 animal(2, Species.DOG, AnimalStatus.ADOPTED), animal(3, Species.CAT, AnimalStatus.PROTECT), first));
-        when(mapper.toResponse(first)).thenReturn(AnimalResponse.builder().id(4L).build());
-        when(mapper.toResponse(second)).thenReturn(AnimalResponse.builder().id(5L).build());
+        when(mapper.toRecommendationResponse(first)).thenReturn(AnimalResponse.builder().id(4L).build());
+        when(mapper.toRecommendationResponse(second)).thenReturn(AnimalResponse.builder().id(5L).build());
         assertThat(service.recommend(1L)).extracting(AnimalResponse::getId).containsExactly(4L, 5L);
         InOrder sequence = inOrder(animals, dinov3);
         sequence.verify(animals).findById(1L);

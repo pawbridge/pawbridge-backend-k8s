@@ -74,6 +74,18 @@ public class AnimalMapper {
     }
 
     /**
+     * 유사 동물 추천 카드에 저장된 식별 정보를 포함한다.
+     * 일반 목록 응답은 기존의 toResponse 계약을 유지한다.
+     */
+    public AnimalResponse toRecommendationResponse(Animal animal) {
+        AnimalResponse response = toResponse(animal);
+        response.setWeight(animal.getWeight());
+        response.setColor(animal.getColor());
+        response.setHappenDate(animal.getHappenDate());
+        return response;
+    }
+
+    /**
      * Animal Entity → AnimalDetailResponse (상세 조회용)
      * @param animal 동물 엔티티
      * @return AnimalDetailResponse DTO

@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 /**
  * 동물 응답 DTO (목록 조회용)
  * - GET /api/animals (목록 조회)
+ * - GET /api/animals/{id}/similar (추천 카드 식별 정보 추가)
  * - 핵심 정보만 포함하여 가볍게 구성
  */
 @Data
@@ -58,6 +59,21 @@ public class AnimalResponse {
      * 나이 (계산된 값)
      */
     private Integer age;
+
+    /**
+     * 유사 동물 추천 카드의 체중 (저장된 단위 포함 원문)
+     */
+    private String weight;
+
+    /**
+     * 유사 동물 추천 카드의 색상
+     */
+    private String color;
+
+    /**
+     * 유사 동물 추천 카드의 발견/접수일 (APMS happenDt)
+     */
+    private LocalDate happenDate;
 
     /**
      * 특징

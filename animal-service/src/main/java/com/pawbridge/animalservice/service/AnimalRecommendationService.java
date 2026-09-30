@@ -78,7 +78,7 @@ public class AnimalRecommendationService {
         return candidates.stream().map(current::get).filter(Objects::nonNull)
                 .filter(animal -> animal.getSpecies() == source.getSpecies())
                 .filter(animal -> animal.getStatus() == AnimalStatus.NOTICE || animal.getStatus() == AnimalStatus.PROTECT)
-                .map(mapper::toResponse).toList();
+                .map(mapper::toRecommendationResponse).toList();
     }
 
     private RecommendationUnavailableException unavailable() {
