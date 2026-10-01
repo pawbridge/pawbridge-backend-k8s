@@ -7,6 +7,10 @@ import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import java.time.LocalDate;
 
 @RestController
 @RequiredArgsConstructor
@@ -16,6 +20,19 @@ public class AdminShelterApplicationController {
     public record ApproveRequest(@NotBlank @Size(max = 50) String careRegNo,
                                  @NotBlank @Size(max = 1000) String note) {}
     public record RejectRequest(@NotBlank @Size(max = 1000) String reason) {}
+
+    @GetMapping("/stats")
+    public ResponseDTO<ShelterApplicationStatsResponse> statistics(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return ResponseDTO.okWithData(service.statistics(authorization, startDate, endDate));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Void> malformedParameter() {
+        return ResponseEntity.badRequest().build();
+    }
 
     @GetMapping
     public ResponseDTO<Page<AdminShelterApplicationResponse>> list(
