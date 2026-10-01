@@ -44,6 +44,62 @@ class CommunityPostgresqlHttpTest {
     @MockitoBean S3Service storage;
     @MockitoBean UserServiceClient users;
 
+    @Test void structured_filters_use_occurrence_dates_preserve_legacy_and_exclude_deleted_reports() {
+        String suffix = java.util.UUID.randomUUID().toString();
+        long first = structuredReport("2026-09-01", "서울특별시", "마포구", "DOG", suffix);
+        long last = structuredReport("2026-09-30", "서울특별시", "마포구", "DOG", suffix);
+        structuredReport("2026-08-31", "서울특별시", "마포구", "DOG", suffix);
+        structuredReport("2026-09-15", "서울특별시", "강남구", "DOG", suffix);
+        structuredReport("2026-09-15", "서울특별시", "마포구", "CAT", suffix);
+        structuredReport("2026-09-15", "부산광역시", "중구", "DOG", suffix);
+        long removed = structuredReport("2026-09-15", "서울특별시", "마포구", "DOG", suffix);
+        HttpHeaders headers = new HttpHeaders(); headers.set("X-User-Id", "101");
+        assertThat(http.exchange("/api/v1/reports/" + removed, HttpMethod.DELETE,
+                new HttpEntity<>(headers), JsonNode.class).getStatusCode()).isEqualTo(HttpStatus.OK);
+        var legacy = reportWrite(HttpMethod.POST, "/api/v1/reports", suffix, 101);
+        assertThat(legacy.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(legacy.getBody().path("data").path("province").isNull()).isTrue();
+        var uri = org.springframework.web.util.UriComponentsBuilder.fromPath("/api/v1/reports")
+                .queryParam("kind", "SIGHTING").queryParam("keyword", suffix)
+                .queryParam("province", "서울특별시").queryParam("district", "마포구")
+                .queryParam("animalType", "DOG").queryParam("from", "2026-09-01").queryParam("to", "2026-09-30");
+        var response = http.getForEntity(uri.build().toUriString(), JsonNode.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().path("data").path("totalElements").asLong()).isEqualTo(2);
+        var ids = new java.util.ArrayList<Long>();
+        response.getBody().path("data").path("content").forEach(row -> ids.add(row.path("reportId").asLong()));
+        assertThat(ids).containsExactly(last, first);
+        var all = http.getForEntity("/api/v1/reports?keyword=" + suffix, JsonNode.class);
+        assertThat(all.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(all.getBody().path("data").path("totalElements").asLong()).isEqualTo(7);
+        assertThat(reportWrite(HttpMethod.PUT, "/api/v1/reports/" + first, suffix, 101).getBody()
+                .path("data").path("animalType").asText()).isEqualTo("DOG");
+    }
+
+    @Test void invalid_structured_filters_return_400_instead_of_500() {
+        for (String query : List.of("from=2026-09-30&to=2026-09-01", "from=2026-02-30",
+                "animalType=BIRD", "district=마포구", "province=서울", "to=9999-01-01")) {
+            assertThat(http.getForEntity("/api/v1/reports?" + query, JsonNode.class).getStatusCode())
+                    .as(query).isEqualTo(HttpStatus.BAD_REQUEST);
+        }
+    }
+
+    private long structuredReport(String date, String province, String district, String type, String description) {
+        HttpHeaders headers = new HttpHeaders(); headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+        headers.set("X-User-Id", "101");
+        HttpHeaders part = new HttpHeaders(); part.setContentType(MediaType.APPLICATION_JSON);
+        String body = String.format("{\"kind\":\"SIGHTING\",\"occurredOn\":\"%s\",\"region\":\"원래 지역 설명\","
+                + "\"species\":\"원래 품종 설명\",\"description\":\"%s\",\"province\":\"%s\",\"district\":\"%s\",\"animalType\":\"%s\"}",
+                date, description, province, district, type);
+        MultiValueMap<String,Object> fields = new LinkedMultiValueMap<>();
+        fields.add("report", new HttpEntity<>(body, part));
+        var result = http.postForEntity("/api/v1/reports", new HttpEntity<>(fields, headers), JsonNode.class);
+        assertThat(result.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(result.getBody().path("data").path("region").asText()).isEqualTo("원래 지역 설명");
+        assertThat(result.getBody().path("data").path("animalType").asText()).isEqualTo(type);
+        return result.getBody().path("data").path("reportId").asLong();
+    }
+
     @DynamicPropertySource
     static void guardedDatabase(DynamicPropertyRegistry properties) throws Exception {
         String port=System.getenv("PG_HTTP_TEST_PORT");

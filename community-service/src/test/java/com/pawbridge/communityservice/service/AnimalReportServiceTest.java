@@ -36,6 +36,45 @@ class AnimalReportServiceTest {
 
     AnimalReportService service;
 
+    @Test
+    void structuredFiltersAreNormalizedAndPassedWithInclusiveOccurrenceDates() {
+        var pageable = PageRequest.of(0, 12);
+        var from = LocalDate.of(2026, 9, 1);
+        var to = LocalDate.of(2026, 9, 30);
+        when(reportRepository.searchVisible(AnimalReport.Kind.SIGHTING, "파란", "서울특별시", "마포구",
+                AnimalReport.AnimalType.DOG, from, to, pageable)).thenReturn(new PageImpl<>(List.of()));
+        assertThat(service.list(AnimalReport.Kind.SIGHTING, " 파란 ", " 서울특별시 ", " 마포구 ",
+                AnimalReport.AnimalType.DOG, from, to, pageable)).isEmpty();
+        verify(reportRepository).searchVisible(AnimalReport.Kind.SIGHTING, "파란", "서울특별시", "마포구",
+                AnimalReport.AnimalType.DOG, from, to, pageable);
+    }
+
+    @Test
+    void invalidRangeOrDistrictWithoutProvinceFailsBeforeDatabaseAccess() {
+        var today = LocalDate.now(java.time.ZoneId.of("Asia/Seoul"));
+        assertThatThrownBy(() -> service.list(null, "", null, "마포구", null, null, null, PageRequest.of(0, 12)))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> service.list(null, "", "잘못된 시도", null, null, null, null, PageRequest.of(0, 12)))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> service.list(null, "", null, null, null, today, today.minusDays(1), PageRequest.of(0, 12)))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> service.list(null, "", null, null, null, null, today.plusDays(1), PageRequest.of(0, 12)))
+                .isInstanceOf(ResponseStatusException.class);
+        verifyNoInteractions(reportRepository, s3Service, userServiceClient);
+    }
+
+    @Test
+    void olderEditWithoutClassificationPreservesSelectedFieldsAndOriginalText() {
+        AnimalReport report = report(AnimalReport.Kind.MISSING);
+        report.classify("서울특별시", "마포구", AnimalReport.AnimalType.DOG);
+        when(reportRepository.findByReportIdAndDeletedAtIsNull(7L)).thenReturn(Optional.of(report));
+        var result = service.update(7L, request(AnimalReport.Kind.MISSING), null, 3L);
+        assertThat(result.province()).isEqualTo("서울특별시");
+        assertThat(result.district()).isEqualTo("마포구");
+        assertThat(result.animalType()).isEqualTo(AnimalReport.AnimalType.DOG);
+        assertThat(result.region()).isEqualTo(request(AnimalReport.Kind.MISSING).region());
+    }
+
     @BeforeEach
     void setUp() {
         service = new AnimalReportService(reportRepository, s3Service, userServiceClient);

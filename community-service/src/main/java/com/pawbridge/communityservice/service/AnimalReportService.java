@@ -19,11 +19,16 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class AnimalReportService {
     private static final long MAX_PHOTO_BYTES = 10L * 1024 * 1024;
+    private static final Set<String> PROVINCES = Set.of("서울특별시", "부산광역시", "대구광역시",
+            "인천광역시", "광주광역시", "대전광역시", "울산광역시", "세종특별자치시", "경기도",
+            "강원특별자치도", "충청북도", "충청남도", "전북특별자치도", "전라남도",
+            "경상북도", "경상남도", "제주특별자치도");
 
     private final AnimalReportRepository reportRepository;
     private final S3Service s3Service;
@@ -38,12 +43,14 @@ public class AnimalReportService {
 
         List<String> imageUrls = s3Service.uploadReportImages(photos);
         try {
-            AnimalReport saved = reportRepository.saveAndFlush(new AnimalReport(
+            AnimalReport report = new AnimalReport(
                     authorId, request.kind(), request.description().trim(), imageUrls,
                     request.occurredOn(), optional(request.approximateTime()), request.region().trim(),
                     optional(request.landmark()), request.species().trim(), optional(request.animalName()),
                     optional(request.coatColor()), optional(request.animalSize()),
-                    optional(request.distinguishingFeatures()), optional(request.direction())));
+                    optional(request.distinguishingFeatures()), optional(request.direction()));
+            report.classify(optional(request.province()), optional(request.district()), request.animalType());
+            AnimalReport saved = reportRepository.saveAndFlush(report);
             return response(saved);
         } catch (RuntimeException failure) {
             imageUrls.forEach(s3Service::deleteFile);
@@ -68,6 +75,10 @@ public class AnimalReportService {
                 request.region().trim(), optional(request.landmark()), request.species().trim(),
                 optional(request.animalName()), optional(request.coatColor()), optional(request.animalSize()),
                 optional(request.distinguishingFeatures()), optional(request.direction()));
+        // Older clients omit these fields. Their edits must not erase an existing classification.
+        if (request.province() != null || request.district() != null || request.animalType() != null) {
+            report.classify(optional(request.province()), optional(request.district()), request.animalType());
+        }
         return response(report);
     }
 
@@ -87,6 +98,30 @@ public class AnimalReportService {
     public Page<AnimalReportResponse> list(AnimalReport.Kind kind, String keyword, Pageable pageable) {
         String normalized = keyword == null || keyword.isBlank() ? "" : keyword.trim().toLowerCase(Locale.ROOT);
         return reportRepository.searchVisible(kind, normalized, pageable).map(this::response);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AnimalReportResponse> list(AnimalReport.Kind kind, String keyword,
+                                          String province, String district, AnimalReport.AnimalType animalType,
+                                          LocalDate from, LocalDate to, Pageable pageable) {
+        validateClassification(province, district);
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Seoul"));
+        if ((from != null && from.isAfter(today)) || (to != null && to.isAfter(today))
+                || (from != null && to != null && from.isAfter(to))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "실종·목격 날짜 범위를 확인해 주세요.");
+        }
+        String normalized = keyword == null || keyword.isBlank() ? "" : keyword.trim().toLowerCase(Locale.ROOT);
+        return reportRepository.searchVisible(kind, normalized, optional(province), optional(district),
+                animalType, from, to, pageable).map(this::response);
+    }
+
+    private static void validateClassification(String province, String district) {
+        String normalizedProvince = optional(province);
+        String normalizedDistrict = optional(district);
+        if ((normalizedProvince != null && !PROVINCES.contains(normalizedProvince))
+                || tooLong(district, 40) || (normalizedDistrict != null && normalizedProvince == null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "시·도와 시·군·구 선택을 확인해 주세요.");
+        }
     }
 
     private AnimalReport findVisible(Long reportId) {
@@ -121,6 +156,7 @@ public class AnimalReportService {
                 || blankOrTooLong(request.description(), 10000)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "필수 제보 정보를 확인해 주세요.");
         }
+        validateClassification(request.province(), request.district());
         if (tooLong(request.approximateTime(), 40) || tooLong(request.landmark(), 200)
                 || tooLong(request.animalName(), 80) || tooLong(request.coatColor(), 100)
                 || tooLong(request.animalSize(), 40)
