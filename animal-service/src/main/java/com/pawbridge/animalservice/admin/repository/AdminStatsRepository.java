@@ -17,6 +17,13 @@ import java.util.List;
 @Repository
 public interface AdminStatsRepository extends JpaRepository<Animal, Long> {
 
+    @Query("SELECT new com.pawbridge.animalservice.admin.dto.DailyAnimalStatsResponse(" +
+            "a.happenDate, COUNT(a)) FROM Animal a " +
+            "WHERE a.happenDate BETWEEN :startDate AND :endDate " +
+            "GROUP BY a.happenDate ORDER BY a.happenDate")
+    List<DailyAnimalStatsResponse> countDailyIntakes(
+            @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
     /**
      * 일일 동물 등록 건수 통계 (관리자용)
      * @param startDate 시작 날짜
