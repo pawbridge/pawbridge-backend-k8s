@@ -26,6 +26,7 @@ public class S3ServiceImpl implements S3Service {
     private final S3Client s3Client;
     private final String bucketName;
     private final String publicBaseUrl;
+    private final String objectPrefix;
 
     // 허용된 파일 타입 (이미지 + 영상)
     private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
@@ -46,11 +47,13 @@ public class S3ServiceImpl implements S3Service {
     public S3ServiceImpl(
             S3Client s3Client,
             @Value("${spring.cloud.aws.s3.bucket}") String bucketName,
-            @Value("${pawbridge.storage.public-base-url}") String publicBaseUrl
+            @Value("${pawbridge.storage.public-base-url}") String publicBaseUrl,
+            @Value("${pawbridge.storage.object-prefix:}") String objectPrefix
     ) {
         this.s3Client = s3Client;
         this.bucketName = bucketName;
         this.publicBaseUrl = removeTrailingSlashes(publicBaseUrl);
+        this.objectPrefix = normalizeObjectPrefix(objectPrefix);
     }
 
     /**
@@ -108,7 +111,7 @@ public class S3ServiceImpl implements S3Service {
         String contentType = file.getContentType();
         String folder = reportPhoto ? "reports/images/"
                 : isVideoType(contentType) ? "posts/videos/" : "posts/images/";
-        String uniqueFilename = folder + UUID.randomUUID() + extension;
+        String uniqueFilename = objectPrefix + folder + UUID.randomUUID() + extension;
 
         // S3에 업로드
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
@@ -198,7 +201,24 @@ public class S3ServiceImpl implements S3Service {
         if (key.isBlank()) {
             throw new IllegalArgumentException("삭제할 객체 키가 없습니다.");
         }
+        if (!objectPrefix.isEmpty() && (!key.startsWith(objectPrefix)
+                || key.length() == objectPrefix.length()
+                || key.contains("\\") || key.contains("%") || key.contains("?") || key.contains("#")
+                || Arrays.stream(key.split("/", -1)).anyMatch(segment ->
+                        segment.isEmpty() || segment.equals(".") || segment.equals("..")))) {
+            throw new IllegalArgumentException("설정된 저장 경로 밖의 객체는 삭제할 수 없습니다.");
+        }
         return key;
+    }
+
+    private static String normalizeObjectPrefix(String prefix) {
+        if (prefix.isEmpty()) {
+            return "";
+        }
+        if (!prefix.matches("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/?")) {
+            throw new IllegalArgumentException("저장 경로는 영문, 숫자, 하이픈, 밑줄과 경로 구분자로 구성해야 합니다.");
+        }
+        return prefix.endsWith("/") ? prefix : prefix + "/";
     }
 
     private static String removeTrailingSlashes(String url) {
