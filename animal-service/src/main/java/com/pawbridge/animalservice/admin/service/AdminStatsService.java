@@ -1,6 +1,7 @@
 package com.pawbridge.animalservice.admin.service;
 
 import com.pawbridge.animalservice.admin.dto.DailyAnimalStatsResponse;
+import com.pawbridge.animalservice.admin.dto.IntakeTrendResponse;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -9,6 +10,8 @@ import java.util.List;
  * 관리자 통계 서비스 인터페이스
  */
 public interface AdminStatsService {
+
+    IntakeTrendResponse getIntakeTrend(LocalDate startDate, LocalDate endDate);
 
     /**
      * 일일 동물 등록 건수 통계
