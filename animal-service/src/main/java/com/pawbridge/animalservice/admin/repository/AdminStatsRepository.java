@@ -25,17 +25,17 @@ public interface AdminStatsRepository extends JpaRepository<Animal, Long> {
             @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 
     /**
-     * 일일 동물 등록 건수 통계 (관리자용)
+     * 한국 날짜 기준 일일 동물 등록 건수 통계 (UTC 저장 시각에 9시간 적용)
      * @param startDate 시작 날짜
      * @param endDate 종료 날짜
      * @return 일별 동물 등록 건수 목록
      */
     @Query("SELECT new com.pawbridge.animalservice.admin.dto.DailyAnimalStatsResponse(" +
-           "CAST(a.createdAt AS LocalDate), COUNT(a)) " +
+           "CAST(a.createdAt + 9 hour AS LocalDate), COUNT(a)) " +
            "FROM Animal a " +
-           "WHERE CAST(a.createdAt AS LocalDate) BETWEEN :startDate AND :endDate " +
-           "GROUP BY CAST(a.createdAt AS LocalDate) " +
-           "ORDER BY CAST(a.createdAt AS LocalDate)")
+           "WHERE CAST(a.createdAt + 9 hour AS LocalDate) BETWEEN :startDate AND :endDate " +
+           "GROUP BY CAST(a.createdAt + 9 hour AS LocalDate) " +
+           "ORDER BY CAST(a.createdAt + 9 hour AS LocalDate)")
     List<DailyAnimalStatsResponse> countDailyAnimals(
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
