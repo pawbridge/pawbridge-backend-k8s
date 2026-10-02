@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -350,7 +351,7 @@ public class UserServiceImpl implements UserService {
     public SignupPeriodsResponse getSignupPeriods() {
         log.info("기간별 가입자 수 통계 조회");
 
-        LocalDate now = LocalDate.now();
+        LocalDate now = LocalDate.now(ZoneId.of("Asia/Seoul"));
 
         // 1. 오늘 (오늘 하루)
         LocalDate todayStart = now;

@@ -58,17 +58,17 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByNickname(@Param("nickname") String nickname);
 
     /**
-     * 일별 가입자 수 통계 (관리자용)
+     * 한국 날짜 기준 일별 가입자 수 통계 (UTC 저장 시각에 9시간 적용)
      * @param startDate 시작 날짜
      * @param endDate 종료 날짜
      * @return 일별 가입자 수 목록
      */
     @Query("SELECT new com.pawbridge.userservice.dto.response.DailySignupStatsResponse(" +
-           "CAST(u.createdAt AS LocalDate), COUNT(u)) " +
+           "CAST(u.createdAt + 9 hour AS LocalDate), COUNT(u)) " +
            "FROM User u " +
-           "WHERE CAST(u.createdAt AS LocalDate) BETWEEN :startDate AND :endDate " +
-           "GROUP BY CAST(u.createdAt AS LocalDate) " +
-           "ORDER BY CAST(u.createdAt AS LocalDate)")
+           "WHERE CAST(u.createdAt + 9 hour AS LocalDate) BETWEEN :startDate AND :endDate " +
+           "GROUP BY CAST(u.createdAt + 9 hour AS LocalDate) " +
+           "ORDER BY CAST(u.createdAt + 9 hour AS LocalDate)")
     List<DailySignupStatsResponse> countDailySignups(
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);
