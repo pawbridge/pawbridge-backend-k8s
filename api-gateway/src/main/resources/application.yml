@@ -189,7 +189,7 @@ spring:
         - id: admin-animal-stats
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
-            - Path=/api/admin/stats/daily-animals
+            - Path=/api/admin/stats/daily-animals, /api/admin/stats/intake-trend
           filters:
             - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
             - JwtAuthorization
