@@ -151,6 +151,35 @@ spring:
             - JwtAuthorization
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
+        # Option metadata is public; mutations remain admin-only.
+        - id: store-service-options-public
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/option-groups, /api/option-groups/{groupId}
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-options-protected
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/option-groups, /api/option-groups/**
+            - Method=POST,PUT,DELETE,OPTIONS
+          filters:
+            # Authorization uses the external option path before rewriting.
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-admin-orders
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/admin/orders, /api/admin/orders/**
+            - Method=GET,PATCH,OPTIONS
+          filters:
+            # Every rewritten /api/v1/admin/** operation requires ROLE_ADMIN.
+            - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
+            - JwtAuthorization
+
         - id: store-service-orders
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
