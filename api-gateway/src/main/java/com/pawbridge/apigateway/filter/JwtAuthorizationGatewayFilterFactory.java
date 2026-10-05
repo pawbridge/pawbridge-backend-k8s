@@ -206,6 +206,12 @@ public class JwtAuthorizationGatewayFilterFactory
             return true;
         }
 
+        // 옵션 쓰기는 현재 Store의 개별 handler 존재 여부와 무관하게 관리자 전용이다.
+        // 공개 GET 경로와 달리 루트 PUT 등 미지원 메서드도 일반 회원에게 전달하지 않는다.
+        if (!"GET".equals(method) && pathMatcher.match("/api/option-groups/**", path)) {
+            return true;
+        }
+
         return ADMIN_ONLY_PATHS.stream()
                 .anyMatch(pattern -> matchesMethodAndPath(pattern, method, path));
     }
