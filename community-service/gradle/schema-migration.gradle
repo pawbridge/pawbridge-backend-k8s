@@ -111,3 +111,10 @@ tasks.register('migrationPostgresqlHttpTest', Test) {
     maxHeapSize = '384m'
     outputs.upToDateWhen { false }
 }
+// Explicit browser fixture: only guarded, disposable localhost PostgreSQL and a synthetic provider.
+tasks.register('videoBrowserServer', JavaExec) {
+    group = 'verification'
+    classpath = sourceSets.migrationTest.runtimeClasspath
+    mainClass = 'com.pawbridge.communityservice.curation.HomeVideoBrowserServer'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+}

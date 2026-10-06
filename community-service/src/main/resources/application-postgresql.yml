@@ -43,3 +43,5 @@ pawbridge:
   search:
     backend: postgresql
     rebuild-enabled: ${SEARCH_REBUILD_ENABLED:false}
+youtube:
+  api-key: ${YOUTUBE_DATA_API_KEY:}
