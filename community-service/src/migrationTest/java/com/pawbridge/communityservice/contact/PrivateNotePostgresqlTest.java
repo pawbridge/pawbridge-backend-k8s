@@ -48,10 +48,19 @@ class PrivateNotePostgresqlTest {
         repository=new PrivateNoteRepository(jdbc);
         users=mock(UserServiceClient.class);stream=mock(PrivateNoteStream.class);
         when(users.getContactMember(anyLong())).thenAnswer(call -> new ContactMember(call.getArgument(0),"테스트 회원",true,false));
+        when(users.getContactMembers(anyList())).thenAnswer(call -> {
+            List<Long> ids = call.getArgument(0);
+            return ids.stream().map(id -> new ContactMember(id, "테스트 회원", true, false)).toList();
+        });
         service=new PrivateNoteService(repository,users,stream,Clock.fixed(NOW,ZoneOffset.UTC),manager);
     }
     SendNote draft(long recipient) { return new SendNote(recipient,"합성 테스트 본문",UUID.randomUUID(),null,null,null); }
     long rows(String table) {return jdbc.queryForObject("SELECT count(*) FROM pawbridge_community."+table,Long.class);}
+
+    @Test void givenMigratedPrivateNoteSchema_whenForeignKeyCleanupIndexesChecked_thenReplyAndBlockedMemberIndexed() {
+        assertThat(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname='pawbridge_community'", String.class))
+                .contains("idx_private_note_reply_to", "idx_private_note_blocked_member");
+    }
 
     @Test void givenConcurrentSameSend_whenRetried_thenOneOriginalAndOnePairOfMailboxes() throws Exception {
         SendNote draft=draft(2);var gate=new CountDownLatch(1);var pool=Executors.newFixedThreadPool(2);
@@ -180,7 +189,7 @@ class PrivateNotePostgresqlTest {
             // Observe the real PostgreSQL waiter, not a sleep that assumes the race occurred.
             boolean waiting=false;
             for(int i=0;i<100&&!waiting;i++) {
-                waiting=jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname='pawbridge' AND wait_event_type='Lock' AND query LIKE 'SELECT note_id FROM pawbridge_community.private_notes WHERE sender_id%')",Boolean.class);
+                waiting=jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname='pawbridge' AND wait_event_type='Lock' AND regexp_replace(query, '\\s+', ' ', 'g') LIKE 'SELECT note_id FROM pawbridge_community.private_notes WHERE sender_id%')",Boolean.class);
                 if(!waiting) Thread.sleep(20);
             }
             assertThat(waiting).isTrue();release.countDown();

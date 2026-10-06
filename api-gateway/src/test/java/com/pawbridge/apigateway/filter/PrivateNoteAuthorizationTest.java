@@ -39,7 +39,8 @@ class PrivateNoteAuthorizationTest {
         return MockServerHttpRequest.get("/api/v1/notes/stream").header("Authorization","Bearer synthetic-token")
                 .header("X-User-Id","999").header("X-Auth-Expires-At","9999999999999").build();
     }
-    @ParameterizedTest @ValueSource(strings={"/api/v1/users/internal/7/contact","/api/users/internal/7/contact"})
+    @ParameterizedTest @ValueSource(strings={"/api/v1/users/internal/7/contact","/api/users/internal/7/contact",
+            "/api/v1/users/internal/contacts?ids=7&ids=8", "/api/users/internal/contacts?ids=7"})
     void givenInternalContactPath_whenPublicRequest_thenNotFound(String path) {
         var request=MockServerWebExchange.from(MockServerHttpRequest.get(path));
         filter.apply(new JwtAuthorizationGatewayFilterFactory.Config()).filter(request,e -> {throw new AssertionError("internal route");}).block();

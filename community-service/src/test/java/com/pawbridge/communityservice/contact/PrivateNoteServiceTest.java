@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import java.time.*;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import com.pawbridge.communityservice.client.UserServiceClient;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,6 +82,93 @@ class PrivateNoteServiceTest {
         when(users.getContactMember(1L)).thenReturn(new ContactMember(1L,"탈퇴한 회원",false,true));
         service.withdraw(1);
         verify(repository).withdraw(1);verify(stream).close(1);verify(stream).resyncAll();
+    }
+
+    @Test void givenTwentyNotesFromOneSender_whenNotificationsQueried_thenUseOneBatchLookup() {
+        List<Note> notes = java.util.stream.IntStream.range(0, 21)
+                .mapToObj(index -> retainedNote(2L)).toList();
+        when(repository.notifications(1, null, now)).thenReturn(notes);
+        when(users.getContactMembers(List.of(2L)))
+                .thenReturn(List.of(new ContactMember(2L, "받는이", true, false)));
+
+        Notifications result = service.notifications(1, null);
+
+        assertThat(result.content()).hasSize(20);
+        assertThat(result.nextCursor()).isEqualTo(notes.get(19).noteId());
+        assertThat(result.content()).allSatisfy(note -> assertThat(note.actorNickname()).isEqualTo("받는이"));
+        verify(users).getContactMember(1L);
+        verify(users).getContactMembers(List.of(2L));
+        verify(users, never()).getContactMember(2L);
+    }
+
+    @Test void givenTwentyDifferentSenders_whenNotificationsQueried_thenOneBatchNotTwentyHttpCalls() {
+        List<Long> senderIds = java.util.stream.LongStream.rangeClosed(10, 29).boxed().toList();
+        List<Note> notes = senderIds.stream().map(this::retainedNote).toList();
+        when(repository.notifications(1, null, now)).thenReturn(notes);
+        when(users.getContactMembers(senderIds)).thenReturn(senderIds.stream()
+                .map(userId -> new ContactMember(userId, "회원 " + userId, true, false)).toList());
+
+        assertThat(service.notifications(1, null).content()).hasSize(20);
+
+        verify(users).getContactMember(1L);
+        verify(users).getContactMembers(senderIds);
+        verifyNoMoreInteractions(users);
+    }
+
+    @Test void givenMailboxOrBlockList_whenQueried_thenResolveCounterpartsInOneBatch() {
+        when(repository.list(1, "INBOX", false, 0, now)).thenReturn(List.of(retainedNote(2L), retainedNote(2L)));
+        when(repository.blocks(1, 0)).thenReturn(List.of(new PrivateNoteRepository.Block(2, now)));
+        when(users.getContactMembers(List.of(2L)))
+                .thenReturn(List.of(new ContactMember(2L, "받는이", true, false)));
+
+        assertThat(service.list(1, "INBOX", false, 0).content()).hasSize(2);
+        assertThat(service.blocks(1, 0).content()).extracting(BlockView::nickname).containsExactly("받는이");
+
+        verify(users, times(2)).getContactMembers(List.of(2L));
+        verify(users, never()).getContactMember(2L);
+    }
+
+    @Test void givenWithdrawnSenderWithoutMemberId_whenNotificationsQueried_thenSkipBatchLookup() {
+        when(repository.notifications(1, null, now)).thenReturn(List.of(retainedNote(null)));
+
+        assertThat(service.notifications(1, null).content()).singleElement().satisfies(note -> {
+            assertThat(note.actorId()).isNull();
+            assertThat(note.actorNickname()).isEqualTo("탈퇴한 회원");
+        });
+
+        verify(users, never()).getContactMembers(any());
+    }
+
+    @Test void givenIncompleteBatchResponse_whenNotificationsQueried_thenFailClosed() {
+        when(repository.notifications(1, null, now)).thenReturn(List.of(retainedNote(2L)));
+        when(users.getContactMembers(List.of(2L))).thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.notifications(1, null)).isInstanceOf(ResponseStatusException.class)
+                .satisfies(failure -> assertThat(((ResponseStatusException) failure).getStatusCode().value()).isEqualTo(503));
+    }
+
+    @Test void givenForeignOrDuplicateBatchMember_whenNotificationsQueried_thenDoNotReturnUnrequestedIdentity() {
+        when(repository.notifications(1, null, now)).thenReturn(List.of(retainedNote(2L), retainedNote(3L)));
+        when(users.getContactMembers(List.of(2L, 3L)))
+                .thenReturn(List.of(new ContactMember(2L, "정상", true, false), new ContactMember(2L, "중복", true, false)))
+                .thenReturn(List.of(new ContactMember(2L, "정상", true, false), new ContactMember(999L, "다른 회원", true, false)));
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            assertThatThrownBy(() -> service.notifications(1, null)).isInstanceOf(ResponseStatusException.class)
+                    .satisfies(failure -> assertThat(((ResponseStatusException) failure).getStatusCode().value()).isEqualTo(503));
+        }
+    }
+
+    @Test void givenPartialContext_whenSend_thenBadRequestBeforeStorage() {
+        assertThatThrownBy(() -> service.send(1, new SendNote(2L, "합성 본문", UUID.randomUUID(), null, "POST", null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(failure -> assertThat(((ResponseStatusException) failure).getStatusCode().value()).isEqualTo(400));
+        verifyNoInteractions(repository, users, stream);
+    }
+
+    private Note retainedNote(Long senderId) {
+        return new Note(UUID.randomUUID(), senderId, 1L, "비공개 합성 본문", null, null, null,
+                now, now.plusSeconds(3600), "INBOX", null, false);
     }
     private static class TestTransactions extends AbstractPlatformTransactionManager {
         @Override protected Object doGetTransaction() {return new Object();}

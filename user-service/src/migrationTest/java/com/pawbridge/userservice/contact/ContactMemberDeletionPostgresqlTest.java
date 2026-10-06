@@ -43,7 +43,7 @@ class ContactMemberDeletionPostgresqlTest {
             // A different thread/connection sees the durable flag, proving this is not an uncommitted local value.
             var pool=Executors.newSingleThreadExecutor();
             try {
-                var observed=pool.submit(() -> new ContactMemberController(jdbc).get(501));
+                var observed=pool.submit(() -> new ContactMemberQuery(jdbc).get(501));
                 var member=observed.get(5,TimeUnit.SECONDS);
                 assertThat(member.active()).isFalse();assertThat(member.deletionPending()).isTrue();
             } finally {pool.shutdownNow();}
@@ -56,10 +56,20 @@ class ContactMemberDeletionPostgresqlTest {
     @Test void givenRemotePurgeFails_whenDeleteThenRetry_thenBlockNewContactUntilCompletion() {
         doThrow(new IllegalStateException("synthetic outage")).doNothing().when(community).removeMailboxes(501);
         assertThatThrownBy(() -> deletion.delete(501)).isInstanceOf(ResponseStatusException.class);
-        var pending=new ContactMemberController(jdbc).get(501);
+        var pending=new ContactMemberQuery(jdbc).get(501);
         assertThat(pending.active()).isFalse();assertThat(pending.deletionPending()).isTrue();
         deletion.delete(501);
-        assertThat(new ContactMemberController(jdbc).get(501).active()).isFalse();
-        assertThat(new ContactMemberController(jdbc).get(501).deletionPending()).isFalse();
+        assertThat(new ContactMemberQuery(jdbc).get(501).active()).isFalse();
+        assertThat(new ContactMemberQuery(jdbc).get(501).deletionPending()).isFalse();
+    }
+
+    @Test void givenActivePendingAndMissingIds_whenBatchQueried_thenReturnMinimalStatusInRequestedOrder() {
+        var query = new ContactMemberQuery(jdbc);
+        assertThat(query.getAll(java.util.List.of(501L, 999999L, 501L)))
+                .containsExactly(new ContactMember(501L, "탈퇴검증", true, false), ContactMember.missing(999999));
+
+        jdbc.update("INSERT INTO pawbridge_user.contact_deletions(user_id) VALUES (501)");
+        assertThat(query.getAll(java.util.List.of(501L)))
+                .containsExactly(new ContactMember(501L, "탈퇴한 회원", false, true));
     }
 }

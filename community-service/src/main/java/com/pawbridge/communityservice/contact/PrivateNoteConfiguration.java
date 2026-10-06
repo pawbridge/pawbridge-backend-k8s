@@ -11,9 +11,19 @@ import org.springframework.scheduling.annotation.Scheduled;
 @Profile("postgresql")
 @EnableScheduling
 public class PrivateNoteConfiguration {
-    private final PrivateNoteService notes;
-    public PrivateNoteConfiguration(PrivateNoteService notes) { this.notes=notes; }
-    @Bean public static Clock privateNoteClock() {return Clock.systemUTC();}
-    @Scheduled(fixedDelay=300000,initialDelay=300000)
-    public void expireNotes() { notes.expire(); }
+    private final PrivateNoteService privateNoteService;
+
+    public PrivateNoteConfiguration(PrivateNoteService privateNoteService) {
+        this.privateNoteService = privateNoteService;
+    }
+
+    @Bean
+    public static Clock privateNoteClock() {
+        return Clock.systemUTC();
+    }
+
+    @Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
+    public void expireNotes() {
+        privateNoteService.expire();
+    }
 }
