@@ -96,6 +96,27 @@ spring:
             - JwtAuthorization
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
+        # Only the authenticated SSE connection bypasses the ordinary response timeout.
+        - id: community-private-notes-stream
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/notes/stream, /api/v1/notes/stream
+            - Method=GET
+          filters:
+            - RewritePath=/api/notes(?<segment>/?.*), /api/v1/notes${segment}
+            - JwtAuthorization
+          metadata:
+            response-timeout: -1
+
+        # Private notes: every REST method requires authentication.
+        - id: community-private-notes
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/notes, /api/notes/**, /api/v1/notes, /api/v1/notes/**
+          filters:
+            - RewritePath=/api/notes(?<segment>/?.*), /api/v1/notes${segment}
+            - JwtAuthorization
+
         # Community Service (JWT 필터 적용)
         # Community Service (JWT 필터 적용)
         - id: community-service

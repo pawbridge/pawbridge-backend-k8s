@@ -23,6 +23,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.ObjectProvider;
+import com.pawbridge.userservice.contact.ContactMemberDeletion;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -41,6 +43,7 @@ public class UserServiceImpl implements UserService {
     private final EmailVerificationService emailVerificationService;
     private final NicknameGeneratorService nicknameGeneratorService;
     private final AnimalServiceClient animalServiceClient;
+    private final ObjectProvider<ContactMemberDeletion> contactDeletion;
 
     @Override
     @Transactional
@@ -267,8 +270,12 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    @Transactional
     public void deleteUserById(Long userId) {
+        ContactMemberDeletion deletion=contactDeletion.getIfAvailable();
+        if(deletion!=null) {
+            deletion.delete(userId);
+            return;
+        }
         log.info("회원 삭제 (관리자): userId={}", userId);
 
         if (!userRepository.existsById(userId)) {

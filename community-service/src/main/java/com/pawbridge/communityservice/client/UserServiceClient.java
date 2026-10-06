@@ -17,4 +17,8 @@ public interface UserServiceClient {
      */
     @GetMapping("/api/v1/users/internal/{userId}/nickname")
     String getUserNickname(@PathVariable("userId") Long userId);
+
+    @GetMapping("/api/v1/users/internal/{userId}/contact")
+    com.pawbridge.communityservice.contact.PrivateNoteModels.ContactMember getContactMember(
+            @PathVariable("userId") Long userId);
 }

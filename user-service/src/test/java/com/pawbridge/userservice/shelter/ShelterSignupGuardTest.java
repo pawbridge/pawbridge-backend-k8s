@@ -17,7 +17,7 @@ class ShelterSignupGuardTest {
     final EmailVerificationService email = mock(EmailVerificationService.class);
     final AnimalServiceClient animals = mock(AnimalServiceClient.class);
     final UserServiceImpl service = new UserServiceImpl(users, mock(PasswordEncoder.class), email,
-            mock(NicknameGeneratorService.class), animals);
+            mock(NicknameGeneratorService.class), animals, mock(org.springframework.beans.factory.ObjectProvider.class));
     @Test void verifiedEmailCannotBypassApprovalThroughSignup() {
         when(email.isVerified("member@example.invalid")).thenReturn(true);
         for (Role role : new Role[]{Role.ROLE_USER, Role.ROLE_SHELTER}) {

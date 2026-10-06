@@ -21,7 +21,7 @@ class UserRollbackCharsetServiceTest {
     private final PasswordEncoder passwords = mock(PasswordEncoder.class);
     private final EmailVerificationService email = mock(EmailVerificationService.class);
     private final NicknameGeneratorService nicknames = mock(NicknameGeneratorService.class);
-    private final UserServiceImpl service = new UserServiceImpl(users, passwords, email, nicknames, mock(AnimalServiceClient.class));
+    private final UserServiceImpl service = new UserServiceImpl(users, passwords, email, nicknames, mock(AnimalServiceClient.class), mock(org.springframework.beans.factory.ObjectProvider.class));
     private final DataIntegrityViolationException failure = new DataIntegrityViolationException("charset",
             PostgresqlRollbackCharsetViolationTest.error("23514", "ck_rollback_charset_users", "pawbridge_user"));
 
