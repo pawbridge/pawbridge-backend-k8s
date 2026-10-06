@@ -18,7 +18,7 @@ class UserSignupPeriodsTest {
     void givenUtcTodayBeforeKoreanMidnight__whenGettingPeriods__thenUseKoreanTodayForEveryPeriod(
             LocalDate serverToday, LocalDate koreanToday) {
         var users = mock(UserRepository.class);
-        var service = new UserServiceImpl(users, null, null, null, null);
+        var service = new UserServiceImpl(users, null, null, null, null, mock(org.springframework.beans.factory.ObjectProvider.class));
         var kst = ZoneId.of("Asia/Seoul");
         when(users.countDailySignups(any(LocalDate.class), any(LocalDate.class)))
                 .thenReturn(List.of(new DailySignupStatsResponse(koreanToday, 7L)));

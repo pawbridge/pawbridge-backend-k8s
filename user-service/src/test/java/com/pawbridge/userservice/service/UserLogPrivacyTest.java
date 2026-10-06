@@ -29,7 +29,7 @@ class UserLogPrivacyTest {
     private final EmailVerificationService verification = mock(EmailVerificationService.class);
     private final NicknameGeneratorService nicknames = mock(NicknameGeneratorService.class);
     private final UserServiceImpl service = new UserServiceImpl(users, encoder, verification,
-            nicknames, mock(AnimalServiceClient.class));
+            nicknames, mock(AnimalServiceClient.class), mock(org.springframework.beans.factory.ObjectProvider.class));
     private final AuthServiceImpl auth = new AuthServiceImpl(mock(RefreshTokenRepository.class),
             users, mock(JwtProvider.class), encoder, verification);
     private static final String EMAIL = "private-person@example.test";

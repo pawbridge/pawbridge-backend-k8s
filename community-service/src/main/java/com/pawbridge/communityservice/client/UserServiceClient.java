@@ -1,8 +1,11 @@
 package com.pawbridge.communityservice.client;
 
+import com.pawbridge.communityservice.contact.PrivateNoteModels.ContactMember;
+import java.util.List;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  * User Service와 통신하는 Feign Client
@@ -17,4 +20,10 @@ public interface UserServiceClient {
      */
     @GetMapping("/api/v1/users/internal/{userId}/nickname")
     String getUserNickname(@PathVariable("userId") Long userId);
+
+    @GetMapping("/api/v1/users/internal/{userId}/contact")
+    ContactMember getContactMember(@PathVariable("userId") Long userId);
+
+    @GetMapping("/api/v1/users/internal/contacts")
+    List<ContactMember> getContactMembers(@RequestParam("ids") List<Long> userIds);
 }

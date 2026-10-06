@@ -111,6 +111,11 @@ public class JwtAuthorizationGatewayFilterFactory
             String path = request.getURI().getPath();
             String method = request.getMethod().name();
 
+            // Never expose service-to-service lifecycle/state APIs through user route wildcards.
+            if(path.startsWith("/api/v1/users/internal/") || path.startsWith("/api/users/internal/")) {
+                return onError(exchange,"유효하지 않은 엔드포인트입니다.",HttpStatus.NOT_FOUND);
+            }
+
             // 실제 CORS preflight 요청만 토큰 검증 없이 통과
             if (CorsUtils.isPreFlightRequest(request)) {
                 return chain.filter(exchange);
@@ -156,6 +161,10 @@ public class JwtAuthorizationGatewayFilterFactory
                         .header("X-User-Email", email)
                         .header("X-User-Name", name)
                         .header("X-User-Role", role);
+
+                if(path.equals("/api/v1/notes/stream")) {
+                    requestBuilder.header("X-Auth-Expires-At",String.valueOf(jwtUtil.getExpiresAtFromToken(token)));
+                }
 
                 // ROLE_SHELTER인 경우 careRegNo 헤더 추가
                 if ("ROLE_SHELTER".equals(role)) {

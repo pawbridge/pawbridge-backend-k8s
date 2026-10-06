@@ -30,6 +30,13 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionRestAdvice {
 
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<ResponseDTO<Void>> responseStatus(org.springframework.web.server.ResponseStatusException e) {
+        HttpStatus status=HttpStatus.valueOf(e.getStatusCode().value());
+        return ResponseEntity.status(status).body(ResponseDTO.errorWithMessage(status,
+                e.getReason()==null?"요청을 처리하지 못했습니다.":e.getReason()));
+    }
+
     @ExceptionHandler
     public ResponseEntity<ResponseDTO<Void>> applicationException(ApplicationException e) {
         log.error(e.getMessage(), e);
