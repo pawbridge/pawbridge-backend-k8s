@@ -10,6 +10,11 @@ import org.springframework.data.domain.Pageable;
  * 관리자용 주문 관리 서비스
  */
 public interface AdminOrderService {
+
+    /**
+     * 주문 상세 조회 (관리자용)
+     */
+    OrderResponse getOrder(Long orderId);
     
     /**
      * 전체 주문 목록 조회 (관리자용)

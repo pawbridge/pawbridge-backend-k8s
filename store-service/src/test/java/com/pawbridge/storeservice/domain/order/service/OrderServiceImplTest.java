@@ -19,7 +19,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -69,5 +71,31 @@ class OrderServiceImplTest {
         verify(outboxRepository).save(outboxCaptor.capture());
         assertEquals("order", outboxCaptor.getValue().getAggregateType());
         assertEquals("10", outboxCaptor.getValue().getAggregateId());
+    }
+
+    @Test
+    void givenOwnOrder__whenUserReadsDetail__thenReturnsOnlyRequestedOrderWithoutWriting() {
+        Order order = Order.builder().orderUuid("owned-order").userId(10L)
+                .totalAmount(10_000L).build();
+        ReflectionTestUtils.setField(order, "id", 42L);
+        when(orderRepository.findById(42L)).thenReturn(Optional.of(order));
+
+        var response = orderService.getOrder(42L, 10L);
+
+        assertEquals(42L, response.getOrderId());
+        assertEquals(10L, response.getUserId());
+        verify(orderRepository).findById(42L);
+        verifyNoMoreInteractions(orderRepository);
+    }
+
+    @Test
+    void givenAnotherUsersOrder__whenUserReadsDetail__thenOwnershipCheckStillRejectsAccess() {
+        Order order = Order.builder().orderUuid("another-users-order").userId(10L).build();
+        when(orderRepository.findById(42L)).thenReturn(Optional.of(order));
+
+        assertThrows(IllegalArgumentException.class, () -> orderService.getOrder(42L, 12L));
+
+        verify(orderRepository).findById(42L);
+        verifyNoMoreInteractions(orderRepository);
     }
 }
