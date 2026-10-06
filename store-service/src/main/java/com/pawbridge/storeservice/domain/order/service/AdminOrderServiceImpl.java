@@ -4,6 +4,7 @@ import com.pawbridge.storeservice.domain.order.dto.OrderResponse;
 import com.pawbridge.storeservice.domain.order.entity.DeliveryStatus;
 import com.pawbridge.storeservice.domain.order.entity.Order;
 import com.pawbridge.storeservice.domain.order.entity.OrderStatus;
+import com.pawbridge.storeservice.domain.order.exception.OrderNotFoundException;
 import com.pawbridge.storeservice.domain.order.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class AdminOrderServiceImpl implements AdminOrderService {
 
     private final OrderRepository orderRepository;
+
+    @Override
+    public OrderResponse getOrder(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        return OrderResponse.from(order);
+    }
 
     @Override
     public Page<OrderResponse> getAllOrders(
