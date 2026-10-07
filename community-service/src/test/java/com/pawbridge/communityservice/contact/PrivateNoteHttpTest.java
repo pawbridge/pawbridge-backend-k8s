@@ -28,6 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -163,6 +164,25 @@ class PrivateNoteHttpTest {
                 .andExpect(jsonPath("$.data.unreadCount").value(3));
 
         verify(service).notifications(7L, cursor);
+    }
+
+    @Test
+    void givenFullStreamCapacity_whenRequested_thenPreserveRetryAfterAndPrivateErrorBody() throws Exception {
+        Instant tokenExpiresAt = Instant.parse("2026-10-07T12:00:00Z");
+        HttpHeaders retryHeaders = new HttpHeaders();
+        retryHeaders.set("Retry-After", "15");
+        ResponseStatusException full = new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "알림 연결이 너무 많습니다.") {
+            @Override public HttpHeaders getHeaders() { return retryHeaders; }
+        };
+        when(privateNoteStream.open(7L, tokenExpiresAt)).thenThrow(full);
+
+        mvc.perform(get("/api/v1/notes/stream")
+                        .header("X-User-Id", "7")
+                        .header("X-Auth-Expires-At", tokenExpiresAt.toEpochMilli()))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "15"))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.message").value("알림 연결이 너무 많습니다."));
     }
 
     @Test

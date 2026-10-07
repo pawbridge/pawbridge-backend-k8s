@@ -24,6 +24,7 @@ public class PrivateNoteExceptionAdvice {
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<?> status(ResponseStatusException failure) {
         return ResponseEntity.status(failure.getStatusCode())
+                .headers(failure.getHeaders())
                 .body(Map.of("message", failure.getReason() == null ? "요청을 처리할 수 없습니다." : failure.getReason()));
     }
 
