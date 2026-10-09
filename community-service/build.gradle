@@ -77,7 +77,23 @@ dependencyManagement {
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform { excludeTags 'real-r2' }
+}
+
+// Never part of test/check: requires separate approval and explicitly supplied test credentials.
+tasks.register('r2ContractTest', Test) {
+	group = 'verification'
+	description = 'Opt-in real R2 check on a unique dev-only object prefix; requires separate approval.'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform { includeTags 'real-r2' }
+	maxHeapSize = '256m'
+	outputs.upToDateWhen { false }
+	doFirst {
+		if (System.getenv('PAWBRIDGE_R2_CONTRACT_APPROVED') != 'yes') {
+			throw new GradleException('Real R2 writes require separate approval before r2ContractTest.')
+		}
+	}
 }
 
 // The API artifact still excludes migrations; only the isolated application test loads them.
