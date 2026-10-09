@@ -1,0 +1,47 @@
+# Test-only overlay on the real PostgreSQL application profile.
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      schema: pawbridge_community
+      connection-init-sql: SET TIME ZONE 'UTC'
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: pawbridge_community
+  flyway:
+    enabled: false # The guarded fixture migrates before Hibernate validates the schema.
+  kafka:
+    bootstrap-servers: 127.0.0.1:1
+    listener:
+      auto-startup: false
+  cloud:
+    aws:
+      credentials:
+        access-key: isolated-test
+        secret-key: isolated-test
+      region:
+        static: us-east-1
+      s3:
+        endpoint: http://127.0.0.1:1
+        bucket: isolated-test
+service:
+  user:
+    url: http://127.0.0.1:1
+pawbridge:
+  search:
+    backend: postgresql
+    rebuild-enabled: false
+  storage:
+    public-base-url: https://images.invalid
+    object-prefix: dev/isolated-test
+    session-token: ""
+youtube:
+  api-key: ""
+management:
+  tracing:
+    enabled: false
+server:
+  address: 127.0.0.1
