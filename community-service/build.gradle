@@ -63,6 +63,10 @@ dependencies {
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.kafka:spring-kafka-test'
+	testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation 'org.testcontainers:postgresql'
+	testImplementation 'org.flywaydb:flyway-core'
+	testRuntimeOnly 'org.flywaydb:flyway-database-postgresql'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -74,6 +78,11 @@ dependencyManagement {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+// The API artifact still excludes migrations; only the isolated application test loads them.
+tasks.named('processTestResources') {
+	from('src/migration/resources') { include 'db/postgresql/**' }
 }
 
 // Schema tools remain outside the API application's startup and runtime classpath.
