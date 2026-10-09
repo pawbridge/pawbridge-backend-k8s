@@ -67,12 +67,77 @@ PRIVATE_NOTES_PG_TEST_PORT=<disposable-local-port> bash ./gradlew migrationPostg
 요구한다. 위 새 자동 앱 시험이나 쪽지 저장 시험과 같은 DB를 그대로 공유하지 않는다.
 영상 전용 실행은 [기존 영상 시험 절차](../migrationTest/java/com/pawbridge/communityservice/curation/README.md)를 따른다.
 
-## 검증 범위 밖
+## SDK와 로컬 저장소 연동
 
-S3 Mock 서버와 실제 R2의 업로드·삭제·서명·CORS는 이번 시험에 포함되지 않는다.
-기존 `S3ServiceImplTest`와 `R2CredentialsConfigTest`는 SDK Mock/모의 HTTP 경계의
-별도 단위 계약을 계속 검사한다. 실제 R2 연동은 개발 전용 객체 경로에서 별도 검증한다.
-운영 배포·운영 최소 검증도 이 절차와 별도다.
+`S3StorageIntegrationTest`는 Testcontainers로 새 S3Mock을 실행한다. 정식 5.1.0 이미지의
+digest를 소스에 고정했으며 Java 17·Spring Boot·AWS SDK·Testcontainers 버전은 바꾸지 않는다.
+컨테이너는 512MiB·CPU 1개로 제한하고 HTTP 포트는 loopback에만 임의 배정한다.
+호스트 디렉터리나 기존 볼륨을 마운트하지 않으며 시험 종료 후 컨테이너를 제거한다.
+처음 실행할 때 Docker 이미지를 다운로드한다. Docker가 없으면 실패하며 자동 skip하지 않는다.
+
+```bash
+bash ./gradlew test --tests '*S3StorageIntegrationTest' --tests '*R2ContractGuardTest' \
+  --tests '*R2CredentialsConfigTest'
+```
+
+시험은 실제 `R2CredentialsConfig`·Spring Cloud AWS 자동 구성·`S3ServiceImpl`을 조립한다.
+저장소 SDK나 HTTP transport를 Mock으로 바꾸지 않는다. 앱 전체·DB·회원 서비스·배치는
+기동하지 않는다. 시험 설정은 프로세스 환경 변수보다 우선하며 합성 자격 증명만 사용한다.
+
+- 제보 사진의 실제 업로드·읽기·바이트와 MIME/길이 확인·삭제 후 404를 검사한다.
+- 게시글 이미지와 영상의 경로·바이트·MIME·삭제를 검사한다. 영상은 합성 바이트로
+  전송 계약만 확인하며 디코딩·재생·브라우저 업로드 성공을 의미하지 않는다.
+- 첫 제보 사진을 실제 저장한 뒤 두 번째 파일의 허용되지 않는 MIME으로 실패를
+  유발한다. 실제 삭제를 통해 첫 객체가 남지 않는지 확인한다. SDK 장애를 재현한 시험은 아니다.
+- 동일한 합성 버킷에 둔 운영 경로 모양의 객체·다른 개발 경로·다른 공개 URL의 객체가
+  삭제 요청 이후에도 남는지 확인한다. 실제 운영 파일을 시험하지 않는다.
+
+기존 `S3ServiceImplTest`와 `R2CredentialsConfigTest`의 Mock/모의 transport 단위 계약도
+유지한다. 로컬 S3Mock은 실제 R2 인증·권한·서명 검증의 증거가 아니다.
+S3Mock은 서명 URL을 받아도 서명·만료·HTTP 메서드를 검증하지 않는다.
+[S3Mock 정식 버전의 한계](https://github.com/adobe/S3Mock/blob/5.1.0/README.md#important-limitations)를 따른다.
+
+## 실제 R2 계약 시험 — 별도 승인 후에만 실행
+
+`r2ContractTest`는 실행 준비용이며 일반 `test`와 `check`에 포함되지 않는다.
+Gradle 실행 단계와 시험 코드가 각각 명시적인 승인을 요구한다. 승인 플래그는 실제
+사용자 승인을 대신하지 않는다. 실행 전에 현재 버킷·endpoint·권한과 아래 쓰기 범위를
+확인해 별도 승인을 받는다. 기본 테스트 성공을 실제 R2 시험 성공으로 기록하지 않는다.
+
+시험 대상은 기존 `pawbridge-public-images` 버킷이다. 새 버킷이나 버킷 설정을 만들지 않는다.
+코드의 승인 endpoint와 `R2_CONTRACT_ENDPOINT`가 정확히 같아야 한다.
+매번 새 UUID를 만든 `dev/contract-tests/<UUID>/reports/images/` 아래에 합성 PNG
+1개(68바이트)를 저장·읽기·삭제하고 삭제 후 404를 확인한다.
+개발 경로는 공개 버킷 안의 논리적 구분이며 그 자체가 IAM 권한 분리는 아니다.
+실제 사진·글·DB·계정·Secret·CORS·공개 도메인 설정은 변경하지 않는다.
+
+실행 전 다음 값을 **해당 실행 프로세스 환경에만** 공급한다. `.env` 자동 로딩이나
+기본 자격 증명 탐색을 사용하지 않는다. 값은 채팅·명령 이력·PR·로그에 넣지 않는다.
+
+| 환경 변수 | 용도 |
+| --- | --- |
+| `PAWBRIDGE_R2_CONTRACT_APPROVED` | 별도 승인 후에만 `yes` |
+| `R2_CONTRACT_ENDPOINT` | 시험 코드의 승인 endpoint와 같은 값 |
+| `R2_CONTRACT_BUCKET` | `pawbridge-public-images` |
+| `R2_CONTRACT_ACCESS_KEY_ID` | 승인한 시험용 Access Key ID |
+| `R2_CONTRACT_SECRET_ACCESS_KEY` | 승인한 시험용 Secret Access Key |
+| `R2_CONTRACT_SESSION_TOKEN` | 임시 자격 증명이 있을 때만 설정, 없으면 미설정 |
+
+```bash
+# 별도 승인과 안전한 환경 변수 공급이 끝난 뒤에만 실행한다.
+bash ./gradlew r2ContractTest --no-daemon --console=plain
+```
+
+시험은 전체 버킷을 조회하거나 비우지 않는다. PUT의 응답을 잃어 객체가 남았을 때에도
+정리 조회는 해당 UUID 경로에만 제한한다. 예상 밖의 여러 객체나 다른 키가 있으면
+삭제하지 않고 실패한다. 정리도 실패하면 원래 오류와 정리 오류를 함께 보존한다.
+이 경우 출력된 개발 경로만 확인해 수동 복구 범위를 승인받으며 다른 경로로 확대하지 않는다.
+
+현재 업로드는 서버가 R2로 전송하는 방식이다. 브라우저 직접 업로드용 서명 URL·CORS나
+공개 이미지 CDN 제공·Gateway 인증·프론트 E2E를 이 계약 시험의 통과로 주장하지 않는다.
+실제 R2가 서명을 검증하는지는 별도 실행 결과를 확인해야 한다.
+[Cloudflare R2 서명 URL 설명](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)도 참고한다.
+운영 배포·운영 최소 검증은 이 절차와 별도다.
 
 테스트가 종료되면 이번에 만든 시험 컨테이너만 정리한다. 기존 Compose 서비스·
 이미지·볼륨은 보존하며 전체 Docker 정리 명령은 사용하지 않는다.
