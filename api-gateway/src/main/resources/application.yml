@@ -96,6 +96,23 @@ spring:
             - JwtAuthorization
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
+        # WebSocket handshake has no Bearer header; Community consumes a single-use STOMP ticket.
+        - id: community-member-chat-socket
+          uri: ${COMMUNITY_CHAT_WEBSOCKET_URL:ws://community-service:8082}
+          predicates:
+            - Path=/api/chats/socket, /api/v1/chats/socket
+            - Method=GET
+          filters:
+            - RewritePath=/api/chats/socket, /api/v1/chats/socket
+
+        - id: community-member-chat-rest
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/chats, /api/chats/**, /api/v1/chats, /api/v1/chats/**
+          filters:
+            - RewritePath=/api/chats(?<segment>/?.*), /api/v1/chats${segment}
+            - JwtAuthorization
+
         # Only the authenticated SSE connection bypasses the ordinary response timeout.
         - id: community-private-notes-stream
           uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}

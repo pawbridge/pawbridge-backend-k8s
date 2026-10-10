@@ -16,27 +16,29 @@ import java.util.concurrent.atomic.AtomicReference;
 class PrivateNoteAuthorizationTest {
     final JwtUtil jwt=mock(JwtUtil.class);
     final JwtAuthorizationGatewayFilterFactory filter=new JwtAuthorizationGatewayFilterFactory(jwt);
-    @ParameterizedTest @ValueSource(strings={"/api/v1/notes","/api/v1/notes/notifications","/api/v1/notes/stream","/api/v1/notes/blocks"})
+    @ParameterizedTest @ValueSource(strings={"/api/v1/notes","/api/v1/notes/notifications","/api/v1/notes/stream","/api/v1/notes/blocks",
+            "/api/v1/chats", "/api/v1/chats/notifications", "/api/v1/chats/connection-ticket"})
     void givenAnonymousRequest_whenMailboxAccess_thenUnauthorized(String path) {
         var request=MockServerWebExchange.from(MockServerHttpRequest.get(path));
         filter.apply(new JwtAuthorizationGatewayFilterFactory.Config()).filter(request,e -> {throw new AssertionError("must not forward");}).block();
         assertThat(request.getResponse().getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
-    @Test void givenForgedIdentityAndExpiry_whenAuthenticatedStream_thenOverwriteWithJwtClaims() {
+    @ParameterizedTest @ValueSource(strings={"/api/v1/notes/stream", "/api/v1/chats/connection-ticket"})
+    void givenForgedIdentityAndExpiry_whenAuthenticatedConnection_thenOverwriteWithJwtClaims(String path) {
         when(jwt.validateAccessToken("synthetic-token")).thenReturn(true);
         when(jwt.getUserIdFromToken("synthetic-token")).thenReturn(7L);
         when(jwt.getRoleFromToken("synthetic-token")).thenReturn("ROLE_USER");
         when(jwt.getEmailFromToken("synthetic-token")).thenReturn("synthetic@example.invalid");
         when(jwt.getNameFromToken("synthetic-token")).thenReturn("합성 사용자");
         when(jwt.getExpiresAtFromToken("synthetic-token")).thenReturn(123456789L);
-        var request=MockServerWebExchange.from(streamRequest());
+        var request=MockServerWebExchange.from(connectionRequest(path));
         var forwarded=new AtomicReference<ServerWebExchange>();
         filter.apply(new JwtAuthorizationGatewayFilterFactory.Config()).filter(request,e -> {forwarded.set(e);return Mono.empty();}).block();
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-User-Id")).isEqualTo("7");
         assertThat(forwarded.get().getRequest().getHeaders().getFirst("X-Auth-Expires-At")).isEqualTo("123456789");
     }
-    private org.springframework.mock.http.server.reactive.MockServerHttpRequest streamRequest() {
-        return MockServerHttpRequest.get("/api/v1/notes/stream").header("Authorization","Bearer synthetic-token")
+    private org.springframework.mock.http.server.reactive.MockServerHttpRequest connectionRequest(String path) {
+        return MockServerHttpRequest.post(path).header("Authorization","Bearer synthetic-token")
                 .header("X-User-Id","999").header("X-Auth-Expires-At","9999999999999").build();
     }
     @ParameterizedTest @ValueSource(strings={"/api/v1/users/internal/7/contact","/api/users/internal/7/contact",

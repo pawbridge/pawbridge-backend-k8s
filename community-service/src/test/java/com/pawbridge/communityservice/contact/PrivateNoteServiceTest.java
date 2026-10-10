@@ -22,7 +22,8 @@ class PrivateNoteServiceTest {
     Instant now=Instant.parse("2026-10-06T05:00:00Z");
     PrivateNoteService service;
     @BeforeEach void setUp() {
-        service=new PrivateNoteService(repository,users,stream,Clock.fixed(now,ZoneOffset.UTC),new TestTransactions());
+        service=new PrivateNoteService(repository,users,stream,Clock.fixed(now,ZoneOffset.UTC),new TestTransactions(),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         when(users.getContactMember(1L)).thenReturn(new ContactMember(1L,"보낸이",true,false));
         when(users.getContactMember(2L)).thenReturn(new ContactMember(2L,"받는이",true,false));
         when(repository.request(anyLong(),any())).thenReturn(Optional.empty());

@@ -162,7 +162,7 @@ public class JwtAuthorizationGatewayFilterFactory
                         .header("X-User-Name", name)
                         .header("X-User-Role", role);
 
-                if(path.equals("/api/v1/notes/stream")) {
+                if(path.equals("/api/v1/notes/stream") || path.equals("/api/v1/chats/connection-ticket")) {
                     requestBuilder.header("X-Auth-Expires-At",String.valueOf(jwtUtil.getExpiresAtFromToken(token)));
                 }
 
