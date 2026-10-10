@@ -2,23 +2,55 @@ spring:
   application:
     name: community-service
 
-  profiles:
-    active: local
-
   data:
     redis:
       connect-timeout: 2s
       timeout: 2s
 
-  # DataSource 설정
+  # Community uses PostgreSQL in every environment; credentials remain externally supplied.
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/pawbridge_community}
-    username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${COMMUNITY_POSTGRESQL_JDBC_URL}
+    username: ${COMMUNITY_POSTGRESQL_USERNAME}
+    password: ${COMMUNITY_POSTGRESQL_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      schema: pawbridge_community
+      connection-init-sql: SET TIME ZONE 'UTC'
+      maximum-pool-size: ${COMMUNITY_POSTGRESQL_POOL_MAX:5}
+      minimum-idle: ${COMMUNITY_POSTGRESQL_POOL_MIN:0}
+      connection-timeout: 5000
+      validation-timeout: 1000
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: pawbridge_community
+        jdbc.time_zone: UTC
+
+  sql:
+    init:
+      mode: never
+
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.elasticsearch.ReactiveElasticsearchClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ReactiveElasticsearchRepositoriesAutoConfiguration
 
   # S3-compatible object storage (Cloudflare R2)
   cloud:
+    openfeign:
+      client:
+        config:
+          user-service:
+            connectTimeout: 2000
+            readTimeout: 3000
     aws:
       credentials:
         access-key: ${R2_ACCESS_KEY_ID}
@@ -74,6 +106,9 @@ server:
   port: 8082
 
 pawbridge:
+  search:
+    backend: postgresql
+    rebuild-enabled: ${SEARCH_REBUILD_ENABLED:false}
   chat:
     enabled: ${MEMBER_CHAT_ENABLED:false}
     namespace: ${MEMBER_CHAT_NAMESPACE:}
@@ -82,3 +117,6 @@ pawbridge:
     public-base-url: ${R2_PUBLIC_BASE_URL:https://images.pawbridge.kr}
     object-prefix: ${R2_OBJECT_PREFIX:}
     session-token: ${R2_SESSION_TOKEN:}
+
+youtube:
+  api-key: ${YOUTUBE_DATA_API_KEY:}

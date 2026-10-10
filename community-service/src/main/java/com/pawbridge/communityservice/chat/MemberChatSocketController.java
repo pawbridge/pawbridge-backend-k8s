@@ -5,7 +5,6 @@ import static com.pawbridge.communityservice.chat.MemberChatModels.*;
 import java.security.Principal;
 import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Profile;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.MessageExceptionHandler;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -18,7 +17,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.server.ResponseStatusException;
 
 @Controller
-@Profile("postgresql")
 @ConditionalOnProperty(name = "pawbridge.chat.enabled", havingValue = "true")
 public class MemberChatSocketController {
     private final MemberChatService service;

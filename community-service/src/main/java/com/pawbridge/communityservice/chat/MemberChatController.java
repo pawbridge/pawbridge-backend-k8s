@@ -5,11 +5,9 @@ import static com.pawbridge.communityservice.chat.MemberChatModels.*;
 import com.pawbridge.communityservice.util.ResponseDTO;
 import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@Profile("postgresql")
 @ConditionalOnProperty(name = "pawbridge.chat.enabled", havingValue = "true")
 @RequestMapping("/api/v1/chats")
 public class MemberChatController {

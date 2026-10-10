@@ -17,7 +17,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -31,7 +30,6 @@ import static org.mockito.Mockito.when;
 /** Full application and real HTTP; only remote storage/user lookup are replaced. */
 @Tag("postgresql-http")
 @EnabledIfEnvironmentVariable(named="PG_HTTP_TEST_PORT",matches="[0-9]{1,5}")
-@ActiveProfiles("postgresql")
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={
         "spring.flyway.enabled=false","spring.kafka.bootstrap-servers=127.0.0.1:1",
         "spring.kafka.listener.auto-startup=false","management.tracing.enabled=false",

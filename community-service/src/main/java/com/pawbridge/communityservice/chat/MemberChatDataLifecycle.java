@@ -2,7 +2,6 @@ package com.pawbridge.communityservice.chat;
 
 import com.pawbridge.communityservice.chat.MemberChatModels.Withdrawn;
 import java.time.Clock;
-import org.springframework.context.annotation.Profile;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,7 +10,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Retention and withdrawal do not stop when the chat UI/transport feature flag is disabled. */
 @Component
-@Profile("postgresql")
 public class MemberChatDataLifecycle {
     private final MemberChatRepository repository;
     private final Clock clock;

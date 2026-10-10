@@ -19,7 +19,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongFunction;
 import java.util.function.BooleanSupplier;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -27,7 +26,6 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Component
-@Profile("postgresql")
 public class PrivateNoteStream {
     private static final long MAX_CONNECTION_LIFETIME_MILLIS = 300_000;
     private static final int MAX_CONNECTIONS_PER_MEMBER = 3;

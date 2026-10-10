@@ -29,7 +29,6 @@ import java.util.Objects;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -39,7 +38,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
-@Profile("postgresql")
 public class PrivateNoteService {
     private static final Logger log = LoggerFactory.getLogger(PrivateNoteService.class);
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");

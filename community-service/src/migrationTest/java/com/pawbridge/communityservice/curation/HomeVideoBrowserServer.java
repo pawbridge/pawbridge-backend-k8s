@@ -59,7 +59,7 @@ public class HomeVideoBrowserServer {
         provider.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> provider.stop(0)));
         new SpringApplication(HomeVideoBrowserServer.class).run(
-                "--spring.profiles.active=postgresql", "--server.address=127.0.0.1", "--server.port=28282",
+                "--server.address=127.0.0.1", "--server.port=28282",
                 "--spring.main.banner-mode=off");
     }
     @Bean DataSource source() {return source;}

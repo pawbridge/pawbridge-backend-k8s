@@ -4,12 +4,10 @@ import static com.pawbridge.communityservice.curation.HomeVideoModels.*;
 import java.sql.*;
 import java.time.Instant;
 import java.util.*;
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-@Profile("postgresql")
 public class HomeVideoRepository {
     private final JdbcTemplate jdbc;
     public HomeVideoRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }

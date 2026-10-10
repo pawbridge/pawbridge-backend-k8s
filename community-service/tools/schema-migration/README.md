@@ -1,131 +1,95 @@
-# Community 스키마 도구 실행
+# Community PostgreSQL 스키마 검증과 적용
 
-## 검증 실행 기준
+Java 17과 Community의 Gradle Wrapper를 사용한다. 아래 명령의 작업 폴더는
+`community-service`다. API 기동은 스키마를 변경하지 않으며 Hibernate는
+`pawbridge_community`를 `validate`한다.
 
-| 명령 | 실행 시점 | 범위 |
-| --- | --- | --- |
-| `migrationTest` | 일반 `check`에 포함 | 우리 실행 도구의 입력·대상·안전 설정, 15개 |
-| `migrationMysqlTest` | SQL·매핑·실행 도구 변경 시 격리 DB에서 명시 실행 | 실제 V1/JPA 일치, SQL 누락·기존 DB 자동 편입 거절, 3개 |
-| `migrationRehearsal` | 초기 편입 또는 baseline 절차 변경 시 명시 실행 | 기존 행을 보존하는 baseline 리허설, 1개 |
+## 앱 설정을 공급한다
 
-`migrationRehearsal`은 `check`와 `migrationMysqlTest`에 포함되지 않는다. 같은 전용 DB 준비와 서비스별 `*_MIGRATION_TEST_PORT`가 필요하다.
-이미지 패키징·백업 복원 시험은 인프라 저장소의 수동 리허설이며 일반 빌드에 연결하지 않는다.
-Flyway 자체의 체크섬·중복 실행을 반복 검증하던 테스트 2개와 전용 fixture를 제거했다. 아래 초기 검증 기록의 21개는 정리 이전 결과다.
+앱은 별도 DB 프로필 없이 PostgreSQL을 사용한다. 다음 값은 실행 환경에서 공급한다.
+비밀번호를 명령 인자, 저장소, 로그에 적지 않는다.
 
-2026-09-11 정리 후 세 명령을 각각 재실행해 단위 15개·SQL 검증 3개·편입 리허설 1개가 실패와 건너뛰기 없이 통과했다. 운영 변경과 전체 애플리케이션 회귀 테스트는 실행하지 않았다.
+- `COMMUNITY_POSTGRESQL_JDBC_URL`: PostgreSQL JDBC URL
+- `COMMUNITY_POSTGRESQL_USERNAME`: Community 앱 계정
+- `COMMUNITY_POSTGRESQL_PASSWORD`: 앱 계정 비밀번호
+- `COMMUNITY_POSTGRESQL_POOL_MAX`: 기본 5
+- `COMMUNITY_POSTGRESQL_POOL_MIN`: 기본 0
 
-명령은 Java 17에서 `community-service` 디렉터리를 기준으로 실행한다.
+Hikari는 스키마 `pawbridge_community`와 UTC 세션을 사용한다. Hibernate의
+DDL 생성과 SQL 자동 초기화는 사용하지 않는다. 채팅은 DB 프로필과 무관하며
+`MEMBER_CHAT_ENABLED` 설정으로 별도 활성화한다.
 
-## 현재 범위
-
-V1은 2026-09-11 운영 MySQL 8.4.12의 `pawbridge_community` 테이블 4개를 읽기 전용으로 확인해 작성했다. 뷰·트리거·루틴·이벤트는 없었다. 운영 행과 자동증가 카운터는 포함하지 않는다. 기존 문자셋과 제약조건을 보존한다.
-
-SQL·실행 파일·이력 테이블은 이 서비스 소유다. API 시작 시 실행하지 않으며 Hibernate 설정도 아직 바꾸지 않는다. 운영 baseline·계정 권한·배포 Job은 별도 승인 후 연결한다.
-
-## 빌드와 조회
+## 독립 실행 도구를 빌드한다
 
 ```bash
-bash ./gradlew --no-daemon migrationTest migrationDistribution bootJar
-java -cp 'build/migration/lib/*' com.pawbridge.communityservice.migration.CommunitySchemaMigration info
+bash ./gradlew migrationTest migrationDistribution bootJar
 ```
 
-다음 환경변수를 승인된 환경에서 주입한다. 운영 비밀번호를 명령 인자나 파일에 적지 않는다.
+API JAR은 마이그레이션 SQL과 Flyway 도구를 포함하지 않는다.
+`build/migration/lib`에는 `CommunityPostgresqlMigration`과 필요한 라이브러리가
+있다. SQL은 `src/migration/resources/db/postgresql`에 둔다.
+이미 적용한 SQL 파일은 수정하지 않고 후속 버전을 추가한다.
 
-- `COMMUNITY_MIGRATION_JDBC_URL`: `jdbc:mysql://<host>:<port>/pawbridge_community`
-- `COMMUNITY_MIGRATION_USERNAME`: 이 스키마 전용 계정
-- `COMMUNITY_MIGRATION_PASSWORD`: 계정 비밀번호
-- `COMMUNITY_MIGRATION_CONFIRM_TARGET`: 변경 승인 후에만 JDBC URL과 같은 값
+## 승인한 로컬 대상의 이력을 조회한다
 
-`schemaInspect`는 테이블 DDL만 읽는다. `schemaInfo`는 이력을 조회한다. `schemaValidate`는 이력과 SQL 파일을 비교하며 실제 DDL 일치 검사가 아니다. `schemaMigrate`는 명시적 대상 확인 값이 있어야 실행한다.
+현재 독립 실행 도구는 루프백의 `pawbridge` DB만 허용한다.
+이 도구를 운영 실행기로 오인하거나 원격 URL 제한을 우회하지 않는다.
+운영 마이그레이션은 인프라의 승인된 실행 경로와 별도 배포 승인을 따른다.
 
-자동 baseline, clean, repair, undo와 다른 스키마 접속은 제공하지 않는다. URL에는 단일 호스트와 명시적 포트만 허용한다. TLS 추가 옵션이 필요한 환경은 먼저 설정 계약을 확장한다. 원문 예외 대신 종류만 출력한다.
+아래 값은 앱 계정 설정과 구분하여 실행 환경에 공급한다.
 
-## 격리 MySQL 검증
-
-운영 DB나 운영 포트포워딩을 연결하지 않는다. 전용 컨테이너에 빈 `pawbridge_community`를 만든다. 테스트 root 비밀번호는 `local_flyway_test_only`다. 실제 계정에 사용하지 않는다.
-
-```sql
-CREATE DATABASE IF NOT EXISTS flyway_test_guard;
-CREATE TABLE flyway_test_guard.community_guard (marker VARCHAR(64) NOT NULL);
-INSERT INTO flyway_test_guard.community_guard VALUES ('community-flyway-disposable');
-```
-
-`COMMUNITY_MIGRATION_TEST_PORT`에 전용 로컬 포트를 지정한다. Java 컨테이너가 전용 MySQL 컨테이너의 네트워크를 공유하면 3306이다.
+- `COMMUNITY_PG_MIGRATION_JDBC_URL`: `jdbc:postgresql://127.0.0.1:<port>/pawbridge`
+- `COMMUNITY_PG_MIGRATION_USERNAME`: 승인된 스키마 적용 계정
+- `COMMUNITY_PG_MIGRATION_PASSWORD`: 적용 계정 비밀번호
 
 ```bash
-bash ./gradlew --no-daemon migrationMysqlTest
+bash ./gradlew schemaPostgresqlInfo schemaPostgresqlValidate
+java -cp 'build/migration/lib/*' com.pawbridge.communityservice.migration.CommunityPostgresqlMigration info
 ```
 
-보호 마커 확인 후 이 서비스의 고정 테이블 목록과 테스트 테이블·이력만 초기화한다. 다른 MS 테이블은 초기화하지 않는다. V1 생성, JPA 엔티티 4개 호환성, SQL 누락과 기존 스키마 거절을 검증한다. 기존 행 보존 baseline 시험은 `migrationRehearsal`로 따로 실행한다.
+`info`는 적용 이력을 조회한다. `validate`는 이력과 SQL 체크섬을 비교하며
+실제 데이터 이관이나 모든 테이블의 DDL 일치를 증명하지 않는다.
 
-## 검증 기록 — 2026-09-11
+## 스키마 적용은 별도 승인 후 실행한다
 
-Java 17과 격리 MySQL 8.4.12에서 단위 테스트 15개, MySQL 통합 테스트 6개가 실패·건너뛰기 없이 통과했다.
-API `bootJar`와 `migrationDistribution` 생성도 통과했다. API JAR에는 Flyway 도구·라이브러리가 없고, migration JAR에는 해당 서비스 V1만 있으며 테스트 fixture는 없음을 확인했다.
-전체 애플리케이션 회귀 테스트와 운영 baseline·권한 변경·배포는 수행하지 않았다.
+변경 전 백업과 복구 경로를 확인한다. 앱 이미지가 요구하는 SQL 버전과 테이블·
+시퀀스 권한을 먼저 적용한 뒤 새 앱을 배포한다. 현재 채팅 앱은 V10까지 필요하다.
 
-## 운영 전환 조건
-
-1. 최신 운영 DDL과 V1의 차이를 확인하고 복구 가능한 백업을 검증한다.
-2. 기존 DB의 V1 baseline 대상과 명령을 별도 승인받는다. 이 도구는 baseline 명령을 노출하지 않는다.
-3. 전용 마이그레이션 계정과 배포 전 Job을 연결한다. 실패하면 새 애플리케이션 배포를 막는다.
-4. 서비스 전환 시 Hibernate를 `validate`로 통일한다. 기존 `update` 실행과 마이그레이션이 경쟁하지 않도록 순서를 정한다.
-5. 운영 변경 승인 후에만 migrate를 실행한다. MySQL DDL 실패 시 자동 롤백을 가정하지 않는다.
-
-
-## PostgreSQL 전환 검증 (운영 전환 전)
-
-`application-postgresql.yml`은 `COMMUNITY_POSTGRESQL_JDBC_URL`,
-`COMMUNITY_POSTGRESQL_USERNAME`, `COMMUNITY_POSTGRESQL_PASSWORD`를 명시한 경우에만 사용한다.
-기존 기본 MySQL 프로필은 유지한다. Hikari는 서비스별 풀(기본 최대 5, 최소 0),
-스키마 `pawbridge_community`, Hibernate `validate`, OSIV 비활성화를 사용한다.
-이 수치는 테스트 출발점이며 전체 파드 수를 반영한 운영 연결 예산이 아니다.
-
-PostgreSQL SQL은 `src/migration/resources/db/postgresql`에 분리하고,
-API 시작 시 자동 실행하지 않는다. 로컬 리허설 runner는
-`COMMUNITY_PG_MIGRATION_JDBC_URL`, `COMMUNITY_PG_MIGRATION_USERNAME`,
-`COMMUNITY_PG_MIGRATION_PASSWORD`를 사용한다.
-URL은 `jdbc:postgresql://127.0.0.1:<port>/pawbridge` 형식의 루프백 대상만 허용한다.
-DB 관리자가 빈 `pawbridge_community` 스키마를 먼저 준비해야 하며,
-`schemaPostgresqlMigrate`에는 URL과 정확히 같은 `COMMUNITY_PG_MIGRATION_CONFIRM_TARGET`이 필요하다.
-`schemaPostgresqlInfo`, `schemaPostgresqlValidate`도 제공한다.
-데이터 적재·운영 계정·CDC·운영 접속 URL 확장은 별도 전환 작업이다.
-
-### 전용 동물 제보 V4 배포 선행조건
-
-`V4__animal_reports.sql`은 `posts`와 연결되지 않는 독립 `animal_reports` 테이블과
-제보 종류·작성 시각 조회 인덱스를 추가한다. `report_id`가 제보의 기본키이고
-`author_id`는 작성자 식별값이다. 기존 `posts` 행은 변경하거나 삭제하지 않는다.
-기존 `MISSING`/`REPORT` 게시글은 새 `/api/reports` 목록으로 이관되지 않는다.
-`postgresql` 프로필은 Hibernate
-`validate`이므로 **V4 적용과 `pawbridge_community_app`의 새 테이블 SELECT/INSERT/UPDATE
-권한 확인 전에 새 Community 이미지를 배포하면 기동이 실패할 수 있다.**
-현재 인프라 차트의 `schemaMigration` Job은 MySQL 전용이며 기본 비활성이다.
-그 Job을 PostgreSQL V4에 그대로 사용하지 않는다. 검증된 PostgreSQL 전용 migration
-실행 경로와 변경 전 백업, 실패 시 앱 이미지 롤백 경로를 별도로 승인받아야 한다.
-테이블에 저장된 새 제보가 생긴 뒤에는 V4를 무조건 되돌리지 않는다.
-
-실제 DB 검증은 `COMMUNITY_PG_MIGRATION_TEST_PORT`와 전용 DB가 필요하다.
-`migration_test_guard.guard`에 `services-pg-disposable` 단일 행이 있어야만
-테스트가 자기 스키마를 재생성한다. **운영 DB에 이 표식을 만들지 않는다.**
-다른 서비스 스키마나 운영 자원은 테스트 대상으로 지정하지 않는다.
+DB 관리자가 대상 스키마를 먼저 준비해야 한다. 적용 승인을 받은 뒤에만
+`COMMUNITY_PG_MIGRATION_CONFIRM_TARGET`을 위 JDBC URL과 정확히 같은 값으로 공급한다.
 
 ```bash
-bash ./gradlew migrationTest migrationPostgresqlTest bootJar migrationDistribution
+bash ./gradlew schemaPostgresqlMigrate schemaPostgresqlValidate
 ```
 
-전용 제보의 HTTP 리허설은 위 테스트가 V4까지 적용한 **같은 일회용 DB**를 사용한다.
-`migration_test_guard.guard`의 단일 값을 `http-rehearsal`로 바꾼 뒤
-`PG_HTTP_TEST_PORT`에 해당 로컬 포트를 지정하고
-`bash ./gradlew migrationPostgresqlHttpTest`를 실행한다.
-이 테스트는 실제 Spring HTTP와 PostgreSQL을 사용하지만 사용자 조회와 R2 저장소는 모의 객체로 대체한다.
-운영 DB나 다른 프로젝트의 PostgreSQL 컨테이너에 보호 표식을 만들지 않는다.
+이 도구는 `clean`, `repair`, `undo`, 자동 baseline과 스키마 자동 생성을
+제공하지 않는다. SQL 적용 실패 시 새 앱 배포를 중단한다.
+새 데이터가 생긴 테이블을 삭제하여 롤백하지 않는다.
 
-MySQL 이력·DDL을 덮어쓰지 않는다. 기존 ID를 적재한 뒤에는 모든 identity sequence를
-현재 최대 ID 다음으로 정렬하고 신규 INSERT를 검증해야 한다. 현재 테스트는 빈 target의
-DDL·실제 JPA 저장/조회/롤백 검증이며 전체 운영 데이터 이관 완료를 뜻하지 않는다.
-문자열 정렬·동등 비교가 MySQL collation과 완전히 같다는 보장도 없으므로 실제 데이터로
-대소문자·악센트·공백과 고유키 충돌을 이관 전 점검한다.
+## 폐기 가능한 DB에서 회귀를 검증한다
 
-이 프로필은 관계형 DB 연결의 리허설용이다. 현재 ES 검색 어댑터와 관련 소비자/스케줄러는
-아직 교체 전이므로, 이 프로필만으로 ES 제거가 완료되지는 않는다.
+앱 기동·쪽지 HTTP/SSE·로컬 저장소 검증은
+[Community 테스트 실행](../../src/test/README.md)을 따른다.
+Testcontainers 시험은 직접 생성한 DB만 사용한다.
+
+기존 옵트인 저장 시험은 별도의 폐기 가능한 루프백 `pawbridge` DB가 필요하다.
+`migration_test_guard.guard`에 `services-pg-disposable`이 정확히 한 행 있어야 한다.
+이 시험은 표식 확인 후 자기 서비스의 스키마 또는 시험 데이터를 초기화한다.
+**운영이나 공유 개발 DB에 표식을 추가하여 실행하지 않는다.**
+
+```bash
+COMMUNITY_PG_MIGRATION_TEST_PORT=<disposable-local-port> bash ./gradlew migrationPostgresqlTest \
+  --tests '*CommunityPostgresqlPersistenceTest'
+PRIVATE_NOTES_PG_TEST_PORT=<disposable-local-port> bash ./gradlew migrationPostgresqlTest \
+  --tests '*PrivateNotePostgresqlTest'
+MEMBER_CHAT_PG_TEST_PORT=<disposable-local-port> bash ./gradlew migrationPostgresqlTest \
+  --tests '*MemberChatPostgresqlTest'
+```
+
+`migrationPostgresqlHttpTest`에는 별도 표식 `http-rehearsal`, 미리 적용한
+SQL과 `PG_HTTP_TEST_PORT`가 필요하다. 공유 DB의 표식을 바꾸어 실행하지 않는다.
+영상 시험은 [영상 저장·브라우저 연결 검증](../../src/migrationTest/java/com/pawbridge/communityservice/curation/README.md)을 따른다.
+
+옛 MySQL 실행 도구·SQL·시험·명령은 퇴역했다. 변경 전 자산은 Git 이력으로
+보존되며 PostgreSQL 적용 SQL과 운영 DB를 삭제하는 작업이 아니다.
+전환 결정과 당시 검증 기록은 Obsidian `Projects/pawbridge`에서 관리한다.

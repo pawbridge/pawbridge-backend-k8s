@@ -5,13 +5,11 @@ import com.pawbridge.communityservice.util.ResponseDTO;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
-@Profile("postgresql")
 public class HomeVideoController {
     private final HomeVideoService service;
     public HomeVideoController(HomeVideoService service) { this.service = service; }

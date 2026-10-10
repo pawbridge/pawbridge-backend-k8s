@@ -1,4 +1,4 @@
-# Test-only overlay on the real PostgreSQL application profile.
+# Test-only overlay on the PostgreSQL base application configuration.
 spring:
   datasource:
     driver-class-name: org.postgresql.Driver
