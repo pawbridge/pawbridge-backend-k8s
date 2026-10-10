@@ -15,8 +15,6 @@ configurations {
 dependencies {
     // Versions follow this service's Spring Boot BOM (3.4.11: Flyway 10.20.1).
     migrationImplementation 'org.flywaydb:flyway-core'
-    migrationRuntimeOnly 'org.flywaydb:flyway-mysql'
-    migrationRuntimeOnly 'com.mysql:mysql-connector-j'
     migrationRuntimeOnly 'org.flywaydb:flyway-database-postgresql'
     migrationRuntimeOnly 'org.postgresql:postgresql'
     migrationTestImplementation 'org.springframework.boot:spring-boot-starter-test'
@@ -28,49 +26,17 @@ tasks.register('migrationTest', Test) {
     group = 'verification'
     testClassesDirs = sourceSets.migrationTest.output.classesDirs
     classpath = sourceSets.migrationTest.runtimeClasspath
-    useJUnitPlatform { excludeTags 'mysql', 'postgresql', 'postgresql-http' }
-}
-
-tasks.register('migrationMysqlTest', Test) {
-    description = 'Checks the runner against an explicitly supplied disposable local MySQL.'
-    group = 'verification'
-    testClassesDirs = sourceSets.migrationTest.output.classesDirs
-    classpath = sourceSets.migrationTest.runtimeClasspath
-    useJUnitPlatform {
-        includeTags 'mysql'
-        excludeTags 'rehearsal'
-    }
-    outputs.upToDateWhen { false }
-}
-
-tasks.register('migrationRehearsal', Test) {
-    description = 'Opt-in existing-schema adoption drill; not part of check or migrationMysqlTest.'
-    group = 'verification'
-    testClassesDirs = sourceSets.migrationTest.output.classesDirs
-    classpath = sourceSets.migrationTest.runtimeClasspath
-    useJUnitPlatform { includeTags 'rehearsal' }
-    outputs.upToDateWhen { false }
+    useJUnitPlatform { excludeTags 'postgresql', 'postgresql-http' }
 }
 
 tasks.named('check') { dependsOn tasks.named('migrationTest') }
-
-['inspect', 'info', 'validate', 'migrate'].each { command ->
-    tasks.register("schema${command.capitalize()}", JavaExec) {
-        group = 'database'
-        description = "Runs community schema ${command} without starting Spring Boot."
-        classpath = sourceSets.migration.runtimeClasspath
-        mainClass = 'com.pawbridge.communityservice.migration.CommunitySchemaMigration'
-        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
-        args command
-    }
-}
 
 tasks.register('migrationJar', Jar) {
     archiveClassifier = 'migration'
     // The API Dockerfile copies build/libs/*.jar. Never put this tool there.
     destinationDirectory = layout.buildDirectory.dir('migration-artifacts')
     from sourceSets.migration.output
-    manifest { attributes 'Main-Class': 'com.pawbridge.communityservice.migration.CommunitySchemaMigration' }
+    manifest { attributes 'Main-Class': 'com.pawbridge.communityservice.migration.CommunityPostgresqlMigration' }
 }
 
 tasks.register('migrationDistribution', Sync) {

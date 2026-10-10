@@ -11,12 +11,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.LongStream;
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-@Profile("postgresql")
 public class PrivateNoteRepository {
     private static final int CLEANUP_BATCH_SIZE = 300;
     private static final String MAILBOX_JOIN = """

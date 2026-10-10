@@ -49,13 +49,13 @@ class CommunityPostgresqlPersistenceTest {
             statement.execute("CREATE SCHEMA pawbridge_community");
         }
         CommunityPostgresqlMigration.execute("migrate",settings);
-        // Bind the real opt-in YAML, so misspelled environment keys or driver/schema settings fail here.
+        // Bind the real base YAML, so misspelled environment keys or driver/schema settings fail here.
         org.springframework.core.env.StandardEnvironment environmentProperties = new org.springframework.core.env.StandardEnvironment();
         environmentProperties.getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("test-target",Map.of(
                 "COMMUNITY_POSTGRESQL_JDBC_URL",url,"COMMUNITY_POSTGRESQL_USERNAME",settings.username(),
                 "COMMUNITY_POSTGRESQL_PASSWORD",settings.password(),"COMMUNITY_POSTGRESQL_POOL_MAX","2")));
         for (org.springframework.core.env.PropertySource<?> propertySource : new org.springframework.boot.env.YamlPropertySourceLoader()
-                .load("postgresql",new org.springframework.core.io.ClassPathResource("application-postgresql.yml"))) {
+                .load("application",new org.springframework.core.io.ClassPathResource("application.yml"))) {
             environmentProperties.getPropertySources().addLast(propertySource);
         }
         org.springframework.boot.context.properties.bind.Binder binder = org.springframework.boot.context.properties.bind.Binder.get(environmentProperties);

@@ -4,7 +4,6 @@ import static com.pawbridge.communityservice.curation.HomeVideoModels.*;
 import java.time.*;
 import java.util.*;
 import java.util.function.Supplier;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -12,7 +11,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
-@Profile("postgresql")
 public class HomeVideoService {
     private final HomeVideoRepository repository;
     private final YouTubeVideoClient youtube;

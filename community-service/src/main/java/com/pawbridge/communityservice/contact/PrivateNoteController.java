@@ -11,7 +11,6 @@ import com.pawbridge.communityservice.contact.PrivateNoteModels.SendNote;
 import com.pawbridge.communityservice.util.ResponseDTO;
 import java.time.Instant;
 import java.util.UUID;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,7 +26,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
-@Profile("postgresql")
 @RequestMapping("/api/v1/notes")
 public class PrivateNoteController {
 

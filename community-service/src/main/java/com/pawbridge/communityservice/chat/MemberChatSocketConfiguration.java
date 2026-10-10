@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
@@ -25,7 +24,6 @@ import org.springframework.web.socket.config.annotation.*;
 import org.springframework.web.socket.handler.WebSocketHandlerDecorator;
 
 @Configuration
-@Profile("postgresql")
 @ConditionalOnProperty(name = "pawbridge.chat.enabled", havingValue = "true")
 @EnableWebSocketMessageBroker
 public class MemberChatSocketConfiguration implements WebSocketMessageBrokerConfigurer {

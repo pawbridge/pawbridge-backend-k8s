@@ -12,11 +12,11 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Sync Scheduler: MySQL → Elasticsearch 동기화
+ * Sync Scheduler: 관계형 DB → Elasticsearch 동기화 (기존 ES 어댑터)
  *
  * 목적: Kafka 실패 시 누락된 문서 복구
  * - 매일 새벽 2시 실행
- * - MySQL의 모든 게시글을 Elasticsearch와 비교
+ * - 관계형 DB의 모든 게시글을 Elasticsearch와 비교
  * - 누락된 문서 재인덱싱
  *
  * 참고: Eventual Consistency 보장
@@ -31,11 +31,11 @@ public class SyncScheduler {
     private final ElasticsearchOperations elasticsearchOperations;
 
     /**
-     * 매일 새벽 2시: MySQL → Elasticsearch 동기화
+     * 매일 새벽 2시: 관계형 DB → Elasticsearch 동기화
      */
     @Scheduled(cron = "0 0 2 * * ?")
     public void syncPostsToElasticsearch() {
-        log.info("🔄 Starting MySQL → Elasticsearch sync");
+        log.info("🔄 Starting relational DB → Elasticsearch sync");
 
         List<Post> posts = postRepository.findByDeletedAtIsNullOrderByCreatedAtDesc();
         int synced = 0;

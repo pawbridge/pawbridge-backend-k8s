@@ -29,7 +29,8 @@ jobs:
       SPRING_PROFILES_ACTIVE: ci
     services:
       mysql:
-        image: mysql:8.0
+        # Community owns its PostgreSQL test container; other service jobs keep their existing fixture.
+        image: ${{ inputs.service != 'community-service' && 'mysql:8.0' || '' }}
         env:
           MYSQL_DATABASE: pawbridge_ci
           MYSQL_USER: pawbridge_ci

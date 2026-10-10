@@ -26,9 +26,10 @@ Windows에서는 Java 17을 `JAVA_HOME`으로 설정하고 같은 인자로 `gra
   org.gradle.wrapper.GradleWrapperMain test migrationTest --no-daemon --console=plain
 ```
 
-앱 시험은 실제 `postgresql` 프로필에 테스트 전용 `isolated-test` 설정을 덧씌운다.
+앱 시험은 PostgreSQL 기본 설정에 테스트 전용 `isolated-test` 설정을 덧씌운다.
+별도 `postgresql` 프로필 없이 쪽지 Controller가 등록되고 앱이 기동하는지도 검증한다.
 외부에서 전달한 JDBC URL을 쓰지 않고 새 컨테이너의 주소만 등록한다. DB 소유 표식
-`community-application-disposable`을 먼저 확인하고 실제 V1~V9 마이그레이션을 적용한 뒤
+`community-application-disposable`을 먼저 확인하고 실제 V1~V10 마이그레이션을 적용한 뒤
 Hibernate의 `validate`로 기동한다. 마이그레이션 파일과 Flyway·Testcontainers는
 시험 classpath에만 추가되며 운영 JAR에는 포함되지 않는다.
 동적 시험 설정은 프로세스 환경 변수보다 우선한다. `SPRING_DATASOURCE_URL`이나
@@ -46,8 +47,9 @@ Hibernate의 `validate`로 기동한다. 마이그레이션 파일과 Flyway·Te
 - SSE 헤더는 서비스 시험이 직접 지정한다. Gateway의 JWT 인증이나 프론트 브라우저를
   포함한 E2E 시험은 아니다. Stream 자체의 heartbeat와 연결 종료는 유지한다.
 
-기존 `ci` 프로필의 MySQL·Elasticsearch 설정과 공유 CI workflow는 변경하지 않는다.
-이 앱 시험의 명시적 프로필은 `ci` 환경 변수와 별개로 PostgreSQL 경로를 선택한다.
+`ci` 설정에도 MySQL 연결이나 Hibernate `create-drop`을 두지 않는다.
+공유 이미지 workflow는 Community에만 MySQL 서비스 컨테이너를 시작하지 않는다.
+실제 PostgreSQL은 위 앱 시험이 소유한 컨테이너를 사용하며 다른 서비스 CI는 유지한다.
 다른 DB 옵트인 시험이 skip되면 전체 보고서에 skip 수와 이유를 함께 기록한다.
 
 ## 기존 PostgreSQL 저장·잠금 시험

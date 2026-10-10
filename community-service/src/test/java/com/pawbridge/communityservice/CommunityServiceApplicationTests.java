@@ -66,7 +66,7 @@ import org.testcontainers.utility.DockerImageName;
 
 /** Full application/HTTP and real PostgreSQL. Remote storage and user lookup are doubles. */
 @Testcontainers
-@ActiveProfiles({"postgresql", "isolated-test"})
+@ActiveProfiles("isolated-test")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class CommunityServiceApplicationTests {
@@ -134,10 +134,12 @@ class CommunityServiceApplicationTests {
 
     @Test
     void contextLoads() {
-        assertThat(context.getEnvironment().getActiveProfiles()).contains("postgresql", "isolated-test");
+        assertThat(context.getEnvironment().getActiveProfiles()).containsExactly("isolated-test");
+        assertThat(context.getEnvironment().getProperty("spring.datasource.driver-class-name"))
+                .isEqualTo("org.postgresql.Driver");
         assertThat(context.getBean(PrivateNoteController.class)).isNotNull();
         assertThat(jdbc.queryForObject("SELECT max(version::integer) FROM flyway_schema_history "
-                + "WHERE success AND version IS NOT NULL", Integer.class)).isGreaterThanOrEqualTo(9);
+                + "WHERE success AND version IS NOT NULL", Integer.class)).isGreaterThanOrEqualTo(10);
         assertThat(context.getBeansOfType(ElasticsearchConfig.class)).isEmpty();
         assertThat(context.getBean(KafkaListenerEndpointRegistry.class).getListenerContainers()).isEmpty();
         assertThat(mockingDetails(context.getBean(TaskScheduler.class)).isMock()).isTrue();

@@ -39,7 +39,7 @@ public class SearchServiceImpl implements SearchService {
      * 검색 로직:
      * 1. Elasticsearch에서 title 또는 content에 keyword 포함된 문서 검색
      * 2. postId 목록 추출
-     * 3. MySQL에서 실제 데이터 조회 (최신 데이터 보장)
+     * 3. 관계형 DB에서 실제 데이터 조회 (최신 데이터 보장)
      *
      * nori 분석기 적용:
      * - 한국어 형태소 분석으로 부분 검색 가능
@@ -77,7 +77,7 @@ public class SearchServiceImpl implements SearchService {
             return List.of();
         }
 
-        // MySQL에서 실제 데이터 조회 (삭제되지 않은 것만)
+        // 관계형 DB에서 실제 데이터 조회 (삭제되지 않은 것만)
         return postRepository.findAllById(postIds).stream()
                 .filter(post -> post.getDeletedAt() == null)
                 .map(post -> {

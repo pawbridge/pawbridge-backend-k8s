@@ -1,11 +1,9 @@
 package com.pawbridge.communityservice.curation;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("postgresql")
 public class HomeVideoRefresh {
     private final HomeVideoService service;
     public HomeVideoRefresh(HomeVideoService service) { this.service = service; }
