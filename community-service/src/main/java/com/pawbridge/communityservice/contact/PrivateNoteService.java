@@ -1,6 +1,8 @@
 package com.pawbridge.communityservice.contact;
 
 import com.pawbridge.communityservice.client.UserServiceClient;
+import com.pawbridge.communityservice.chat.MemberChatModels.Withdrawn;
+import org.springframework.context.ApplicationEventPublisher;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.BlockPage;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.BlockView;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.ContactMember;
@@ -49,19 +51,22 @@ public class PrivateNoteService {
     private final PrivateNoteStream privateNoteStream;
     private final Clock clock;
     private final TransactionTemplate transactions;
+    private final ApplicationEventPublisher events;
 
     public PrivateNoteService(
             PrivateNoteRepository privateNoteRepository,
             UserServiceClient userServiceClient,
             PrivateNoteStream privateNoteStream,
             Clock clock,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            ApplicationEventPublisher events) {
         this.privateNoteRepository = privateNoteRepository;
         this.userServiceClient = userServiceClient;
         this.privateNoteStream = privateNoteStream;
         this.clock = clock;
         this.transactions = new TransactionTemplate(transactionManager);
         this.transactions.setTimeout(15);
+        this.events = events;
     }
 
     public Receipt send(long currentUserId, SendNote request) {
@@ -222,6 +227,7 @@ public class PrivateNoteService {
                 throw error(HttpStatus.CONFLICT, "회원 삭제 준비 상태가 아닙니다.");
             }
             privateNoteRepository.withdraw(userId);
+            events.publishEvent(new Withdrawn(userId));
             afterCommit(() -> {
                 privateNoteStream.close(userId);
                 privateNoteStream.resyncAll();

@@ -16,7 +16,8 @@ public class PrivateNoteHttpBoundary extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return !path.equals("/api/v1/notes") && !path.startsWith("/api/v1/notes/");
+        return !path.equals("/api/v1/notes") && !path.startsWith("/api/v1/notes/")
+                && !path.equals("/api/v1/chats") && !path.startsWith("/api/v1/chats/");
     }
 
     @Override

@@ -17,7 +17,8 @@ import org.slf4j.LoggerFactory;
 
 /** SQL exception text can contain private message values; never log it here. */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = {PrivateNoteController.class, PrivateNoteDeletionController.class})
+@RestControllerAdvice(assignableTypes = {PrivateNoteController.class, PrivateNoteDeletionController.class,
+        com.pawbridge.communityservice.chat.MemberChatController.class})
 public class PrivateNoteExceptionAdvice {
     private static final Logger log = LoggerFactory.getLogger(PrivateNoteExceptionAdvice.class);
 

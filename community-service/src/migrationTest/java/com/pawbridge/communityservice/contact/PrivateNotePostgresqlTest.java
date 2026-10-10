@@ -52,7 +52,8 @@ class PrivateNotePostgresqlTest {
             List<Long> ids = call.getArgument(0);
             return ids.stream().map(id -> new ContactMember(id, "테스트 회원", true, false)).toList();
         });
-        service=new PrivateNoteService(repository,users,stream,Clock.fixed(NOW,ZoneOffset.UTC),manager);
+        service=new PrivateNoteService(repository,users,stream,Clock.fixed(NOW,ZoneOffset.UTC),manager,
+                mock(org.springframework.context.ApplicationEventPublisher.class));
     }
     SendNote draft(long recipient) { return new SendNote(recipient,"합성 테스트 본문",UUID.randomUUID(),null,null,null); }
     long rows(String table) {return jdbc.queryForObject("SELECT count(*) FROM pawbridge_community."+table,Long.class);}
@@ -136,12 +137,14 @@ class PrivateNotePostgresqlTest {
     @Test void givenOneHundredSendsOnKstDay_whenNextSendOrNewDay_thenDailyLimitResetsOnlyAtKstMidnight() {
         Instant start=Instant.parse("2026-10-06T13:00:00Z");
         for(int i=0;i<100;i++) {
-            var at=new PrivateNoteService(repository,users,stream,Clock.fixed(start.plusSeconds(i*61L),ZoneOffset.UTC),manager);
+            var at=new PrivateNoteService(repository,users,stream,Clock.fixed(start.plusSeconds(i*61L),ZoneOffset.UTC),manager,
+                    mock(org.springframework.context.ApplicationEventPublisher.class));
             at.send(1,draft(2));
         }
         assertThatThrownBy(() -> service.send(1,draft(2))).isInstanceOf(ResponseStatusException.class)
                 .satisfies(e -> assertThat(((ResponseStatusException)e).getStatusCode().value()).isEqualTo(429));
-        var nextDay=new PrivateNoteService(repository,users,stream,Clock.fixed(Instant.parse("2026-10-06T15:00:00Z"),ZoneOffset.UTC),manager);
+        var nextDay=new PrivateNoteService(repository,users,stream,Clock.fixed(Instant.parse("2026-10-06T15:00:00Z"),ZoneOffset.UTC),manager,
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         assertThat(nextDay.send(1,draft(2)).noteId()).isNotNull();
         assertThat(rows("private_notes")).isEqualTo(101);
     }
