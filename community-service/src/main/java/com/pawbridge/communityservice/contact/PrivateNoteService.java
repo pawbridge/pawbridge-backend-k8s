@@ -4,6 +4,7 @@ import com.pawbridge.communityservice.client.UserServiceClient;
 import com.pawbridge.communityservice.chat.MemberChatModels.Withdrawn;
 import org.springframework.context.ApplicationEventPublisher;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.BlockPage;
+import com.pawbridge.communityservice.contact.PrivateNoteModels.BlockedAuthors;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.BlockView;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.ContactMember;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.Note;
@@ -205,6 +206,15 @@ public class PrivateNoteService {
                 .map(block -> new BlockView(block.id(), display(block.id(), members).nickname(), block.createdAt()))
                 .toList();
         return new BlockPage(content, count, totalPages(count), page);
+    }
+
+    public BlockedAuthors blockedAuthors(long currentUserId, List<Long> memberIds) {
+        if (memberIds == null || memberIds.isEmpty() || memberIds.size() > 100
+                || memberIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw error(HttpStatus.BAD_REQUEST, "작성자 식별자는 1~100개의 양수여야 합니다.");
+        }
+        active(currentUserId);
+        return new BlockedAuthors(privateNoteRepository.blockedAuthors(currentUserId, memberIds.stream().distinct().toList()));
     }
 
     public ContactMember recipient(long currentUserId, long recipientId) {

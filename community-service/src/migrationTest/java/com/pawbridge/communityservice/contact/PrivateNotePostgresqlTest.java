@@ -58,6 +58,20 @@ class PrivateNotePostgresqlTest {
     SendNote draft(long recipient) { return new SendNote(recipient,"합성 테스트 본문",UUID.randomUUID(),null,null,null); }
     long rows(String table) {return jdbc.queryForObject("SELECT count(*) FROM pawbridge_community."+table,Long.class);}
 
+    @Test void givenMoreThanOneBlockPage_whenDisplayedAuthorsQueried_thenFindOwnBlocksWithoutReverseLeakOrWrites() {
+        for (long id = 2; id <= 13; id++) service.block(1, id);
+        service.block(20, 1);
+        List<Map<String, Object>> before = jdbc.queryForList("SELECT * FROM pawbridge_community.private_note_blocks ORDER BY member_id, blocked_id");
+
+        assertThat(service.blocks(1, 0).content()).noneMatch(block -> block.memberId() == 2L);
+        assertThat(service.blockedAuthors(1, List.of(2L, 13L, 20L, 99L)).memberIds()).containsExactly(2L, 13L);
+        assertThat(service.blockedAuthors(2, List.of(1L, 13L)).memberIds()).isEmpty();
+        assertThat(jdbc.queryForList("SELECT * FROM pawbridge_community.private_note_blocks ORDER BY member_id, blocked_id")).isEqualTo(before);
+
+        service.unblock(1, 2);
+        assertThat(service.blockedAuthors(1, List.of(2L, 13L)).memberIds()).containsExactly(13L);
+    }
+
     @Test void givenMigratedPrivateNoteSchema_whenForeignKeyCleanupIndexesChecked_thenReplyAndBlockedMemberIndexed() {
         assertThat(jdbc.queryForList("SELECT indexname FROM pg_indexes WHERE schemaname='pawbridge_community'", String.class))
                 .contains("idx_private_note_reply_to", "idx_private_note_blocked_member");

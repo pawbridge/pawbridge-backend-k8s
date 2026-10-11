@@ -1,6 +1,7 @@
 package com.pawbridge.communityservice.contact;
 
 import com.pawbridge.communityservice.contact.PrivateNoteModels.BlockPage;
+import com.pawbridge.communityservice.contact.PrivateNoteModels.BlockedAuthors;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.ContactMember;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.Favorite;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.NotePage;
@@ -10,6 +11,7 @@ import com.pawbridge.communityservice.contact.PrivateNoteModels.Receipt;
 import com.pawbridge.communityservice.contact.PrivateNoteModels.SendNote;
 import com.pawbridge.communityservice.util.ResponseDTO;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -87,6 +89,13 @@ public class PrivateNoteController {
             @RequestHeader("X-User-Id") long currentUserId,
             @RequestParam(defaultValue = "0") int page) {
         return ResponseDTO.okWithData(privateNoteService.blocks(currentUserId, page));
+    }
+
+    @GetMapping("/blocks/status")
+    public ResponseDTO<BlockedAuthors> blockedAuthors(
+            @RequestHeader("X-User-Id") long currentUserId,
+            @RequestParam List<Long> memberIds) {
+        return ResponseDTO.okWithData(privateNoteService.blockedAuthors(currentUserId, memberIds));
     }
 
     @PutMapping("/blocks/{member}")

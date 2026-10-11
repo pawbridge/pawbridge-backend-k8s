@@ -29,6 +29,31 @@ class PrivateNoteServiceTest {
         when(repository.request(anyLong(),any())).thenReturn(Optional.empty());
     }
     private SendNote input() {return new SendNote(2L,"안녕하세요",UUID.randomUUID(),null,null,null);}
+    @Test void givenDisplayedAuthors_whenBlockStatusQueried_thenReadOnlyOwnDirectionalBlocks() {
+        when(repository.blockedAuthors(1, List.of(2L, 3L))).thenReturn(List.of(2L));
+
+        assertThat(service.blockedAuthors(1, List.of(2L, 3L, 2L)).memberIds()).containsExactly(2L);
+
+        verify(users).getContactMember(1L);
+        verifyNoMoreInteractions(users);
+        verify(repository).blockedAuthors(1, List.of(2L, 3L));
+        verifyNoMoreInteractions(repository);
+        verifyNoInteractions(stream);
+    }
+    @Test void givenInvalidBlockStatusBatch_whenQueried_thenRejectBeforeStorage() {
+        for (List<Long> ids : List.of(List.<Long>of(), List.of(0L), List.of(-1L), java.util.Collections.nCopies(101, 2L), java.util.Arrays.asList(2L, null))) {
+            assertThatThrownBy(() -> service.blockedAuthors(1, ids))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode().value()).isEqualTo(400));
+        }
+        assertThatThrownBy(() -> service.blockedAuthors(1, null)).isInstanceOf(ResponseStatusException.class);
+        verifyNoInteractions(repository, users, stream);
+    }
+    @Test void givenOneHundredAuthors_whenBlockStatusQueried_thenAcceptBoundary() {
+        List<Long> ids = java.util.stream.LongStream.rangeClosed(2, 101).boxed().toList();
+        when(repository.blockedAuthors(1, ids)).thenReturn(List.of(101L));
+        assertThat(service.blockedAuthors(1, ids).memberIds()).containsExactly(101L);
+    }
     @Test void givenValidNote_whenSend_thenStoreAndEmitOnlyAfterCommit() {
         var input=input();
         Receipt receipt=service.send(1,input);
