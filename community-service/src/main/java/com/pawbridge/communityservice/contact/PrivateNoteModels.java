@@ -37,6 +37,9 @@ public final class PrivateNoteModels {
 
     public record BlockPage(List<BlockView> content, long totalElements, int totalPages, int number) {}
 
+    /** Only the current member's outgoing blocks among the displayed authors. */
+    public record BlockedAuthors(List<Long> memberIds) {}
+
     public record Favorite(boolean favorite) {}
 
     public record Receipt(UUID noteId) {}

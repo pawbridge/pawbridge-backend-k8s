@@ -217,6 +217,19 @@ public class PrivateNoteRepository {
                 """, Long.class, ownerId);
     }
 
+    public List<Long> blockedAuthors(long ownerId, List<Long> memberIds) {
+        String placeholders = String.join(",", Collections.nCopies(memberIds.size(), "?"));
+        Object[] parameters = new Object[memberIds.size() + 1];
+        parameters[0] = ownerId;
+        for (int index = 0; index < memberIds.size(); index++) {
+            parameters[index + 1] = memberIds.get(index);
+        }
+        return jdbc.query("""
+                SELECT blocked_id FROM pawbridge_community.private_note_blocks
+                WHERE member_id = ? AND blocked_id IN (%s) ORDER BY blocked_id
+                """.formatted(placeholders), (row, number) -> row.getLong("blocked_id"), parameters);
+    }
+
     public void withdraw(long userId) {
         // Lock originals before requests, matching mailbox deletion's lock order.
         List<UUID> affectedNotes = jdbc.query("""

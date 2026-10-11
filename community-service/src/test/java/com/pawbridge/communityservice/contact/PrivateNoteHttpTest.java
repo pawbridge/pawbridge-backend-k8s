@@ -130,6 +130,25 @@ class PrivateNoteHttpTest {
     }
 
     @Test
+    void givenDisplayedAuthors_whenStatusRequested_thenBindCurrentMemberAndAvoidCaching() throws Exception {
+        when(service.blockedAuthors(7, List.of(8L, 9L)))
+                .thenReturn(new PrivateNoteModels.BlockedAuthors(List.of(8L)));
+        mvc.perform(get("/api/v1/notes/blocks/status").header("X-User-Id", "7").param("memberIds", "8,9"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.data.memberIds[0]").value(8));
+        verify(service).blockedAuthors(7, List.of(8L, 9L));
+    }
+
+    @Test
+    void givenMissingIdentityOrInvalidAuthorParameter_whenStatusRequested_thenRejectBeforeService() throws Exception {
+        mvc.perform(get("/api/v1/notes/blocks/status").param("memberIds", "8")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/notes/blocks/status").header("X-User-Id", "7")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/notes/blocks/status").header("X-User-Id", "7").param("memberIds", "invalid")).andExpect(status().isBadRequest());
+        verifyNoInteractions(service);
+    }
+
+    @Test
     void givenNoteId_whenGettingReadingFavoritingOrDeleting_thenBindExistingIdPath() throws Exception {
         UUID noteId = UUID.randomUUID();
         String notePath = "/api/v1/notes/" + noteId;
