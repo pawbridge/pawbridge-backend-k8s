@@ -26,6 +26,12 @@ public class MemberChatController {
         return ResponseDTO.okWithData(service.room(owner, room));
     }
 
+    @GetMapping("/with/{member}")
+    public ResponseDTO<ExistingRoom> existingRoom(@RequestHeader("X-User-Id") long owner,
+                                                @PathVariable("member") long counterpartId) {
+        return ResponseDTO.okWithData(service.existingRoom(owner, counterpartId));
+    }
+
     @GetMapping
     public ResponseDTO<RoomPage> rooms(@RequestHeader("X-User-Id") long owner,
                                        @RequestParam(required = false) UUID cursor) {

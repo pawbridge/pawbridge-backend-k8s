@@ -89,6 +89,15 @@ public class MemberChatService {
         });
     }
 
+    public ExistingRoom existingRoom(long owner, long counterpartId) {
+        active(owner);
+        if (counterpartId <= 0 || counterpartId == owner) {
+            throw error(HttpStatus.BAD_REQUEST, "대화 상대를 확인해 주세요.");
+        }
+        // Looking up a peer never creates a room or changes its hidden/read state.
+        return new ExistingRoom(repository.existingRoom(owner, counterpartId).orElse(null));
+    }
+
     public RoomPage rooms(long owner, UUID cursor) {
         active(owner);
         List<MemberChatRepository.Summary> found = repository.rooms(owner, cursor, false, clock.instant());

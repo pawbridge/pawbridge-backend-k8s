@@ -62,6 +62,18 @@ public class MemberChatRepository {
         return room;
     }
 
+    public Optional<UUID> existingRoom(long owner, long counterpartId) {
+        return jdbc.query("""
+                SELECT r.room_id FROM pawbridge_community.member_chat_rooms r
+                JOIN pawbridge_community.member_chat_room_members owner
+                  ON owner.room_id=r.room_id AND owner.member_id=?
+                JOIN pawbridge_community.member_chat_room_members counterpart
+                  ON counterpart.room_id=r.room_id AND counterpart.member_id=?
+                WHERE r.first_member_id=? AND r.second_member_id=?
+                """, (row, n) -> row.getObject("room_id", UUID.class), owner, counterpartId,
+                Math.min(owner, counterpartId), Math.max(owner, counterpartId)).stream().findFirst();
+    }
+
     public Optional<Membership> membership(long memberId, UUID roomId) {
         return jdbc.query("""
                 SELECT r.*, a.read_through, a.hidden_through, b.member_id AS counterpart_id,
