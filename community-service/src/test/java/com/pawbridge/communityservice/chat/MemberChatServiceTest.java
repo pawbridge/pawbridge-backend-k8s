@@ -105,6 +105,30 @@ class MemberChatServiceTest {
         verifyNoInteractions(repository, contact, users, signals);
     }
 
+    @Test void givenExistingPeer_whenLookup_thenReturnRoomWithoutWritingOrSignalling() {
+        when(repository.existingRoom(1, 2)).thenReturn(Optional.of(room));
+        assertThat(service.existingRoom(1, 2).roomId()).isEqualTo(room);
+        verify(repository).existingRoom(1, 2);
+        verifyNoMoreInteractions(repository);
+        verifyNoInteractions(contact, signals);
+    }
+
+    @Test void givenNewPeer_whenLookup_thenReturnEmptyWithoutCreatingRoom() {
+        when(repository.existingRoom(1, 2)).thenReturn(Optional.empty());
+        assertThat(service.existingRoom(1, 2).roomId()).isNull();
+        verify(repository).existingRoom(1, 2);
+        verifyNoMoreInteractions(repository);
+        verifyNoInteractions(contact, signals);
+    }
+
+    @Test void givenSelfOrInvalidPeer_whenLookup_thenRejectBeforeStorage() {
+        for (long peer : new long[] {1, 0, -1}) {
+            assertThatThrownBy(() -> service.existingRoom(1, peer)).isInstanceOf(ResponseStatusException.class)
+                    .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode().value()).isEqualTo(400));
+        }
+        verifyNoInteractions(repository, contact, signals);
+    }
+
     private static class Transactions extends AbstractPlatformTransactionManager {
         @Override protected Object doGetTransaction() { return new Object(); }
         @Override protected void doBegin(Object transaction, TransactionDefinition definition) {}

@@ -112,6 +112,38 @@ class MemberChatPostgresqlTest {
         assertThat(service.notifications(2, null).unreadCount()).isEqualTo(1);
     }
 
+    @Test void givenHiddenExistingRoom_whenPeerLookup_thenReturnSameRoomWithoutStateChanges() {
+        UUID room = service.send(1, draft(2)).roomId();
+        service.hide(2, room);
+        var before = repository.membership(2, room).orElseThrow();
+        assertThat(service.existingRoom(2, 1).roomId()).isEqualTo(room);
+        assertThat(service.existingRoom(1, 2).roomId()).isEqualTo(room);
+        assertThat(service.existingRoom(3, 1).roomId()).isNull();
+        assertThat(service.messages(2, room, null, null).content()).hasSize(1);
+        assertThat(repository.membership(2, room).orElseThrow()).isEqualTo(before);
+        assertThat(service.rooms(2, null).content()).isEmpty();
+        assertThat(rows("member_chat_rooms")).isEqualTo(1);
+        assertThat(rows("member_chat_messages")).isEqualTo(1);
+        assertThat(rows("member_chat_requests")).isEqualTo(1);
+    }
+
+    @Test void givenNoPriorRoom_whenPeerLookup_thenDoNotCreateAnyChatData() {
+        assertThat(service.existingRoom(1, 2).roomId()).isNull();
+        assertThat(rows("member_chat_rooms")).isZero();
+        assertThat(rows("member_chat_room_members")).isZero();
+        assertThat(rows("member_chat_messages")).isZero();
+        assertThat(rows("member_chat_requests")).isZero();
+    }
+
+    @Test void givenBlockedExistingPair_whenPeerLookup_thenKeepHistoryButDenySending() {
+        UUID room = service.send(1, draft(2)).roomId();
+        contact.block(2, 1, NOW);
+        assertThat(service.existingRoom(2, 1).roomId()).isEqualTo(room);
+        assertThat(service.room(2, room).canSend()).isFalse();
+        assertThat(service.messages(2, room, null, null).content()).hasSize(1);
+        denied(() -> service.send(2, draft(1)), 403);
+    }
+
     @Test void givenSixtyMessages_whenHistoryOrRecoveryQueried_thenContiguousFiftyAndRemainingTen() {
         UUID room = null;
         for (int n = 0; n < 60; n++) room = service.send(1, draft(2)).roomId();

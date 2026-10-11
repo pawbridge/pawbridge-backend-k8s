@@ -9,6 +9,7 @@ public final class MemberChatModels {
 
     public record Send(Long recipientId, UUID requestId, String body, String contextType, Long contextId) {}
     public record Receipt(UUID requestId, UUID roomId, long sequence) {}
+    public record ExistingRoom(UUID roomId) {}
     public record Message(UUID roomId, long sequence, Long senderId, String body,
                           String contextHref, Instant createdAt) {}
     public record Room(UUID roomId, Long counterpartId, String counterpartNickname,
