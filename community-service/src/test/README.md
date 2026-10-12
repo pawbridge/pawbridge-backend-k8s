@@ -29,7 +29,7 @@ Windows에서는 Java 17을 `JAVA_HOME`으로 설정하고 같은 인자로 `gra
 앱 시험은 PostgreSQL 기본 설정에 테스트 전용 `isolated-test` 설정을 덧씌운다.
 별도 `postgresql` 프로필 없이 쪽지 Controller가 등록되고 앱이 기동하는지도 검증한다.
 외부에서 전달한 JDBC URL을 쓰지 않고 새 컨테이너의 주소만 등록한다. DB 소유 표식
-`community-application-disposable`을 먼저 확인하고 실제 V1~V10 마이그레이션을 적용한 뒤
+`community-application-disposable`을 먼저 확인하고 실제 V1~V11 마이그레이션을 적용한 뒤
 Hibernate의 `validate`로 기동한다. 마이그레이션 파일과 Flyway·Testcontainers는
 시험 classpath에만 추가되며 운영 JAR에는 포함되지 않는다.
 동적 시험 설정은 프로세스 환경 변수보다 우선한다. `SPRING_DATASOURCE_URL`이나
@@ -51,6 +51,19 @@ Hibernate의 `validate`로 기동한다. 마이그레이션 파일과 Flyway·Te
 공유 이미지 workflow는 Community에만 MySQL 서비스 컨테이너를 시작하지 않는다.
 실제 PostgreSQL은 위 앱 시험이 소유한 컨테이너를 사용하며 다른 서비스 CI는 유지한다.
 다른 DB 옵트인 시험이 skip되면 전체 보고서에 skip 수와 이유를 함께 기록한다.
+
+## 일일 방문 집계
+
+일일 방문은 `bash ./gradlew test --tests '*visits.*'`로 쿠키·HTTP·날짜·저장 계약을 검사한다.
+`VisitPostgresqlTest`는 위와 같은 digest·소유 표식을 쓰되 자체 PostgreSQL 컨테이너를
+만들고 시험 종료 후 제거한다. 기존 DB를 대체 사용하지 않는다. 동일 쿠키 24개 동시
+요청, 서로 다른 쿠키 30개 동시 요청, 실패 롤백, 자정 잠금·정리 경합과 이력 보존을 검사한다.
+
+운영 기능 기본값은 `DAILY_VISITORS_ENABLED=false`다. 실제 활성화에는 V11 마이그레이션,
+기존 앱 계정의 신규 테이블 권한, 전용 `DAILY_VISITORS_SIGNING_KEY`(32바이트 이상 난수의
+Base64), 정확한 `DAILY_VISITORS_ALLOWED_ORIGINS`와 별도 운영 승인이 필요하다.
+키는 Pod 간 동일하게 유지하고 당일 중 임의 교체하지 않는다. JWT 키를 재사용하지 않는다.
+프런트 브라우저 대역 시험과 실제 PostgreSQL 시험은 각각 다른 검증 경계다.
 
 ## 기존 PostgreSQL 저장·잠금 시험
 
