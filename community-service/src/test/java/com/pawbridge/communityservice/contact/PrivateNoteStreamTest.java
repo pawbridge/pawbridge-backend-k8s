@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
@@ -78,6 +79,124 @@ class PrivateNoteStreamTest {
             assertThat(emitter.sends.get()).isEqualTo(1);
             assertThat(emitter.completed.get()).isZero();
         });
+    }
+
+    @Test
+    void givenSameTabReconnect_whenOpening_thenCloseOnlyPreviousAndPreserveOtherTabs() {
+        UUID tab = UUID.randomUUID();
+        stream.open(7, expiry(), tab);
+        TrackingEmitter previous = emitters.get(0);
+        stream.open(7, expiry(), UUID.randomUUID());
+        TrackingEmitter other = emitters.get(1);
+        stream.open(7, expiry(), UUID.randomUUID());
+        stream.open(7, expiry(), tab);
+
+        stream.heartbeat();
+        writes.runAll();
+        assertThat(previous.sends.get()).isEqualTo(1);
+        assertThat(other.sends.get()).isEqualTo(2);
+        assertThat(emitters.get(3).sends.get()).isEqualTo(2);
+        completions.runAll();
+        assertThat(previous.completed.get()).isEqualTo(1);
+        assertThat(emitters.subList(1, 4)).allSatisfy(emitter -> assertThat(emitter.completed.get()).isZero());
+        assertStatus(() -> stream.open(7, expiry(), UUID.randomUUID()), HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    void givenRepeatedReloadsWithPendingCompletion_whenOpeningSameTab_thenKeepOneMemberSlot() {
+        UUID tab = UUID.randomUUID();
+        for (int index = 0; index < 12; index++) {
+            stream.open(7, expiry(), tab);
+            if (index % 3 == 2) completions.runAll();
+        }
+        stream.open(7, expiry(), UUID.randomUUID());
+        stream.open(7, expiry(), UUID.randomUUID());
+        assertStatus(() -> stream.open(7, expiry(), UUID.randomUUID()), HttpStatus.TOO_MANY_REQUESTS);
+
+        completions.runAll();
+        assertThat(emitters.subList(0, 11)).allSatisfy(emitter -> assertThat(emitter.completed.get()).isEqualTo(1));
+        assertThat(emitters.subList(11, 14)).allSatisfy(emitter -> assertThat(emitter.completed.get()).isZero());
+    }
+
+    @Test
+    void givenLatePreviousCallback_whenReplacementIsActive_thenDoNotRemoveReplacement() {
+        UUID tab = UUID.randomUUID();
+        stream.open(7, expiry(), tab);
+        TrackingEmitter previous = emitters.get(0);
+        stream.open(7, expiry(), tab);
+        completions.runAll();
+        previous.completion.run();
+        stream.open(7, expiry(), UUID.randomUUID());
+        stream.open(7, expiry(), UUID.randomUUID());
+
+        assertStatus(() -> stream.open(7, expiry(), UUID.randomUUID()), HttpStatus.TOO_MANY_REQUESTS);
+        stream.heartbeat();
+        writes.runAll();
+        assertThat(emitters.get(1).sends.get()).isEqualTo(2);
+    }
+
+    @Test
+    void givenSameClientIdForDifferentMembers_whenOneReconnects_thenDoNotCloseOtherMember() {
+        UUID tab = UUID.randomUUID();
+        stream.open(7, expiry(), tab);
+        stream.open(8, expiry(), tab);
+        stream.open(7, expiry(), tab);
+        completions.runAll();
+
+        assertThat(emitters.get(0).completed.get()).isEqualTo(1);
+        assertThat(emitters.get(1).completed.get()).isZero();
+        stream.heartbeat();
+        writes.runAll();
+        assertThat(emitters.get(1).sends.get()).isEqualTo(2);
+    }
+
+    @Test
+    void givenGlobalCapacityOccupiedByPendingReplacements_whenReconnecting_thenKeepResourceCap() {
+        UUID tab = UUID.randomUUID();
+        stream.open(7, expiry(), tab);
+        for (long member = 8; member < 507; member++) stream.open(member, expiry());
+        assertStatus(() -> stream.open(7, expiry(), tab), HttpStatus.TOO_MANY_REQUESTS);
+        assertStatus(() -> stream.open(8, expiry(), UUID.randomUUID()), HttpStatus.TOO_MANY_REQUESTS);
+
+        stream.heartbeat();
+        writes.runAll();
+        assertThat(emitters.get(0).sends.get()).isEqualTo(2);
+        stream.close(8);
+        completions.runAll();
+        stream.open(7, expiry(), tab);
+        assertThat(emitters.get(0).completed.get()).isZero();
+    }
+
+    @Test
+    void givenBlockedReplacementCompletion_whenSameMemberReconnectsRapidly_thenBoundRetiringConnectionsAndPreserveCurrentTabs() {
+        UUID tab = UUID.randomUUID();
+        stream.open(7, expiry(), UUID.randomUUID());
+        for (int index = 0; index < 4; index++) stream.open(7, expiry(), tab);
+
+        assertStatus(() -> stream.open(7, expiry(), tab), HttpStatus.TOO_MANY_REQUESTS);
+        stream.heartbeat();
+        writes.runAll();
+        assertThat(emitters.get(0).sends.get()).isEqualTo(2);
+        assertThat(emitters.get(4).sends.get()).isEqualTo(2);
+        assertThat(emitters).hasSize(5);
+        completions.runAll();
+        stream.open(7, expiry(), tab);
+    }
+
+    @Test
+    void givenRejectedReplacementCompletion_whenHeartbeatRetries_thenKeepOtherBrowserActive() {
+        UUID tab = UUID.randomUUID();
+        stream.open(7, expiry(), tab);
+        stream.open(7, expiry(), UUID.randomUUID());
+        completions.rejectNext = true;
+        stream.open(7, expiry(), tab);
+        stream.heartbeat();
+        writes.runAll();
+        completions.runAll();
+
+        assertThat(emitters.get(0).completed.get()).isEqualTo(1);
+        assertThat(emitters.get(1).completed.get()).isZero();
+        assertThat(emitters.get(1).sends.get()).isEqualTo(2);
     }
 
     @Test
