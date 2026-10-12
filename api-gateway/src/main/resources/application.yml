@@ -134,6 +134,42 @@ spring:
             - RewritePath=/api/notes(?<segment>/?.*), /api/v1/notes${segment}
             - JwtAuthorization
 
+        # Exact anonymous visit methods; do not forward account identity to this domain.
+        - id: community-visits-identity
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/visits/identity, /api/v1/visits/identity
+            - Method=POST,OPTIONS
+          filters:
+            - RewritePath=/api/visits/identity, /api/v1/visits/identity
+            - RemoveRequestHeader=Authorization
+            - RemoveRequestHeader=X-User-Id
+            - RemoveRequestHeader=X-User-Email
+            - RemoveRequestHeader=X-User-Name
+            - RemoveRequestHeader=X-User-Role
+
+        - id: community-visits-today
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/visits/today, /api/v1/visits/today
+            - Method=GET,POST,OPTIONS
+          filters:
+            - RewritePath=/api/visits/today, /api/v1/visits/today
+            - RemoveRequestHeader=Authorization
+            - RemoveRequestHeader=X-User-Id
+            - RemoveRequestHeader=X-User-Email
+            - RemoveRequestHeader=X-User-Name
+            - RemoveRequestHeader=X-User-Role
+
+        - id: community-visits-admin
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/admin/visits/stats/period, /api/v1/admin/visits/stats/period
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/admin/visits/stats/period, /api/v1/admin/visits/stats/period
+            - JwtAuthorization
+
         # Home video listing is public and read-only; management is admin-only after rewriting.
         - id: community-home-videos-public
           uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}

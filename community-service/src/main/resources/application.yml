@@ -106,6 +106,10 @@ server:
   port: 8082
 
 pawbridge:
+  visits:
+    enabled: ${DAILY_VISITORS_ENABLED:false}
+    signing-key: ${DAILY_VISITORS_SIGNING_KEY:}
+    allowed-origins: ${DAILY_VISITORS_ALLOWED_ORIGINS:https://www.pawbridge.kr}
   search:
     backend: postgresql
     rebuild-enabled: ${SEARCH_REBUILD_ENABLED:false}
