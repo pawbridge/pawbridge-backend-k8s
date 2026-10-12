@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -29,6 +30,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class PrivateNoteStream {
     private static final long MAX_CONNECTION_LIFETIME_MILLIS = 300_000;
     private static final int MAX_CONNECTIONS_PER_MEMBER = 3;
+    private static final int MAX_PENDING_REPLACEMENTS_PER_MEMBER = 3;
     private static final int MAX_CONNECTIONS = 500;
     private static final int HEARTBEAT_SECONDS = 15;
 
@@ -67,17 +69,20 @@ public class PrivateNoteStream {
     private static final class Connection {
         private final StreamEmitter emitter;
         private final Instant expiresAt;
+        private final UUID clientId;
         private volatile boolean closing;
         // Protected by registryLock. A rejected completion is retried by heartbeat.
         private boolean completionQueued;
 
-        private Connection(StreamEmitter emitter, Instant expiresAt) {
+        private Connection(StreamEmitter emitter, Instant expiresAt, UUID clientId) {
             this.emitter = emitter;
             this.expiresAt = expiresAt;
+            this.clientId = clientId;
         }
     }
 
     private record Registration(long memberId, UUID connectionId, Connection connection) {}
+    private record Opening(Registration current, List<Registration> previous) {}
 
     private final Object registryLock = new Object();
     private final Map<Long, Map<UUID, Connection>> connections = new HashMap<>();
@@ -106,17 +111,23 @@ public class PrivateNoteStream {
     }
 
     public SseEmitter open(long memberId, Instant tokenExpiresAt) {
-        Registration registration = register(memberId, tokenExpiresAt);
+        return open(memberId, tokenExpiresAt, null);
+    }
+
+    public SseEmitter open(long memberId, Instant tokenExpiresAt, UUID clientId) {
+        Opening opening = register(memberId, tokenExpiresAt, clientId);
+        Registration registration = opening.current();
         SseEmitter emitter = registration.connection().emitter;
         emitter.onCompletion(() -> remove(registration));
         emitter.onTimeout(() -> requestCompletion(registration));
         emitter.onError(error -> remove(registration));
+        opening.previous().forEach(this::requestCompletion);
         // The initial event is buffered by Spring until the controller initializes the response.
         send(registration, "ready", null);
         return emitter;
     }
 
-    private Registration register(long memberId, Instant tokenExpiresAt) {
+    private Opening register(long memberId, Instant tokenExpiresAt, UUID clientId) {
         synchronized (registryLock) {
             Instant now = clock.instant();
             long lifetime = Math.min(MAX_CONNECTION_LIFETIME_MILLIS, Duration.between(now, tokenExpiresAt).toMillis());
@@ -128,14 +139,29 @@ public class PrivateNoteStream {
             }
             Map<UUID, Connection> memberConnections = connections.get(memberId);
             int connectionCount = connections.values().stream().mapToInt(Map::size).sum();
-            if ((memberConnections != null && memberConnections.size() >= MAX_CONNECTIONS_PER_MEMBER)
+            List<Registration> previous = clientId == null || memberConnections == null ? List.of()
+                    : memberConnections.entrySet().stream()
+                            .filter(entry -> clientId.equals(entry.getValue().clientId))
+                            .map(entry -> new Registration(memberId, entry.getKey(), entry.getValue())).toList();
+            long memberSlots = memberConnections == null ? 0
+                    : memberConnections.values().stream().filter(connection -> connection.clientId == null).count()
+                            + memberConnections.values().stream().map(connection -> connection.clientId)
+                                    .filter(Objects::nonNull).distinct().count();
+            long pendingReplacements = memberConnections == null ? 0
+                    : memberConnections.values().stream()
+                            .filter(connection -> connection.clientId != null && connection.closing).count();
+            // Same-tab replacements share one member slot. Pending physical connections still
+            // count toward the global cap until completion, including rejected close tasks.
+            if ((previous.isEmpty() && memberSlots >= MAX_CONNECTIONS_PER_MEMBER)
+                    || (!previous.isEmpty() && pendingReplacements >= MAX_PENDING_REPLACEMENTS_PER_MEMBER)
                     || connectionCount >= MAX_CONNECTIONS) {
                 throw new ConnectionLimitException();
             }
             UUID connectionId = UUID.randomUUID();
-            Connection connection = new Connection(emitterFactory.apply(lifetime), now.plusMillis(lifetime));
+            Connection connection = new Connection(emitterFactory.apply(lifetime), now.plusMillis(lifetime), clientId);
+            previous.forEach(registration -> registration.connection().closing = true);
             connections.computeIfAbsent(memberId, ignored -> new HashMap<>()).put(connectionId, connection);
-            return new Registration(memberId, connectionId, connection);
+            return new Opening(new Registration(memberId, connectionId, connection), previous);
         }
     }
 

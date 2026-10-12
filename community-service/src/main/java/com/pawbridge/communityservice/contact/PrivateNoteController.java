@@ -67,14 +67,16 @@ public class PrivateNoteController {
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> stream(
             @RequestHeader("X-User-Id") long currentUserId,
-            @RequestHeader("X-Auth-Expires-At") long tokenExpiresAtEpochMillis) {
+            @RequestHeader("X-Auth-Expires-At") long tokenExpiresAtEpochMillis,
+            @RequestParam(required = false) UUID clientId) {
         privateNoteService.requireActive(currentUserId);
         Instant tokenExpiresAt = Instant.ofEpochMilli(tokenExpiresAtEpochMillis);
 
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store")
                 .header("X-Accel-Buffering", "no")
-                .body(privateNoteStream.open(currentUserId, tokenExpiresAt));
+                .body(clientId == null ? privateNoteStream.open(currentUserId, tokenExpiresAt)
+                        : privateNoteStream.open(currentUserId, tokenExpiresAt, clientId));
     }
 
     @GetMapping("/recipients/{member}")

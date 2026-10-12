@@ -228,4 +228,29 @@ class PrivateNoteHttpTest {
             emitter.complete();
         }
     }
+
+    @Test
+    void givenClientIdentity_whenStreamRequested_thenBindIdentityAfterMemberValidation() throws Exception {
+        UUID clientId = UUID.randomUUID();
+        Instant expiry = Instant.parse("2026-10-12T12:00:00Z");
+        SseEmitter emitter = new SseEmitter(60_000L);
+        emitter.send(SseEmitter.event().name("ready").data("{}"));
+        when(privateNoteStream.open(7L, expiry, clientId)).thenReturn(emitter);
+        try {
+            mvc.perform(get("/api/v1/notes/stream").header("X-User-Id", "7")
+                            .header("X-Auth-Expires-At", expiry.toEpochMilli()).param("clientId", clientId.toString()))
+                    .andExpect(status().isOk()).andExpect(request().asyncStarted());
+            var order = inOrder(service, privateNoteStream);
+            order.verify(service).requireActive(7L);
+            order.verify(privateNoteStream).open(7L, expiry, clientId);
+        } finally { emitter.complete(); }
+    }
+
+    @Test
+    void givenInvalidClientIdentity_whenStreamRequested_thenRejectBeforeAllocatingConnection() throws Exception {
+        mvc.perform(get("/api/v1/notes/stream").header("X-User-Id", "7")
+                        .header("X-Auth-Expires-At", "1791806400000").param("clientId", "not-a-uuid"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(service, privateNoteStream);
+    }
 }
