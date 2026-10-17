@@ -102,6 +102,9 @@ apms:
     base-url: ${APMS_API_BASE_URL}
     service-key: ${APMS_API_SERVICE_KEY}
   batch:
+    # Enable only in the elected collection environment; keep Kubernetes CronJob disabled there.
+    schedule-enabled: ${APMS_BATCH_SCHEDULE_ENABLED:false}
+    collection-cron: ${APMS_BATCH_COLLECTION_CRON:0 */30 * * * *}
     stale-execution-threshold: ${APMS_BATCH_STALE_EXECUTION_THRESHOLD:10m}
     elasticsearch-index-timeout: ${APMS_BATCH_ELASTICSEARCH_INDEX_TIMEOUT:4m}
     elasticsearch-cancellation-wait: ${APMS_BATCH_ELASTICSEARCH_CANCELLATION_WAIT:35s}
