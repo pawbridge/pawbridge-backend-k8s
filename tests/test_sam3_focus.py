@@ -106,6 +106,7 @@ class Sam3ContractTest(unittest.TestCase):
     @unittest.skipIf(torch is None, "Requires the dedicated PyTorch runtime")
     def test_gpu_oom_releases_lock_and_next_request_can_run(self):
         encoder = object.__new__(DinoV3Encoder)
+        encoder.device = "cuda"
         from app.services.inference_gate import InferenceGate
         encoder.gate = InferenceGate()
         with patch.object(encoder, "_encode_image", side_effect=[torch.cuda.OutOfMemoryError(), "ok"]), patch.object(torch.cuda, "empty_cache") as clear:
@@ -123,6 +124,7 @@ class Sam3ContractTest(unittest.TestCase):
         from app.services.inference_gate import InferenceGate
         encoder = object.__new__(DinoV3Encoder)
         encoder.gate = InferenceGate()
+        encoder.device = "cuda"
         encoder._vector_for = Mock()
         color = {"test": "descriptor"}
         def prepare(image, species):

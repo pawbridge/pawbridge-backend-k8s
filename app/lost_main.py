@@ -1,4 +1,4 @@
-"""WSL GPU entry point; excludes the existing DINOv2 and chatbot startup path."""
+"""GPU search entry point for WSL CUDA or native Mac MPS."""
 from contextlib import asynccontextmanager, nullcontext
 import os
 import anyio

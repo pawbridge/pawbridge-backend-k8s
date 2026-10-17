@@ -65,10 +65,12 @@ def prepare_prediction(image, boxes, masks, scores):
 
 class Sam3Focus:
     def __init__(self):
+        from app.services.gpu_device import inference_device
+        self.device = inference_device()
         import torch
         from sam3.model_builder import build_sam3_image_model
         from sam3.model.sam3_image_processor import Sam3Processor
-        if not torch.cuda.is_available() or not torch.cuda.is_bf16_supported():
+        if self.device == "cuda" and not torch.cuda.is_bf16_supported():
             raise RuntimeError("SAM 3 requires a BF16-capable CUDA GPU")
         checkpoint = Path(os.environ["SAM3_CHECKPOINT"])
         digest = hashlib.sha256()
@@ -83,8 +85,8 @@ class Sam3Focus:
                                       load_from_HF=False, enable_inst_interactivity=False,
                                       compile=False)
         load_mapped_checkpoint(model, checkpoint)
-        self.model = model.eval().to("cuda")
-        self.processor = Sam3Processor(self.model, confidence_threshold=0.5)
+        self.model = model.eval().to(self.device)
+        self.processor = Sam3Processor(self.model, device=self.device, confidence_threshold=0.5)
         self._species_text = {}
 
     def _set_species_prompt(self, state, species):
@@ -115,7 +117,7 @@ class Sam3Focus:
                 working.thumbnail((1024, 1024), Image.Resampling.BICUBIC)
             elif working.mode != "RGB" or max(working.size) > 1024:
                 raise ValueError("Prepared SAM 3 image must be bounded RGB")
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.inference_mode(), torch.autocast(self.device, dtype=torch.bfloat16):
                 state = self.processor.set_image(working)
                 prediction = self._set_species_prompt(state, species)
             boxes = prediction["boxes"].detach().float().cpu().numpy()
