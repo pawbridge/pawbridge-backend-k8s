@@ -271,6 +271,34 @@ spring:
             - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
             - JwtAuthorization
 
+        # Only customer cart operations are exposed; never route the global /carts/reset endpoint.
+        - id: store-service-cart
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/carts
+            - Method=GET,DELETE,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-cart-add
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/carts/items
+            - Method=POST,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-cart-item
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/carts/items/{skuId}
+            - Method=PATCH,DELETE,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
         - id: store-service-orders
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
