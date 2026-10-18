@@ -19,68 +19,83 @@ SHA = "a" * 40
 
 
 class StorePublicationTest(unittest.TestCase):
-    def test_workflow_does_not_trust_pr_script_output_alone_for_writes(self):
-        workflow = SCRIPT.parents[1] / "workflows" / "store-service-ci.yml"
-        content = workflow.read_text()
-        self.assertIn(
-            "STORE_PUBLISH_ALLOWED: ${{ github.ref == 'refs/heads/dev' && "
-            "(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}",
-            content,
-        )
-        blocks = re.split(r"^      - name: ", content, flags=re.MULTILINE)[1:]
-        steps = {block.splitlines()[0]: block for block in blocks}
-        gate = "if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'"
-        for name in [
-            "Set up Helm", "Refuse an existing or unverified Store image tag",
-            "Log in to Docker Hub", "Verify published Store Service image digest",
-            "Check out Infra repository", "Update Store image reference",
-            "Validate Store image Helm override", "Create Infra pull request",
+    def test_workflows_preserve_external_steps_behind_literal_false(self):
+        for filename, external_count, image_count in [
+            ("api-gateway-ci.yml", 10, 1), ("store-service-ci.yml", 13, 2),
         ]:
-            with self.subTest(step=name):
-                self.assertIn(gate, steps[name])
-        self.assertIn(
-            "push: ${{ env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true' }}",
-            steps["Build and optionally publish Store Service image"],
-        )
+            with self.subTest(workflow=filename):
+                content = (SCRIPT.parents[1] / "workflows" / filename).read_text()
+                build_job = content.split("  test-and-build:\n", 1)[1].split("\n  ci-result:", 1)[0]
+                blocks = re.split(r"^      - name: ", build_job, flags=re.MULTILINE)[1:]
+                steps = {block.splitlines()[0]: block for block in blocks}
+                names = list(steps)
+                external = names[names.index("Set up Helm"):]
+                self.assertEqual(len(external), external_count)
+                for name in external:
+                    with self.subTest(step=name):
+                        self.assertRegex(steps[name], r"(?m)^        if: \$\{\{ false \}\}$")
+                images = [block for block in steps.values() if "uses: docker/build-push-action@" in block]
+                self.assertEqual(len(images), image_count)
+                for block in images:
+                    self.assertRegex(block, r"(?m)^          push: false$")
+                if filename == "store-service-ci.yml":
+                    self.assertIn("STORE_PUBLISH_ALLOWED: 'false'", content)
 
-    def test_event_and_ref_publication_contract(self):
+    def test_supported_validation_events_never_allow_publication(self):
         cases = [
-            ("pull_request", "refs/pull/1/merge", "true", False),
-            ("push", "refs/heads/dev", "", True),
-            ("workflow_dispatch", "refs/heads/dev", "", False),
-            ("workflow_dispatch", "refs/heads/dev", "false", False),
-            ("workflow_dispatch", "refs/heads/dev", "true", True),
-            ("workflow_dispatch", "refs/heads/topic", "false", False),
+            ("pull_request", "refs/pull/1/merge", ""),
+            ("pull_request", "refs/pull/2/merge", "false"),
+            ("push", "refs/heads/dev", ""),
+            ("push", "refs/heads/main", ""),
+            ("workflow_dispatch", "refs/heads/dev", "false"),
+            ("workflow_dispatch", "refs/heads/main", "false"),
         ]
-        for event, ref, requested, expected in cases:
+        for event, ref, requested in cases:
             with self.subTest(event=event, ref=ref, requested=requested):
-                self.assertEqual(MODULE.publication_allowed(event, ref, requested), expected)
+                self.assertFalse(MODULE.publication_allowed(event, ref, requested))
 
-    def test_rejects_non_dev_publication_and_unknown_inputs(self):
-        for event, ref, flag in [
+    def test_rejects_publication_wrong_manual_refs_and_malformed_events(self):
+        cases = [
+            ("pull_request", "refs/pull/1/merge", "true"),
+            ("push", "refs/heads/dev", "true"),
+            ("workflow_dispatch", "refs/heads/dev", "true"),
+            ("workflow_dispatch", "refs/heads/main", "true"),
             ("push", "refs/heads/topic", ""),
-            ("workflow_dispatch", "refs/heads/topic", "true"),
-            ("workflow_dispatch", "refs/tags/dev", "true"),
+            ("workflow_dispatch", "refs/heads/topic", "false"),
+            ("workflow_dispatch", "refs/tags/dev", "false"),
+            ("workflow_dispatch", "refs/heads/dev", ""),
             ("workflow_dispatch", "refs/heads/dev", "yes"),
-            ("pull_request_target", "refs/heads/dev", "true"),
-        ]:
+            ("push", "refs/heads/dev", "False"),
+            ("pull_request_target", "refs/heads/dev", "false"),
+            ("", "refs/heads/dev", "false"),
+        ]
+        for event, ref, flag in cases:
             with self.subTest(event=event, ref=ref, flag=flag):
                 with self.assertRaises(ValueError):
                     MODULE.publication_allowed(event, ref, flag)
 
-    def test_plan_cli_outputs_only_decision_and_fails_without_output(self):
-        for ref, expected_exit, output in [
-            ("refs/heads/dev", 0, "publish=true\n"),
-            ("refs/heads/topic", 1, ""),
-        ]:
-            with self.subTest(ref=ref):
+    def test_plan_cli_outputs_only_false_or_fails_without_output(self):
+        cases = [
+            ("push", "refs/heads/dev", "", 0),
+            ("push", "refs/heads/main", "", 0),
+            ("pull_request", "refs/pull/1/merge", "", 0),
+            ("workflow_dispatch", "refs/heads/dev", "false", 0),
+            ("workflow_dispatch", "refs/heads/main", "false", 0),
+            ("workflow_dispatch", "refs/heads/dev", "true", 1),
+            ("workflow_dispatch", "refs/heads/topic", "false", 1),
+            ("workflow_dispatch", "refs/heads/dev", "yes", 1),
+            ("workflow_dispatch", "refs/heads/dev", "", 1),
+            ("pull_request_target", "refs/heads/dev", "false", 1),
+        ]
+        for event, ref, flag, expected_exit in cases:
+            with self.subTest(event=event, ref=ref, flag=flag):
                 result = subprocess.run(
                     [sys.executable, str(SCRIPT), "plan"], capture_output=True, text=True,
-                    env={**os.environ, "GITHUB_EVENT_NAME": "workflow_dispatch",
-                         "GITHUB_REF": ref, "MANUAL_PUBLISH": "true"},
+                    env={**os.environ, "GITHUB_EVENT_NAME": event,
+                         "GITHUB_REF": ref, "MANUAL_PUBLISH": flag},
                 )
                 self.assertEqual(result.returncode, expected_exit)
-                self.assertEqual(result.stdout, output)
+                self.assertEqual(result.stdout, "publish=false\n" if expected_exit == 0 else "")
 
 
 class StoreTagGuardTest(unittest.TestCase):

@@ -25,19 +25,18 @@ class ReleaseBlocked(ValueError):
 
 
 def publication_allowed(event: str, ref: str, manual_publish: str) -> bool:
-    if event == "pull_request":
-        return False
-    if event == "push":
-        if ref != "refs/heads/dev":
-            raise ReleaseBlocked("Store publication requires the dev branch.")
-        return True
-    if event == "workflow_dispatch":
-        if manual_publish not in ("", "false", "true"):
-            raise ReleaseBlocked("Manual publish must be a boolean.")
-        if manual_publish == "true" and ref != "refs/heads/dev":
-            raise ReleaseBlocked("Manual publication requires the dev branch.")
-        return manual_publish == "true"
-    raise ReleaseBlocked("Unsupported Store CI event.")
+    if event not in ("pull_request", "push", "workflow_dispatch"):
+        raise ReleaseBlocked("Unsupported Store CI event.")
+    if manual_publish not in ("", "false", "true"):
+        raise ReleaseBlocked("Manual publish must be a boolean.")
+    if manual_publish == "true":
+        raise ReleaseBlocked("Store publication is disabled during the branch transition.")
+    if event == "workflow_dispatch" and manual_publish != "false":
+        raise ReleaseBlocked("Manual validation requires an explicit false publish input.")
+    if event != "pull_request" and ref not in ("refs/heads/dev", "refs/heads/main"):
+        raise ReleaseBlocked("Store validation requires the main or dev branch.")
+    # PR heads may be feature branches; the shared selection policy validates their base.
+    return False
 
 
 class NoRedirect(HTTPRedirectHandler):

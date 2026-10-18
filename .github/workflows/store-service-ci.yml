@@ -5,35 +5,14 @@ on:
     branches:
       - dev
       - main
-    paths:
-      - ".github/scripts/assert_dev_environment.py"
-      - ".github/scripts/test_assert_dev_environment.py"
-      - ".github/migrations/**"
-      - ".github/scripts/update_migration_image_pair.py"
-      - ".github/scripts/test_update_migration_image_pair.py"
-      - "store-service/**"
-      - ".github/scripts/update_service_image_values.py"
-      - ".github/scripts/test_update_service_image_values.py"
-      - ".github/scripts/store_release_guard.py"
-      - ".github/scripts/test_store_release_guard.py"
-      - ".github/workflows/store-service-ci.yml"
   push:
     branches:
       - dev
-    paths:
-      - ".github/migrations/**"
-      - ".github/scripts/update_migration_image_pair.py"
-      - ".github/scripts/test_update_migration_image_pair.py"
-      - "store-service/**"
-      - ".github/scripts/update_service_image_values.py"
-      - ".github/scripts/test_update_service_image_values.py"
-      - ".github/scripts/store_release_guard.py"
-      - ".github/scripts/test_store_release_guard.py"
-      - ".github/workflows/store-service-ci.yml"
+      - main
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish a new SHA tag from dev and update the Infra PR; existing tags are refused.
+        description: Publication is disabled; only false runs validation.
         required: true
         type: boolean
         default: false
@@ -43,17 +22,42 @@ permissions:
 
 concurrency:
   group: store-service-ci-${{ github.workflow }}-${{ github.ref }}
-  # Do not interrupt a publication between the image push and Infra PR creation.
+  # Keep validation runs ordered; publication remains disabled.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  selection:
+    name: Select Store validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select changed validation
+        id: select
+        env:
+          MANUAL_PUBLISH: ${{ inputs.publish }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PULL_REQUEST_BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 .github/scripts/ci_branch_policy.py select --group store >> "$GITHUB_OUTPUT"
+
   test-and-build:
+    needs: selection
+    if: needs.selection.outputs.selected == 'true'
     name: Test and build Store Service
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Do not let a script output alone authorize writes from a PR checkout.
-      STORE_PUBLISH_ALLOWED: ${{ github.ref == 'refs/heads/dev' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}
+      # Publication remains disabled even if a script changes its outputs.
+      STORE_PUBLISH_ALLOWED: 'false'
       SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3306/pawbridge_store
       SPRING_DATASOURCE_USERNAME: pawbridge_ci
       SPRING_DATASOURCE_PASSWORD: ci_only_password
@@ -118,21 +122,22 @@ jobs:
           --pattern 'test_*.py'
 
       - name: Set up Helm
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.21.3
 
       - name: Set up Docker Buildx
+        if: ${{ false }}
         uses: docker/setup-buildx-action@v4
 
       - name: Refuse an existing or unverified Store image tag
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}
         run: python3 .github/scripts/store_release_guard.py check-tag
 
       - name: Log in to Docker Hub
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         uses: docker/login-action@v4
         with:
           username: dorosiya
@@ -140,28 +145,30 @@ jobs:
           scope: dorosiya/pawbridge-store-service@push
 
       - name: Build and optionally publish Store Service image
+        if: ${{ false }}
         id: image
         uses: docker/build-push-action@v7
         with:
           context: ./store-service
           platforms: linux/amd64
-          push: ${{ env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true' }}
+          push: false
           tags: dorosiya/pawbridge-store-service:sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build and optionally publish migration image
+        if: ${{ false }}
         id: migration
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./store-service/build/migration
           file: .github/migrations/Dockerfile
           platforms: linux/amd64
-          push: ${{ env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true' }}
+          push: false
           tags: dorosiya/pawbridge-store-service:migration-sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Verify published migration digest
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         env:
           MIGRATION_REPOSITORY: dorosiya/pawbridge-store-service
           MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
@@ -171,7 +178,7 @@ jobs:
           docker buildx imagetools inspect "$MIGRATION_REPOSITORY@$MIGRATION_DIGEST"
 
       - name: Verify published Store Service image digest
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         env:
           STORE_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
@@ -180,7 +187,7 @@ jobs:
           "dorosiya/pawbridge-store-service@$STORE_IMAGE_DIGEST"
 
       - name: Check out Infra repository
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: pawbridge/pawbridge-infra-k8s
@@ -190,14 +197,14 @@ jobs:
           fetch-depth: 0
 
       - name: Require isolated dev destination
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}
-        if: github.event_name == 'push'
         env:
           TARGET_SERVICE: store-service
         run: python3 .github/scripts/assert_dev_environment.py infra "$TARGET_SERVICE"
 
       - name: Update Store image reference
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}
         env:
           STORE_IMAGE_TAG: sha-${{ github.sha }}
@@ -211,7 +218,7 @@ jobs:
           --digest "$STORE_IMAGE_DIGEST" --migration-digest "$MIGRATION_DIGEST"
 
       - name: Validate Store image Helm override
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}/infra
         env:
           STORE_IMAGE_REPOSITORY: dorosiya/pawbridge-store-service
@@ -248,7 +255,7 @@ jobs:
           fi
 
       - name: Create Infra pull request
-        if: env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}/infra
         env:
           GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
@@ -453,3 +460,19 @@ jobs:
           done <<<"$obsolete_prs"
 
           echo "Infra pull request ready: $pr_url"
+
+  ci-result:
+    name: Store CI result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [selection, test-and-build]
+    if: always()
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate CI result
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/ci_branch_policy.py gate --check test-and-build

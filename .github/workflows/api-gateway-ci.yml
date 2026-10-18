@@ -5,25 +5,10 @@ on:
     branches:
       - dev
       - main
-    paths:
-      - ".github/scripts/assert_dev_environment.py"
-      - ".github/scripts/test_assert_dev_environment.py"
-      - ".github/scripts/update_service_image_values.py"
-      - ".github/scripts/test_update_service_image_values.py"
-      - "api-gateway/**"
-      - ".github/scripts/update_api_gateway_image_values.py"
-      - ".github/scripts/test_update_api_gateway_image_values.py"
-      - ".github/workflows/api-gateway-ci.yml"
   push:
     branches:
       - dev
-    paths:
-      - ".github/scripts/update_service_image_values.py"
-      - ".github/scripts/test_update_service_image_values.py"
-      - "api-gateway/**"
-      - ".github/scripts/update_api_gateway_image_values.py"
-      - ".github/scripts/test_update_api_gateway_image_values.py"
-      - ".github/workflows/api-gateway-ci.yml"
+      - main
 
 permissions:
   contents: read
@@ -33,7 +18,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  selection:
+    name: Select Gateway validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.select.outputs.selected }}
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select changed validation
+        id: select
+        env:
+          MANUAL_PUBLISH: ${{ inputs.publish }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PULL_REQUEST_BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 .github/scripts/ci_branch_policy.py select --group gateway >> "$GITHUB_OUTPUT"
+
   test-and-build:
+    needs: selection
+    if: needs.selection.outputs.selected == 'true'
     name: Test and build API Gateway
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -69,16 +79,17 @@ jobs:
           --pattern 'test_update_api_gateway_image_values.py'
 
       - name: Set up Helm
-        if: github.event_name == 'push'
+        if: ${{ false }}
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.21.4
 
       - name: Set up Docker Buildx
+        if: ${{ false }}
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to Docker Hub
-        if: github.event_name == 'push'
+        if: ${{ false }}
         uses: docker/login-action@v4
         with:
           username: dorosiya
@@ -86,17 +97,18 @@ jobs:
           scope: dorosiya/pawbridge-api-gateway@push
 
       - name: Build and optionally publish API Gateway image
+        if: ${{ false }}
         id: image
         uses: docker/build-push-action@v7
         with:
           context: ./api-gateway
           platforms: linux/amd64
-          push: ${{ github.event_name == 'push' }}
+          push: false
           tags: dorosiya/pawbridge-api-gateway:sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Verify published API Gateway image digest
-        if: github.event_name == 'push'
+        if: ${{ false }}
         env:
           API_GATEWAY_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
         run: >-
@@ -104,7 +116,7 @@ jobs:
           "dorosiya/pawbridge-api-gateway@$API_GATEWAY_IMAGE_DIGEST"
 
       - name: Check out Infra repository
-        if: github.event_name == 'push'
+        if: ${{ false }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: pawbridge/pawbridge-infra-k8s
@@ -114,14 +126,14 @@ jobs:
           fetch-depth: 0
 
       - name: Require isolated dev destination
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}
-        if: github.event_name == 'push'
         env:
           TARGET_SERVICE: api-gateway
         run: python3 .github/scripts/assert_dev_environment.py infra "$TARGET_SERVICE"
 
       - name: Update API Gateway image reference
-        if: github.event_name == 'push'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}
         env:
           API_GATEWAY_IMAGE_TAG: sha-${{ github.sha }}
@@ -134,7 +146,7 @@ jobs:
           --digest "$API_GATEWAY_IMAGE_DIGEST"
 
       - name: Validate API Gateway image Helm override
-        if: github.event_name == 'push'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}/infra
         env:
           API_GATEWAY_IMAGE_REPOSITORY: dorosiya/pawbridge-api-gateway
@@ -170,7 +182,7 @@ jobs:
           fi
 
       - name: Create Infra draft pull request
-        if: github.event_name == 'push'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}/infra
         env:
           GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
@@ -365,3 +377,19 @@ jobs:
           done <<<"$obsolete_prs"
 
           echo "Infra draft pull request created or recovered: $pr_url"
+
+  ci-result:
+    name: Gateway CI result
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [selection, test-and-build]
+    if: always()
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate CI result
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/ci_branch_policy.py gate --check test-and-build
