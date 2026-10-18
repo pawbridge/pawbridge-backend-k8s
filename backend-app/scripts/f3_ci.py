@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Hosted-only F3 extension of the single owned F2 PostgreSQL fixture."""
 import contextlib
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import hashlib
 import json
 import os
@@ -130,12 +131,13 @@ def verify_continue_handshake(endpoint, owner):
             'X-F3-Owner: ' + owner + '\r\nExpect: 100-continue\r\n'
             'Content-Length: 0\r\nConnection: close\r\n\r\n').encode())
         response = bytearray()
-        while b'\r\n\r\n' not in response and len(response) < 4096:
+        while len(response) < 16384:
             chunk = connection.recv(4096)
             if not chunk:
                 break
             response.extend(chunk)
-        if not response.startswith(b'HTTP/1.1 100 Continue\r\n'):
+        if (not response.startswith(b'HTTP/1.1 100 Continue\r\n')
+                or b'HTTP/1.1 200 OK\r\n' not in response):
             raise AssertionError('Synthetic server did not send the required interim response')
 
 
@@ -268,8 +270,21 @@ def smoke():
                                    ('COMMUNICATION', 'ADOPTION', 'PROTECTION')):
                 files = [('empty.jpg', 'image/jpeg', b''), ('dog.jpg', 'image/jpeg', b'F3-image'),
                          ('dog.mp4', 'video/mp4', b'F3-video')] if role == 'ROLE_USER' else []
-                response = post(tokens[role], change={'boardType': board}, files=files,
-                                extra={'X-User-Id': '999999', 'X-User-Role': 'ROLE_FORGED'})
+                if role == 'ROLE_USER':
+                    with ThreadPoolExecutor(max_workers=1) as diagnostic:
+                        pending = diagnostic.submit(post, tokens[role], change={'boardType': board}, files=files,
+                            extra={'X-User-Id': '999999', 'X-User-Role': 'ROLE_FORGED'})
+                        try:
+                            response = pending.result(timeout=0.75)
+                        except FutureTimeoutError:
+                            with (EVIDENCE / 'f3-upload-threads.txt').open('w') as threads:
+                                with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                                    subprocess.run(['jcmd', str(app.pid), 'Thread.print'], env=base_env,
+                                        stdout=threads, stderr=subprocess.STDOUT, timeout=5, check=False)
+                            response = pending.result(timeout=10)
+                else:
+                    response = post(tokens[role], change={'boardType': board}, files=files,
+                                    extra={'X-User-Id': '999999', 'X-User-Role': 'ROLE_FORGED'})
                 data = response['data']
                 if (response['code'] != 200 or response['message'] != '게시글이 생성되었습니다.'
                         or data['authorId'] != 42 or data['authorNickname'] != '합성작성자'

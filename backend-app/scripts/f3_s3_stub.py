@@ -187,7 +187,17 @@ class FixtureHandler(BaseHTTPRequestHandler):
         length = int(length_header or "0")
         if length < 0 or length > MAX_WIRE_BYTES:
             raise ValueError("synthetic wire body limit exceeded")
-        body = self.rfile.read(length)
+        received = bytearray()
+        try:
+            while len(received) < length:
+                chunk = self.rfile.read1(length - len(received))
+                if not chunk:
+                    break
+                received.extend(chunk)
+        except (TimeoutError, ConnectionError):
+            print(json.dumps({"incomplete_body": {"expected": length, "received": len(received)}}), flush=True)
+            raise
+        body = bytes(received)
         if len(body) != length:
             raise ValueError("incomplete HTTP body")
         return body
