@@ -121,6 +121,24 @@ def wait_ready(process, check, label):
         time.sleep(0.25)
 
 
+def verify_continue_handshake(endpoint, owner):
+    host, raw_port = endpoint.removeprefix('http://').rsplit(':', 1)
+    if host != '127.0.0.1':
+        raise AssertionError('Handshake probe must remain loopback')
+    with socket.create_connection((host, int(raw_port)), timeout=3) as connection:
+        connection.sendall(('GET /__f3__/state HTTP/1.1\r\nHost: 127.0.0.1\r\n'
+            'X-F3-Owner: ' + owner + '\r\nExpect: 100-continue\r\n'
+            'Content-Length: 0\r\nConnection: close\r\n\r\n').encode())
+        response = bytearray()
+        while b'\r\n\r\n' not in response and len(response) < 4096:
+            chunk = connection.recv(4096)
+            if not chunk:
+                break
+            response.extend(chunk)
+        if not response.startswith(b'HTTP/1.1 100 Continue\r\n'):
+            raise AssertionError('Synthetic server did not send the required interim response')
+
+
 def stop_owned_child(process, label):
     if process.poll() is not None:
         raise AssertionError(label + ' exited before requested normal termination')
@@ -186,6 +204,7 @@ def smoke():
         app = None
         try:
             wait_ready(stub, lambda: state()['owner'] == owner, 'S3 stub')
+            verify_continue_handshake(endpoint, owner)
             for missing_key in ('F2_JDBC_URL', 'F3_DB_WRITER_PASSWORD', 'F3_JWT_SECRET', 'F3_STORAGE_ENDPOINT'):
                 incomplete = {key: value for key, value in app_env.items() if key != missing_key}
                 failure = subprocess.run(['java', '-Xmx256m', '-jar', str(jar), '--spring.main.banner-mode=off'],
@@ -329,6 +348,12 @@ def smoke():
             if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
                 raise AssertionError('Reader/writer transaction leaked after HTTP response')
             result['packaged_post_get_auth_upload_rollback_recovery'] = 'passed'
+        except Exception:
+            if app is not None and app.poll() is None:
+                with (EVIDENCE / 'f3-failure-threads.txt').open('w') as threads:
+                    subprocess.run(['jcmd', str(app.pid), 'Thread.print'], env=base_env,
+                        stdout=threads, stderr=subprocess.STDOUT, timeout=5, check=False)
+            raise
         finally:
             try:
                 if app is not None:

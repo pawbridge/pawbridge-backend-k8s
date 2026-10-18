@@ -75,6 +75,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 3
 
+    def handle_expect_100(self):
+        accepted = super().handle_expect_100()
+        self.wfile.flush()
+        print(json.dumps({"continue_response_sent": accepted}), flush=True)
+        return accepted
+
     def log_message(self, *_):
         # Do not log Authorization headers, query strings or uploaded body bytes.
         pass
