@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.jar.JarOutputStream;
 
+import static org.gradle.testkit.runner.TaskOutcome.FAILED;
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -173,6 +174,91 @@ class GradleArchitectureTest {
                 "forbidden project dependency :application -> :infrastructure through files");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"sourceSets.main.output", "tasks.named('jar')"})
+    void givenRelocatedForbiddenModuleOutputAsFiles_whenCheck_thenRejects(String output) throws IOException {
+        write("infrastructure/build.gradle", """
+                layout.buildDirectory = rootProject.layout.buildDirectory.dir('infrastructure')
+                """);
+        write("infrastructure/src/main/java/fixture/InfrastructureMarker.java", """
+                package fixture;
+                public class InfrastructureMarker {}
+                """);
+        write("application/build.gradle", """
+                evaluationDependsOn(':infrastructure')
+                dependencies {
+                    implementation files(project(':infrastructure').%s)
+                }
+                """.formatted(output));
+        write("application/src/main/java/fixture/ApplicationMarker.java", """
+                package fixture;
+                class ApplicationMarker { InfrastructureMarker marker; }
+                """);
+
+        assertRejected(runner("check").buildAndFail(),
+                "forbidden project dependency :application -> :infrastructure through files");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sourceSets.main.output", "tasks.named('jar')"})
+    void givenRelocatedAllowedDomainOutputAsFiles_whenCheck_thenCompiles(String output) throws IOException {
+        write("domain/build.gradle", """
+                layout.buildDirectory = rootProject.layout.buildDirectory.dir('domain')
+                """);
+        write("domain/src/main/java/fixture/DomainMarker.java", """
+                package fixture;
+                public class DomainMarker {}
+                """);
+        write("application/build.gradle", """
+                evaluationDependsOn(':domain')
+                dependencies {
+                    implementation files(project(':domain').%s)
+                }
+                """.formatted(output));
+        write("application/src/main/java/fixture/ApplicationMarker.java", """
+                package fixture;
+                class ApplicationMarker { DomainMarker marker; }
+                """);
+
+        BuildResult result = runner("check").build();
+
+        assertEquals(SUCCESS, result.task(":verifyArchitecture").getOutcome());
+        assertEquals(SUCCESS, result.task(":application:compileJava").getOutcome());
+        assertTrue(Files.exists(fixture.resolve("build/domain/classes/java/main/fixture/DomainMarker.class")));
+    }
+
+    @Test
+    void givenSharedOutputDirectoryOwners_whenCheck_thenRejectsAmbiguousOwnership() throws IOException {
+        write("domain/build.gradle", """
+                layout.buildDirectory = rootProject.layout.buildDirectory.dir('shared')
+                """);
+        write("infrastructure/build.gradle", """
+                layout.buildDirectory = rootProject.layout.buildDirectory.dir('shared')
+                """);
+        createJar("build/shared/libs/shared.jar");
+        write("application/build.gradle", """
+                dependencies {
+                    implementation files(rootProject.file('build/shared/libs/shared.jar'))
+                }
+                """);
+
+        assertRejected(runner("check").buildAndFail(),
+                ":application production classpath has ambiguous output ownership");
+    }
+
+    @Test
+    void givenSiblingServiceProductionClasspath_whenCheck_thenRejects() throws IOException {
+        createJar("../store-service/build/libs/store-service.jar");
+        write("application/build.gradle", """
+                dependencies {
+                    runtimeOnly files(rootProject.file('../store-service/build/libs/store-service.jar'))
+                }
+                """);
+
+        assertRejected(runner("check").buildAndFail(),
+                ":application production classpath references a sibling service");
+    }
+
     @Test
     void givenDomainOverriddenMainClasspath_whenCheck_thenRejects() throws IOException {
         createJar("local.jar");
@@ -221,6 +307,27 @@ class GradleArchitectureTest {
     }
 
     @Test
+    void givenReassignedProjectDirectory_whenCheck_thenRejects() throws IOException {
+        write("legacy-application/build.gradle", "");
+        Files.writeString(fixture.resolve("settings.gradle"),
+                "project(':application').projectDir = file('legacy-application')\n",
+                java.nio.file.StandardOpenOption.APPEND);
+
+        assertRejected(runner("check").buildAndFail(),
+                ":application must use its own application directory");
+    }
+
+    @Test
+    void givenForbiddenProjectEdge_whenOnlyApplicationCheck_thenRunsGuardAndRejects() throws IOException {
+        write("application/build.gradle", "dependencies { implementation project(':infrastructure') }");
+
+        BuildResult result = runner(":application:check").buildAndFail();
+
+        assertRejected(result, "forbidden project dependency :application -> :infrastructure");
+        assertEquals(FAILED, result.task(":verifyArchitecture").getOutcome());
+    }
+
+    @Test
     void givenCompositeBuild_whenCheck_thenRejects() throws IOException {
         write("legacy/settings.gradle", "rootProject.name = 'legacy'");
         write("legacy/build.gradle", "plugins { id 'java-library' }");
@@ -248,6 +355,79 @@ class GradleArchitectureTest {
 
         assertRejected(runner("check").buildAndFail(),
                 ":application production compiler sources must stay inside the module");
+    }
+
+    @Test
+    void givenSiblingServiceCompilerSourcepath_whenCheck_thenRejects() throws IOException {
+        write("../store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/ProductStatus.java", """
+                package com.pawbridge.storeservice.domain.product.entity;
+                public enum ProductStatus { ACTIVE }
+                """);
+        write("domain/src/main/java/fixture/DomainProduct.java", """
+                package fixture;
+                import com.pawbridge.storeservice.domain.product.entity.ProductStatus;
+                class DomainProduct { ProductStatus status = ProductStatus.ACTIVE; }
+                """);
+        write("domain/build.gradle", """
+                tasks.named('compileJava') {
+                    options.sourcepath = files(rootProject.file('../store-service/src/main/java'))
+                }
+                """);
+
+        assertRejected(runner("check").buildAndFail(),
+                ":domain production compiler sourcepath must stay inside the module");
+    }
+
+    @Test
+    void givenModuleLocalCompilerSourcepath_whenCheck_thenCompilesImplicitSource() throws IOException {
+        write("domain/src/implicit/java/fixture/DomainStatus.java", """
+                package fixture;
+                public enum DomainStatus { ACTIVE }
+                """);
+        write("domain/src/main/java/fixture/DomainProduct.java", """
+                package fixture;
+                class DomainProduct { DomainStatus status = DomainStatus.ACTIVE; }
+                """);
+        write("domain/build.gradle", """
+                tasks.named('compileJava') {
+                    options.sourcepath = files('src/implicit/java')
+                }
+                """);
+
+        BuildResult result = runner("check").build();
+
+        assertEquals(SUCCESS, result.task(":verifyArchitecture").getOutcome());
+        assertEquals(SUCCESS, result.task(":domain:compileJava").getOutcome());
+        assertTrue(Files.exists(fixture.resolve("domain/build/classes/java/main/fixture/DomainStatus.class")));
+    }
+
+    @Test
+    void givenSiblingServiceResourceCopyInput_whenCheck_thenRejects() throws IOException {
+        write("../store-service/src/main/resources/store-es-validation-manifest.sql", "select 1;\n");
+        write("boot/build.gradle", """
+                tasks.named('processResources') {
+                    from(rootProject.file('../store-service/src/main/resources/store-es-validation-manifest.sql'))
+                }
+                """);
+
+        assertRejected(runner("check").buildAndFail(),
+                ":boot production resource inputs must stay inside the module");
+    }
+
+    @Test
+    void givenModuleLocalResourceCopyInput_whenCheck_thenCopiesResource() throws IOException {
+        write("boot/config/fixture.properties", "fixture.enabled=true\n");
+        write("boot/build.gradle", """
+                tasks.named('processResources') {
+                    from(project.file('config/fixture.properties'))
+                }
+                """);
+
+        BuildResult result = runner("check").build();
+
+        assertEquals(SUCCESS, result.task(":verifyArchitecture").getOutcome());
+        assertEquals("fixture.enabled=true\n",
+                Files.readString(fixture.resolve("boot/build/resources/main/fixture.properties")));
     }
 
     private GradleRunner runner(String task) {
