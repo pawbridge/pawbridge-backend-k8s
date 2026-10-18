@@ -1,0 +1,138 @@
+import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.api.tasks.SourceSetContainer
+
+// This guards Gradle production dependency boundaries, not Java package visibility.
+def allowedDependencies = [
+    ':boot'          : [':ui', ':application', ':infrastructure', ':domain'] as Set,
+    ':ui'            : [':application', ':domain'] as Set,
+    ':application'   : [':domain'] as Set,
+    ':infrastructure': [':domain'] as Set,
+    ':domain'        : [] as Set
+]
+
+def verifyArchitecture = tasks.register('verifyArchitecture') {
+    group = 'verification'
+    description = 'Checks the five-layer production Gradle dependency graph.'
+
+    doLast {
+        def reject = { String detail ->
+            throw new GradleException("Architecture violation: ${detail}")
+        }
+        if (rootProject.plugins.hasPlugin('java-base') ||
+            rootProject.extensions.findByType(SourceSetContainer) != null) {
+            reject('root project is a build aggregator and must not apply Java production plugins')
+        }
+        def expectedProjects = allowedDependencies.keySet()
+        if (rootProject.subprojects.collect { it.path }.toSet() != expectedProjects) {
+            reject('only boot, ui, application, domain and infrastructure projects are allowed')
+        }
+        if (!gradle.includedBuilds.empty) {
+            reject('included builds are not allowed in this isolated application')
+        }
+        def checkTarget = { String from, def target ->
+            if (!(target instanceof ProjectComponentIdentifier)) {
+                return
+            }
+            if (target.build.buildPath != ':' || !expectedProjects.contains(target.projectPath)) {
+                reject("${from} references a root, unknown or composite project: ${target}")
+            }
+            if (!allowedDependencies[from].contains(target.projectPath)) {
+                reject("forbidden project dependency ${from} -> ${target.projectPath}")
+            }
+        }
+
+        rootProject.subprojects.each { module ->
+            def expectedDirectory = rootProject.file(module.name).canonicalFile
+            if (module.projectDir.canonicalFile != expectedDirectory) {
+                reject("${module.path} must use its own application directory")
+            }
+            def main = module.extensions.getByType(SourceSetContainer).named('main').get()
+            main.allSource.srcDirs.each { directory ->
+                if (!directory.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    reject("${module.path} production sources must stay inside the module")
+                }
+            }
+
+            // Check declarations as well as resolved paths: compileOnly and annotation
+            // processors are production inputs even when absent from runtimeClasspath.
+            def configurations = [main.compileClasspathConfigurationName,
+                                  main.runtimeClasspathConfigurationName,
+                                  main.annotationProcessorConfigurationName].collect {
+                module.configurations.getByName(it)
+            }
+            configurations.each { configuration ->
+                configuration.allDependencies.withType(ProjectDependency).each { dependency ->
+                    def target = dependency.dependencyProject.path
+                    if (!expectedProjects.contains(target) || !allowedDependencies[module.path].contains(target)) {
+                        reject("forbidden project dependency ${module.path} -> ${target}")
+                    }
+                }
+                configuration.incoming.resolutionResult.allDependencies.each { dependency ->
+                    if (dependency instanceof ResolvedDependencyResult &&
+                        dependency.selected.id instanceof ProjectComponentIdentifier) {
+                        def owner = dependency.from.id
+                        if (!(owner instanceof ProjectComponentIdentifier)) {
+                            reject("external dependency imports project ${dependency.selected.id}")
+                        }
+                        checkTarget(owner.projectPath, dependency.selected.id)
+                    }
+                }
+                // Fail on unresolved dependencies too; an incomplete graph is not evidence.
+                if (module.path == ':domain' && !configuration.files.empty) {
+                    reject('domain production dependencies must be JDK-only')
+                } else {
+                    configuration.files
+                }
+            }
+            // File collections can bypass ProjectDependency (for example another
+            // module's output). Check their actual paths as well as graph components.
+            def compileJava = module.tasks.named(main.compileJavaTaskName).get()
+            compileJava.source.files.each { source ->
+                if (!source.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    reject("${module.path} production compiler sources must stay inside the module")
+                }
+            }
+            def productionClasspaths = [main.compileClasspath, main.runtimeClasspath,
+                                        compileJava.classpath, compileJava.options.annotationProcessorPath,
+                                        module.configurations.getByName(main.annotationProcessorConfigurationName)]
+                                        .findAll { it != null }
+            productionClasspaths.each { classpath ->
+                classpath.files.each { artifact ->
+                    def artifactPath = artifact.canonicalFile.toPath()
+                    def owner = rootProject.subprojects.find { candidate ->
+                        artifactPath.startsWith(candidate.projectDir.canonicalFile.toPath())
+                    }
+                    if (owner != null && owner != module &&
+                        !allowedDependencies[module.path].contains(owner.path)) {
+                        reject("forbidden project dependency ${module.path} -> ${owner.path} through files")
+                    }
+                    def repositoryDirectory = rootProject.projectDir.parentFile.canonicalFile.toPath()
+                    if (artifactPath.startsWith(repositoryDirectory) &&
+                        !artifactPath.startsWith(rootProject.projectDir.canonicalFile.toPath())) {
+                        reject("${module.path} production classpath references a sibling service")
+                    }
+                }
+            }
+            if (module.path == ':domain') {
+                def ownOutputs = main.output.files
+                def productionFiles = productionClasspaths.collectMany { it.files }.toSet() - ownOutputs
+                if (!productionFiles.empty) {
+                    reject('domain production classpaths must be JDK-only')
+                }
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyArchitecture
+}
+subprojects {
+    plugins.withId('java') {
+        tasks.named('check') {
+            dependsOn verifyArchitecture
+        }
+    }
+}

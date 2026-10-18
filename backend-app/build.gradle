@@ -1,0 +1,46 @@
+plugins {
+    id 'base'
+    id 'org.springframework.boot' version '3.4.11' apply false
+}
+
+allprojects {
+    group = 'com.pawbridge.backend'
+    version = '0.1.0-SNAPSHOT'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    plugins.withId('java') {
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(21)
+            }
+        }
+
+        tasks.withType(JavaCompile).configureEach {
+            options.encoding = 'UTF-8'
+            options.release = 21
+        }
+
+        dependencies {
+            testImplementation platform('org.junit:junit-bom:5.11.4')
+            testImplementation 'org.junit.jupiter:junit-jupiter'
+            testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+        }
+
+        tasks.withType(Test).configureEach {
+            useJUnitPlatform()
+            maxHeapSize = '256m'
+            maxParallelForks = 1
+        }
+    }
+}
+
+apply from: 'gradle/architecture.gradle'
+
+tasks.named('check') {
+    dependsOn subprojects.collect { "${it.path}:check" }
+}

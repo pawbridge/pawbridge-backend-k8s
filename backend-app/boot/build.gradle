@@ -1,0 +1,30 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation project(':ui')
+    implementation project(':application')
+    implementation project(':infrastructure')
+    implementation project(':domain')
+
+    testImplementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation gradleTestKit()
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'pawbridge-backend-app.jar'
+}
+
+tasks.named('jar') {
+    enabled = false
+}
+
+tasks.named('test') {
+    systemProperty 'test.gradle.home', gradle.gradleHomeDir.absolutePath
+    systemProperty 'architecture.guard.file', rootProject.file('gradle/architecture.gradle').absolutePath
+}
