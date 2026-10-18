@@ -127,29 +127,6 @@ jobs:
           docker logs pawbridge-ci-redis
           exit 1
 
-      - name: Start Elasticsearch with nori required by Community Service
-        if: inputs.service == 'community-service'
-        run: |
-          set -euo pipefail
-
-          docker run --detach --rm --name pawbridge-ci-elasticsearch -p 9200:9200 \
-            -e discovery.type=single-node \
-            -e xpack.security.enabled=false \
-            -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
-            docker.elastic.co/elasticsearch/elasticsearch:8.15.5@sha256:8870d5b7b86235fa790c9112464f5fd3b693f89d73e757a630f8b5cda350f95b \
-            bash -c 'bin/elasticsearch-plugin install --batch analysis-nori && exec /usr/local/bin/docker-entrypoint.sh eswrapper'
-
-          for attempt in $(seq 1 40); do
-            if curl --fail --silent --show-error http://127.0.0.1:9200 >/dev/null && \
-               curl --fail --silent --show-error 'http://127.0.0.1:9200/_cat/plugins?h=component' | grep -Fxq analysis-nori; then
-              exit 0
-            fi
-            sleep 3
-          done
-
-          docker logs pawbridge-ci-elasticsearch
-          exit 1
-
       - name: Run tests and build executable JAR
         working-directory: ${{ inputs.service }}
         run: bash ./gradlew test migrationTest bootJar migrationDistribution --no-daemon
