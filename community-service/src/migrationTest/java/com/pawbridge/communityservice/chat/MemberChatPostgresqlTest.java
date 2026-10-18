@@ -227,14 +227,14 @@ class MemberChatPostgresqlTest {
         UUID room = service.send(1, draft(2)).roomId();
         Instant expired = NOW.atZone(ZoneOffset.UTC).plusYears(1).toInstant();
         assertThat(at(expired).messages(2, room, null, null).content()).isEmpty();
-        var lifecycle = new MemberChatDataLifecycle(repository, Clock.fixed(expired, ZoneOffset.UTC), manager);
+        var lifecycle = new MemberChatDataLifecycle(repository, Clock.fixed(expired, ZoneOffset.UTC), manager, true);
         lifecycle.expire();
         assertThat(rows("member_chat_messages")).isZero();
     }
 
     @Test void givenWithdrawal_whenLifecycleReceivesEvent_thenRetainCounterpartTextWithoutSenderLinkAndFinallyErase() {
         UUID room = service.send(1, draft(2)).roomId();
-        var lifecycle = new MemberChatDataLifecycle(repository, Clock.fixed(NOW, ZoneOffset.UTC), manager);
+        var lifecycle = new MemberChatDataLifecycle(repository, Clock.fixed(NOW, ZoneOffset.UTC), manager, true);
         new TransactionTemplate(manager).executeWithoutResult(status -> lifecycle.withdraw(new Withdrawn(1)));
         var retained = service.room(2, room);
         assertThat(retained.counterpartId()).isNull(); assertThat(retained.counterpartNickname()).isEqualTo("탈퇴한 회원");

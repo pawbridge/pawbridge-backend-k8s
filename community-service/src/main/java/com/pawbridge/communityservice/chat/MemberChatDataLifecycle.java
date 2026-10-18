@@ -2,6 +2,7 @@ package com.pawbridge.communityservice.chat;
 
 import com.pawbridge.communityservice.chat.MemberChatModels.Withdrawn;
 import java.time.Clock;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -13,11 +14,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class MemberChatDataLifecycle {
     private final MemberChatRepository repository;
     private final Clock clock;
+    private final boolean cleanupEnabled;
     private final TransactionTemplate transactions;
 
-    public MemberChatDataLifecycle(MemberChatRepository repository, Clock clock, PlatformTransactionManager manager) {
+    public MemberChatDataLifecycle(MemberChatRepository repository, Clock clock, PlatformTransactionManager manager,
+            @Value("${pawbridge.jobs.cleanup-enabled:true}") boolean cleanupEnabled) {
         this.repository = repository;
         this.clock = clock;
+        this.cleanupEnabled = cleanupEnabled;
         transactions = new TransactionTemplate(manager);
         transactions.setTimeout(15);
     }
@@ -29,6 +33,7 @@ public class MemberChatDataLifecycle {
 
     @Scheduled(fixedDelay = 300_000, initialDelay = 300_000)
     public void expire() {
+        if (!cleanupEnabled) return;
         if (repository.installed()) transactions.executeWithoutResult(status -> repository.expire(clock.instant()));
     }
 }

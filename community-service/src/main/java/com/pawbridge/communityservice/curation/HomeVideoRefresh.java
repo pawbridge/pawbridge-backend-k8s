@@ -1,9 +1,11 @@
 package com.pawbridge.communityservice.curation;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(prefix = "pawbridge.jobs", name = "refresh-enabled", havingValue = "true", matchIfMissing = true)
 public class HomeVideoRefresh {
     private final HomeVideoService service;
     public HomeVideoRefresh(HomeVideoService service) { this.service = service; }
