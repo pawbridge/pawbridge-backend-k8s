@@ -31,8 +31,6 @@ jobs:
       run:
         shell: bash
         working-directory: backend-app
-    env:
-      GRADLE_USER_HOME: ${{ runner.temp }}/pawbridge-backend-app-gradle
     steps:
       - name: Check out backend-app sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,6 +40,11 @@ jobs:
             backend-app
             .github/workflows/backend-app-check.yml
           sparse-checkout-cone-mode: false
+
+      - name: Isolate Gradle state on the hosted runner
+        run: |
+          set -euo pipefail
+          printf 'GRADLE_USER_HOME=%s\n' "$RUNNER_TEMP/pawbridge-backend-app-gradle" >> "$GITHUB_ENV"
 
       - name: Set up Java 21
         id: java
