@@ -18,6 +18,9 @@ import static org.mockito.Mockito.when;
 import com.pawbridge.backend.community.internal.post.application.PostUpload;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.FilterInputStream;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -190,6 +193,61 @@ class S3PostMediaUploaderTest {
         assertTrue(second.closed);
         verify(s3, times(2))
                 .putObject(any(PutObjectRequest.class), any(RequestBody.class));
+        verifyNoMoreInteractions(s3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {8, 200_000})
+    void given__non_resettable_source__when__sdk_reads_for_signing_and_sending__then__fresh_bytes_and_closed_streams(int length) {
+        byte[] bytes = new byte[length];
+        java.util.Arrays.fill(bytes, (byte) 7);
+        List<TrackingStream> opened = new ArrayList<>();
+        PostUpload upload = new PostUpload("disk.png", "image/png", length, () -> {
+            TrackingStream stream = new TrackingStream(bytes);
+            opened.add(stream);
+            return new FilterInputStream(stream) {
+                @Override public boolean markSupported() { return false; }
+                @Override public void reset() throws IOException { throw new IOException("non-resettable disk source"); }
+            };
+        });
+        when(s3.putObject(any(PutObjectRequest.class), any(RequestBody.class))).thenAnswer(invocation -> {
+            RequestBody body = invocation.getArgument(1);
+            InputStream signing = body.contentStreamProvider().newStream();
+            assertFalse(signing.markSupported());
+            assertArrayEquals(bytes, signing.readAllBytes());
+            InputStream sending = body.contentStreamProvider().newStream();
+            assertArrayEquals(bytes, sending.readAllBytes());
+            return null;
+        });
+
+        uploader.upload(List.of(upload));
+
+        assertEquals(2, opened.size());
+        assertTrue(opened.stream().allMatch(stream -> stream.closed));
+        verify(s3).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+    }
+
+    @Test
+    void given__source_reopen_failure__when__sdk_requests_another_read__then__previous_stream_closes_and_upload_fails() {
+        TrackingStream first = new TrackingStream(new byte[]{1});
+        IOException cause = new IOException("synthetic reopen failure");
+        int[] opens = {0};
+        PostUpload upload = new PostUpload("disk.png", "image/png", 1, () -> {
+            if (opens[0]++ == 0) return first;
+            throw cause;
+        });
+        when(s3.putObject(any(PutObjectRequest.class), any(RequestBody.class))).thenAnswer(invocation -> {
+            RequestBody body = invocation.getArgument(1);
+            body.contentStreamProvider().newStream().readAllBytes();
+            body.contentStreamProvider().newStream();
+            return null;
+        });
+
+        RuntimeException failure = assertThrows(RuntimeException.class, () -> uploader.upload(List.of(upload)));
+
+        assertSame(cause, assertInstanceOf(UncheckedIOException.class, failure.getCause()).getCause());
+        assertTrue(first.closed);
+        verify(s3).putObject(any(PutObjectRequest.class), any(RequestBody.class));
         verifyNoMoreInteractions(s3);
     }
 

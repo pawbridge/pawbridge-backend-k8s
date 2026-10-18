@@ -4,10 +4,12 @@ import com.pawbridge.backend.community.internal.post.application.PostMediaUpload
 import com.pawbridge.backend.community.internal.post.application.PostUpload;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.http.ContentStreamProvider;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
@@ -63,10 +65,44 @@ public final class S3PostMediaUploader implements PostMediaUploader {
                 .key(key)
                 .contentType(upload.contentType())
                 .build();
-        try (InputStream stream = upload.content().open()) {
-            s3.putObject(request, RequestBody.fromInputStream(stream, upload.size()));
+        try (ReopeningContent content = new ReopeningContent(upload.content())) {
+            s3.putObject(request, RequestBody.fromContentProvider(content, upload.size(), upload.contentType()));
         }
         return publicBaseUrl + "/" + key;
+    }
+
+    /** SDK signing and sending may request separate streams; multipart disk streams cannot reset. */
+    private static final class ReopeningContent implements ContentStreamProvider, AutoCloseable {
+        private final PostUpload.Content source;
+        private InputStream current;
+        private boolean first = true;
+
+        private ReopeningContent(PostUpload.Content source) throws IOException {
+            this.source = source;
+            current = source.open();
+        }
+
+        @Override
+        public InputStream newStream() {
+            if (first) {
+                first = false;
+                return current;
+            }
+            try {
+                close();
+                current = source.open();
+                return current;
+            } catch (IOException failure) {
+                throw new UncheckedIOException(failure);
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            InputStream closing = current;
+            current = null;
+            if (closing != null) closing.close();
+        }
     }
 
     private static void validateMedia(PostUpload upload) {
