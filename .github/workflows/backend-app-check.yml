@@ -90,6 +90,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f3-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
+            printf 'F3 stub accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f3-stub-refusal.txt
 
       - name: Check modules, boundaries, unit tests and executable JAR
         run: |

@@ -16,12 +16,15 @@ import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import unquote, urlsplit
 
+from f2_ci import require_hosted
+
 SYNTHETIC_ACCESS_KEY = "f3-synthetic-access"
 MAX_OBJECT_BYTES = 16 * 1024
 MAX_WIRE_BYTES = MAX_OBJECT_BYTES * 4
 
 
 def arguments():
+    owner = require_hosted()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", choices=("127.0.0.1",), default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
@@ -33,6 +36,8 @@ def arguments():
         parser.error("port must be between 1 and 65535")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,39}", args.owner):
         parser.error("owner must be a unique lowercase CI run identifier (3-40 characters)")
+    if args.owner != owner:
+        parser.error("owner must match this hosted run identity")
     if args.bucket != "f3-" + args.owner or args.prefix != "f3-" + args.owner + "/":
         parser.error("bucket and prefix must exactly match f3-<owner> and f3-<owner>/")
     return args
