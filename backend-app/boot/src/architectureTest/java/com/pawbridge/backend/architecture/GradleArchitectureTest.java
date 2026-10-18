@@ -166,6 +166,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         appendModuleBuild("community", """
                 evaluationDependsOn(':user')
                 configurations.implementation.dependencies.clear()
+                configurations.compileOnly.dependencies.clear()
                 dependencies { implementation files(project(':user').%s) }
                 """.formatted(output));
 
