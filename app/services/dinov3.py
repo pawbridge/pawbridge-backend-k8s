@@ -54,10 +54,12 @@ def validate_vector(vector):
 
 class DinoV3Encoder:
     def __init__(self):
+        from app.services.gpu_device import inference_device
+        self.device = inference_device()
+        if self.device == "mps" and visual_profile() == "animal-focus":
+            raise RuntimeError("The legacy animal-focus profile requires CUDA; select sam3-animal-focus for MPS")
         import torch
         import timm
-        if not torch.cuda.is_available():
-            raise RuntimeError("DINOv3 requires CUDA; CPU fallback is disabled")
         checkpoint = Path(os.environ["DINOV3_CHECKPOINT"])
         with checkpoint.open("rb") as source:
             digest = hashlib.sha256()
@@ -66,9 +68,14 @@ class DinoV3Encoder:
         if digest.hexdigest() != WEIGHTS_SHA256:
             raise RuntimeError("DINOv3 checkpoint hash mismatch")
         torch.set_num_threads(2)
-        total = torch.cuda.get_device_properties(0).total_memory
-        limit_gib = 7.0 if visual_profile() == "sam3-animal-focus" else 5.5
-        torch.cuda.set_per_process_memory_fraction(min(1.0, limit_gib * 1024**3 / total), 0)
+        if self.device == "cuda":
+            total = torch.cuda.get_device_properties(0).total_memory
+            limit_gib = 7.0 if visual_profile() == "sam3-animal-focus" else 5.5
+            torch.cuda.set_per_process_memory_fraction(min(1.0, limit_gib * 1024**3 / total), 0)
+        else:
+            # Validated ceiling, not a reservation; do not remove MPS memory guards.
+            recommended = torch.mps.recommended_max_memory()
+            torch.mps.set_per_process_memory_fraction(min(1.0, 16 * 1024**3 / recommended))
         self.focus = None
         self.model_version = MODEL_VERSION
         # SAM first avoids retaining DINO's CPU allocation during SAM construction.
@@ -77,7 +84,7 @@ class DinoV3Encoder:
             self.focus = Sam3Focus()
             self.model_version = FOCUS_VERSION
         self.model = timm.create_model(MODEL_NAME, pretrained=False, num_classes=0,
-                                      checkpoint_path=str(checkpoint)).eval().to("cuda")
+                                      checkpoint_path=str(checkpoint)).eval().to(self.device)
         config = timm.data.resolve_model_data_config(self.model)
         expected = {"input_size": (3, 256, 256), "interpolation": "bicubic",
                     "mean": (0.485, 0.456, 0.406), "std": (0.229, 0.224, 0.225),
@@ -98,28 +105,31 @@ class DinoV3Encoder:
     def _vector_for(self, view):
         import torch
         import torch.nn.functional as functional
-        tensor = self.transform(view).unsqueeze(0).to("cuda")
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+        tensor = self.transform(view).unsqueeze(0).to(self.device)
+        with torch.inference_mode(), torch.autocast(self.device, dtype=torch.float16):
             vector = functional.normalize(self.model(tensor).float(), dim=-1)
         return validate_vector(vector.squeeze(0).cpu().tolist())
 
     def encode_with_metadata(self, image, species=None, *, background=False, prepared_focus_image=None):
         # Hold one lock across detection and both embeddings; no concurrent GPU jobs.
         import torch
+        from app.services.gpu_device import is_gpu_oom
         with self.gate.acquire(background=background):
             try:
                 if prepared_focus_image is None:
                     return self._encode_image(image, species)
                 return self._encode_image(image, species, prepared_focus_image=prepared_focus_image)
-            except torch.cuda.OutOfMemoryError:
-                pass
+            except RuntimeError as error:
+                if not is_gpu_oom(error, self.device):
+                    raise
             # Leave the exception scope first so failed inference tensors are released.
-            torch.cuda.empty_cache()
+            getattr(torch, self.device).empty_cache()
             raise RuntimeError("GPU memory exhausted during lost-animal search")
 
     def describe_coat_color(self, image, species, *, background=False, prepared_focus_image=None):
         # Reuse the loaded segmenter without recomputing either DINO vector.
         import torch
+        from app.services.gpu_device import is_gpu_oom
         with self.gate.acquire(background=background):
             try:
                 if self.focus is None:
@@ -130,9 +140,10 @@ class DinoV3Encoder:
                     return prepared.coat_color
                 finally:
                     prepared.image.close()
-            except torch.cuda.OutOfMemoryError:
-                pass
-            torch.cuda.empty_cache()
+            except RuntimeError as error:
+                if not is_gpu_oom(error, self.device):
+                    raise
+            getattr(torch, self.device).empty_cache()
             raise RuntimeError("GPU memory exhausted during color backfill")
 
     def _encode_image(self, image, species, *, prepared_focus_image=None):
