@@ -1,4 +1,22 @@
-# PawBridge Backend (Kubernetes Edition)
+# PawBridge Backend
+
+## 현재 운영과 개발
+
+2026-10-19 기준 운영 환경은 Mac의 Docker Compose이며, PostgreSQL 17과 pgvector를 사용합니다. 기존 Java 17 마이크로서비스를 운영하고, 동물 사진 검색·추천용 Python AI는 별도 Mac 네이티브 프로세스로 실행합니다. 현재 Mac 운영에서도 Kafka·Debezium CDC·Redis를 계속 사용합니다.
+
+`dev`에서는 Java 21 기반 [모듈형 모놀리스 backend-app](https://github.com/pawbridge/pawbridge-backend-k8s/tree/dev/backend-app)을 개발·통합합니다.
+
+| 브랜치 | 역할 |
+| --- | --- |
+| `main` | 승인된 운영 릴리스의 소스 기준과 운영 hotfix 통합 |
+| `dev` | 모듈형 모놀리스 전환 기능 개발·통합 |
+
+현재 CI 정의는 검사 전용으로 이미지 발행을 차단합니다. main 기준선 정렬과 CI 변경은 실제 운영 이미지 교체나 배포 완료를 뜻하지 않습니다.
+
+## 이전 Kubernetes 환경의 구현 기록
+
+아래 Kubernetes·MySQL·Elasticsearch·로컬 VM 구성과 기술 표, 구현 경험·성과·이미지는 이전 환경의 기록입니다. 현재 운영 구성과 구분해 보존합니다.
+
 <img width="1919" height="920" alt="Image" src="https://github.com/user-attachments/assets/2d016c69-7d91-4f1a-8111-abbb773ec5a7" />
 반려동물 입양 프로세스, 커뮤니티, 스토어 통합 커머스 플랫폼인 PawBridge의 마이크로서비스 백엔드 저장소입니다. 
 기존 AWS EC2 다중 노드 환경에서 운영되던 서비스를 개인 로컬 PC 기반의 Kubernetes(K8s) 클러스터로 마이그레이션한 버전입니다.
