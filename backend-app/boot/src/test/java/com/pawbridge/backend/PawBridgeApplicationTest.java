@@ -3,9 +3,16 @@ package com.pawbridge.backend;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.pawbridge.backend.boot.configuration.ReadDatabaseSettings;
+import jakarta.servlet.MultipartConfigElement;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.web.servlet.MultipartAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.servlet.MultipartProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
+import org.springframework.util.unit.DataSize;
 
 class PawBridgeApplicationTest {
     @Test
@@ -67,6 +74,23 @@ class PawBridgeApplicationTest {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();
                     });
+                });
+    }
+
+    @Test
+    void given__candidate_multipart_configuration__when__binding_servlet_configuration__then__preserve_file_and_request_limits() {
+        new WebApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withConfiguration(AutoConfigurations.of(MultipartAutoConfiguration.class))
+                .withPropertyValues("spring.config.location=classpath:/application.properties")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    var properties = context.getBean(MultipartProperties.class);
+                    assertThat(properties.getMaxFileSize()).isEqualTo(DataSize.ofMegabytes(100));
+                    assertThat(properties.getMaxRequestSize()).isEqualTo(DataSize.ofMegabytes(200));
+                    var servletConfig = context.getBean(MultipartConfigElement.class);
+                    assertThat(servletConfig.getMaxFileSize()).isEqualTo(DataSize.ofMegabytes(100).toBytes());
+                    assertThat(servletConfig.getMaxRequestSize()).isEqualTo(DataSize.ofMegabytes(200).toBytes());
                 });
     }
 
