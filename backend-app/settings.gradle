@@ -6,4 +6,4 @@ pluginManagement {
 }
 
 rootProject.name = 'pawbridge-backend-app'
-include 'boot', 'ui', 'application', 'domain', 'infrastructure'
+include 'boot', 'user', 'community'

@@ -94,6 +94,11 @@ jobs:
         run: |
           set -euo pipefail
           test -f boot/build/libs/pawbridge-backend-app.jar
+          jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform)[^/]*\.jar$' build/ci/boot-jar-contents.txt; then
+            printf 'Build/test tooling must not enter the application JAR\n' >&2
+            exit 1
+          fi
           startup_exit_code=0
           timeout --kill-after=5s 30s \
             java -jar boot/build/libs/pawbridge-backend-app.jar \
@@ -116,6 +121,7 @@ jobs:
             backend-app/build/ci/packaged-startup.log
             backend-app/build/ci/packaged-startup-result.txt
             backend-app/build/ci/boot-jar.sha256
+            backend-app/build/ci/boot-jar-contents.txt
           if-no-files-found: warn
           include-hidden-files: false
           retention-days: 7
