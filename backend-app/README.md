@@ -1,93 +1,70 @@
-# PawBridge 업무 통합 빌드 기반
+# PawBridge 업무 통합 실행기
 
-이 디렉터리는 기존 서비스와 독립적인 Java 21 Gradle 멀티프로젝트다. F1은 업무 모듈의 의존 경계와 외부 서비스 없이 기동·종료하는 Spring Boot 산출물을 제공한다. 실제 User·Community 기능 편입은 다음 단계에서 진행한다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2는 기존 게시글 단건 GET과 작성자 닉네임 조회만 편입한 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
 
-## 모듈과 의존성
+## 업무 경계와 호출
 
-| Gradle 모듈 | 책임 | 허용되는 직접 프로젝트 의존성 |
+| 모듈 | 책임 | 직접 프로젝트 의존성 |
 |---|---|---|
-| boot | 실행 설정, 구현체 조립, 실행 JAR | user, community |
-| user | 사용자 업무와 다른 업무에 제공할 계약 | 없음 |
-| community | 커뮤니티 업무와 다른 업무에 제공할 계약 | user |
-
-루트는 빌드 집계만 담당한다. Spring Boot 플러그인과 실행 JAR는 boot에만 둔다. 업무 모듈은 일반 Java 라이브러리다. 기존 서비스의 build·sourceSets·Application·migration·스케줄러는 가져오지 않는다.
-
-업무 모듈 내부의 패키지 배치는 다음을 기준으로 한다. 아래 역할은 별도 Gradle 모듈이 아니며 실제 책임이 생길 때 필요한 패키지만 추가한다.
+| boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
+| user | 공개 닉네임 조회 계약과 JDBC 구현 | 없음 |
+| community | 게시글 읽기·닉네임 조합·REST 응답 | user |
 
 ```text
-backend-app/
-  boot/                         실행·설정·의존성 조립
-  user/
-    com.pawbridge.backend.user
-      api/                      다른 업무에 제공하는 계약
-      internal/
-        <기능>/
-          domain/               업무 모델·규칙·필요한 포트
-          application/          유스케이스 실행 조율
-          web/                  REST·STOMP·SSE 등의 인바운드 어댑터
-          infrastructure/       영속성·외부 연동 구현
-  community/
-    com.pawbridge.backend.community
-      api/
-      internal/<기능>/<역할>/
+boot -> community.internal.post.web -> community.internal.post.application
+                                      -> community.internal.post.infrastructure
+                                      -> user.api -> user.internal.nickname.infrastructure
 ```
 
-작은 업무에서는 `internal.domain`, `internal.application`처럼 기능 구분을 생략할 수 있다. `api`는 다른 업무 모듈이 호출하는 Java 계약이다. HTTP 요청·응답 변환은 `internal.<기능>.web`이 담당한다. 실제 필요 없이 인터페이스나 빈 계층을 만들지 않는다.
+`api`는 업무 간 Java 계약이다. HTTP는 `internal.<기능>.web`, DB/JSON 변환은 infrastructure, 조회 조합은 application이 담당한다. 이번 읽기 projection에 빈 domain 계층이나 회원 전체 aggregate를 만들지 않는다. 필요해지는 domain 규칙은 후속 업무 편입에서 추가한다.
 
-community는 user의 api만 참조할 수 있다. boot는 설정과 의존성 조립을 위해 두 업무의 구현체를 참조할 수 있다. Gradle의 `implementation`만으로 공개 Java 타입의 내부 접근을 막을 수 없으므로 바이트코드 검사도 수행한다.
+Community는 User의 공개 API만 참조한다. User 부재·명시된 조회 실패는 `사용자{id}`로 표시하고, 빈 HTTP 응답이 null로 decode되던 동작은 빈 저장 닉네임의 표시 호환에 반영한다. 공백은 그대로 둔다. 게시글 없음/soft-delete는 404이며 게시글 DB·JSON 오류는 닉네임 fallback로 숨기지 않는다.
 
-## 의존 규칙과 검사 범위
+공개 GET은 `/api/v1/posts/read/{postId}` 하나다. 기존 envelope와 data 9필드, 이미지 null/순서/중복과 LocalDateTime 의미를 보존한다. 기존 malformed ID의 generic 500 동작은 유지하며 400 개선을 섞지 않는다. `/api/posts/...` alias rewrite는 기존 Gateway 책임이다. 후보는 별도 nickname HTTP·쓰기·로그인 API를 제공하지 않는다.
 
-`gradle/architecture.gradle`이 제공하는 다음 두 검사를 루트와 모든 모듈의 `check`가 수행한다.
+## DB·실행 설정
 
-- `verifyArchitecture`: 정확히 세 모듈과 허용된 프로젝트 의존 방향, 루트의 집계 책임, 단일 Boot 모듈을 검사한다. 직접 의존은 태스크 그래프 생성 전에도 확인해 금지 순환이 컴파일 태스크 순환으로 가려지지 않게 한다.
-- `verifyBusinessPackages`: 실제 main 바이트코드를 읽어 업무별 api/internal과 domain/application 의존 경계를 검사한다. 테스트 코드는 실제 업무 구현으로 세지 않는다.
+DataSource·transaction manager 각 1개로 `pawbridge_community.posts`와 `pawbridge_user.users`의 필요한 열만 읽는다. Community 게시글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 tx를 시작한다. application 조합에 외곽 tx나 REQUIRES_NEW를 두지 않는다. SQL의 schema와 parameter binding을 명시한다.
 
-주요 패키지 규칙은 다음과 같다.
+| 환경 변수 | 의미 |
+|---|---|
+| F2_JDBC_URL | 명시적 PostgreSQL JDBC URL. 계정/쿼리 옵션을 URL에 넣지 않음 |
+| F2_DB_USER | 대상 두 schema의 필요한 열을 읽을 계정 |
+| F2_DB_PASSWORD | 해당 계정 암호. 이미지/소스에 포함하지 않음 |
+| F2_POOL_MAX_SIZE | 후보 시험 pool 상한, 기본 2; 운영 pool 확정값 아님 |
+| F2_PORT | loopback HTTP 포트. 기본 0(임의 포트) |
 
-- api는 JDK와 허용된 api 계약만 참조한다. 내부 모델·저장소·JPA·프레임워크 타입을 반환값, 필드, 상속, 제네릭, 예외, 애너테이션 등을 통해 노출하지 않는다.
-- domain은 자신의 domain과 JDK 타입만 참조한다. JDK에 포함된 JDBC·HTTP 타입도 거부한다. 다른 업무 api, 자신의 application·web·infrastructure, Spring·JPA·JDBC·HTTP 타입은 허용하지 않는다.
-- application은 web·infrastructure 및 JPA·JDBC·Feign·HTTP 기술에 의존하지 않는다. Spring 예외는 `Transactional`, `Propagation`, `Isolation` 세 타입으로 제한한다. 이 예외가 있으므로 application 전체를 프레임워크 독립이라고 표현하지 않는다.
+필수 설정이 없으면 main은 Spring 기동/DB 접속 전에 실패한다. 운영 기본 주소나 기존 .env를 자동 탐색하지 않는다. readOnly tx와 SQL READ ONLY를 적용하며 CI 앱 계정도 SELECT-only로 제한한다. 앱 classpath에 SQL 초기화·Flyway·기존 migration/consumer/스케줄러·Feign·JPA·Redis·Kafka·ES·R2·OAuth를 추가하지 않는다.
 
-Gradle 검사는 compile/runtime/annotation processor 의존과 전이 경로를 확인한다. 실제 source·resource·compiler sourcepath가 모듈 내부에 있는지, 파일 classpath가 금지 모듈이나 형제 서비스의 출력으로 우회하는지도 검사한다. 모듈별로 분리한 중앙 출력은 허용하지만 소유권이 겹치는 출력은 거부한다.
+DB의 `TIMESTAMP(6)`와 기존 Hibernate UTC JDBC 추출 의미를 보존하도록 mapper를 비교한다. 문자열에 Z를 붙이거나 무조건 9시간을 더하지 않는다. 이 후보를 운영으로 연결하기 전에는 운영 DB 권한·기존/신규 JVM timezone·총 pool 예산과 라우팅 인계를 별도 검증해야 한다.
 
-이 검사는 Gradle 모델의 경로·의존 관계와 정적 바이트코드 경계를 다룬다. 임의 Gradle 스크립트를 격리하는 보안 샌드박스나 boot의 모든 코드가 조립만 하는지 판정하는 의미 검사는 아니다. 리플렉션·문자열 기반 접근과 실제 업무 책임은 코드 리뷰에서도 확인해야 한다.
+## 구조 검사
 
-domain의 JDK-only 규칙과 달리 application은 모든 외부 라이브러리를 거부하는 허용 목록을 사용하지 않는다. 명시한 어댑터 역할과 기술 패키지를 검사하므로, 그 목록에 없는 직렬화 라이브러리 등의 직접 의존까지 자동으로 차단한다고 보장하지 않는다. 실제 업무 편입 때 외부 타입의 역할을 검토하고 필요한 규칙·예외를 해당 계약과 함께 보완한다.
+`gradle/architecture.gradle`의 `verifyArchitecture`와 `verifyBusinessPackages`를 유지한다.
 
-현재 user·community에는 업무 구현 클래스가 없다. 패키지 검사는 실제 업무 클래스 수를 출력하고 0개일 때 실제 업무 코드의 준수 여부가 미검증임을 명시한다. fixture 검증과 실제 기능 편입 완료를 구분한다.
+- 루트는 집계만, boot만 실행 JAR, user/community는 java-library다.
+- 세 모듈 DAG·순환/boot 역참조·외부 source/resource/compiler input·class output 소유권을 검사한다.
+- api에는 JDK/허용 api만 노출하며 타 업무 internal 접근과 내부 타입 signature 누출을 거부한다.
+- domain은 자기 domain과 기술을 제외한 JDK만 허용한다. application은 web/infrastructure/JPA/JDBC/HTTP/Feign/TransactionTemplate을 참조하지 않는다. Spring 선언 예외는 Transactional/Propagation/Isolation뿐이다.
+- application 검사는 명시 기술 blacklist이며 임의 외부 라이브러리의 모든 의미를 판정하는 샌드박스는 아니다. 리플렉션·업무 책임도 코드 리뷰한다.
+- ArchUnit은 빌드 도구이며 앱 runtime에 포함하지 않는다. Kotlin 도입 시 별도 compiled fixture로 언어 runtime 경계를 검증한다.
 
-현재 JDK-only 검사는 Java 단계의 기준이다. Kotlin 도입 시 컴파일러가 추가하는 Metadata 등 필수 언어 지원 타입과 기술 프레임워크 의존을 구분하고, 실제 Kotlin 허용·위반 fixture로 검사 규칙과 컴파일 입력 경계를 함께 조정해야 한다. 이 F1에 Kotlin 지원이나 언어 런타임 예외를 미리 추가하지 않는다.
+## GitHub-hosted 검증과 oracle
 
-## 현재 실행 동작
+운영 Mac에서는 Gradle·Java 앱·컨테이너를 실행하지 않는다. `Backend app check`는 backend-app/전용 workflow의 dev PR·dev push에만 GitHub-hosted Linux에서 실행하며 contents:read와 credential 미보존을 유지한다. 이미지 발행·infra PR·배포는 없다.
 
-기본 설정은 비웹이다. `PawBridgeApplication`은 context를 기동하고 정상적으로 닫은 뒤 종료한다. HTTP·DB·Redis·Kafka·R2·OAuth·예약 설정이나 기존 서비스의 .env를 읽는 설정을 추가하지 않는다. context 테스트는 비웹 기동·종료와 datasource·예약 구성요소 부재를 확인한다. 이 테스트 자체가 외부 연결을 차단하는 방화벽은 아니다.
+1. 세 모듈 unit/MVC/Security·구조 fixture와 실행 JAR를 검사한다.
+2. digest로 고정한 공식 PostgreSQL 17.11 linux/amd64 컨테이너를 고유 run label로 생성한다. loopback bind·CPU 2·RAM 512MiB·tmpfs 제한과 합성 schema/SELECT-only 계정을 사용한다.
+3. compatibilityTest와 compatibilitySeoulTest를 별도 UTC/Asia-Seoul JVM에서 실행한다. 같은 저장행의 legacy Hibernate/Jackson과 새 JDBC, 실제 nickname decoder, pool max1·실제 권한 실패/회복·읽기 전용을 검사한다.
+4. 실제 JAR를 loopback에 띄워 HTTP·권한 실패 fallback·같은 pool의 다음 요청 회복·SIGTERM 종료와 연결 해제를 확인한다. 무설정 JAR 거부도 별도로 확인한다.
+5. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
-기존 기능의 REST·STOMP·SSE 전송 계약과 데이터·트랜잭션·권한은 실제 업무 편입 단계에서 검증한다. F1에서 컨트롤러나 공개 업무 API를 임의로 추가하지 않는다.
+`scripts/f2_ci.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
 
-## 검증 실행 위치
+`prepare_legacy_oracle.py`는 기준 `e8ad7b8ec9006772ccc5f5881334df2730dbd8de`의 정확히 6개 Java 파일만 해시 검증해 boot/build 안 test-only 경로로 추출한다. Post/BoardType/StringListConverter/PostResponse와 UserServiceClient 및 그 JDK-only 응답 의존 PrivateNoteModels다. legacy 전체 sourceDir·Application을 편입하지 않는다. 실제 source/버전 비교는 compatibility classpath에서만 이뤄지고 앱 JAR에는 들어가지 않는다.
 
-운영 Mac에서는 Gradle·Java 앱·컨테이너를 실행하지 않는다. `Backend app check`의 GitHub-hosted runner에서만 다음 작업을 수행한다. backend-app 또는 이 workflow가 바뀐 dev 대상 PR과 dev push에만 읽기 권한의 검사를 실행한다. 이미지 게시·운영 비밀값·infra PR·배포 연결은 없다.
+TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classpath를 사용한다. 실제 업무 build와 guard를 fixture에 복사하고, 본 빌드가 해결한 BOM/의존 cache를 offline으로 사용한다. 허용/금지 fixture의 이유를 검사하며 일반 컴파일·다운로드 오류를 구조 차단 성공으로 취급하지 않는다.
 
-```sh
-bash ./gradlew --no-daemon --max-workers=1 projects check :boot:bootJar
-timeout 30s java -jar boot/build/libs/pawbridge-backend-app.jar
-```
+Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-`boot:test`는 Spring context를, `boot:architectureTest`는 실제 production guard entry와 업무 build 스크립트를 사용하는 TestKit fixture를 검증한다. 허용·위반 fixture는 작은 Java 코드를 실제로 컴파일한다. 위반 사례는 의도한 guard의 거부를 확인하며 컴파일·의존성 다운로드 실패를 성공 근거로 취급하지 않는다.
-
-architectureTest sourceSet은 일반 테스트·앱의 의존성을 상속하지 않는다. TestKit의 Gradle 로깅 구현과 Spring Logback 충돌을 피하기 위해 실행 classpath를 분리한다. fixture는 같은 CI의 Gradle 설치와 이미 해결한 의존 캐시를 사용하고 offline으로 실행한다. 전용 daemon은 192MiB부터 순차 재사용하며 바깥 빌드의 --no-daemon과 구분한다. 각 Test 태스크는 256MiB·fork 1개로 제한한다.
-
-ArchUnit 1.5.1은 Gradle 검사 스크립트의 빌드 의존성이다. 앱의 compile/runtime 의존성으로 추가하지 않는다. CI는 실행 JAR에도 검사 도구·TestKit·JUnit이 포함되지 않았는지 확인하고 JDK·Gradle·runner 버전과 시험·정상 종료 근거를 보존한다.
-
-CI 통과는 Mac ARM64 실제 기동, 기존 업무 통합 또는 메모리 절감의 증거가 아니다.
-
-## 빌드 기준과 무결성
-
-Java 21, Gradle 8.14.3, Spring Boot 3.4.11을 유지한다. 기존 앱의 Java 17 빌드·실행 설정은 변경하지 않는다. Wrapper JAR와 배포 ZIP의 공식 checksum을 고정한 기존 설정을 유지한다.
-
-- [Gradle 배포 ZIP checksum](https://services.gradle.org/distributions/gradle-8.14.3-bin.zip.sha256)
-- [Gradle Wrapper checksum](https://services.gradle.org/distributions/gradle-8.14.3-wrapper.jar.sha256)
-- [ArchUnit 공식 사용 안내](https://www.archunit.org/userguide/html/000_Index.html)
-
-전체 전환 결정·실행 기록은 Obsidian `Projects/pawbridge`의 기존 모듈형 모놀리스 전환 노트가 관리한다.
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2 계획과 모듈형 모놀리스 전환 노트를 따른다.

@@ -2,17 +2,11 @@ name: Backend app check
 
 on:
   push:
-    branches:
-      - dev
-    paths:
-      - 'backend-app/**'
-      - '.github/workflows/backend-app-check.yml'
+    branches: [dev]
+    paths: ['backend-app/**', '.github/workflows/backend-app-check.yml']
   pull_request:
-    branches:
-      - dev
-    paths:
-      - 'backend-app/**'
-      - '.github/workflows/backend-app-check.yml'
+    branches: [dev]
+    paths: ['backend-app/**', '.github/workflows/backend-app-check.yml']
 
 permissions:
   contents: read
@@ -23,18 +17,19 @@ concurrency:
 
 jobs:
   check:
-    name: Java 21 build and isolated startup
+    name: Java 21 build and isolated PostgreSQL HTTP contract
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
         working-directory: backend-app
     steps:
-      - name: Check out backend-app sources
+      - name: Check out candidate and pinned legacy Git objects
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
           sparse-checkout: |
             backend-app
             .github/workflows/backend-app-check.yml
@@ -79,49 +74,59 @@ jobs:
             printf 'jdk_version=%s\n' "$JDK_VERSION"
             java -version 2>&1
           } | tee build/ci/runtime-metadata.txt
-          bash ./gradlew --version --no-daemon --max-workers=1 -Dorg.gradle.parallel=false \
-            | tee build/ci/gradle-version.txt
+          bash ./gradlew --version --no-daemon --max-workers=1 -Dorg.gradle.parallel=false | tee build/ci/gradle-version.txt
           grep -Fx 'Gradle 8.14.3' build/ci/gradle-version.txt
 
-      - name: Check modules, dependency rules, and executable JAR
-        id: build
+      - name: Verify no hosted-only helper can run outside CI
         run: |
           set -euo pipefail
-          bash ./gradlew projects check :boot:bootJar \
-            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
-
-      - name: Start and close the packaged application without external services
-        run: |
-          set -euo pipefail
-          test -f boot/build/libs/pawbridge-backend-app.jar
-          jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform)[^/]*\.jar$' build/ci/boot-jar-contents.txt; then
-            printf 'Build/test tooling must not enter the application JAR\n' >&2
+          if env -u GITHUB_ACTIONS python3 scripts/f2_ci.py prepare > build/ci/helper-refusal.txt 2>&1; then
+            printf 'Hosted-only fixture helper accepted a non-CI invocation\n' >&2
             exit 1
           fi
-          startup_exit_code=0
-          timeout --kill-after=5s 30s \
-            java -jar boot/build/libs/pawbridge-backend-app.jar \
-            --spring.main.banner-mode=off \
-            > build/ci/packaged-startup.log 2>&1 || startup_exit_code=$?
-          printf 'packaged_application_exit_code=%s\n' "$startup_exit_code" \
-            | tee build/ci/packaged-startup-result.txt
-          test "$startup_exit_code" -eq 0
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/helper-refusal.txt
+
+      - name: Check modules, boundaries, unit tests and executable JAR
+        run: |
+          set -euo pipefail
+          bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+
+      - name: Prepare owned synthetic PostgreSQL 17
+        run: python3 scripts/f2_ci.py prepare
+
+      - name: Compare legacy reads, transactions and nickname transport in UTC and Seoul
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:compatibilityTest :boot:compatibilitySeoulTest             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          bash ./gradlew :boot:dependencies --configuration compatibilityTestRuntimeClasspath             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false > build/ci/compatibility-dependencies.txt
+
+      - name: Verify production JAR isolation
+        run: |
+          set -euo pipefail
+          jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f2_fixture|f2LegacyOracle|compatibilityTest|com/pawbridge/communityservice/' build/ci/boot-jar-contents.txt; then
+            printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
+            exit 1
+          fi
           sha256sum boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar.sha256
 
-      - name: Preserve test and runtime evidence
+      - name: Verify packaged HTTP and normal termination against the disposable database
+        run: python3 scripts/f2_ci.py smoke
+
+      - name: Remove only the owned disposable fixture
+        if: always()
+        run: python3 scripts/f2_ci.py cleanup
+
+      - name: Preserve tests and bounded runtime evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             backend-app/**/build/test-results/**/TEST-*.xml
-            backend-app/build/ci/runtime-metadata.txt
-            backend-app/build/ci/gradle-version.txt
-            backend-app/build/ci/packaged-startup.log
-            backend-app/build/ci/packaged-startup-result.txt
+            backend-app/build/ci/*.txt
+            backend-app/build/ci/*.log
             backend-app/build/ci/boot-jar.sha256
-            backend-app/build/ci/boot-jar-contents.txt
           if-no-files-found: warn
           include-hidden-files: false
           retention-days: 7
