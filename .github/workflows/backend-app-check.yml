@@ -3,10 +3,8 @@ name: Backend app check
 on:
   push:
     branches: [dev]
-    paths: ['backend-app/**', '.github/workflows/backend-app-check.yml']
   pull_request:
     branches: [dev]
-    paths: ['backend-app/**', '.github/workflows/backend-app-check.yml']
 
 permissions:
   contents: read
@@ -16,7 +14,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  selection:
+    name: Select backend app validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.selection.outputs.selected }}
+    steps:
+      - name: Check out source for selection
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Select application and CI policy changes
+        id: selection
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PULL_REQUEST_BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import sys
+          sys.path.insert(0, ".github/scripts")
+          from ci_branch_policy import changed_paths, validate_event
+
+          paths = changed_paths(os.environ, validate_event(os.environ))
+          selected = any(
+              path.startswith("backend-app/")
+              or path in {
+                  ".github/workflows/backend-app-check.yml",
+                  ".github/scripts/test_backend_app_ci_policy.py",
+                  ".github/scripts/ci_branch_policy.py",
+              }
+              for path in paths
+          )
+          print("selected=" + str(selected).lower())
+          PY
+
   check:
+    needs: selection
+    if: ${{ needs.selection.outputs.selected == 'true' }}
     name: Java 21 build and isolated PostgreSQL/S3 HTTP contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -157,3 +196,23 @@ jobs:
           include-hidden-files: false
           compression-level: 0
           retention-days: 7
+
+  ci-result:
+    name: Backend app CI result
+    needs: [selection, check]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require the selected application check to succeed
+        env:
+          SELECTION_RESULT: ${{ needs.selection.result }}
+          MODULE_SELECTED: ${{ needs.selection.outputs.selected }}
+          MODULE_RESULT: ${{ needs.check.result }}
+        run: |
+          set -euo pipefail
+          test "$SELECTION_RESULT" = success
+          case "$MODULE_SELECTED:$MODULE_RESULT" in
+            true:success|false:skipped) ;;
+            *) printf 'Backend app checks failed or were unexpectedly skipped\n' >&2; exit 1 ;;
+          esac
