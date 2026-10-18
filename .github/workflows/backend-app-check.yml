@@ -100,7 +100,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/f2_ci.py prepare
-          python3 scripts/f3_ci.py prepare
+
+      - name: Extend the same owned PostgreSQL with F3 writer fixture
+        run: python3 scripts/f3_ci.py prepare
 
       - name: Compare legacy reads/writes, issuer, atomicity and resource boundaries in UTC and Seoul
         run: |
