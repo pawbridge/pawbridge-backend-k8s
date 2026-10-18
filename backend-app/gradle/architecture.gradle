@@ -2,6 +2,7 @@ import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.ResolvedDependencyResult
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
 // This guards Gradle production dependency boundaries, not Java package visibility.
 def allowedDependencies = [
@@ -41,6 +42,21 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
             if (!allowedDependencies[from].contains(target.projectPath)) {
                 reject("forbidden project dependency ${from} -> ${target.projectPath}")
             }
+        }
+
+        // Query locations only: the guard does not depend on or execute producer tasks.
+        // Keep project directories as a fallback, and also follow relocated outputs.
+        def productionLocations = rootProject.subprojects.collectEntries { candidate ->
+            def output = candidate.extensions.getByType(SourceSetContainer).named('main').get().output
+            def locations = [candidate.projectDir, candidate.layout.buildDirectory.get().asFile]
+            locations.addAll(output.files)
+            candidate.tasks.withType(AbstractArchiveTask).each { archive ->
+                def artifact = archive.archiveFile.orNull
+                if (artifact != null) {
+                    locations.add(artifact.asFile)
+                }
+            }
+            [(candidate): locations.collect { it.canonicalFile.toPath() }.toSet()]
         }
 
         rootProject.subprojects.each { module ->
@@ -94,6 +110,17 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
                     reject("${module.path} production compiler sources must stay inside the module")
                 }
             }
+            compileJava.options.sourcepath?.files?.each { directory ->
+                if (!directory.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    reject("${module.path} production compiler sourcepath must stay inside the module")
+                }
+            }
+            def processResources = module.tasks.named(main.processResourcesTaskName).get()
+            processResources.source.files.each { resource ->
+                if (!resource.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    reject("${module.path} production resource inputs must stay inside the module")
+                }
+            }
             def productionClasspaths = [main.compileClasspath, main.runtimeClasspath,
                                         compileJava.classpath, compileJava.options.annotationProcessorPath,
                                         module.configurations.getByName(main.annotationProcessorConfigurationName)]
@@ -101,9 +128,13 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
             productionClasspaths.each { classpath ->
                 classpath.files.each { artifact ->
                     def artifactPath = artifact.canonicalFile.toPath()
-                    def owner = rootProject.subprojects.find { candidate ->
-                        artifactPath.startsWith(candidate.projectDir.canonicalFile.toPath())
+                    def owners = productionLocations.findAll { candidate, locations ->
+                        locations.any { artifactPath.startsWith(it) }
+                    }.keySet()
+                    if (owners.size() > 1) {
+                        reject("${module.path} production classpath has ambiguous output ownership")
                     }
+                    def owner = owners.empty ? null : owners.first()
                     if (owner != null && owner != module &&
                         !allowedDependencies[module.path].contains(owner.path)) {
                         reject("forbidden project dependency ${module.path} -> ${owner.path} through files")

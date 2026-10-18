@@ -201,6 +201,35 @@ class GradleArchitectureTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"sourceSets.main.output", "tasks.named('jar')"})
+    void givenIndividuallyRelocatedForbiddenOutputAsFiles_whenCheck_thenRejects(String output) throws IOException {
+        String producerTask = output.equals("sourceSets.main.output") ? "compileJava" : "jar";
+        String outputDirectory = output.equals("sourceSets.main.output") ? "classes" : "libs";
+        write("infrastructure/build.gradle", """
+                tasks.named('%s') {
+                    destinationDirectory = rootProject.layout.projectDirectory.dir('custom-outputs/infrastructure/%s')
+                }
+                """.formatted(producerTask, outputDirectory));
+        write("infrastructure/src/main/java/fixture/InfrastructureMarker.java", """
+                package fixture;
+                public class InfrastructureMarker {}
+                """);
+        write("application/build.gradle", """
+                evaluationDependsOn(':infrastructure')
+                dependencies {
+                    implementation files(project(':infrastructure').%s)
+                }
+                """.formatted(output));
+        write("application/src/main/java/fixture/ApplicationMarker.java", """
+                package fixture;
+                class ApplicationMarker { InfrastructureMarker marker; }
+                """);
+
+        assertRejected(runner("check").buildAndFail(),
+                "forbidden project dependency :application -> :infrastructure through files");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sourceSets.main.output", "tasks.named('jar')"})
     void givenRelocatedAllowedDomainOutputAsFiles_whenCheck_thenCompiles(String output) throws IOException {
         write("domain/build.gradle", """
                 layout.buildDirectory = rootProject.layout.buildDirectory.dir('domain')

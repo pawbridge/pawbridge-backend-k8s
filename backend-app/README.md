@@ -22,7 +22,7 @@ Spring Boot 플러그인은 boot에만 적용하고 나머지는 일반 Java 라
 
 ## 검증 실행 위치
 
-현재 운영 Mac에서는 Gradle·Java 앱·컨테이너를 실행하지 않는다. 검증은 `Backend app check`의 GitHub-hosted runner에서만 수행한다. 새 경로와 해당 workflow만 대상으로 읽기 권한의 검사 작업을 실행하며 이미지·레지스트리 게시, 운영 비밀값, infra PR, 배포 연결은 없다.
+현재 운영 Mac에서는 Gradle·Java 앱·컨테이너를 실행하지 않는다. 검증은 `Backend app check`의 GitHub-hosted runner에서만 수행한다. 새 경로 또는 해당 workflow가 바뀐 PR과 dev push에서만 읽기 권한의 검사 작업을 실행하며 이미지·레지스트리 게시, 운영 비밀값, infra PR, 배포 연결은 없다.
 
 다음 명령은 이 CI의 작업 디렉터리에서 사용한다.
 
@@ -38,8 +38,12 @@ CI는 JDK vendor/patch·CPU 아키텍처·Gradle/runner 버전을 기록하고 J
 - 정확히 5개 계층 프로젝트와 허용된 production 의존 방향.
 - `api`, `implementation`, `compileOnly`, `runtimeOnly`, annotation processor와 전이 경로를 통한 금지 프로젝트 접근 방지.
 - domain production classpath의 외부 의존 누수 방지. 테스트용 JUnit은 production과 구분한다.
+- production source root, JavaCompile의 실제 소스·`options.sourcepath`, processResources의 실제 입력 파일이 해당 모듈 내부에 있는지 검사.
+- `files(...)`로 참조하는 경로의 소유 모듈을 프로젝트 디렉터리와 실제 `buildDirectory`·main output·archive 산출물에서 판정. 모듈별로 분리한 중앙 출력 디렉터리는 허용하고, 둘 이상의 모듈에 겹치는 출력 소유권은 거부한다.
 - 실제 Gradle 모델을 검사하는 guard와 허용·금지 fixture의 TestKit 검증.
 - 기본 context의 비웹 기동·종료, datasource·예약 작업 부재.
+
+검사는 Gradle production 모델에 노출된 의존 관계와 입력·출력 경로를 대상으로 한다. 임의 Gradle 스크립트 실행을 격리하는 보안 샌드박스는 제공하지 않는다.
 
 `boot:test`는 Spring context를 검증하고, 별도 `boot:architectureTest`는 `boot/src/architectureTest/java`의 Gradle 경계 fixture를 실행한다. `check`는 둘 다 실행한다. `architectureTest` sourceSet은 일반 테스트·애플리케이션의 의존성을 상속하지 않으며 JUnit과 TestKit만 사용한다. Gradle API가 제공하는 로깅 구현이 Spring의 Logback과 충돌하지 않도록 테스트 실행 classpath를 분리한다. 계층 프로젝트 수는 그대로 5개다.
 
