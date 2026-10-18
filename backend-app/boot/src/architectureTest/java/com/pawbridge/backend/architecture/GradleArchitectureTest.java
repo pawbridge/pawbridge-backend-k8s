@@ -197,6 +197,10 @@ class GradleArchitectureTest extends BusinessBuildFixture {
             "tasks.named('compileJava') { classpath = files(rootProject.file('../store-service/build/libs/store-service.jar')) }",
             "tasks.named('compileJava') { options.annotationProcessorPath = files(rootProject.file('../store-service/build/libs/store-service.jar')) }"})
     void givenSiblingServiceFileClasspath_whenCheck_thenRejects(String configuration) throws IOException {
+        // Isolate the user input: runtimeOnly otherwise propagates through legal
+        // project dependencies and can be rejected first on boot or community.
+        appendModuleBuild("boot", "configurations.implementation.dependencies.clear()");
+        disconnectCommunityFromUser();
         createEmptyJar("../store-service/build/libs/store-service.jar");
         appendModuleBuild("user", configuration);
 

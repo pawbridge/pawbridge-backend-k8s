@@ -306,7 +306,8 @@ def verifyBusinessPackages = tasks.register('verifyBusinessPackages') {
             }
             def referencedTypes = [:]
             type.directDependenciesFromSelf.each { dependency ->
-                referencedTypes[dependency.targetClass.name] = dependency.description
+                // Array names may be JVM descriptors; classify the actual element type.
+                referencedTypes[dependency.targetClass.baseComponentType.name] = dependency.description
             }
             // ArchUnit's Dependency aggregation covers ordinary generic signatures but
             // 1.5.1 omits JavaGenericArrayType in that aggregation. Its public JavaType
@@ -326,7 +327,7 @@ def verifyBusinessPackages = tasks.register('verifyBusinessPackages') {
             }
             signatureTypes.each { signature ->
                 signature.allInvolvedRawTypes.each { rawType ->
-                    referencedTypes.putIfAbsent(rawType.name, "signature ${signature.name}")
+                    referencedTypes.putIfAbsent(rawType.baseComponentType.name, "signature ${signature.name}")
                 }
             }
             referencedTypes.each { targetName, reason ->

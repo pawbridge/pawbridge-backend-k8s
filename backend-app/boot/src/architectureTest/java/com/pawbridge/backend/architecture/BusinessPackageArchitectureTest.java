@@ -15,8 +15,13 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
     @ParameterizedTest
     @ValueSource(strings = {"check", ":user:check", ":community:check", ":boot:check"})
     void givenLegalBusinessClasses_whenRootOrIndividualCheck_thenRunsPackageGuard(String task) throws IOException {
+        javaSource("user", "internal.domain.UserStatus", "public enum UserStatus { ACTIVE }");
         javaSource("user", "internal.profile.domain.UserProfile", """
                 public record UserProfile(com.pawbridge.backend.user.internal.domain.UserName name,
+                        com.pawbridge.backend.user.internal.domain.UserName[] history,
+                        com.pawbridge.backend.user.internal.domain.UserStatus[] statuses,
+                        java.util.List<com.pawbridge.backend.user.internal.domain.UserName>[] previousNames,
+                        String[] aliases, int[] scores,
                         java.util.UUID id, java.time.Instant createdAt, java.math.BigDecimal score) {}
                 """);
         javaSource("user", "internal.domain.Identifier", """
@@ -51,6 +56,8 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
         assertCheckCompleted(result, task.equals("check") ? ":check" : task);
+        assertCompiled("user", "internal.domain.UserStatus");
+        assertCompiled("user", "internal.profile.domain.UserProfile");
         assertCompiled("user", "internal.profile.application.ProfileReader");
         assertCompiled("community", "internal.application.PostReader");
     }
@@ -173,10 +180,15 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
             default -> throw new IllegalArgumentException(signature);
         };
         javaSource("user", "api.LeakyContract", declaration);
+        String internalType = switch (signature) {
+            case "throws" -> "InternalUserProblem";
+            case "inheritance" -> "InternalUserBase";
+            default -> "UserName";
+        };
 
         BuildResult result = runner("check").buildAndFail();
 
-        assertPackageRejected(result, "API_SIGNATURE", "com.pawbridge.backend.user.api.LeakyContract");
+        assertPackageRejected(result, "API_SIGNATURE", "com.pawbridge.backend.user.internal.domain." + internalType);
         assertCompiled("user", "api.LeakyContract");
     }
 

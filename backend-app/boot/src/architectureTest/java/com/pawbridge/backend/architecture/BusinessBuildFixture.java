@@ -224,8 +224,19 @@ abstract class BusinessBuildFixture {
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
         assertTask(result, ":verifyBusinessPackages", FAILED);
-        assertTrue(result.getOutput().contains("Business package violation: [" + rule + "]"),
+        String violationPrefix = "Business package violation: [" + rule + "] ";
+        assertTrue(result.getOutput().lines().anyMatch(line -> {
+                    int start = line.indexOf(violationPrefix);
+                    if (start < 0) {
+                        return false;
+                    }
+                    String detail = line.substring(start + violationPrefix.length());
+                    if (rule.equals("BUSINESS_PACKAGE")) {
+                        return detail.contains(offendingType);
+                    }
+                    int target = detail.indexOf(" -> ");
+                    return target >= 0 && detail.substring(target + 4).startsWith(offendingType + ": ");
+                }),
                 result.getOutput());
-        assertTrue(result.getOutput().contains(offendingType), result.getOutput());
     }
 }
