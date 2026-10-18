@@ -21,7 +21,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(controllers = PostReadController.class, excludeAutoConfiguration = org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
-@ContextConfiguration(classes = {PostReadController.class, PostReadExceptionHandler.class, ReadSecurityConfiguration.class})
+@ContextConfiguration(classes = {PostReadController.class, PostReadExceptionHandler.class, ReadSecurityConfiguration.class, F3TestInputs.SecurityInputs.class})
 class PostReadHttpTest {
     @Autowired MockMvc mvc;
     @MockitoBean ReadPost readPost;

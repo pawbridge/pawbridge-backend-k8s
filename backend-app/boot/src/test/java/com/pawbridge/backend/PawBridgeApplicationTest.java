@@ -3,9 +3,16 @@ package com.pawbridge.backend;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.pawbridge.backend.boot.configuration.ReadDatabaseSettings;
+import jakarta.servlet.MultipartConfigElement;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.web.servlet.MultipartAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.servlet.MultipartProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
+import org.springframework.util.unit.DataSize;
 
 class PawBridgeApplicationTest {
     @Test
@@ -40,23 +47,50 @@ class PawBridgeApplicationTest {
     }
 
     @Test
-    void given__explicit_candidate_assembly__when__context_starts__then__only_read_dependencies_are_assembled() {
-        var settings = ReadDatabaseSettings.fromEnvironment(inputs()::get);
+    void given__explicit_candidate_assembly__when__context_starts__then__only_explicit_read_and_write_dependencies_are_assembled() {
+        var values = F3TestInputs.values();
+        var settings = ReadDatabaseSettings.fromEnvironment(values::get);
+        var writeSettings = com.pawbridge.backend.boot.configuration.PostWriteSettings.fromEnvironment(values::get,settings);
         new org.springframework.boot.test.context.runner.WebApplicationContextRunner()
                 .withUserConfiguration(PawBridgeApplication.class)
-                .withInitializer(context -> context.getBeanFactory().registerSingleton("readDatabaseSettings", settings))
+                .withInitializer(context -> {
+                    context.getBeanFactory().registerSingleton("readDatabaseSettings", settings);
+                    context.getBeanFactory().registerSingleton("postWriteSettings", writeSettings);
+                })
                 .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(1);
-                    assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
+                    assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.api.UserNicknameQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostReadController.class)).hasSize(1);
-                    var pool = context.getBean(com.zaxxer.hikari.HikariDataSource.class);
-                    assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
-                    assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();
+                    var pools = context.getBeansOfType(com.zaxxer.hikari.HikariDataSource.class);
+                    assertThat(pools.get("dataSource").isReadOnly()).isTrue();
+                    assertThat(pools.get("writeDataSource").isReadOnly()).isFalse();
+                    assertThat(pools.get("writeDataSource").getMaximumPoolSize()).isEqualTo(1);
+                    pools.values().forEach(pool -> {
+                        assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
+                        assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();
+                    });
+                });
+    }
+
+    @Test
+    void given__candidate_multipart_configuration__when__binding_servlet_configuration__then__preserve_file_and_request_limits() {
+        new WebApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withConfiguration(AutoConfigurations.of(MultipartAutoConfiguration.class))
+                .withPropertyValues("spring.config.location=classpath:/application.properties")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    var properties = context.getBean(MultipartProperties.class);
+                    assertThat(properties.getMaxFileSize()).isEqualTo(DataSize.ofMegabytes(100));
+                    assertThat(properties.getMaxRequestSize()).isEqualTo(DataSize.ofMegabytes(200));
+                    var servletConfig = context.getBean(MultipartConfigElement.class);
+                    assertThat(servletConfig.getMaxFileSize()).isEqualTo(DataSize.ofMegabytes(100).toBytes());
+                    assertThat(servletConfig.getMaxRequestSize()).isEqualTo(DataSize.ofMegabytes(200).toBytes());
                 });
     }
 

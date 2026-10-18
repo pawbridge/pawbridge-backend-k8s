@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   check:
-    name: Java 21 build and isolated PostgreSQL HTTP contract
+    name: Java 21 build and isolated PostgreSQL/S3 HTTP contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -85,6 +85,16 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f3_ci.py prepare > build/ci/f3-helper-refusal.txt 2>&1; then
+            printf 'F3 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f3-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
+            printf 'F3 stub accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f3-stub-refusal.txt
 
       - name: Check modules, boundaries, unit tests and executable JAR
         run: |
@@ -92,30 +102,36 @@ jobs:
           bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
 
       - name: Prepare owned synthetic PostgreSQL 17
-        run: python3 scripts/f2_ci.py prepare
+        run: |
+          set -euo pipefail
+          python3 scripts/f2_ci.py prepare
 
-      - name: Compare legacy reads, transactions and nickname transport in UTC and Seoul
+      - name: Extend the same owned PostgreSQL with F3 writer fixture
+        run: python3 scripts/f3_ci.py prepare
+
+      - name: Compare legacy reads/writes, issuer, atomicity and resource boundaries in UTC and Seoul
         run: |
           set -euo pipefail
           bash ./gradlew :boot:compatibilityTest :boot:compatibilitySeoulTest             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
           bash ./gradlew :boot:dependencies --configuration compatibilityTestRuntimeClasspath             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false > build/ci/compatibility-dependencies.txt
+          bash ./gradlew :boot:dependencies --configuration runtimeClasspath --no-daemon --max-workers=1 -Dorg.gradle.parallel=false > build/ci/f3-runtime-dependencies.txt
 
       - name: Verify production JAR isolation
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f2_fixture|f2LegacyOracle|compatibilityTest|com/pawbridge/communityservice/' build/ci/boot-jar-contents.txt; then
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[23]_fixture|f[23]LegacyOracle|compatibilityTest|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
           fi
           sha256sum boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar.sha256
 
-      - name: Verify packaged HTTP and normal termination against the disposable database
-        run: python3 scripts/f2_ci.py smoke
+      - name: Verify packaged POST/GET, synthetic SDK uploads, failures and normal termination
+        run: python3 scripts/f3_ci.py smoke
 
       - name: Remove only the owned disposable fixture
         if: always()
-        run: python3 scripts/f2_ci.py cleanup
+        run: python3 scripts/f3_ci.py cleanup
 
       - name: Preserve tests and bounded runtime evidence
         if: always()

@@ -1,6 +1,10 @@
 package com.pawbridge.backend.boot.configuration;
 
 import jakarta.servlet.DispatcherType;
+import com.pawbridge.backend.boot.security.PostTokenAuthenticator;
+import com.pawbridge.backend.boot.security.PostBearerAuthenticationFilter;
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -15,7 +19,8 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration(proxyBeanMethods = false)
 public class ReadSecurityConfiguration {
     @Bean
-    SecurityFilterChain postReadSecurity(HttpSecurity http) throws Exception {
+    SecurityFilterChain postReadSecurity(HttpSecurity http, PostTokenAuthenticator tokens) throws Exception {
+        var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -25,7 +30,9 @@ public class ReadSecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read/*").permitAll()
+                        .requestMatchers(postCreation).authenticated()
                         .anyRequest().denyAll())
+                .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postCreation), AnonymousAuthenticationFilter.class)
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> forbidden(response))
                         .accessDeniedHandler((request, response, exception) -> forbidden(response)))

@@ -166,6 +166,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         appendModuleBuild("community", """
                 evaluationDependsOn(':user')
                 configurations.implementation.dependencies.clear()
+                configurations.compileOnly.dependencies.clear()
                 dependencies { implementation files(project(':user').%s) }
                 """.formatted(output));
 
@@ -311,7 +312,10 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     private void disconnectCommunityFromUser() throws IOException {
         // Keep the output-ownership fixture acyclic. The independent graph-cycle
         // cases above exercise the declaration preflight before task graph creation.
-        appendModuleBuild("community", "configurations.implementation.dependencies.clear()");
+        appendModuleBuild("community", """
+                configurations.implementation.dependencies.clear()
+                configurations.compileOnly.dependencies.clear()
+                """);
         javaSource("community", "internal.application.PostReader", "public class PostReader {}");
     }
 }
