@@ -234,7 +234,7 @@ class GradleArchitectureTest {
     void givenSourcesOutsideModule_whenCheck_thenRejects() throws IOException {
         write("application/build.gradle", "sourceSets.main.java.srcDir rootProject.file('legacy/src')");
 
-        assertRejected(runner("check").buildAndFail(), "production sources must stay inside the module");
+        assertRejected(runner("check").buildAndFail(), ":application production sources must stay inside the module");
     }
 
     @Test
@@ -247,7 +247,7 @@ class GradleArchitectureTest {
                 """);
 
         assertRejected(runner("check").buildAndFail(),
-                "production compiler sources must stay inside the module");
+                ":application production compiler sources must stay inside the module");
     }
 
     private GradleRunner runner(String task) {

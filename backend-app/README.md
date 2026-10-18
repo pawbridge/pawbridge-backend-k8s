@@ -41,7 +41,9 @@ CI는 JDK vendor/patch·CPU 아키텍처·Gradle/runner 버전을 기록하고 J
 - 실제 Gradle 모델을 검사하는 guard와 허용·금지 fixture의 TestKit 검증.
 - 기본 context의 비웹 기동·종료, datasource·예약 작업 부재.
 
-TestKit은 같은 CI의 Gradle 설치와 작은 로컬 fixture를 사용한다. Tooling API의 전용 daemon은 192MiB부터 제한해 순차 재사용하며, 바깥 빌드의 `--no-daemon`과 구분한다. 실제 검사 범위와 테스트 사례는 `gradle/architecture.gradle` 및 `boot`의 시험 소스를 따른다. 기능별 데이터/트랜잭션·권한 검증은 향후 편입 단위에서 수행한다.
+`boot:test`는 Spring context를 검증하고, 별도 `boot:architectureTest`는 `boot/src/architectureTest/java`의 Gradle 경계 fixture를 실행한다. `check`는 둘 다 실행한다. `architectureTest` sourceSet은 일반 테스트·애플리케이션의 의존성을 상속하지 않으며 JUnit과 TestKit만 사용한다. Gradle API가 제공하는 로깅 구현이 Spring의 Logback과 충돌하지 않도록 테스트 실행 classpath를 분리한다. 계층 프로젝트 수는 그대로 5개다.
+
+TestKit은 같은 CI의 Gradle 설치와 작은 로컬 fixture를 사용한다. Tooling API의 전용 daemon은 192MiB부터 제한해 순차 재사용하며, 바깥 빌드의 `--no-daemon`과 구분한다. 모든 `Test` 태스크는 256MiB·동시 fork 1개로 제한한다. 실제 검사 범위와 테스트 사례는 `gradle/architecture.gradle` 및 `boot`의 시험 소스를 따른다. 기능별 데이터/트랜잭션·권한 검증은 향후 편입 단위에서 수행한다.
 
 ## 빌드 기준과 무결성
 

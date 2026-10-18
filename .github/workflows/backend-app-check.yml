@@ -111,7 +111,7 @@ jobs:
         with:
           name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            backend-app/**/build/test-results/test/TEST-*.xml
+            backend-app/**/build/test-results/**/TEST-*.xml
             backend-app/build/ci/runtime-metadata.txt
             backend-app/build/ci/gradle-version.txt
             backend-app/build/ci/packaged-startup.log
