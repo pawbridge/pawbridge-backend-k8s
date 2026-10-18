@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JPA Converter: List<String> ↔ MySQL JSON 컬럼 변환
+ * JPA Converter: List<String> ↔ JSON 문자열 변환
  * 용도: imageUrls를 JSON 배열로 저장
  */
 @Converter

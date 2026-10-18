@@ -3,6 +3,7 @@ package com.pawbridge.animalservice.client;
 import com.pawbridge.animalservice.config.FeignConfig;
 import com.pawbridge.animalservice.dto.apms.ApmsAnimal;
 import com.pawbridge.animalservice.dto.apms.ApmsRootResponse;
+
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -38,6 +39,8 @@ public interface ApmsApiClient {
             @RequestParam(value = "endde", required = false) String endde,
             @RequestParam(value = "upkind", required = false) String upkind,
             @RequestParam(value = "state", required = false) String state,
-            @RequestParam(value = "_type", defaultValue = "json") String type
+            @RequestParam(value = "_type", defaultValue = "json") String type,
+            @RequestParam(value = "bgupd", required = false) String updatedBeginDate,
+            @RequestParam(value = "enupd", required = false) String updatedEndDate
     );
 }

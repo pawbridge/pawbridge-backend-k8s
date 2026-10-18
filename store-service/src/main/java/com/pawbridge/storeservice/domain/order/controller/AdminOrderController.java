@@ -24,6 +24,14 @@ public class AdminOrderController {
     private final AdminOrderService adminOrderService;
 
     /**
+     * 주문 상세 조회 (Gateway의 관리자 권한 검증을 거친 요청)
+     */
+    @GetMapping("/{orderId}")
+    public ResponseEntity<OrderResponse> getOrder(@PathVariable Long orderId) {
+        return ResponseEntity.ok(adminOrderService.getOrder(orderId));
+    }
+
+    /**
      * 전체 주문 목록 조회 (관리자용)
      * - 필터링: status, deliveryStatus, userId
      * - 검색: keyword (주문번호, 수령인 이름)

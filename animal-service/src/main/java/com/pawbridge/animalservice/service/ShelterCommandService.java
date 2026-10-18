@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.service;
 
+import com.pawbridge.animalservice.search.SearchDocumentWriter;
 import com.pawbridge.animalservice.dto.request.CreateShelterRequest;
 import com.pawbridge.animalservice.dto.request.UpdateShelterRequest;
 import com.pawbridge.animalservice.dto.response.ShelterDetailResponse;
@@ -21,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ShelterCommandService {
 
+    private final SearchDocumentWriter searchDocuments;
+
     private final ShelterRepository shelterRepository;
     private final ShelterMapper mapper;
 
@@ -36,6 +39,7 @@ public class ShelterCommandService {
 
         // 저장
         Shelter saved = shelterRepository.save(shelter);
+        refreshSearch(saved.getId());
 
         // Entity → Response DTO
         return mapper.toDetailResponse(saved);
@@ -56,7 +60,9 @@ public class ShelterCommandService {
             throw new IllegalStateException("Shelter already exists: " + shelter.getCareRegNo());
         }
 
-        return shelterRepository.save(shelter);
+        Shelter saved=shelterRepository.save(shelter);
+        refreshSearch(saved.getId());
+        return saved;
     }
 
     /**
@@ -95,4 +101,11 @@ public class ShelterCommandService {
         }
         shelterRepository.deleteById(id);
     }
+    private void refreshSearch(Long id) {
+        if (searchDocuments.enabled()) {
+            shelterRepository.flush();
+            searchDocuments.shelter(id);
+        }
+    }
+
 }

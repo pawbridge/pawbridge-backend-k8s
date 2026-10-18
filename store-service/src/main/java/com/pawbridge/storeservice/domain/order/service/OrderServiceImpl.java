@@ -23,8 +23,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -51,14 +51,20 @@ public class OrderServiceImpl implements OrderService {
             throw new IllegalArgumentException("Cart is empty");
         }
 
-        // 2. Deadlock 방지를 위한 SKU ID 순 정렬 (비관적 락 획득 순서 보장)
-        cartItems.sort(Comparator.comparing(CartItemResponse::getSkuId));
-
         long totalAmount = 0;
 
-        // 3. 재고 차감 (ProductService 내부에서 비관적 락 및 상태 검증 처리)
+        // 2. 상품 ID -> SKU ID 순으로 일괄 잠금 후 재고 차감
+        Map<Long, Integer> quantitiesBySkuId = cartItems.stream()
+                .collect(Collectors.toMap(
+                        CartItemResponse::getSkuId,
+                        CartItemResponse::getQuantity,
+                        Integer::sum,
+                        LinkedHashMap::new
+                ));
+        productService.decreaseStocks(quantitiesBySkuId);
+
+        // 3. 주문 금액 계산
         for (CartItemResponse item : cartItems) {
-            productService.decreaseStock(item.getSkuId(), item.getQuantity());
             totalAmount += item.getPrice() * item.getQuantity();
         }
 
@@ -109,7 +115,7 @@ public class OrderServiceImpl implements OrderService {
         Integer quantity = request.getQuantity();
 
         // 1. 재고 차감 (ProductService 내부에서 비관적 락 및 상태 검증 처리)
-        productService.decreaseStock(skuId, quantity);
+        productService.decreaseStocks(Map.of(skuId, quantity));
 
         // 2. 주문 정보 생성을 위해 SKU 조회 (이미 락이 해제된 상태이므로 일반 조회)
         ProductSKU sku = productSKURepository.findById(skuId)
@@ -205,7 +211,7 @@ public class OrderServiceImpl implements OrderService {
             
             String payload = objectMapper.writeValueAsString(payloadMap);
             Outbox outbox = Outbox.builder()
-                    .aggregateType("ORDER")
+                    .aggregateType("order")
                     .aggregateId(String.valueOf(order.getId()))
                     .eventType("ORDER_PAID")
                     .payload(payload)
@@ -230,11 +236,15 @@ public class OrderServiceImpl implements OrderService {
 
         order.cancelOrder();
         
-        // 재고 롤백 (ProductService 내부에서 비관적 락 적용)
-        for (OrderItem item : order.getOrderItems()) {
-            Long skuId = item.getProductSKU().getId();
-            productService.increaseStock(skuId, item.getQuantity());
-        }
+        // 상품 ID -> SKU ID 순으로 일괄 잠금 후 재고 롤백
+        Map<Long, Integer> quantitiesBySkuId = order.getOrderItems().stream()
+                .collect(Collectors.toMap(
+                        item -> item.getProductSKU().getId(),
+                        OrderItem::getQuantity,
+                        Integer::sum,
+                        LinkedHashMap::new
+                ));
+        productService.increaseStocks(quantitiesBySkuId);
         
         log.info("Order {} canceled and stock restored.", orderUuid);
     }

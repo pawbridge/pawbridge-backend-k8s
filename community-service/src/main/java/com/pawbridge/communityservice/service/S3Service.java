@@ -16,6 +16,9 @@ public interface S3Service {
      */
     List<String> uploadImages(MultipartFile[] files);
 
+    /** Uploads report photos under a report-specific object prefix. */
+    List<String> uploadReportImages(MultipartFile[] files);
+
     /**
      * S3에서 파일 삭제
      * @param fileUrl 삭제할 파일의 S3 URL

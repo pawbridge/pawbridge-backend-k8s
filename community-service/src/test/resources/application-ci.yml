@@ -1,0 +1,31 @@
+spring:
+  kafka:
+    bootstrap-servers: 127.0.0.1:9092
+    listener:
+      auto-startup: false
+
+  elasticsearch:
+    uris: http://127.0.0.1:9200
+
+  cloud:
+    aws:
+      credentials:
+        access-key: placeholder
+        secret-key: placeholder
+      region:
+        static: placeholder-region
+      s3:
+        endpoint: http://127.0.0.1:4566
+        bucket: placeholder-bucket
+
+  task:
+    scheduling:
+      enabled: false
+
+management:
+  tracing:
+    enabled: false
+
+service:
+  user:
+    url: http://127.0.0.1:18002

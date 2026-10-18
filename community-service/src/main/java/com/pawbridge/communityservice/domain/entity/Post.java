@@ -1,6 +1,8 @@
 package com.pawbridge.communityservice.domain.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -40,6 +42,7 @@ public class Post {
     @Column(nullable = false, name = "board_type")
     private BoardType boardType;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Convert(converter = StringListConverter.class)
     @Column(name = "image_urls", columnDefinition = "JSON")
     @Builder.Default

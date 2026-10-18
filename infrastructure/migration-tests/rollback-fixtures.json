@@ -1,0 +1,316 @@
+{
+  "animal": {
+    "shelters": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "created_at": "2026-09-21 01:02:03.123456",
+        "care_reg_no": "TEST-100",
+        "name": "검증 보호소"
+      },
+      "update": {
+        "name": "수정 보호소"
+      },
+      "identity": true
+    },
+    "animals": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "created_at": "2026-09-21 01:02:03.123456",
+        "api_source": "APMS_ANIMAL",
+        "apms_notice_no": "TEST-100",
+        "favorite_count": 0,
+        "gender": "UNKNOWN",
+        "neuter_status": "UNKNOWN",
+        "notice_end_date": "2026-09-30",
+        "notice_start_date": "2026-09-21",
+        "species": "DOG",
+        "status": "PROTECT",
+        "shelter_id": 100,
+        "description": "검증 '문장'\\경로\n두 줄"
+      },
+      "update": {
+        "status": "ADOPTED"
+      },
+      "identity": true
+    },
+    "outbox_events": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "aggregate_id": "100",
+        "aggregate_type": "animal",
+        "created_at": "2026-09-21 01:02:03.123456",
+        "payload": "{\"id\": 100, \"text\": \"한국어 '내용'\\\\경로\\n두 줄\", \"nested\": {\"enabled\": true}}",
+        "event_type": "SyntheticEvent",
+        "event_id": "event100",
+        "topic": "test.animal"
+      },
+      "update": {},
+      "identity": true,
+      "outbox": true
+    },
+    "processed_events": {
+      "pk": "event_id",
+      "row": {
+        "event_id": "event100",
+        "event_type": "SyntheticEvent",
+        "processed_at": "2026-09-21 01:02:03.123456"
+      },
+      "update": {},
+      "identity": false
+    }
+  },
+  "user": {
+    "users": {
+      "pk": "user_id",
+      "row": {
+        "user_id": 100,
+        "created_at": "2026-09-21 01:02:03.123456",
+        "email": "test100@example.invalid",
+        "name": "검증",
+        "nickname": "검증100",
+        "provider": "LOCAL",
+        "role": "ROLE_USER"
+      },
+      "update": {
+        "name": "수정"
+      },
+      "identity": true
+    },
+    "favorites": {
+      "pk": "favorite_id",
+      "row": {
+        "favorite_id": 100,
+        "animal_id": 100,
+        "created_at": "2026-09-21 01:02:03.123456",
+        "user_id": 100
+      },
+      "update": {
+        "animal_id": 101
+      },
+      "identity": true
+    },
+    "shelter_applications": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "user_id": 100,
+        "shelter_name": "검증소",
+        "status": "PENDING",
+        "requested_at": "2026-09-21 01:02:03.123456"
+      },
+      "update": {
+        "status": "APPROVED"
+      },
+      "identity": true
+    },
+    "outbox_events": {
+      "pk": "outbox_event_id",
+      "row": {
+        "outbox_event_id": 100,
+        "aggregate_id": "100",
+        "aggregate_type": "user",
+        "created_at": "2026-09-21 01:02:03.123456",
+        "payload": "{\"id\": 100, \"text\": \"한국어 '내용'\\\\경로\\n두 줄\", \"nested\": {\"enabled\": true}}",
+        "event_type": "SyntheticEvent",
+        "event_id": "event100",
+        "topic": "test.user"
+      },
+      "update": {},
+      "identity": true,
+      "outbox": true
+    },
+    "processed_events": {
+      "pk": "event_id",
+      "row": {
+        "event_id": "event100",
+        "event_type": "SyntheticEvent",
+        "processed_at": "2026-09-21 01:02:03.123456"
+      },
+      "update": {},
+      "identity": false
+    }
+  },
+  "community": {
+    "posts": {
+      "pk": "post_id",
+      "row": {
+        "post_id": 100,
+        "author_id": 100,
+        "board_type": "MISSING",
+        "content": "본문 '인용'\\파일\n둘째 줄",
+        "created_at": "2026-09-21 01:02:03.123456",
+        "image_urls": "[\"https://example.invalid/100.jpg\"]",
+        "title": "검증100",
+        "updated_at": "2026-09-21 01:02:03.123456"
+      },
+      "update": {
+        "title": "수정 게시글"
+      },
+      "identity": true
+    },
+    "comments": {
+      "pk": "comment_id",
+      "row": {
+        "comment_id": 100,
+        "author_id": 100,
+        "content": "검증 댓글",
+        "created_at": "2026-09-21 01:02:03.123456",
+        "post_id": 100,
+        "updated_at": "2026-09-21 01:02:03.123456"
+      },
+      "update": {
+        "content": "수정 댓글"
+      },
+      "identity": true
+    },
+    "outbox_events": {
+      "pk": "outbox_id",
+      "row": {
+        "outbox_id": 100,
+        "aggregate_id": "100",
+        "aggregate_type": "community",
+        "created_at": "2026-09-21 01:02:03.123456",
+        "payload": "{\"id\": 100, \"text\": \"한국어 '내용'\\\\경로\\n두 줄\", \"nested\": {\"enabled\": true}}",
+        "type": "SyntheticEvent",
+        "event_id": "event100"
+      },
+      "update": {},
+      "identity": true,
+      "outbox": true
+    },
+    "processed_events": {
+      "pk": "event_id",
+      "row": {
+        "event_id": "event100",
+        "event_type": "SyntheticEvent",
+        "processed_at": "2026-09-21 01:02:03.123456"
+      },
+      "update": {},
+      "identity": false
+    }
+  },
+  "store": {
+    "categories": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "name": "검증100"
+      },
+      "update": {
+        "description": "수정 카테고리"
+      },
+      "identity": true
+    },
+    "products": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "name": "상품100",
+        "status": "ACTIVE",
+        "view_count": 0,
+        "category_id": 100
+      },
+      "update": {
+        "status": "HIDDEN"
+      },
+      "identity": true
+    },
+    "product_skus": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "price": 12000,
+        "sku_code": "SKU100",
+        "stock_quantity": 3,
+        "product_id": 100
+      },
+      "update": {
+        "stock_quantity": 2
+      },
+      "identity": true
+    },
+    "orders": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "delivery_address": "검증 주소",
+        "delivery_status": "READY",
+        "order_uuid": "order100",
+        "receiver_name": "검증",
+        "receiver_phone": "000-0000-0000",
+        "status": "PENDING",
+        "total_amount": 12000,
+        "user_id": 100
+      },
+      "update": {
+        "status": "PAID"
+      },
+      "identity": true
+    },
+    "order_items": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "price": 12000,
+        "product_name": "상품100",
+        "quantity": 1,
+        "sku_code": "SKU100",
+        "order_id": 100,
+        "product_sku_id": 100
+      },
+      "update": {
+        "quantity": 2
+      },
+      "identity": true
+    },
+    "outbox": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "aggregate_id": "100",
+        "aggregate_type": "store",
+        "created_at": "2026-09-21 01:02:03.123456",
+        "payload": "{\"id\": 100, \"text\": \"한국어 '내용'\\\\경로\\n두 줄\", \"nested\": {\"enabled\": true}}",
+        "event_type": "SyntheticEvent"
+      },
+      "update": {},
+      "identity": true,
+      "outbox": true
+    }
+  },
+  "payment": {
+    "payments": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "created_at": "2026-09-21 01:02:03.123456",
+        "amount": 12000,
+        "order_id": "order100",
+        "payment_key": "synthetic100",
+        "status": "READY",
+        "user_id": 100
+      },
+      "update": {
+        "status": "DONE"
+      },
+      "identity": true
+    },
+    "outbox": {
+      "pk": "id",
+      "row": {
+        "id": 100,
+        "aggregate_id": "100",
+        "aggregate_type": "payment",
+        "created_at": "2026-09-21 01:02:03.123456",
+        "payload": "{\"id\": 100, \"text\": \"한국어 '내용'\\\\경로\\n두 줄\", \"nested\": {\"enabled\": true}}",
+        "event_type": "SyntheticEvent"
+      },
+      "update": {},
+      "identity": true,
+      "outbox": true
+    }
+  }
+}

@@ -2,6 +2,7 @@ package com.pawbridge.animalservice.mypage.service;
 
 import com.pawbridge.animalservice.dto.response.AnimalResponse;
 import com.pawbridge.animalservice.entity.Animal;
+import com.pawbridge.animalservice.enums.ApiSource;
 import com.pawbridge.animalservice.mapper.AnimalMapper;
 import com.pawbridge.animalservice.repository.AnimalRepository;
 import lombok.RequiredArgsConstructor;
@@ -50,7 +51,7 @@ public class MyPageAnimalServiceImpl implements MyPageAnimalService {
     }
 
     /**
-     * 보호소별 동물 목록 조회 (MySQL)
+     * 보호소가 직접 등록한 동물 목록 조회 (MySQL)
      * - user-service의 보호소 직원 마이페이지에 사용
      */
     @Override
@@ -58,7 +59,7 @@ public class MyPageAnimalServiceImpl implements MyPageAnimalService {
     public Page<AnimalResponse> findByShelterId(Long shelterId, Pageable pageable) {
         log.debug("[MyPage] 보호소별 동물 조회: shelterId={}", shelterId);
 
-        Page<Animal> animals = animalRepository.findByShelterId(shelterId, pageable);
+        Page<Animal> animals = animalRepository.findByShelterIdAndApiSource(shelterId, ApiSource.MANUAL, pageable);
 
         return animals.map(animalMapper::toResponse);
     }

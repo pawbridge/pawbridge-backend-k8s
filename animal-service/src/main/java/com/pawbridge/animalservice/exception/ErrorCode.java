@@ -14,6 +14,9 @@ public enum ErrorCode {
 
     // Animal 관련 에러 (404)
     ANIMAL_NOT_FOUND("ANIMAL_NOT_FOUND", "동물을 찾을 수 없습니다", HttpStatus.NOT_FOUND),
+    SEARCH_PROJECTION_PENDING("SEARCH_PROJECTION_PENDING", "검색 정보를 갱신 중입니다. 잠시 후 다시 시도해주세요", HttpStatus.SERVICE_UNAVAILABLE),
+
+    RECOMMENDATION_UNAVAILABLE("RECOMMENDATION_UNAVAILABLE", "추천 자료를 준비 중입니다. 잠시 후 다시 시도해 주세요", HttpStatus.SERVICE_UNAVAILABLE),
 
     // Shelter 관련 에러 (404)
     SHELTER_NOT_FOUND("SHELTER_NOT_FOUND", "보호소를 찾을 수 없습니다", HttpStatus.NOT_FOUND),
@@ -21,6 +24,9 @@ public enum ErrorCode {
     // Validation 에러 (400)
     INVALID_INPUT_VALUE("INVALID_INPUT_VALUE", "입력값이 올바르지 않습니다", HttpStatus.BAD_REQUEST),
     INVALID_ARGUMENT("INVALID_ARGUMENT", "잘못된 인자가 전달되었습니다", HttpStatus.BAD_REQUEST),
+
+    // 상태 충돌 에러 (409)
+    CONCURRENT_REQUEST("CONCURRENT_REQUEST", "이미 진행 중인 작업이 있습니다", HttpStatus.CONFLICT),
 
     // 권한 에러 (403)
     PERMISSION_DENIED("PERMISSION_DENIED", "접근 권한이 없습니다", HttpStatus.FORBIDDEN),

@@ -17,13 +17,21 @@ import java.util.Optional;
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
 
-    Optional<User> findByEmail(String email);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from User u where u.userId = :id")
+    Optional<User> findByIdForUpdate(@Param("id") Long id);
+
+    Page<User> findByCareRegNoAndRole(String careRegNo, Role role, Pageable pageable);
+
+    @Query("select u from User u where lower(u.email) = lower(:email)")
+    Optional<User> findByEmail(@Param("email") String email);
 
     /**
      * 이메일과 Provider로 사용자 조회
      * OAuth2 로그인 시 사용 (LOCAL과 GOOGLE을 구분하기 위함)
      */
-    Optional<User> findByEmailAndProvider(String email, String provider);
+    @Query("select u from User u where lower(u.email) = lower(:email) and lower(u.provider) = lower(:provider)")
+    Optional<User> findByEmailAndProvider(@Param("email") String email, @Param("provider") String provider);
 
     /**
      * Provider와 ProviderId로 사용자 조회
@@ -34,30 +42,33 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /**
      * 이메일과 provider로 존재 여부 확인
      */
-    boolean existsByEmailAndProvider(String email, String provider);
+    @Query("select (count(u) > 0) from User u where lower(u.email) = lower(:email) and lower(u.provider) = lower(:provider)")
+    boolean existsByEmailAndProvider(@Param("email") String email, @Param("provider") String provider);
 
     /**
      * 닉네임 중복 확인
      */
-    boolean existsByNickname(String nickname);
+    @Query("select (count(u) > 0) from User u where lower(u.nickname) = lower(:nickname)")
+    boolean existsByNickname(@Param("nickname") String nickname);
 
     /**
      * 닉네임으로 사용자 조회
      */
-    Optional<User> findByNickname(String nickname);
+    @Query("select u from User u where lower(u.nickname) = lower(:nickname)")
+    Optional<User> findByNickname(@Param("nickname") String nickname);
 
     /**
-     * 일별 가입자 수 통계 (관리자용)
+     * 한국 날짜 기준 일별 가입자 수 통계 (UTC 저장 시각에 9시간 적용)
      * @param startDate 시작 날짜
      * @param endDate 종료 날짜
      * @return 일별 가입자 수 목록
      */
     @Query("SELECT new com.pawbridge.userservice.dto.response.DailySignupStatsResponse(" +
-           "CAST(u.createdAt AS LocalDate), COUNT(u)) " +
+           "CAST(u.createdAt + 9 hour AS LocalDate), COUNT(u)) " +
            "FROM User u " +
-           "WHERE CAST(u.createdAt AS LocalDate) BETWEEN :startDate AND :endDate " +
-           "GROUP BY CAST(u.createdAt AS LocalDate) " +
-           "ORDER BY CAST(u.createdAt AS LocalDate)")
+           "WHERE CAST(u.createdAt + 9 hour AS LocalDate) BETWEEN :startDate AND :endDate " +
+           "GROUP BY CAST(u.createdAt + 9 hour AS LocalDate) " +
+           "ORDER BY CAST(u.createdAt + 9 hour AS LocalDate)")
     List<DailySignupStatsResponse> countDailySignups(
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate);

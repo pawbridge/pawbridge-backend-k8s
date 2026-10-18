@@ -1,6 +1,9 @@
 package com.pawbridge.animalservice.exception;
 
+import com.pawbridge.animalservice.persistence.PostgresqlRollbackCharsetViolation;
+
 import com.pawbridge.animalservice.util.ResponseDto;
+import com.pawbridge.animalservice.chatbot.exception.ChatbotRateLimitExceededException;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.TypeMismatchException;
 import org.springframework.dao.DataAccessException;
@@ -94,6 +97,15 @@ public class GlobalExceptionHandler {
                 .body(ResponseDto.errorWithMessage(HttpStatus.BAD_REQUEST, ex.getMessage()));
     }
 
+    @ExceptionHandler(ChatbotRateLimitExceededException.class)
+    public ResponseEntity<ResponseDto<Void>> handleChatbotRateLimitExceededException(ChatbotRateLimitExceededException ex) {
+        log.warn("Chatbot rate limit exceeded: {}", ex.getMessage());
+
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(ResponseDto.errorWithMessage(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage()));
+    }
+
     /**
      * NoHandlerFoundException 처리
      * - 존재하지 않는 API 엔드포인트 요청 시 404 반환
@@ -169,11 +181,22 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<ResponseDto<Void>> handleDataAccessException(DataAccessException ex) {
+        if (PostgresqlRollbackCharsetViolation.matches(ex)) {
+            return ResponseEntity.badRequest().body(ResponseDto.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error("Database error: {}", ex.getMessage(), ex);
 
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ResponseDto.errorWithMessage(HttpStatus.INTERNAL_SERVER_ERROR, "데이터베이스 오류가 발생했습니다."));
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<ResponseDto<Void>> handleUploadSizeExceeded() {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(ResponseDto.errorWithMessage(HttpStatus.PAYLOAD_TOO_LARGE, "사진 크기 제한을 초과했습니다"));
     }
 
     /**
@@ -182,6 +205,11 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ResponseDto<Void>> handleException(Exception ex) {
+        if (PostgresqlRollbackCharsetViolation.matches(ex)) {
+            return ResponseEntity.badRequest().body(ResponseDto.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error("Unexpected error occurred: {}", ex.getMessage(), ex);
 
         return ResponseEntity

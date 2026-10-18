@@ -1,6 +1,9 @@
 package com.pawbridge.storeservice.common.exception;
 
+import com.pawbridge.storeservice.persistence.PostgresqlRollbackCharsetViolation;
+
 import com.pawbridge.storeservice.common.dto.ErrorResponse;
+import com.pawbridge.storeservice.domain.order.exception.OrderNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -83,8 +86,22 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(com.pawbridge.storeservice.search.SearchUnavailableException.class)
+    protected ResponseEntity<ErrorResponse> handleSearchUnavailable(com.pawbridge.storeservice.search.SearchUnavailableException e) {
+        return new ResponseEntity<>(ErrorResponse.of(ErrorCode.SEARCH_SERVICE_UNAVAILABLE),HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    @ExceptionHandler(OrderNotFoundException.class)
+    protected ResponseEntity<ErrorResponse> handleOrderNotFound(OrderNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of(ErrorCode.ORDER_NOT_FOUND));
+    }
+
     @ExceptionHandler(Exception.class)
     protected ResponseEntity<ErrorResponse> handleException(Exception e) {
+        if (PostgresqlRollbackCharsetViolation.matches(e)) {
+            return ResponseEntity.badRequest().body(ErrorResponse.of(ErrorCode.UNSUPPORTED_INPUT_CHARACTER));
+        }
+
         log.error("handleEntityNotFoundException", e);
         final ErrorResponse response = ErrorResponse.of(ErrorCode.INTERNAL_SERVER_ERROR);
         return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);

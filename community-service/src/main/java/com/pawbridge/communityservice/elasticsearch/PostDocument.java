@@ -8,6 +8,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
+import org.springframework.data.elasticsearch.annotations.Setting;
 
 import java.util.List;
 
@@ -19,6 +20,7 @@ import java.util.List;
  * - nori (한국어 형태소 분석기) 사용
  */
 @Document(indexName = "posts")
+@Setting(shards = 1, replicas = 0)
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor

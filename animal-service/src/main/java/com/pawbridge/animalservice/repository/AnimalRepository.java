@@ -1,9 +1,12 @@
 package com.pawbridge.animalservice.repository;
 
 import com.pawbridge.animalservice.entity.Animal;
+import com.pawbridge.animalservice.entity.Shelter;
 import com.pawbridge.animalservice.enums.AnimalStatus;
+import com.pawbridge.animalservice.enums.ApiSource;
 import com.pawbridge.animalservice.enums.Gender;
 import com.pawbridge.animalservice.enums.Species;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -26,6 +29,9 @@ import java.util.Optional;
 @Repository
 public interface AnimalRepository extends JpaRepository<Animal, Long>,
                                           org.springframework.data.jpa.repository.JpaSpecificationExecutor<Animal> {
+
+    @Query("SELECT MIN(a.happenDate) FROM Animal a WHERE a.apiSource = :source")
+    LocalDate findEarliestHappenDate(@Param("source") ApiSource source);
 
     //기본 조회 (UNIQUE KEY)
     /**
@@ -55,12 +61,32 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
     Optional<Animal> findWithShelterById(Long id);
 
     /**
+     * ID 목록으로 동물 조회 (Shelter fetch join)
+     * - 유사 동물 목록 조회용 (toResponse에서 shelter 접근 필요)
+     * - @EntityGraph로 트랜잭션 종료 후 LazyInitializationException 방지
+     * @param ids 동물 ID 목록
+     * @return List<Animal> with Shelter
+     */
+    @EntityGraph(attributePaths = {"shelter"})
+    List<Animal> findWithShelterByIdIn(List<Long> ids);
+
+    /**
      * APMS 유기번호로 조회 (Shelter fetch join)
      * @param apmsDesertionNo APMS 유기번호
      * @return Animal Optional with Shelter
      */
     @EntityGraph(attributePaths = {"shelter"})
     Optional<Animal> findWithShelterByApmsDesertionNo(String apmsDesertionNo);
+
+    /**
+     * 전체 동물 페이징 조회 (Shelter fetch join)
+     * - Elasticsearch 일괄 인덱싱 시 N+1 방지용
+     * @param pageable 페이징 정보
+     * @return Page<Animal>
+     */
+    @Query(value = "SELECT a FROM Animal a JOIN FETCH a.shelter ORDER BY a.id ASC",
+           countQuery = "SELECT COUNT(a) FROM Animal a")
+    Page<Animal> findAllWithShelter(Pageable pageable);
 
 
     // 보호소별 조회
@@ -72,6 +98,8 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
      * @return Page<Animal>
      */
     Page<Animal> findByShelterId(Long shelterId, Pageable pageable);
+
+    Page<Animal> findByShelterIdAndApiSource(Long shelterId, ApiSource apiSource, Pageable pageable);
 
     /**
      * 보호소 ID + 축종으로 조회
@@ -162,4 +190,49 @@ public interface AnimalRepository extends JpaRepository<Animal, Long>,
      * @return 개수
      */
     long countByApmsNoticeNoStartingWith(String prefix);
+
+    // 배치 HashMap 캐시용
+
+    /**
+     * 배치 시작 시 기존 Animal의 (desertionNo, id) 쌍 전체 조회
+     * - AnimalItemProcessor.beforeStep() 에서 SELECT 1회로 existingAnimalIdMap 구성
+     * - row[0] = apmsDesertionNo (String), row[1] = id (Long)
+     */
+    @Query("SELECT a.apmsDesertionNo, a.id FROM Animal a WHERE a.apmsDesertionNo IS NOT NULL")
+    List<Object[]> findAllApmsDesertionNoAndId();
+
+    /**
+     * APMS 배치 기존 Animal 직접 UPDATE - SELECT 없이 id 기반 UPDATE만 실행
+     * - merge()의 SELECT → UPDATE 2단계를 UPDATE 1단계로 단축
+     * - @Modifying(clearAutomatically = true): 쿼리 후 1차 캐시 초기화로 스테일 방지
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @Query("UPDATE Animal a SET " +
+            "a.breed = :breed, a.birthYear = :birthYear, a.weight = :weight, " +
+            "a.color = :color, a.gender = :gender, a.neuterStatus = :neuterStatus, " +
+            "a.specialMark = :specialMark, a.apmsProcessState = :apmsProcessState, " +
+            "a.noticeStartDate = :noticeStartDate, a.noticeEndDate = :noticeEndDate, " +
+            "a.apmsUpdatedAt = :apmsUpdatedAt, a.happenDate = :happenDate, " +
+            "a.happenPlace = :happenPlace, a.imageUrl = :imageUrl, a.imageUrl2 = :imageUrl2, " +
+            "a.shelter = :shelter, a.status = :status WHERE a.id = :id")
+    int updateAnimalFromApms(
+            @Param("id") Long id,
+            @Param("shelter") Shelter shelter,
+            @Param("breed") String breed,
+            @Param("birthYear") Integer birthYear,
+            @Param("weight") String weight,
+            @Param("color") String color,
+            @Param("gender") com.pawbridge.animalservice.enums.Gender gender,
+            @Param("neuterStatus") com.pawbridge.animalservice.enums.NeuterStatus neuterStatus,
+            @Param("specialMark") String specialMark,
+            @Param("apmsProcessState") String apmsProcessState,
+            @Param("noticeStartDate") java.time.LocalDate noticeStartDate,
+            @Param("noticeEndDate") java.time.LocalDate noticeEndDate,
+            @Param("apmsUpdatedAt") java.time.LocalDateTime apmsUpdatedAt,
+            @Param("happenDate") java.time.LocalDate happenDate,
+            @Param("happenPlace") String happenPlace,
+            @Param("imageUrl") String imageUrl,
+            @Param("imageUrl2") String imageUrl2,
+            @Param("status") com.pawbridge.animalservice.enums.AnimalStatus status
+    );
 }

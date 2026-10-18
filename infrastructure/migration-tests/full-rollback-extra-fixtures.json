@@ -1,0 +1,349 @@
+{
+  "pawbridge_animal.sync_history": {
+    "row": {
+      "id": 100,
+      "api_source": "APMS_ANIMAL",
+      "fail_count": 0,
+      "start_time": "2026-09-21 01:02:03.027050",
+      "success_count": 1,
+      "sync_status": "SUCCESS"
+    },
+    "update": {
+      "success_count": 2
+    }
+  },
+  "pawbridge_animal.chatbot_sessions": {
+    "row": {
+      "id": "session100",
+      "anonymous_session_id": "anon100",
+      "animal_id": 100,
+      "created_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "updated_at": "2026-09-21 01:02:03.027050"
+    }
+  },
+  "pawbridge_animal.chatbot_messages": {
+    "row": {
+      "id": 100,
+      "session_id": "session100",
+      "role": "user",
+      "content": "질문 '인용'\\경로\n다음 줄",
+      "created_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "content": "수정 질문"
+    }
+  },
+  "pawbridge_animal.chatbot_block_logs": {
+    "row": {
+      "id": 100,
+      "animal_id": 100,
+      "anonymous_session_id": "anon100",
+      "ip_hash": "synthetic100",
+      "category": "TEST",
+      "reason": "검증",
+      "question_length": 2,
+      "created_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "reason": "수정 검증"
+    }
+  },
+  "pawbridge_animal.batch_job_instance": {
+    "row": {
+      "job_instance_id": 100,
+      "version": 1,
+      "job_name": "synthetic100",
+      "job_key": "key100"
+    },
+    "update": {
+      "version": 2
+    }
+  },
+  "pawbridge_animal.batch_job_execution": {
+    "row": {
+      "job_execution_id": 100,
+      "version": 1,
+      "job_instance_id": 100,
+      "create_time": "2026-09-21 01:02:03.027050",
+      "status": "COMPLETED"
+    },
+    "update": {
+      "version": 2,
+      "exit_code": "COMPLETED"
+    }
+  },
+  "pawbridge_animal.batch_job_execution_params": {
+    "row": {
+      "job_execution_id": 100,
+      "parameter_name": "run100",
+      "parameter_type": "java.lang.String",
+      "parameter_value": "검증100",
+      "identifying": "Y"
+    },
+    "update": {
+      "parameter_value": "수정값"
+    }
+  },
+  "pawbridge_animal.batch_step_execution": {
+    "row": {
+      "step_execution_id": 100,
+      "version": 1,
+      "step_name": "step100",
+      "job_execution_id": 100,
+      "create_time": "2026-09-21 01:02:03.027050",
+      "status": "COMPLETED"
+    },
+    "update": {
+      "version": 2,
+      "read_count": 3
+    }
+  },
+  "pawbridge_animal.batch_job_execution_context": {
+    "row": {
+      "job_execution_id": 100,
+      "short_context": "context100"
+    },
+    "update": {
+      "serialized_context": "opaque-serialized100"
+    }
+  },
+  "pawbridge_animal.batch_step_execution_context": {
+    "row": {
+      "step_execution_id": 100,
+      "short_context": "context100"
+    },
+    "update": {
+      "serialized_context": "opaque-step100"
+    }
+  },
+  "pawbridge_animal.apms_photo_scan": {
+    "row": {
+      "id": 1,
+      "new_cursor": 100,
+      "sweep_cursor": 100
+    },
+    "update": {
+      "new_cursor": 500
+    }
+  },
+  "pawbridge_animal.apms_photo_archive": {
+    "row": {
+      "animal_id": 100,
+      "slot": 1,
+      "desertion_no": "TEST100",
+      "source_url": "https://example.invalid/100.jpg",
+      "generation": 1,
+      "state": "STORED",
+      "next_attempt_at": "2026-09-21 01:02:03.027050",
+      "object_key": "test/100.webp",
+      "stored_bytes": 1234,
+      "stored_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "update": {
+      "state": "PENDING",
+      "generation": 2
+    }
+  },
+  "pawbridge_animal.shelter_public_information": {
+    "row": {
+      "shelter_id": 100,
+      "details": "{\"text\": \"\\ubcf4\\ud638\\uc18c \\ud83d\\udc15\"}",
+      "collected_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "details": "{\"text\": \"\\ubcc0\\uacbd \\ud83d\\udc08\"}"
+    }
+  },
+  "pawbridge_animal.pet_travel_regions": {
+    "row": {
+      "code": "100",
+      "name": "여행100",
+      "fetched_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "name": "수정 여행"
+    }
+  },
+  "pawbridge_animal.pet_travel_collection_state": {
+    "row": {
+      "id": 1,
+      "phase": "HIDDEN",
+      "next_page": 1
+    },
+    "update": {
+      "next_page": 2
+    }
+  },
+  "pawbridge_animal.pet_travel_pet_collection_state": {
+    "row": {
+      "id": 1,
+      "next_page": 1,
+      "cycle_id": "cycle100"
+    },
+    "update": {
+      "next_page": 2
+    }
+  },
+  "pawbridge_animal.pet_travel_collection_runs": {
+    "row": {
+      "id": "run100",
+      "started_at": "2026-09-21 01:02:03.027050",
+      "status": "SUCCESS"
+    },
+    "update": {
+      "discovered": 2
+    }
+  },
+  "pawbridge_animal.pet_travel_request_budgets": {
+    "row": {
+      "request_day": "2026-09-21",
+      "operation": "test100",
+      "used": 1
+    },
+    "update": {
+      "used": 2
+    }
+  },
+  "pawbridge_animal.pet_travel_targets": {
+    "row": {
+      "provider": "TEST",
+      "content_id": "100",
+      "area_code": "100",
+      "modified_time": "20260921010203",
+      "shown": 1,
+      "generation": 1,
+      "pending": 0,
+      "observed_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "pending": 1,
+      "generation": 2
+    }
+  },
+  "pawbridge_animal.pet_travel_places": {
+    "row": {
+      "provider": "TEST",
+      "content_id": "100",
+      "area_code": "100",
+      "title": "여행100",
+      "common_data": "{\"text\": \"\\ud55c\\uae00 \\ud83d\\udc15\"}",
+      "pet_data": "{}",
+      "visible": 1,
+      "published_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "visible": 0,
+      "title": "수정 여행"
+    }
+  },
+  "pawbridge_animal.pet_travel_pet_details": {
+    "row": {
+      "provider": "TEST",
+      "content_id": "100",
+      "pet_data": "{}",
+      "source": "TEST",
+      "fetched_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "pet_data": "{\"updated\": true}"
+    }
+  },
+  "pawbridge_animal.pet_travel_visit_details": {
+    "row": {
+      "provider": "TEST",
+      "content_id": "100",
+      "content_type_id": "12"
+    },
+    "update": {
+      "intro_data": "{\"text\": \"\\uc548\\ub0b4 \\ud83d\\udc15\"}"
+    }
+  },
+  "pawbridge_animal.pet_travel_images": {
+    "row": {
+      "provider": "TEST",
+      "content_id": "100",
+      "serial_number": "100",
+      "original_url": "https://example.invalid/100.jpg",
+      "display_order": 1,
+      "fetched_at": "2026-09-21 01:02:03.027050"
+    },
+    "update": {
+      "display_order": 2
+    }
+  },
+  "pawbridge_user.refresh_tokens": {
+    "row": {
+      "refresh_token_id": 100,
+      "created_at": "2026-09-21 01:02:03.027050",
+      "expires_at": "2026-10-21 00:00:00.000000",
+      "token": "not-a-real-token-100",
+      "user_id": 100
+    },
+    "update": {
+      "expires_at": "2026-11-21 00:00:00.000000"
+    }
+  },
+  "pawbridge_store.option_groups": {
+    "row": {
+      "id": 100,
+      "name": "크기100"
+    },
+    "update": {
+      "name": "수정 크기"
+    }
+  },
+  "pawbridge_store.option_values": {
+    "row": {
+      "id": 100,
+      "name": "대형100",
+      "option_group_id": 100
+    },
+    "update": {
+      "name": "수정 대형"
+    }
+  },
+  "pawbridge_store.sku_values": {
+    "row": {
+      "id": 100,
+      "option_value_id": 100,
+      "product_sku_id": 100
+    },
+    "update": {
+      "updated_at": "2026-09-21 01:02:03.027050"
+    }
+  },
+  "pawbridge_store.carts": {
+    "row": {
+      "id": 100,
+      "user_id": 100
+    },
+    "update": {
+      "updated_at": "2026-09-21 01:02:03.027050"
+    }
+  },
+  "pawbridge_store.cart_items": {
+    "row": {
+      "id": 100,
+      "product_sku_id": 100,
+      "quantity": 1,
+      "sku_id": 100,
+      "cart_id": 100
+    },
+    "update": {
+      "quantity": 2
+    }
+  },
+  "pawbridge_store.wishlists": {
+    "row": {
+      "id": 100,
+      "user_id": 100,
+      "sku_id": 100
+    },
+    "update": {
+      "updated_at": "2026-09-21 01:02:03.027050"
+    }
+  }
+}

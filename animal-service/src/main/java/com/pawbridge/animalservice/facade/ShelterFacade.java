@@ -118,6 +118,11 @@ public class ShelterFacade {
         return queryService.searchByNameOrAddress(keyword, pageable);
     }
 
+    @Transactional(readOnly = true)
+    public Page<ShelterResponse> searchByKeywordAndAddress(String keyword, String address, Pageable pageable) {
+        return queryService.searchByKeywordAndAddress(keyword, address, pageable);
+    }
+
     /**
      * 여러 개의 careRegNo로 Shelter 조회 (배치)
      * - Entity 반환 (배치 작업에서 사용)

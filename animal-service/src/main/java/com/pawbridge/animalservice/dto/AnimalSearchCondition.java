@@ -24,6 +24,11 @@ public class AnimalSearchCondition {
     private String keyword;
 
     /**
+     * 공고번호 (완전 일치)
+     */
+    private String noticeNo;
+
+    /**
      * 축종 (DOG, CAT, ETC)
      */
     private String species;

@@ -1,6 +1,7 @@
 package com.pawbridge.userservice.service;
 
 import com.pawbridge.userservice.client.AnimalServiceClient;
+import com.pawbridge.userservice.persistence.PostgresqlRollbackCharsetViolation;
 import com.pawbridge.userservice.dto.response.SignupPeriodsResponse;
 import com.pawbridge.userservice.email.service.EmailVerificationService;
 import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
@@ -22,8 +23,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.ObjectProvider;
+import com.pawbridge.userservice.contact.ContactMemberDeletion;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +43,7 @@ public class UserServiceImpl implements UserService {
     private final EmailVerificationService emailVerificationService;
     private final NicknameGeneratorService nicknameGeneratorService;
     private final AnimalServiceClient animalServiceClient;
+    private final ObjectProvider<ContactMemberDeletion> contactDeletion;
 
     @Override
     @Transactional
@@ -69,31 +74,15 @@ public class UserServiceImpl implements UserService {
             throw new AdminRoleNotAllowedException();
         }
 
-        // 6. ROLE_SHELTER인 경우 careRegNo 검증
-        if (requestDto.role() == Role.ROLE_SHELTER) {
-            // careRegNo가 없으면 에러
-            if (requestDto.careRegNo() == null || requestDto.careRegNo().isBlank()) {
-                throw new ShelterCareRegNoRequiredException();
-            }
-
-            // animal-service에 보호소 존재 여부 확인
-            try {
-                Boolean exists = animalServiceClient.existsByCareRegNo(requestDto.careRegNo());
-                if (exists == null || !exists) {
-                    throw new ShelterNotFoundException();
-                }
-                log.info("보호소 등록번호 검증 완료: {}", requestDto.careRegNo());
-            } catch (ShelterNotFoundException e) {
-                throw e;
-            } catch (Exception e) {
-                log.error("보호소 존재 여부 확인 실패: {}", e.getMessage());
-                throw new ShelterServiceUnavailableException();
-            }
+        // 보호소 권한은 로그인 후 신청·관리자 승인으로만 부여한다.
+        if (requestDto.role() != Role.ROLE_USER ||
+                (requestDto.careRegNo() != null && !requestDto.careRegNo().isBlank())) {
+            throw new com.pawbridge.userservice.shelter.ShelterApplicationException(
+                    com.pawbridge.userservice.exception.common.ErrorCode.SHELTER_APPROVAL_REQUIRED);
         }
 
         // 7. 닉네임 자동 생성
         String nickname = nicknameGeneratorService.generateUniqueNickname();
-        log.info("자동 생성된 닉네임: {}", nickname);
 
         // 8. 비밀번호 암호화
         String encodedPassword = passwordEncoder.encode(requestDto.password());
@@ -111,6 +100,9 @@ public class UserServiceImpl implements UserService {
         try {
             savedUser = userRepository.save(user);
         } catch (DataIntegrityViolationException e) {
+            if (PostgresqlRollbackCharsetViolation.matches(e)) {
+                throw e;
+            }
             log.warn("닉네임 중복 발생 (동시성), 재생성 시도");
             // 닉네임 중복으로 인한 실패 시 재시도
             String newNickname = nicknameGeneratorService.generateUniqueNickname();
@@ -121,18 +113,16 @@ public class UserServiceImpl implements UserService {
                     newNickname
             );
             savedUser = userRepository.save(user);
-            log.info("재생성된 닉네임: {}", newNickname);
         }
 
         // 11. 이메일 인증 정보 삭제
         try {
             emailVerificationService.clearVerification(requestDto.email());
         } catch (Exception e) {
-            log.warn("이메일 인증 정보 삭제 실패 (무시): {}", e.getMessage());
+            log.warn("이메일 인증 정보 삭제 실패 (무시): errorType={}", e.getClass().getSimpleName());
         }
 
-        log.info("회원가입 완료: email={}, nickname={}, role={}, careRegNo={}",
-                savedUser.getEmail(), savedUser.getNickname(), savedUser.getRole(), savedUser.getCareRegNo());
+        log.info("회원가입 완료: userId={}, role={}", savedUser.getUserId(), savedUser.getRole());
 
         return SignUpResponseDto.fromEntity(savedUser);
     }
@@ -187,7 +177,7 @@ public class UserServiceImpl implements UserService {
 
         // 2. 현재 닉네임과 동일하면 변경 불필요
         if (user.getNickname().equals(newNickname)) {
-            log.debug("동일한 닉네임으로 변경 시도, 변경 없음: {}", newNickname);
+            log.debug("동일한 닉네임으로 변경 시도, 변경 없음: userId={}", userId);
             return;
         }
 
@@ -200,10 +190,13 @@ public class UserServiceImpl implements UserService {
             user.updateNickname(newNickname);
             userRepository.save(user);
 
-            log.info("닉네임 변경 완료: userId={}, 새 닉네임={}", userId, newNickname);
+            log.info("닉네임 변경 완료: userId={}", userId);
         } catch (DataIntegrityViolationException e) {
+            if (PostgresqlRollbackCharsetViolation.matches(e)) {
+                throw e;
+            }
             // DB 레벨에서 UNIQUE 제약 위반 시
-            log.warn("닉네임 중복 (DB 제약): {}", newNickname);
+            log.warn("닉네임 중복 (DB 제약): userId={}", userId);
             throw new NicknameDuplicateException();
         }
     }
@@ -240,10 +233,17 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public void updateUserByAdmin(Long userId, AdminUserUpdateRequest request) {
-        log.info("회원 수정 (관리자): userId={}, request={}", userId, request);
+        log.debug("회원 수정 요청 (관리자): userId={}", userId);
 
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new UserNotFoundException());
+
+        if ((request.role() == Role.ROLE_SHELTER && user.getRole() != Role.ROLE_SHELTER)
+                || (request.careRegNo() != null && !request.careRegNo().isBlank()
+                && !request.careRegNo().equals(user.getCareRegNo()))) {
+            throw new com.pawbridge.userservice.shelter.ShelterApplicationException(
+                    com.pawbridge.userservice.exception.common.ErrorCode.SHELTER_APPROVAL_REQUIRED);
+        }
 
         // 닉네임 수정
         if (request.nickname() != null && !request.nickname().isBlank()) {
@@ -270,8 +270,12 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    @Transactional
     public void deleteUserById(Long userId) {
+        ContactMemberDeletion deletion=contactDeletion.getIfAvailable();
+        if(deletion!=null) {
+            deletion.delete(userId);
+            return;
+        }
         log.info("회원 삭제 (관리자): userId={}", userId);
 
         if (!userRepository.existsById(userId)) {
@@ -354,7 +358,7 @@ public class UserServiceImpl implements UserService {
     public SignupPeriodsResponse getSignupPeriods() {
         log.info("기간별 가입자 수 통계 조회");
 
-        LocalDate now = LocalDate.now();
+        LocalDate now = LocalDate.now(ZoneId.of("Asia/Seoul"));
 
         // 1. 오늘 (오늘 하루)
         LocalDate todayStart = now;

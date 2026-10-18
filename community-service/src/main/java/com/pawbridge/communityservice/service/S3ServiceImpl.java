@@ -1,7 +1,6 @@
 package com.pawbridge.communityservice.service;
 
 import com.pawbridge.communityservice.exception.InvalidImageFormatException;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,14 +20,13 @@ import java.util.UUID;
  * S3 파일 업로드 서비스 구현체
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class S3ServiceImpl implements S3Service {
 
     private final S3Client s3Client;
-
-    @Value("${spring.cloud.aws.s3.bucket}")
-    private String bucketName;
+    private final String bucketName;
+    private final String publicBaseUrl;
+    private final String objectPrefix;
 
     // 허용된 파일 타입 (이미지 + 영상)
     private static final List<String> ALLOWED_IMAGE_TYPES = Arrays.asList(
@@ -46,11 +44,32 @@ public class S3ServiceImpl implements S3Service {
             "video/x-matroska"    // .mkv
     );
 
+    public S3ServiceImpl(
+            S3Client s3Client,
+            @Value("${spring.cloud.aws.s3.bucket}") String bucketName,
+            @Value("${pawbridge.storage.public-base-url}") String publicBaseUrl,
+            @Value("${pawbridge.storage.object-prefix:}") String objectPrefix
+    ) {
+        this.s3Client = s3Client;
+        this.bucketName = bucketName;
+        this.publicBaseUrl = removeTrailingSlashes(publicBaseUrl);
+        this.objectPrefix = normalizeObjectPrefix(objectPrefix);
+    }
+
     /**
      * 여러 이미지/영상 파일을 S3에 업로드
      */
     @Override
     public List<String> uploadImages(MultipartFile[] files) {
+        return uploadFiles(files, false);
+    }
+
+    @Override
+    public List<String> uploadReportImages(MultipartFile[] files) {
+        return uploadFiles(files, true);
+    }
+
+    private List<String> uploadFiles(MultipartFile[] files, boolean reportPhoto) {
         List<String> uploadedUrls = new ArrayList<>();
 
         if (files == null || files.length == 0) {
@@ -63,9 +82,10 @@ public class S3ServiceImpl implements S3Service {
             }
 
             try {
-                String uploadedUrl = uploadSingleFile(file);
+                String uploadedUrl = uploadSingleFile(file, reportPhoto);
                 uploadedUrls.add(uploadedUrl);
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
+                if (reportPhoto) uploadedUrls.forEach(this::deleteFile);
                 log.error("파일 업로드 실패: {}", file.getOriginalFilename(), e);
                 throw new RuntimeException("파일 업로드 중 오류가 발생했습니다", e);
             }
@@ -77,7 +97,7 @@ public class S3ServiceImpl implements S3Service {
     /**
      * 단일 파일을 S3에 업로드
      */
-    private String uploadSingleFile(MultipartFile file) throws IOException {
+    private String uploadSingleFile(MultipartFile file, boolean reportPhoto) throws IOException {
         // 파일 타입 검증 (이미지 + 영상)
         validateFileType(file);
 
@@ -89,8 +109,9 @@ public class S3ServiceImpl implements S3Service {
 
         // 이미지와 영상 저장 경로 분리
         String contentType = file.getContentType();
-        String folder = isVideoType(contentType) ? "posts/videos/" : "posts/images/";
-        String uniqueFilename = folder + UUID.randomUUID() + extension;
+        String folder = reportPhoto ? "reports/images/"
+                : isVideoType(contentType) ? "posts/videos/" : "posts/images/";
+        String uniqueFilename = objectPrefix + folder + UUID.randomUUID() + extension;
 
         // S3에 업로드
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
@@ -101,9 +122,8 @@ public class S3ServiceImpl implements S3Service {
 
         s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
 
-        // 업로드된 파일의 URL 반환
-        String fileUrl = String.format("https://%s.s3.%s.amazonaws.com/%s",
-                bucketName, "ap-northeast-2", uniqueFilename);
+        // S3-compatible storage endpoint와 공개 제공 URL은 서로 다를 수 있다.
+        String fileUrl = publicBaseUrl + "/" + uniqueFilename;
 
         log.info("파일 업로드 성공: {}", fileUrl);
         return fileUrl;
@@ -156,8 +176,7 @@ public class S3ServiceImpl implements S3Service {
     @Override
     public void deleteFile(String fileUrl) {
         try {
-            // URL에서 키 추출 (예: https://bucket.s3.region.amazonaws.com/posts/uuid.jpg -> posts/uuid.jpg)
-            String key = fileUrl.substring(fileUrl.indexOf(".com/") + 5);
+            String key = extractObjectKey(fileUrl);
 
             DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
                     .bucket(bucketName)
@@ -170,5 +189,43 @@ public class S3ServiceImpl implements S3Service {
         } catch (Exception e) {
             log.error("파일 삭제 실패: {}", fileUrl, e);
         }
+    }
+
+    private String extractObjectKey(String fileUrl) {
+        String publicUrlPrefix = publicBaseUrl + "/";
+        if (fileUrl == null || !fileUrl.startsWith(publicUrlPrefix)) {
+            throw new IllegalArgumentException("등록된 공개 저장소 URL이 아닙니다.");
+        }
+
+        String key = fileUrl.substring(publicUrlPrefix.length());
+        if (key.isBlank()) {
+            throw new IllegalArgumentException("삭제할 객체 키가 없습니다.");
+        }
+        if (!objectPrefix.isEmpty() && (!key.startsWith(objectPrefix)
+                || key.length() == objectPrefix.length()
+                || key.contains("\\") || key.contains("%") || key.contains("?") || key.contains("#")
+                || Arrays.stream(key.split("/", -1)).anyMatch(segment ->
+                        segment.isEmpty() || segment.equals(".") || segment.equals("..")))) {
+            throw new IllegalArgumentException("설정된 저장 경로 밖의 객체는 삭제할 수 없습니다.");
+        }
+        return key;
+    }
+
+    private static String normalizeObjectPrefix(String prefix) {
+        if (prefix.isEmpty()) {
+            return "";
+        }
+        if (!prefix.matches("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/?")) {
+            throw new IllegalArgumentException("저장 경로는 영문, 숫자, 하이픈, 밑줄과 경로 구분자로 구성해야 합니다.");
+        }
+        return prefix.endsWith("/") ? prefix : prefix + "/";
+    }
+
+    private static String removeTrailingSlashes(String url) {
+        int end = url.length();
+        while (end > 0 && url.charAt(end - 1) == '/') {
+            end--;
+        }
+        return url.substring(0, end);
     }
 }

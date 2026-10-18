@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.batch.writer;
 
+import com.pawbridge.animalservice.search.SearchDocumentWriter;
 import com.pawbridge.animalservice.entity.Animal;
 import com.pawbridge.animalservice.repository.AnimalRepository;
 import lombok.RequiredArgsConstructor;
@@ -7,15 +8,22 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.item.Chunk;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StopWatch;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Animal Entity를 DB에 저장하는 Writer
- * - Chunk 단위로 일괄 저장 (성능 최적화)
+ * - id==null (신규): saveAll() → IDENTITY persist → INSERT 직행 (SELECT 없음)
+ * - id!=null (기존): @Modifying JPQL UPDATE → SELECT 없이 UPDATE만 실행
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AnimalItemWriter implements ItemWriter<Animal> {
+
+    private final SearchDocumentWriter searchDocuments;
 
     private final AnimalRepository animalRepository;
 
@@ -27,10 +35,52 @@ public class AnimalItemWriter implements ItemWriter<Animal> {
         }
 
         try {
-            // Chunk 내의 모든 Animal을 일괄 저장
-            animalRepository.saveAll(chunk.getItems());
+            StopWatch stopWatch = new StopWatch("APMS Writer 측정");
+            stopWatch.start("2. MySQL Bulk Save");
 
-            log.info("Animal {} 건 저장 완료", chunk.size());
+            List<Animal> newAnimals = chunk.getItems().stream()
+                    .filter(a -> a.getId() == null)
+                    .collect(Collectors.toList());
+
+            List<Animal> existingAnimals = chunk.getItems().stream()
+                    .filter(a -> a.getId() != null)
+                    .collect(Collectors.toList());
+
+            if (!newAnimals.isEmpty()) {
+                animalRepository.saveAll(newAnimals);
+            }
+
+            for (Animal existing : existingAnimals) {
+                animalRepository.updateAnimalFromApms(
+                        existing.getId(),
+                        existing.getShelter(),
+                        existing.getBreed(),
+                        existing.getBirthYear(),
+                        existing.getWeight(),
+                        existing.getColor(),
+                        existing.getGender(),
+                        existing.getNeuterStatus(),
+                        existing.getSpecialMark(),
+                        existing.getApmsProcessState(),
+                        existing.getNoticeStartDate(),
+                        existing.getNoticeEndDate(),
+                        existing.getApmsUpdatedAt(),
+                        existing.getHappenDate(),
+                        existing.getHappenPlace(),
+                        existing.getImageUrl(),
+                        existing.getImageUrl2(),
+                        existing.getStatus()
+                );
+            }
+
+            if (searchDocuments.enabled()) {
+                animalRepository.flush();
+                for (Animal animal:chunk.getItems()) searchDocuments.animal(animal.getId());
+            }
+
+            stopWatch.stop();
+            log.info("Animal {} 건 처리 완료 (신규 INSERT: {}, 기존 UPDATE: {}). [성능측정] DB 소요시간 - {} ms",
+                    chunk.size(), newAnimals.size(), existingAnimals.size(), stopWatch.getTotalTimeMillis());
 
         } catch (Exception e) {
             log.error("Animal 저장 중 오류 발생: chunk size={}", chunk.size(), e);

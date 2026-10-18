@@ -7,7 +7,6 @@ import com.pawbridge.storeservice.common.repository.OutboxRepository;
 import com.pawbridge.storeservice.domain.product.dto.ProductEventPayload;
 import com.pawbridge.storeservice.domain.product.entity.Product;
 import com.pawbridge.storeservice.domain.product.entity.ProductSKU;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -20,53 +19,65 @@ import java.time.LocalDateTime;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ProductOutboxService {
+
+    static final String PRODUCT_SEARCH_AGGREGATE_TYPE = "product-sku";
 
     private final OutboxRepository outboxRepository;
     private final ObjectMapper objectMapper;
+    private final ProductSKUService productSKUService;
+    private final java.util.Optional<com.pawbridge.storeservice.search.PostgresqlSearchDocuments> searchDocuments;
 
-    /**
-     * SKU 생성/수정 이벤트 발행
-     * @param product 상품 엔티티
-     * @param sku SKU 엔티티
-     * @param isPrimary 대표 SKU 여부
-     */
-    public void publishSkuEvent(Product product, ProductSKU sku, boolean isPrimary) {
-        ProductEventPayload eventPayload = buildEventPayload(product, sku, isPrimary);
-        saveOutboxEvent(sku.getId(), "SKU_UPDATED", eventPayload);
+    @org.springframework.beans.factory.annotation.Autowired
+    public ProductOutboxService(OutboxRepository repository,ObjectMapper mapper,ProductSKUService skuService,
+            java.util.Optional<com.pawbridge.storeservice.search.PostgresqlSearchDocuments> documents) {
+        this.outboxRepository=repository;this.objectMapper=mapper;this.productSKUService=skuService;this.searchDocuments=documents;
+    }
+    public ProductOutboxService(OutboxRepository repository,ObjectMapper mapper,ProductSKUService skuService) {
+        this(repository,mapper,skuService,java.util.Optional.empty());
     }
 
+
     /**
-     * SKU 삭제 이벤트 발행
-     * @param skuId 삭제된 SKU ID
+     * 한 상품의 검색 projection 전체를 같은 시점의 snapshot으로 발행한다.
+     * 대표 SKU는 최저가, 동가이면 낮은 SKU ID 규칙으로 매번 다시 계산한다.
      */
-    public void publishSkuDeleteEvent(Long skuId) {
-        try {
-            // 삭제 이벤트는 ID만 포함
-            String payload = objectMapper.writeValueAsString(
-                java.util.Map.of("skuId", skuId, "deleted", true)
+    @org.springframework.transaction.annotation.Transactional
+    public void publishProductSnapshot(Product product) {
+        if (product.getSkus().isEmpty()) {
+            searchDocuments.ifPresent(documents -> documents.delete(product.getId()));
+            return;
+        }
+
+        ProductSKU primarySku = productSKUService.findPrimarySku(product.getSkus());
+        searchDocuments.ifPresent(documents -> documents.write(product.getId(),primarySku.getId(),product.getName(),primarySku.generateOptionName()));
+        int totalStockQuantity = product.getSkus().stream()
+                .mapToInt(ProductSKU::getStockQuantity)
+                .sum();
+        LocalDateTime snapshotUpdatedAt = LocalDateTime.now();
+
+        for (ProductSKU sku : product.getSkus()) {
+            ProductEventPayload eventPayload = buildEventPayload(
+                    product,
+                    sku,
+                    sku == primarySku,
+                    totalStockQuantity,
+                    snapshotUpdatedAt
             );
-            
-            Outbox outbox = Outbox.builder()
-                    .aggregateType("PRODUCT_SKU")
-                    .aggregateId(String.valueOf(skuId))
-                    .eventType("SKU_DELETED")
-                    .payload(payload)
-                    .build();
-            outboxRepository.save(outbox);
-            
-            log.info(">>> [OUTBOX] SKU 삭제 이벤트 발행: skuId={}", skuId);
-        } catch (JsonProcessingException e) {
-            log.error("SKU 삭제 이벤트 페이로드 직렬화 실패: skuId={}", skuId, e);
-            throw new RuntimeException("Outbox 이벤트 생성 실패", e);
+            saveOutboxEvent(sku.getId(), "SKU_UPDATED", eventPayload);
         }
     }
 
     /**
      * 이벤트 페이로드 빌드
      */
-    private ProductEventPayload buildEventPayload(Product product, ProductSKU sku, boolean isPrimary) {
+    private ProductEventPayload buildEventPayload(
+            Product product,
+            ProductSKU sku,
+            boolean isPrimary,
+            int totalStockQuantity,
+            LocalDateTime snapshotUpdatedAt
+    ) {
         return ProductEventPayload.builder()
                 .skuId(sku.getId())
                 .productId(product.getId())
@@ -76,11 +87,12 @@ public class ProductOutboxService {
                 .optionName(sku.generateOptionName())
                 .price(sku.getPrice())
                 .stockQuantity(sku.getStockQuantity())
+                .totalStockQuantity(totalStockQuantity)
                 .isPrimarySku(isPrimary)
                 .status(product.getStatus().name())
                 .imageUrl(product.getImageUrl())
                 .createdAt(product.getCreatedAt())
-                .updatedAt(LocalDateTime.now())
+                .updatedAt(snapshotUpdatedAt)
                 .build();
     }
 
@@ -91,7 +103,7 @@ public class ProductOutboxService {
         try {
             String payloadJson = objectMapper.writeValueAsString(payload);
             Outbox outbox = Outbox.builder()
-                    .aggregateType("PRODUCT_SKU")
+                    .aggregateType(PRODUCT_SEARCH_AGGREGATE_TYPE)
                     .aggregateId(String.valueOf(skuId))
                     .eventType(eventType)
                     .payload(payloadJson)

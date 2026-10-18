@@ -1,5 +1,7 @@
 package com.pawbridge.userservice.exception.common;
 
+import com.pawbridge.userservice.persistence.PostgresqlRollbackCharsetViolation;
+
 import com.pawbridge.userservice.util.ResponseDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.TypeMismatchException;
@@ -28,6 +30,13 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionRestAdvice {
 
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<ResponseDTO<Void>> responseStatus(org.springframework.web.server.ResponseStatusException e) {
+        HttpStatus status=HttpStatus.valueOf(e.getStatusCode().value());
+        return ResponseEntity.status(status).body(ResponseDTO.errorWithMessage(status,
+                e.getReason()==null?"요청을 처리하지 못했습니다.":e.getReason()));
+    }
+
     @ExceptionHandler
     public ResponseEntity<ResponseDTO<Void>> applicationException(ApplicationException e) {
         log.error(e.getMessage(), e);
@@ -47,6 +56,11 @@ public class GlobalExceptionRestAdvice {
 
     @ExceptionHandler
     public ResponseEntity<ResponseDTO<Void>> dbException(DataAccessException e) {
+        if (PostgresqlRollbackCharsetViolation.matches(e)) {
+            return ResponseEntity.badRequest().body(ResponseDTO.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error(e.getMessage(), e);
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -55,6 +69,11 @@ public class GlobalExceptionRestAdvice {
 
     @ExceptionHandler
     public ResponseEntity<ResponseDTO<Void>> serverException(RuntimeException e) {
+        if (PostgresqlRollbackCharsetViolation.matches(e)) {
+            return ResponseEntity.badRequest().body(ResponseDTO.errorWithMessage(
+                    HttpStatus.BAD_REQUEST, PostgresqlRollbackCharsetViolation.MESSAGE));
+        }
+
         log.error(e.getMessage(), e);
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)

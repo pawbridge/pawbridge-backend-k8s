@@ -14,6 +14,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Product SKU Service (표준화 버전)
@@ -41,6 +44,20 @@ public class ProductSKUService {
         if (skuDtos == null || skuDtos.isEmpty()) {
             return savedSkus;
         }
+
+        List<Long> optionValueIds = skuDtos.stream()
+                .filter(skuDto -> skuDto.getOptionValueIds() != null)
+                .flatMap(skuDto -> skuDto.getOptionValueIds().stream())
+                .distinct()
+                .sorted()
+                .toList();
+        Map<Long, OptionValue> optionValuesById = optionValueIds.isEmpty()
+                ? Map.of()
+                : optionValueRepository.findAllByIdWithLock(optionValueIds).stream()
+                        .collect(Collectors.toMap(OptionValue::getId, Function.identity()));
+        if (optionValuesById.size() != optionValueIds.size()) {
+            throw new IllegalArgumentException("존재하지 않는 옵션 값이 포함되어 있습니다.");
+        }
         
         for (SkuCreateDto skuDto : skuDtos) {
             // SKU 저장
@@ -58,9 +75,7 @@ public class ProductSKUService {
             // 옵션 연결 (ID 기반)
             if (skuDto.getOptionValueIds() != null && !skuDto.getOptionValueIds().isEmpty()) {
                 for (Long optionValueId : skuDto.getOptionValueIds()) {
-                    OptionValue optionValue = optionValueRepository.findById(optionValueId)
-                            .orElseThrow(() -> new IllegalArgumentException(
-                                    "옵션 값을 찾을 수 없습니다: " + optionValueId));
+                    OptionValue optionValue = optionValuesById.get(optionValueId);
                     
                     SKUValue skuValue = SKUValue.builder()
                             .productSKU(sku)

@@ -21,7 +21,9 @@ public record FavoriteWithAnimalDto(
         Integer age,
         String imageUrl,
         String shelterName,
-        String status
+        String status,
+        String apmsNoticeNo,
+        String specialMark
 ) {
     /**
      * Favorite + AnimalResponse 조합
@@ -38,7 +40,9 @@ public record FavoriteWithAnimalDto(
                 animal.getAge(),
                 animal.getImageUrl(),
                 animal.getShelterName(),
-                animal.getStatus()
+                animal.getStatus(),
+                animal.getApmsNoticeNo(),
+                animal.getSpecialMark()
         );
     }
 
@@ -57,7 +61,9 @@ public record FavoriteWithAnimalDto(
                 null,  // age
                 null,  // imageUrl
                 null,  // shelterName
-                "DELETED"  // status
+                "DELETED",  // status
+                null,  // apmsNoticeNo
+                null  // specialMark
         );
     }
 }

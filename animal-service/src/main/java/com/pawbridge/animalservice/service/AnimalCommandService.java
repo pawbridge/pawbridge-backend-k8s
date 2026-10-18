@@ -1,5 +1,6 @@
 package com.pawbridge.animalservice.service;
 
+import com.pawbridge.animalservice.search.SearchDocumentWriter;
 import com.pawbridge.animalservice.dto.request.CreateAnimalRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalDescriptionRequest;
 import com.pawbridge.animalservice.dto.request.UpdateAnimalStatusRequest;
@@ -41,6 +42,8 @@ public class AnimalCommandService {
     private static final String TOPIC_ANIMAL_UPDATED = "animal.updated";
     private static final String TOPIC_ANIMAL_STATUS_CHANGED = "animal.status.changed";
 
+    private final SearchDocumentWriter searchDocuments;
+
     private final AnimalRepository animalRepository;
     private final ShelterRepository shelterRepository;
     private final AnimalMapper mapper;
@@ -75,6 +78,7 @@ public class AnimalCommandService {
 
         // 저장
         Animal saved = animalRepository.save(animal);
+        refreshSearch(saved.getId());
 
         // Outbox에 이벤트 저장 (같은 트랜잭션)
         AnimalCreatedEvent event = AnimalCreatedEvent.builder()
@@ -139,6 +143,7 @@ public class AnimalCommandService {
                 .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + id));
 
         animal.updateDescription(request.getDescription());
+        refreshSearch(animal.getId());
 
         // Outbox에 이벤트 저장 (같은 트랜잭션)
         Map<String, Object> updatedFields = new HashMap<>();
@@ -213,7 +218,9 @@ public class AnimalCommandService {
             throw new IllegalStateException("Animal already exists: " + animal.getApmsDesertionNo());
         }
 
-        return animalRepository.save(animal);
+        Animal saved=animalRepository.save(animal);
+        refreshSearch(saved.getId());
+        return saved;
     }
 
     /**
@@ -231,4 +238,11 @@ public class AnimalCommandService {
 
         return expiredAnimals.size();
     }
+    private void refreshSearch(Long id) {
+        if (searchDocuments.enabled()) {
+            animalRepository.flush();
+            searchDocuments.animal(id);
+        }
+    }
+
 }

@@ -5,6 +5,7 @@ import com.pawbridge.storeservice.domain.order.dto.OrderCreateRequest;
 import com.pawbridge.storeservice.domain.order.dto.OrderResponse;
 import com.pawbridge.storeservice.domain.order.entity.OrderStatus;
 import com.pawbridge.storeservice.domain.order.service.OrderService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -31,7 +32,7 @@ public class OrderController {
     @PostMapping("/direct")
     public ResponseEntity<OrderResponse> createDirectOrder(
             @RequestHeader("X-User-Id") Long userId,
-            @RequestBody DirectOrderCreateRequest request) {
+            @Valid @RequestBody DirectOrderCreateRequest request) {
         OrderResponse response = orderService.createDirectOrder(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }

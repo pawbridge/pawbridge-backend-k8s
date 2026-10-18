@@ -17,7 +17,7 @@ import org.springframework.data.elasticsearch.annotations.FieldType;
  * - 날짜 필드는 String(Keyword)으로 매핑 (답변2 B안)
  * - ID 필드는 esId(_id)와 id(PK) 분리 (답변3 B안)
  */
-@Document(indexName = "animals")
+@Document(indexName = "animals", createIndex = false)
 @Getter
 @Builder
 @NoArgsConstructor

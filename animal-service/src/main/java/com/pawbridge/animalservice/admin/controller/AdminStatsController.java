@@ -1,10 +1,12 @@
 package com.pawbridge.animalservice.admin.controller;
 
 import com.pawbridge.animalservice.admin.dto.DailyAnimalStatsResponse;
+import com.pawbridge.animalservice.admin.dto.IntakeTrendResponse;
 import com.pawbridge.animalservice.admin.service.AdminStatsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -21,6 +23,18 @@ import java.util.List;
 public class AdminStatsController {
 
     private final AdminStatsService adminStatsService;
+
+    @GetMapping("/intake-trend")
+    public ResponseEntity<IntakeTrendResponse> getIntakeTrend(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return ResponseEntity.ok(adminStatsService.getIntakeTrend(startDate, endDate));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Void> invalidDate() {
+        return ResponseEntity.badRequest().build();
+    }
 
     /**
      * 일일 동물 등록 건수 통계

@@ -8,7 +8,6 @@ import com.pawbridge.userservice.repository.OutboxEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
@@ -23,10 +22,10 @@ public class OutboxServiceImpl implements OutboxService {
 
     /**
      * Outbox 이벤트 저장
-     * REQUIRES_NEW로 별도 트랜잭션에서 실행 (부모 트랜잭션과 독립)
+     * 업무 데이터와 같은 트랜잭션에서 커밋 또는 롤백한다.
      */
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional
     public void saveEvent(String aggregateType, String aggregateId, String eventType, String topic, Object payload) {
         try {
             String eventId = UUID.randomUUID().toString();

@@ -33,7 +33,7 @@ public class OAuth2FailureHandler extends SimpleUrlAuthenticationFailureHandler 
         String errorMessage = exception.getMessage() != null ?
                 exception.getMessage() : "로그인에 실패했습니다";
 
-        log.error("OAuth2 로그인 실패: {}", errorMessage);
+        log.warn("OAuth2 로그인 실패: errorType={}", exception.getClass().getSimpleName());
 
         // 에러 메시지 인코딩
         String encodedError = URLEncoder.encode(errorMessage, StandardCharsets.UTF_8);
@@ -44,8 +44,6 @@ public class OAuth2FailureHandler extends SimpleUrlAuthenticationFailureHandler 
                 .queryParam("error", encodedError)
                 .build()
                 .toUriString();
-
-        log.info("OAuth2 실패 리다이렉트: {}", targetUrl);
 
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }

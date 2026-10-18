@@ -1,0 +1,50 @@
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/pawbridge_ci
+    username: pawbridge_ci
+    password: ci_placeholder
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+  kafka:
+    bootstrap-servers: 127.0.0.1:9092
+    listener:
+      auto-startup: false
+
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+
+  mail:
+    host: 127.0.0.1
+    port: 2525
+    username: placeholder@example.invalid
+    password: placeholder
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: placeholder
+            client-secret: placeholder
+            redirect-uri: http://127.0.0.1:8080/login/oauth2/code/google
+
+  task:
+    scheduling:
+      enabled: false
+
+management:
+  tracing:
+    enabled: false
+
+jwt:
+  secret: placeholder-placeholder-placeholder-1234
+  access-token-expiration: 3600000
+  refresh-token-expiration: 1209600000
+
+oauth2:
+  redirect-uri: http://127.0.0.1:3000/oauth2/redirect

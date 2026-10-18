@@ -1,6 +1,8 @@
 package com.pawbridge.communityservice.domain.repository;
 
 import com.pawbridge.communityservice.domain.entity.Post;
+import com.pawbridge.communityservice.dto.response.DailyPostStats;
+import com.pawbridge.communityservice.dto.response.BoardTypeStats;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -33,4 +35,15 @@ public interface PostRepository extends JpaRepository<Post, Long> {
      */
     @Query("SELECT COUNT(p) FROM Post p WHERE p.createdAt >= :startDateTime AND p.createdAt < :endDateTime AND p.deletedAt IS NULL")
     Long countByCreatedAtBetween(@Param("startDateTime") LocalDateTime startDateTime, @Param("endDateTime") LocalDateTime endDateTime);
+
+    // UTC JDBC encoding of Seoul LocalDateTime requires KST calendar grouping.
+    @Query("SELECT new com.pawbridge.communityservice.dto.response.DailyPostStats("
+            + "cast(p.createdAt + 9 hour as LocalDate), COUNT(p)) FROM Post p "
+            + "WHERE p.createdAt >= :start AND p.createdAt < :end AND p.deletedAt IS NULL "
+            + "GROUP BY cast(p.createdAt + 9 hour as LocalDate) ORDER BY cast(p.createdAt + 9 hour as LocalDate)")
+    List<DailyPostStats> countDailyPosts(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @Query("SELECT new com.pawbridge.communityservice.dto.response.BoardTypeStats(p.boardType, COUNT(p)) "
+            + "FROM Post p WHERE p.createdAt >= :start AND p.createdAt < :end AND p.deletedAt IS NULL GROUP BY p.boardType")
+    List<BoardTypeStats> countByBoardType(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 }

@@ -105,14 +105,14 @@ public class AuthServiceImpl implements AuthService {
             try {
                 // 이메일 발송
                 emailVerificationService.sendPasswordResetCode(requestDto.getEmail());
-                log.info("비밀번호 재설정 이메일 발송 성공: {}", requestDto.getEmail());
+                log.info("비밀번호 재설정 이메일 발송 성공");
             } catch (Exception e) {
-                log.error("이메일 발송 실패: {}", e.getMessage());
+                log.error("이메일 발송 실패: errorType={}", e.getClass().getSimpleName());
                 // 보안상 실패해도 성공 응답 (계정 존재 여부 노출 방지)
             }
         }
         // 이메일이 없어도 동일하게 성공 응답 (보안)
-        log.debug("비밀번호 재설정 요청 처리 완료: {}", requestDto.getEmail());
+        log.debug("비밀번호 재설정 요청 처리 완료");
     }
 
     /**
@@ -136,7 +136,7 @@ public class AuthServiceImpl implements AuthService {
                 throw new PasswordResetCodeInvalidException();
             }
         } catch (Exception e) {
-            log.error("인증코드 검증 실패: {}", e.getMessage());
+            log.error("인증코드 검증 실패: errorType={}", e.getClass().getSimpleName());
             throw new PasswordResetCodeInvalidException();
         }
 
@@ -149,9 +149,9 @@ public class AuthServiceImpl implements AuthService {
         try {
             emailVerificationService.clearPasswordResetVerification(requestDto.getEmail());
         } catch (Exception e) {
-            log.warn("인증 정보 삭제 실패 (무시): {}", e.getMessage());
+            log.warn("인증 정보 삭제 실패 (무시): errorType={}", e.getClass().getSimpleName());
         }
 
-        log.info("비밀번호 재설정 완료: {}", requestDto.getEmail());
+        log.info("비밀번호 재설정 완료: userId={}", user.getUserId());
     }
 }

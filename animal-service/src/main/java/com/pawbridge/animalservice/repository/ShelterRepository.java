@@ -77,6 +77,15 @@ public interface ShelterRepository extends JpaRepository<Shelter, Long> {
             Pageable pageable
     );
 
+    /** 지역 조건 안에서 이름 또는 주소를 검색한다. */
+    @Query("SELECT s FROM Shelter s WHERE s.address LIKE %:address% "
+            + "AND (s.name LIKE %:keyword% OR s.address LIKE %:keyword%)")
+    Page<Shelter> findByKeywordAndAddress(
+            @Param("keyword") String keyword,
+            @Param("address") String address,
+            Pageable pageable
+    );
+
     // 배치 작업용
     /**
      * 여러 개의 careRegNo로 Shelter 조회

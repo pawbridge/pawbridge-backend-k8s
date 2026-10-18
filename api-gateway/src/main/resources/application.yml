@@ -20,7 +20,16 @@ spring:
           predicates:
             - Path=/api/v1/email/**
 
-        # User Service (JWT 필터 적용, 화이트리스트는 필터 내부에서 처리)
+        # User Service - 구버전 라우팅 (프론트엔드 호환용, v1으로 자동 Rewrite)
+        - id: user-service-legacy
+          uri: ${USER_SERVICE_URL:http://user-service:8080}
+          predicates:
+            - Path=/api/users/**, /api/auth/**, /api/favorites/**
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+            - JwtAuthorization
+
+        # User Service - 신버전 라우팅 (정규 v1 요청)
         - id: user-service
           uri: ${USER_SERVICE_URL:http://user-service:8080}
           predicates:
@@ -33,17 +42,46 @@ spring:
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/animals/**, /api/v1/animals/**
-            - Method=GET
+            - Method=GET,OPTIONS
           filters:
             - RewritePath=/api/animals(?<segment>/?.*), /api/v1/animals${segment}
           # JWT 필터 없음 (로그인 없이 검색/조회 가능)
+
+        # Only this exact POST is public; internal Python endpoints remain unrouted.
+        - id: animal-service-lost-search-public
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
+          predicates:
+            - Path=/api/v1/animals/lost-candidates
+            - Method=POST
+          filters:
+            - LostSearchLimits
+
+        # Pet Travel - 공개 목록/상세 조회만 animal-service로 전달
+        - id: animal-service-places-public
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
+          predicates:
+            - Path=/api/places, /api/places/regions, /api/places/{contentId}, /api/v1/places, /api/v1/places/regions, /api/v1/places/{contentId}
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/places(?<segment>/?.*), /api/v1/places${segment}
+          # JWT 필터 없음. 쓰기·하위 관리 경로는 공개하지 않는다.
+
+        # Animal Service - Chatbot (POST, public)
+        - id: animal-service-chatbot-public
+          uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
+          predicates:
+            - Path=/api/animals/{animalId}/chat/messages, /api/v1/animals/{animalId}/chat/messages
+            - Method=POST,OPTIONS
+          filters:
+            - RewritePath=/api/animals/(?<animalId>[^/]+)/chat/messages, /api/v1/animals/${animalId}/chat/messages
+          # JWT 필터 없음 (익명 챗봇 사용자 허용)
 
         # Shelter Service - 조회 (GET, 공개)
         - id: shelter-service-public
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
             - Path=/api/shelters/**, /api/v1/shelters/**
-            - Method=GET
+            - Method=GET,OPTIONS
           filters:
             - RewritePath=/api/shelters(?<segment>/?.*), /api/v1/shelters${segment}
           # JWT 필터 없음 (로그인 없이 조회 가능)
@@ -58,12 +96,105 @@ spring:
             - JwtAuthorization
             - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
+        # WebSocket handshake has no Bearer header; Community consumes a single-use STOMP ticket.
+        - id: community-member-chat-socket
+          uri: ${COMMUNITY_CHAT_WEBSOCKET_URL:ws://community-service:8082}
+          predicates:
+            - Path=/api/chats/socket, /api/v1/chats/socket
+            - Method=GET
+          filters:
+            - RewritePath=/api/chats/socket, /api/v1/chats/socket
+
+        - id: community-member-chat-rest
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/chats, /api/chats/**, /api/v1/chats, /api/v1/chats/**
+          filters:
+            - RewritePath=/api/chats(?<segment>/?.*), /api/v1/chats${segment}
+            - JwtAuthorization
+
+        # Only the authenticated SSE connection bypasses the ordinary response timeout.
+        - id: community-private-notes-stream
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/notes/stream, /api/v1/notes/stream
+            - Method=GET
+          filters:
+            - RewritePath=/api/notes(?<segment>/?.*), /api/v1/notes${segment}
+            - JwtAuthorization
+          metadata:
+            response-timeout: -1
+
+        # Private notes: every REST method requires authentication.
+        - id: community-private-notes
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/notes, /api/notes/**, /api/v1/notes, /api/v1/notes/**
+          filters:
+            - RewritePath=/api/notes(?<segment>/?.*), /api/v1/notes${segment}
+            - JwtAuthorization
+
+        # Exact anonymous visit methods; do not forward account identity to this domain.
+        - id: community-visits-identity
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/visits/identity, /api/v1/visits/identity
+            - Method=POST,OPTIONS
+          filters:
+            - RewritePath=/api/visits/identity, /api/v1/visits/identity
+            - RemoveRequestHeader=Authorization
+            - RemoveRequestHeader=X-User-Id
+            - RemoveRequestHeader=X-User-Email
+            - RemoveRequestHeader=X-User-Name
+            - RemoveRequestHeader=X-User-Role
+
+        - id: community-visits-today
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/visits/today, /api/v1/visits/today
+            - Method=GET,POST,OPTIONS
+          filters:
+            - RewritePath=/api/visits/today, /api/v1/visits/today
+            - RemoveRequestHeader=Authorization
+            - RemoveRequestHeader=X-User-Id
+            - RemoveRequestHeader=X-User-Email
+            - RemoveRequestHeader=X-User-Name
+            - RemoveRequestHeader=X-User-Role
+
+        - id: community-visits-admin
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/admin/visits/stats/period, /api/v1/admin/visits/stats/period
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/admin/visits/stats/period, /api/v1/admin/visits/stats/period
+            - JwtAuthorization
+
+        # Home video listing is public and read-only; management is admin-only after rewriting.
+        - id: community-home-videos-public
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/home/videos, /api/v1/home/videos
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/home/videos, /api/v1/home/videos
+
+        - id: community-admin-videos
+          uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
+          predicates:
+            - Path=/api/admin/videos, /api/admin/videos/**, /api/v1/admin/videos, /api/v1/admin/videos/**
+          filters:
+            - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
+            - JwtAuthorization
+
+        # Community Service (JWT 필터 적용)
         # Community Service (JWT 필터 적용)
         - id: community-service
           uri: ${COMMUNITY_SERVICE_URL:http://community-service:8082}
           predicates:
-            - Path=/api/v1/posts/**, /api/v1/comments/**
+            - Path=/api/posts/**, /api/comments/**, /api/reports, /api/reports/**, /api/v1/posts/**, /api/v1/comments/**, /api/v1/reports, /api/v1/reports/**
           filters:
+            - RewritePath=/api/(?<segment>posts/?.*|comments/?.*|reports/?.*), /api/v1/${segment}
             - JwtAuthorization
 
         # Store Service (Product - Public GET, Protected POST) - 순서 중요
@@ -71,7 +202,9 @@ spring:
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
           predicates:
             - Path=/api/products/**
-            - Method=GET
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
           # JWT 필터 없음 (상품 조회는 공개)
 
         - id: store-service-products-protected
@@ -81,6 +214,90 @@ spring:
             - Method=POST,PUT,PATCH,DELETE
           filters:
             - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-images
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/images, /api/images/**
+            - Method=POST,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-categories-public
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/categories/**
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-categories-protected
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/categories/**
+            - Method=POST,PUT,PATCH,DELETE
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        # Option metadata is public; mutations remain admin-only.
+        - id: store-service-options-public
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/option-groups, /api/option-groups/{groupId}
+            - Method=GET,OPTIONS
+          filters:
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-options-protected
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/option-groups, /api/option-groups/**
+            - Method=POST,PUT,DELETE,OPTIONS
+          filters:
+            # Authorization uses the external option path before rewriting.
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-admin-orders
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/admin/orders, /api/admin/orders/**
+            - Method=GET,PATCH,OPTIONS
+          filters:
+            # Every rewritten /api/v1/admin/** operation requires ROLE_ADMIN.
+            - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
+            - JwtAuthorization
+
+        # Only customer cart operations are exposed; never route the global /carts/reset endpoint.
+        - id: store-service-cart
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/carts
+            - Method=GET,DELETE,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-cart-add
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/carts/items
+            - Method=POST,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
+
+        - id: store-service-cart-item
+          uri: ${STORE_SERVICE_URL:http://store-service:8083}
+          predicates:
+            - Path=/api/carts/items/{skuId}
+            - Method=PATCH,DELETE,OPTIONS
+          filters:
+            - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
         - id: store-service-orders
           uri: ${STORE_SERVICE_URL:http://store-service:8083}
@@ -88,6 +305,7 @@ spring:
             - Path=/api/orders/**
           filters:
             - JwtAuthorization
+            - RewritePath=/api/(?<segment>.*), /api/v1/${segment}
 
         # Payment Service
         - id: payment-service
@@ -119,7 +337,7 @@ spring:
         - id: admin-animal-stats
           uri: ${ANIMAL_SERVICE_URL:http://animal-service:8081}
           predicates:
-            - Path=/api/admin/stats/daily-animals
+            - Path=/api/admin/stats/daily-animals, /api/admin/stats/intake-trend
           filters:
             - RewritePath=/api/admin/(?<segment>.*), /api/v1/admin/${segment}
             - JwtAuthorization
@@ -141,9 +359,9 @@ spring:
               - "http://127.0.0.1:3000"
               - "http://localhost:5173"
               - "http://127.0.0.1:5173"
-              - "https://pawbridge.com"
-              - "https://www.pawbridge.com"
-              - "https://*.pawbridge.com"
+              - "https://pawbridge.kr"
+              - "https://www.pawbridge.kr"
+              - "https://*.pawbridge.kr"
             allowedMethods:
               - GET
               - POST
@@ -155,6 +373,30 @@ spring:
               - Authorization              # JWT 토큰
               - Content-Type               # 요청 본문 타입
               - Accept                     # 응답 타입
+              - x-user-id                  # 사용자 식별용 커스텀 헤더
             exposedHeaders:
+              - Retry-After
               - Authorization              # 응답 헤더 노출
-            allowCredentials: false        # 개발 단계에서는 false
+            allowCredentials: true         # 인증 정보 통신 허용 (이전의 false 설정이 마지막 차단 원인)
+
+# K8s Probe 설정 (Actuator)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%level] - %msg%n"
+
+server:
+  port: 8080

@@ -31,8 +31,11 @@ ext {
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
 
 
@@ -57,10 +60,14 @@ dependencies {
 
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
-	runtimeOnly 'com.mysql:mysql-connector-j'
+	implementation 'org.postgresql:postgresql'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.kafka:spring-kafka-test'
+	testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation 'org.testcontainers:postgresql'
+	testImplementation 'org.flywaydb:flyway-core'
+	testRuntimeOnly 'org.flywaydb:flyway-database-postgresql'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -71,5 +78,29 @@ dependencyManagement {
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform { excludeTags 'real-r2' }
 }
+
+// Never part of test/check: requires separate approval and explicitly supplied test credentials.
+tasks.register('r2ContractTest', Test) {
+	group = 'verification'
+	description = 'Opt-in real R2 check on a unique dev-only object prefix; requires separate approval.'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform { includeTags 'real-r2' }
+	maxHeapSize = '256m'
+	outputs.upToDateWhen { false }
+	doFirst {
+		if (System.getenv('PAWBRIDGE_R2_CONTRACT_APPROVED') != 'yes') {
+			throw new GradleException('Real R2 writes require separate approval before r2ContractTest.')
+		}
+	}
+}
+
+// The API artifact still excludes migrations; only the isolated application test loads them.
+tasks.named('processTestResources') {
+	from('src/migration/resources') { include 'db/postgresql/**' }
+}
+
+// Schema tools remain outside the API application's startup and runtime classpath.
+apply from: 'gradle/schema-migration.gradle'

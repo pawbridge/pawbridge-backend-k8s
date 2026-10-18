@@ -1,0 +1,1248 @@
+[
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution",
+    "column": "status",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution",
+    "column": "exit_code",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution",
+    "column": "exit_message",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution_context",
+    "column": "short_context",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution_context",
+    "column": "serialized_context",
+    "type": "text",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution_params",
+    "column": "parameter_name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution_params",
+    "column": "parameter_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution_params",
+    "column": "parameter_value",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_execution_params",
+    "column": "identifying",
+    "type": "char",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_instance",
+    "column": "job_name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_job_instance",
+    "column": "job_key",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_step_execution",
+    "column": "step_name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_step_execution",
+    "column": "status",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_step_execution",
+    "column": "exit_code",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_step_execution",
+    "column": "exit_message",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_step_execution_context",
+    "column": "short_context",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "batch_step_execution_context",
+    "column": "serialized_context",
+    "type": "text",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "api_source",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "apms_desertion_no",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "apms_notice_no",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "apms_process_state",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "breed",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "color",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "description",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "gender",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "happen_place",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "image_url",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "image_url2",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "neuter_status",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "special_mark",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "species",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "status",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "animals",
+    "column": "weight",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "desertion_no",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "source_url",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "state",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "lease_token",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "error_code",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "archived_source_url",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "source_sha256",
+    "type": "char",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "stored_sha256",
+    "type": "char",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "object_key",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "content_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "apms_photo_archive",
+    "column": "recipe",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_block_logs",
+    "column": "anonymous_session_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_block_logs",
+    "column": "ip_hash",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_block_logs",
+    "column": "category",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_block_logs",
+    "column": "reason",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_block_logs",
+    "column": "question_preview",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_messages",
+    "column": "session_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_messages",
+    "column": "role",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_messages",
+    "column": "content",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_messages",
+    "column": "provider",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_messages",
+    "column": "safety_notice",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_sessions",
+    "column": "id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "chatbot_sessions",
+    "column": "anonymous_session_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "outbox_events",
+    "column": "aggregate_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "outbox_events",
+    "column": "aggregate_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "outbox_events",
+    "column": "event_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "outbox_events",
+    "column": "event_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "outbox_events",
+    "column": "payload",
+    "type": "text",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "outbox_events",
+    "column": "topic",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_collection_runs",
+    "column": "id",
+    "type": "char",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_collection_runs",
+    "column": "status",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_collection_runs",
+    "column": "error_code",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_collection_state",
+    "column": "phase",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_collection_state",
+    "column": "error_code",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_images",
+    "column": "provider",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_images",
+    "column": "content_id",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_images",
+    "column": "serial_number",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_images",
+    "column": "image_name",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_images",
+    "column": "original_url",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_images",
+    "column": "thumbnail_url",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_images",
+    "column": "copyright_type",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_pet_collection_state",
+    "column": "cycle_id",
+    "type": "char",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_pet_collection_state",
+    "column": "error_code",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_pet_details",
+    "column": "provider",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_pet_details",
+    "column": "content_id",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_pet_details",
+    "column": "source",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_pet_details",
+    "column": "cycle_id",
+    "type": "char",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_places",
+    "column": "provider",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_places",
+    "column": "content_id",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_places",
+    "column": "area_code",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_places",
+    "column": "title",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_places",
+    "column": "image_url",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_places",
+    "column": "copyright_type",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_regions",
+    "column": "code",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_regions",
+    "column": "name",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_request_budgets",
+    "column": "operation",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_targets",
+    "column": "provider",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_targets",
+    "column": "content_id",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_targets",
+    "column": "area_code",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_targets",
+    "column": "modified_time",
+    "type": "char",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_targets",
+    "column": "image_url",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_targets",
+    "column": "copyright_type",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_targets",
+    "column": "detail_error",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "provider",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "content_id",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "content_type_id",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "intro_source_modified_time",
+    "type": "char",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "info_source_modified_time",
+    "type": "char",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "image_source_modified_time",
+    "type": "char",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "intro_error",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "info_error",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "pet_travel_visit_details",
+    "column": "image_error",
+    "type": "varchar",
+    "charset": "ascii"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "processed_events",
+    "column": "event_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "processed_events",
+    "column": "event_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "address",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "adoption_procedure",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "care_reg_no",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "email",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "introduction",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "operating_hours",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "organization_name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "owner_name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "shelters",
+    "column": "phone",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "sync_history",
+    "column": "api_source",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "sync_history",
+    "column": "error_message",
+    "type": "text",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_animal",
+    "table": "sync_history",
+    "column": "sync_status",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "comments",
+    "column": "content",
+    "type": "text",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "outbox_events",
+    "column": "aggregate_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "outbox_events",
+    "column": "aggregate_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "outbox_events",
+    "column": "event_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "outbox_events",
+    "column": "type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "posts",
+    "column": "board_type",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "posts",
+    "column": "content",
+    "type": "text",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "posts",
+    "column": "title",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "processed_events",
+    "column": "event_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_community",
+    "table": "processed_events",
+    "column": "event_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "table": "outbox",
+    "column": "aggregate_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "table": "outbox",
+    "column": "aggregate_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "table": "outbox",
+    "column": "event_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "table": "payments",
+    "column": "method",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "table": "payments",
+    "column": "order_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "table": "payments",
+    "column": "payment_key",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_payment",
+    "table": "payments",
+    "column": "status",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "categories",
+    "column": "description",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "categories",
+    "column": "name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "option_groups",
+    "column": "name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "option_values",
+    "column": "name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "order_items",
+    "column": "product_name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "order_items",
+    "column": "sku_code",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "orders",
+    "column": "delivery_address",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "orders",
+    "column": "delivery_message",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "orders",
+    "column": "delivery_status",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "orders",
+    "column": "order_uuid",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "orders",
+    "column": "receiver_name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "orders",
+    "column": "receiver_phone",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "orders",
+    "column": "status",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "outbox",
+    "column": "aggregate_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "outbox",
+    "column": "aggregate_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "outbox",
+    "column": "event_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "product_skus",
+    "column": "sku_code",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "products",
+    "column": "description",
+    "type": "text",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "products",
+    "column": "image_url",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "products",
+    "column": "name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_store",
+    "table": "products",
+    "column": "status",
+    "type": "enum",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "outbox_events",
+    "column": "aggregate_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "outbox_events",
+    "column": "aggregate_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "outbox_events",
+    "column": "event_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "outbox_events",
+    "column": "event_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "outbox_events",
+    "column": "topic",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "processed_events",
+    "column": "event_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "processed_events",
+    "column": "event_type",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "refresh_tokens",
+    "column": "token",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "shelter_applications",
+    "column": "shelter_name",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "shelter_applications",
+    "column": "status",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "shelter_applications",
+    "column": "review_note",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "shelter_applications",
+    "column": "care_reg_no",
+    "type": "varchar",
+    "charset": "utf8mb4"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "care_reg_no",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "email",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "name",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "nickname",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "password",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "provider",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "provider_id",
+    "type": "varchar",
+    "charset": "utf8mb3"
+  },
+  {
+    "schema": "pawbridge_user",
+    "table": "users",
+    "column": "role",
+    "type": "enum",
+    "charset": "utf8mb3"
+  }
+]

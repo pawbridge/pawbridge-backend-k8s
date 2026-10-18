@@ -1,6 +1,13 @@
 package com.pawbridge.animalservice.config;
 
+import org.springframework.batch.core.launch.support.TaskExecutorJobLauncher;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.SyncTaskExecutor;
+
+import java.time.Clock;
+import java.time.ZoneId;
 
 /**
  * Spring Batch 설정
@@ -17,6 +24,19 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 public class BatchConfig {
-    // Spring Boot 3.x Auto-configuration 사용
-    // 커스텀 설정 필요 시 여기에 @Bean 추가
+    @Bean
+    public Clock apmsClock() {
+        return Clock.system(ZoneId.of("Asia/Seoul"));
+    }
+
+    // Boot may select batchTaskExecutor for its default launcher. APMS must instead
+    // finish on the caller thread so its database session lock covers the whole job.
+    @Bean
+    public TaskExecutorJobLauncher apmsJobLauncher(JobRepository jobRepository) throws Exception {
+        var launcher = new TaskExecutorJobLauncher();
+        launcher.setJobRepository(jobRepository);
+        launcher.setTaskExecutor(new SyncTaskExecutor());
+        launcher.afterPropertiesSet();
+        return launcher;
+    }
 }

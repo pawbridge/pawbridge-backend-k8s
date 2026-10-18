@@ -1,0 +1,14 @@
+// Opt-in connected rehearsal only; each service retains its own production classpath.
+gradle.projectsEvaluated {
+    def project = gradle.rootProject
+    project.tasks.register('cutoverConsumerTest', Test) {
+        testClassesDirs = project.sourceSets.migrationTest.output.classesDirs
+        classpath = project.sourceSets.migrationTest.runtimeClasspath
+        useJUnitPlatform { includeTags 'postgresql-cutover' }
+        maxHeapSize = '384m'
+        outputs.upToDateWhen { false }
+        doLast {
+            project.layout.buildDirectory.file('cutover-classpath.txt').get().asFile.text = classpath.asPath
+        }
+    }
+}

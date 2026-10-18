@@ -86,4 +86,8 @@ public class JwtUtil {
                 .parseSignedClaims(token)
                 .getPayload();
     }
+
+    public long getExpiresAtFromToken(String token) {
+        return getClaims(token).getExpiration().getTime();
+    }
 }

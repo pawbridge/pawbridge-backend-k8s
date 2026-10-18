@@ -1,6 +1,5 @@
 package com.pawbridge.animalservice.service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,16 +20,11 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class S3Service {
 
     private final S3Client s3Client;
-
-    @Value("${spring.cloud.aws.s3.bucket}")
-    private String bucketName;
-
-    @Value("${spring.cloud.aws.region.static}")
-    private String region;
+    private final String bucketName;
+    private final String publicBaseUrl;
 
     private static final String ANIMALS_FOLDER = "animals/";
 
@@ -41,6 +35,16 @@ public class S3Service {
             "image/gif",
             "image/webp"
     );
+
+    public S3Service(
+            S3Client s3Client,
+            @Value("${spring.cloud.aws.s3.bucket}") String bucketName,
+            @Value("${pawbridge.storage.public-base-url}") String publicBaseUrl
+    ) {
+        this.s3Client = s3Client;
+        this.bucketName = bucketName;
+        this.publicBaseUrl = removeTrailingSlashes(publicBaseUrl);
+    }
 
     /**
      * 이미지 업로드
@@ -65,7 +69,7 @@ public class S3Service {
 
             s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
 
-            String imageUrl = buildS3Url(key);
+            String imageUrl = publicBaseUrl + "/" + key;
             log.info("이미지 업로드 완료: {}", imageUrl);
             return imageUrl;
 
@@ -84,14 +88,8 @@ public class S3Service {
             return;
         }
 
-        // URL에서 S3 키 추출
-        String key = extractKeyFromUrl(imageUrl);
-        if (key == null) {
-            log.warn("유효하지 않은 이미지 URL: {}", imageUrl);
-            return;
-        }
-
         try {
+            String key = extractObjectKey(imageUrl);
             DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
                     .bucket(bucketName)
                     .key(key)
@@ -101,7 +99,7 @@ public class S3Service {
             log.info("이미지 삭제 완료: {}", key);
 
         } catch (Exception e) {
-            log.error("이미지 삭제 실패: {}", key, e);
+            log.error("이미지 삭제 실패: {}", imageUrl, e);
             // 삭제 실패는 예외를 던지지 않음 (비즈니스 로직에 영향 없음)
         }
     }
@@ -136,22 +134,24 @@ public class S3Service {
         return "";
     }
 
-    /**
-     * S3 URL 생성
-     */
-    private String buildS3Url(String key) {
-        return String.format("https://%s.s3.%s.amazonaws.com/%s", bucketName, region, key);
+    private String extractObjectKey(String imageUrl) {
+        String publicUrlPrefix = publicBaseUrl + "/";
+        if (!imageUrl.startsWith(publicUrlPrefix)) {
+            throw new IllegalArgumentException("등록된 공개 저장소 URL이 아닙니다.");
+        }
+
+        String key = imageUrl.substring(publicUrlPrefix.length());
+        if (key.isBlank()) {
+            throw new IllegalArgumentException("삭제할 객체 키가 없습니다.");
+        }
+        return key;
     }
 
-    /**
-     * S3 URL에서 키 추출
-     */
-    private String extractKeyFromUrl(String imageUrl) {
-        // https://{bucket}.s3.{region}.amazonaws.com/{key} 형식에서 key 추출
-        String prefix = String.format("https://%s.s3.%s.amazonaws.com/", bucketName, region);
-        if (imageUrl.startsWith(prefix)) {
-            return imageUrl.substring(prefix.length());
+    private static String removeTrailingSlashes(String url) {
+        int end = url.length();
+        while (end > 0 && url.charAt(end - 1) == '/') {
+            end--;
         }
-        return null;
+        return url.substring(0, end);
     }
 }

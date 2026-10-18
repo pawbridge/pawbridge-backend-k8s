@@ -19,6 +19,7 @@ import org.springframework.data.elasticsearch.core.IndexOperations;
 @Configuration
 @RequiredArgsConstructor
 @Slf4j
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="pawbridge.search.backend",havingValue="elasticsearch",matchIfMissing=true)
 public class ElasticsearchConfig {
 
     private final ElasticsearchOperations elasticsearchOperations;

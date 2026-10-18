@@ -10,6 +10,13 @@ import org.springframework.http.HttpStatus;
 @Getter
 public enum ErrorCode {
 
+    // Shelter applications
+    SHELTER_APPLICATION_FORBIDDEN(HttpStatus.FORBIDDEN, "보호소 신청을 처리할 권한이 없습니다."),
+    SHELTER_APPLICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "보호소 신청을 찾을 수 없습니다."),
+    SHELTER_APPLICATION_CONFLICT(HttpStatus.CONFLICT, "이미 대기 중이거나 처리된 신청입니다. 상태를 다시 확인해주세요."),
+    SHELTER_APPROVAL_REQUIRED(HttpStatus.BAD_REQUEST, "보호소 권한은 담당자 신청 승인으로 부여해야 합니다."),
+    SHELTER_APPLICATION_INVALID(HttpStatus.BAD_REQUEST, "신청 이름, 등록번호 또는 처리 사유를 확인해주세요."),
+
     // USER
     USER_NOT_FOUND(HttpStatus.BAD_REQUEST, "존재하지 않는 회원입니다."),
     USER_ALREADY_REGISTERED(HttpStatus.BAD_REQUEST, "이미 가입된 회원입니다."),

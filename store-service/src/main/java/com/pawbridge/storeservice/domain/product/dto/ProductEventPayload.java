@@ -20,6 +20,7 @@ public class ProductEventPayload {
     private String optionName; // 예: "Color:Red, Size:L"
     private Long price;
     private Integer stockQuantity;
+    private Integer totalStockQuantity;
     private Boolean isPrimarySku; // 대표 SKU 여부
     private String status;
     private String imageUrl;
