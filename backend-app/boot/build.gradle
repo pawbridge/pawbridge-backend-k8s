@@ -10,10 +10,8 @@ sourceSets {
 dependencies {
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     implementation 'org.springframework.boot:spring-boot-starter'
-    implementation project(':ui')
-    implementation project(':application')
-    implementation project(':infrastructure')
-    implementation project(':domain')
+    implementation project(':user')
+    implementation project(':community')
 
     testImplementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
@@ -43,6 +41,7 @@ tasks.register('architectureTest', Test) {
 
     systemProperty 'test.gradle.home', gradle.gradleHomeDir.absolutePath
     systemProperty 'architecture.guard.file', rootProject.file('gradle/architecture.gradle').absolutePath
+    systemProperty 'architecture.gradle.user.home', gradle.gradleUserHomeDir.absolutePath
 }
 
 tasks.named('check') {
