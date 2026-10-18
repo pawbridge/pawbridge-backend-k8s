@@ -53,18 +53,20 @@ class MigrationPairTest(unittest.TestCase):
                 self.assertIn(f"image: {repo}@sha256:", output)
                 self.assertEqual(output, self.pair(output, repository=repo))
 
-    def test_workflows_build_pair_without_broadening_publication(self):
+    def test_workflows_keep_pair_build_inputs_but_disable_image_execution(self):
         root = Path(__file__).resolve().parents[1]
-        for name, gate in (
-            ("store-service-ci.yml",
-             "env.STORE_PUBLISH_ALLOWED == 'true' && steps.release.outputs.publish == 'true'"),
-            ("_java-service-image.yml", "inputs.publish && github.ref == 'refs/heads/dev'"),
+        for name, app_step_name in (
+            ("store-service-ci.yml", "Build and optionally publish Store Service image"),
+            ("_java-service-image.yml", "Build and optionally publish service image"),
         ):
             with self.subTest(workflow=name):
                 workflow = (root / "workflows" / name).read_text()
                 self.assertIn("test migrationTest bootJar migrationDistribution", workflow)
+                for step_name in (app_step_name, "Build and optionally publish migration image"):
+                    step = workflow.split("      - name: " + step_name + "\n")[1].split("      - name:")[0]
+                    self.assertIn("        if: ${{ false }}\n", step)
+                    self.assertIn("          push: false\n", step)
                 migration_step = workflow.split("      - name: Build and optionally publish migration image\n")[1].split("      - name:")[0]
-                self.assertIn("push: ${{ " + gate + " }}", migration_step)
                 self.assertIn("build/migration", migration_step)
                 self.assertIn("file: .github/migrations/Dockerfile", migration_step)
                 self.assertEqual(workflow.count('--migration-digest "$MIGRATION_DIGEST"'), 2)

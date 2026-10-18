@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       publish:
-        description: Whether this invocation may publish and create an Infra Draft PR.
+        description: Check-only invocation; publication requests are rejected during R1.
         required: true
         type: boolean
     secrets:
@@ -49,6 +49,11 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+
+      - name: Require check-only invocation
+        env:
+          PUBLISH_REQUESTED: ${{ inputs.publish }}
+        run: python3 .github/scripts/ci_branch_policy.py require-check-only --publish-env PUBLISH_REQUESTED
 
       - id: service
         name: Set service metadata
@@ -162,47 +167,51 @@ jobs:
           fi
           echo "file=${jars[0]}" >> "$GITHUB_OUTPUT"
 
+      # Frozen external steps stay disabled until a separate R4 release review.
       - name: Set up Helm
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.21.4
 
       - name: Set up Docker Buildx
+        if: ${{ false }}
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Log in to Docker Hub
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: dorosiya
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and optionally publish service image
+        if: ${{ false }}
         id: image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./${{ inputs.service }}
           platforms: linux/amd64
-          push: ${{ inputs.publish && github.ref == 'refs/heads/dev' }}
+          push: false
           tags: ${{ steps.service.outputs.image_repository }}:sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             JAR_FILE=build/libs/${{ steps.jar.outputs.file }}
 
       - name: Build and optionally publish migration image
+        if: ${{ false }}
         id: migration
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./${{ inputs.service }}/build/migration
           file: .github/migrations/Dockerfile
           platforms: linux/amd64
-          push: ${{ inputs.publish && github.ref == 'refs/heads/dev' }}
+          push: false
           tags: ${{ steps.service.outputs.image_repository }}:migration-sha-${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Verify published migration digest
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         env:
           MIGRATION_REPOSITORY: ${{ steps.service.outputs.image_repository }}
           MIGRATION_DIGEST: ${{ steps.migration.outputs.digest }}
@@ -212,7 +221,7 @@ jobs:
           docker buildx imagetools inspect "$MIGRATION_REPOSITORY@$MIGRATION_DIGEST"
 
       - name: Verify published image digest
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         env:
           IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
@@ -227,7 +236,7 @@ jobs:
           docker buildx imagetools inspect "$IMAGE_REPOSITORY@$IMAGE_DIGEST"
 
       - name: Check out Infra repository
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: pawbridge/pawbridge-infra-k8s
@@ -238,7 +247,7 @@ jobs:
 
       - id: infra-base
         name: Record checked out Infra dev SHA
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}/infra
         run: |
           set -euo pipefail
@@ -247,13 +256,13 @@ jobs:
           echo "Checked out Infra dev SHA: $infra_dev_sha"
 
       - name: Require isolated dev destination
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         env:
           TARGET_SERVICE: ${{ inputs.service }}
         run: python3 .github/scripts/assert_dev_environment.py infra "$TARGET_SERVICE"
 
       - name: Update service image reference
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         env:
           IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
           IMAGE_TAG: sha-${{ github.sha }}
@@ -268,7 +277,7 @@ jobs:
           --digest "$IMAGE_DIGEST" --migration-digest "$MIGRATION_DIGEST"
 
       - name: Validate digest-aware Infra Helm override
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}/infra
         env:
           IMAGE_REPOSITORY: ${{ steps.service.outputs.image_repository }}
@@ -306,7 +315,7 @@ jobs:
           fi
 
       - name: Create or update Infra draft pull request
-        if: inputs.publish && github.ref == 'refs/heads/dev'
+        if: ${{ false }}
         working-directory: ${{ github.workspace }}/infra
         env:
           GH_TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
