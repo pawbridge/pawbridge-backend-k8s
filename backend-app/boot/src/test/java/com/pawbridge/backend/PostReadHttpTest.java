@@ -90,6 +90,8 @@ class PostReadHttpTest {
     void given__internal_error_dispatch__when__dispatching_to_error_path__then__security_does_not_replace_it_with_403() throws Exception {
         mvc.perform(get("/error").with(request -> {
                     request.setDispatcherType(jakarta.servlet.DispatcherType.ERROR);
+                    request.setAttribute(jakarta.servlet.RequestDispatcher.ERROR_STATUS_CODE, 404);
+                    request.setAttribute(jakarta.servlet.RequestDispatcher.ERROR_REQUEST_URI, "/api/v1/posts/read/42");
                     return request;
                 }))
                 .andExpect(status().isNotFound());
