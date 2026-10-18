@@ -73,6 +73,7 @@ class FixtureServer(HTTPServer):
 
 class FixtureHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    timeout = 3
 
     def log_message(self, *_):
         # Do not log Authorization headers, query strings or uploaded body bytes.
@@ -186,6 +187,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
         return body
 
     def _body(self):
+        # Synthetic framing metadata only: never Authorization, path query or body.
+        print(json.dumps({"framing": {
+            "method": self.command, "http_version": self.request_version,
+            **{name: self.headers.get(name) for name in (
+                "Content-Length", "Transfer-Encoding", "Content-Encoding", "Expect",
+                "x-amz-decoded-content-length")}}}), flush=True)
         wire = self._wire_body()
         encoding = self.headers.get("Content-Encoding", "").lower()
         if encoding == "aws-chunked":
@@ -226,7 +233,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
             return
         try:
             body = self._body()
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError, TimeoutError, ConnectionError) as failure:
+            print(json.dumps({"framing_failure": type(failure).__name__}), flush=True)
             self._record(400, key)
             self._error(400)
             return
