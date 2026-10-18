@@ -1,0 +1,132 @@
+name: Backend app check
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - 'backend-app/**'
+      - '.github/workflows/backend-app-check.yml'
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - 'backend-app/**'
+      - '.github/workflows/backend-app-check.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Java 21 build and isolated startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend-app
+    steps:
+      - name: Check out backend-app sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            backend-app
+            .github/workflows/backend-app-check.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Isolate Gradle state on the hosted runner
+        run: |
+          set -euo pipefail
+          printf 'GRADLE_USER_HOME=%s\n' "$RUNNER_TEMP/pawbridge-backend-app-gradle" >> "$GITHUB_ENV"
+
+      - name: Set up Java 21
+        id: java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: x64
+          check-latest: true
+
+      - name: Set up Gradle Wrapper validation
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          validate-wrappers: true
+          cache-disabled: true
+          dependency-graph: disabled
+          build-scan-publish: false
+          add-job-summary-as-pr-comment: never
+
+      - name: Record the tested runtime
+        env:
+          JDK_DISTRIBUTION: ${{ steps.java.outputs.distribution }}
+          JDK_VERSION: ${{ steps.java.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/ci
+          {
+            printf 'source_sha=%s\n' "$(git rev-parse HEAD)"
+            printf 'runner_image_os=%s\n' "${ImageOS:-unknown}"
+            printf 'runner_image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'runner_architecture=%s\n' "$(uname -m)"
+            printf 'jdk_distribution=%s\n' "$JDK_DISTRIBUTION"
+            printf 'jdk_version=%s\n' "$JDK_VERSION"
+            java -version 2>&1
+          } | tee build/ci/runtime-metadata.txt
+          bash ./gradlew --version --no-daemon --max-workers=1 -Dorg.gradle.parallel=false \
+            | tee build/ci/gradle-version.txt
+          grep -Fx 'Gradle 8.14.3' build/ci/gradle-version.txt
+
+      - name: Check modules, dependency rules, and executable JAR
+        id: build
+        run: |
+          set -euo pipefail
+          bash ./gradlew projects check :boot:bootJar \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+
+      - name: Start and close the packaged application without external services
+        run: |
+          set -euo pipefail
+          test -f boot/build/libs/pawbridge-backend-app.jar
+          startup_exit_code=0
+          timeout --kill-after=5s 30s \
+            java -jar boot/build/libs/pawbridge-backend-app.jar \
+            --spring.main.banner-mode=off \
+            > build/ci/packaged-startup.log 2>&1 || startup_exit_code=$?
+          printf 'packaged_application_exit_code=%s\n' "$startup_exit_code" \
+            | tee build/ci/packaged-startup-result.txt
+          test "$startup_exit_code" -eq 0
+          sha256sum boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar.sha256
+
+      - name: Preserve test and runtime evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backend-app/**/build/test-results/**/TEST-*.xml
+            backend-app/build/ci/runtime-metadata.txt
+            backend-app/build/ci/gradle-version.txt
+            backend-app/build/ci/packaged-startup.log
+            backend-app/build/ci/packaged-startup-result.txt
+            backend-app/build/ci/boot-jar.sha256
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Preserve the verified executable JAR
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-app-boot-jar-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backend-app/boot/build/libs/pawbridge-backend-app.jar
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 7

@@ -1,0 +1,50 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+}
+
+sourceSets {
+    architectureTest
+}
+
+dependencies {
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation project(':ui')
+    implementation project(':application')
+    implementation project(':infrastructure')
+    implementation project(':domain')
+
+    testImplementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    architectureTestImplementation platform('org.junit:junit-bom:5.11.4')
+    architectureTestImplementation 'org.junit.jupiter:junit-jupiter'
+    architectureTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    architectureTestImplementation gradleTestKit()
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'pawbridge-backend-app.jar'
+}
+
+tasks.named('jar') {
+    enabled = false
+}
+
+// TestKit brings Gradle's own logging provider. Keep it off the Spring context
+// test classpath instead of overriding the production application's logging.
+tasks.register('architectureTest', Test) {
+    group = 'verification'
+    description = 'Exercises the production Gradle boundary guard in isolated TestKit fixtures.'
+    testClassesDirs = sourceSets.architectureTest.output.classesDirs
+    classpath = sourceSets.architectureTest.runtimeClasspath
+    shouldRunAfter tasks.named('test')
+
+    systemProperty 'test.gradle.home', gradle.gradleHomeDir.absolutePath
+    systemProperty 'architecture.guard.file', rootProject.file('gradle/architecture.gradle').absolutePath
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('architectureTest')
+}
