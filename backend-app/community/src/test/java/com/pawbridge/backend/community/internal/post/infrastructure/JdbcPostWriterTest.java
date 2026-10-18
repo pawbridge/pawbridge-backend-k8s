@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -136,8 +137,8 @@ class JdbcPostWriterTest {
         assertEquals("42", outbox.values.get(3));
         assertEquals("POST_CREATED", outbox.values.get(4));
         JsonNode payload = mapper.readTree((String) outbox.values.get(5));
-        assertEquals(mapper.valueToTree(Map.of("postId", 42L, "authorId", 7L, "title", input().title(),
-                "content", input().content(), "boardType", "PROTECTION", "imageUrls", input().imageUrls())), payload);
+        assertEquals(mapper.readTree(mapper.writeValueAsString(Map.of("postId", 42L, "authorId", 7L, "title", input().title(),
+                "content", input().content(), "boardType", "PROTECTION", "imageUrls", input().imageUrls()))), payload);
         assertEquals("UTC", outbox.calendars.get(6).getTimeZone().getID());
 
         StatementCall search = calls.get(2);
@@ -176,7 +177,7 @@ class JdbcPostWriterTest {
     @Test
     void given__commit_charset_failure__when__write__then__only_named_community_constraint_becomes_user_error() {
         TransactionSystemException failure = new TransactionSystemException("commit", charset("23514", "pawbridge_community", "ck_rollback_charset_posts"));
-        when(transactions.execute(ArgumentMatchers.<TransactionCallback<PostSnapshot>>any())).thenThrow(failure);
+        doThrow(failure).when(transactions).execute(ArgumentMatchers.<TransactionCallback<PostSnapshot>>any());
         try (JdbcPostWriter writer = writer()) {
             UnsupportedPostCharactersException translated = assertThrows(UnsupportedPostCharactersException.class,
                     () -> writer.create(input()));
@@ -188,7 +189,7 @@ class JdbcPostWriterTest {
     @Test
     void given__unrelated_check_failure_at_commit__when__write__then__original_failure_is_not_a_user_error() {
         TransactionSystemException failure = new TransactionSystemException("commit", charset("23514", "pawbridge_community", "business_constraint"));
-        when(transactions.execute(ArgumentMatchers.<TransactionCallback<PostSnapshot>>any())).thenThrow(failure);
+        doThrow(failure).when(transactions).execute(ArgumentMatchers.<TransactionCallback<PostSnapshot>>any());
         try (JdbcPostWriter writer = writer()) {
             assertSame(failure, assertThrows(TransactionSystemException.class, () -> writer.create(input())));
         }

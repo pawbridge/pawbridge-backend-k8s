@@ -163,8 +163,8 @@ class PostgresqlPostCreateCompatibilityTest {
         assertThat(UUID.fromString((String) event.get("event_id")).toString()).isEqualTo(event.get("event_id"));
         assertThat(event).containsEntry("aggregate_type", "Post").containsEntry("aggregate_id", String.valueOf(saved.postId()))
                 .containsEntry("type", "POST_CREATED");
-        JsonNode expected = mapper.valueToTree(Map.of("postId",saved.postId(),"authorId",saved.authorId(),
-                "title",saved.title(),"content",saved.content(),"boardType",saved.boardType(),"imageUrls",saved.imageUrls()));
+        JsonNode expected = mapper.readTree(mapper.writeValueAsString(Map.of("postId",saved.postId(),"authorId",saved.authorId(),
+                "title",saved.title(),"content",saved.content(),"boardType",saved.boardType(),"imageUrls",saved.imageUrls())));
         assertThat(mapper.readTree((String)event.get("payload"))).isEqualTo(expected);
         // Persist the exact legacy @JdbcTypeCode(JSON) OutboxEvent and compare its stored JSON shape.
         OutboxEvent oracle = OutboxEvent.builder().eventId(UUID.randomUUID().toString()).aggregateType("Post")
