@@ -1,0 +1,80 @@
+package com.pawbridge.backend.boot.configuration;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.backend.community.internal.post.application.PostReader;
+import com.pawbridge.backend.community.internal.post.application.ReadPost;
+import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostReader;
+import com.pawbridge.backend.community.internal.post.web.PostReadController;
+import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler;
+import com.pawbridge.backend.user.api.UserNicknameQuery;
+import com.pawbridge.backend.user.internal.nickname.infrastructure.JdbcUserNicknameQuery;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import javax.sql.DataSource;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.JdbcTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
+@Configuration(proxyBeanMethods = false)
+@Import(ReadSecurityConfiguration.class)
+public class ReadConfiguration {
+    @Bean(destroyMethod = "close")
+    HikariDataSource dataSource(ReadDatabaseSettings settings) {
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(settings.jdbcUrl());
+        config.setUsername(settings.username());
+        config.setPassword(settings.password());
+        config.setPoolName("pawbridge-post-read");
+        config.setMaximumPoolSize(settings.maximumPoolSize());
+        config.setMinimumIdle(0);
+        config.setConnectionTimeout(2000);
+        config.setValidationTimeout(1000);
+        config.setInitializationFailTimeout(-1);
+        config.setReadOnly(true);
+        return new HikariDataSource(config);
+    }
+
+    @Bean
+    JdbcTemplate readJdbc(DataSource dataSource) {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.setQueryTimeout(3);
+        return jdbc;
+    }
+
+    @Bean
+    JdbcTransactionManager transactionManager(DataSource dataSource) {
+        JdbcTransactionManager manager = new JdbcTransactionManager(dataSource);
+        manager.setEnforceReadOnly(true);
+        return manager;
+    }
+
+    @Bean
+    TransactionTemplate readOnlyTransaction(JdbcTransactionManager manager) {
+        TransactionTemplate transaction = new TransactionTemplate(manager);
+        transaction.setReadOnly(true);
+        transaction.setTimeout(3);
+        return transaction;
+    }
+
+    @Bean
+    UserNicknameQuery userNicknameQuery(JdbcTemplate readJdbc, TransactionTemplate readOnlyTransaction) {
+        return new JdbcUserNicknameQuery(readJdbc, readOnlyTransaction);
+    }
+
+    @Bean
+    PostReader postReader(JdbcTemplate readJdbc, TransactionTemplate readOnlyTransaction, ObjectMapper mapper) {
+        return new JdbcPostReader(readJdbc, readOnlyTransaction, mapper);
+    }
+
+    @Bean
+    ReadPost readPost(PostReader posts, UserNicknameQuery users) { return new ReadPost(posts, users); }
+
+    @Bean
+    PostReadController postReadController(ReadPost readPost) { return new PostReadController(readPost); }
+
+    @Bean
+    PostReadExceptionHandler postReadExceptionHandler() { return new PostReadExceptionHandler(); }
+}
