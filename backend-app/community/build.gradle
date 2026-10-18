@@ -10,5 +10,13 @@ dependencies {
     implementation 'org.springframework:spring-tx'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
 
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:3.0.3')
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'org.springframework:spring-webmvc'
+    implementation 'org.springframework.security:spring-security-core'
+    implementation 'org.postgresql:postgresql'
+    implementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
+
     testImplementation 'org.mockito:mockito-core'
+    testImplementation 'org.assertj:assertj-core'
 }

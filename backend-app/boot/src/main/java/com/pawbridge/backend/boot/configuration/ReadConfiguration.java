@@ -9,6 +9,7 @@ import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandle
 import com.pawbridge.backend.user.api.UserNicknameQuery;
 import com.pawbridge.backend.user.internal.nickname.infrastructure.JdbcUserNicknameQuery;
 import com.zaxxer.hikari.HikariConfig;
+import org.springframework.beans.factory.annotation.Qualifier;
 import com.zaxxer.hikari.HikariDataSource;
 import javax.sql.DataSource;
 import org.springframework.context.annotation.Bean;
@@ -38,21 +39,21 @@ public class ReadConfiguration {
     }
 
     @Bean
-    JdbcTemplate readJdbc(DataSource dataSource) {
+    JdbcTemplate readJdbc(@Qualifier("dataSource") DataSource dataSource) {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         jdbc.setQueryTimeout(3);
         return jdbc;
     }
 
     @Bean
-    JdbcTransactionManager transactionManager(DataSource dataSource) {
+    JdbcTransactionManager transactionManager(@Qualifier("dataSource") DataSource dataSource) {
         JdbcTransactionManager manager = new JdbcTransactionManager(dataSource);
         manager.setEnforceReadOnly(true);
         return manager;
     }
 
     @Bean
-    TransactionTemplate readOnlyTransaction(JdbcTransactionManager manager) {
+    TransactionTemplate readOnlyTransaction(@Qualifier("transactionManager") JdbcTransactionManager manager) {
         TransactionTemplate transaction = new TransactionTemplate(manager);
         transaction.setReadOnly(true);
         transaction.setTimeout(3);
@@ -60,12 +61,12 @@ public class ReadConfiguration {
     }
 
     @Bean
-    UserNicknameQuery userNicknameQuery(JdbcTemplate readJdbc, TransactionTemplate readOnlyTransaction) {
+    UserNicknameQuery userNicknameQuery(@Qualifier("readJdbc") JdbcTemplate readJdbc, @Qualifier("readOnlyTransaction") TransactionTemplate readOnlyTransaction) {
         return new JdbcUserNicknameQuery(readJdbc, readOnlyTransaction);
     }
 
     @Bean
-    PostReader postReader(JdbcTemplate readJdbc, TransactionTemplate readOnlyTransaction, ObjectMapper mapper) {
+    PostReader postReader(@Qualifier("readJdbc") JdbcTemplate readJdbc, @Qualifier("readOnlyTransaction") TransactionTemplate readOnlyTransaction, ObjectMapper mapper) {
         return new JdbcPostReader(readJdbc, readOnlyTransaction, mapper);
     }
 
