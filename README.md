@@ -67,8 +67,3 @@
 - 동물 및 상품 검색 코어가 의존하는 Elasticsearch 수동 인덱스 매핑 파일 및 파이프라인 스크립트는 현재 백엔드 저장소의 infrastructure/elasticsearch/ 디렉토리에 포함되어 있습니다.
 
 ---
-
-## 테스트 계정 안내 (Test Account)
-로컬 클러스터 구동 또는 실제 배포 환경에서 기능 테스트를 위한 테스트 전용 계정입니다.
-- Email: admin@pawbridge.kr
-- Password: password123!
