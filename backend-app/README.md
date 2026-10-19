@@ -427,3 +427,18 @@ private source에서 Core/Boot9+9경로를 입력 지문과 대조해 통합했�
 JAR 계획은 정상 actual issuer600초 F28_CALLER/OTHER, 직전TTL60·소유0600/기존키 보존, 본인/other SSE두개를 사용한다. A의본인INBOX만삭제하고 otherSENT/원본을보존, B의마지막SENT삭제로 own request.note_id와자식C.reply_to NULL전이, C삭제 뒤 알림empty를 확인하도록 준비한다. 각DELETE권한·User실패/복구·반복404·인증/깊은경로를 포함하는정적18HTTP=DELETE9/GET9이며 아직actual요청수가아니다. 승인delta는mailbox3/note2/requestNULL1/replyNULL1뿐이고 read_at/favorite/다른17표/S3는보존한다. ACK seed외참조는삭제하지않으며응답실패뒤commit재관측/모든stream·child정리와최종17baseline복구를요구한다. 열린SSE2 serverEOF/registry성공1/두pool·연결0/비밀로그0 뒤에만 passed다.
 
 workflow는 F27 전체 → 무자원 F28 guards → 원문 requests1표/index3/DELETE2 atomic stage → UTC 정확2클래스 → XML/source receipt → JAR 순서다. 새Seoul0, 항상소유정리·실패증거·발행차단·특정 f28-results.json만보존한다. 첫 결합 상한55분은 위 실제 부모 시간에 근거한 여유이며 F28 실제 소요시간은 hosted 결과에서 확인한다.
+
+
+## F29 본인 쪽지 발송의 CI 연결 준비
+
+기존 POST `/api/v1/notes`의 입력6필드·strip/hash·멱등 요청키·분/Seoul일 한도·답장·POST/REPORT 문맥을 보존한다. TX15의 정렬 회원 잠금과 현재/수신자 User 조회, 기존 요청의 gone/conflict/replay, 양방향 차단과 한도/문맥 검사 뒤 새 UUID1개로 note1/mailbox2/request1을 저장한다. commit 뒤 수신자에게만 기존 알림7필드 note 이벤트를 전달하고, 같은 키 재전송은 같은 receipt를 반환하며 새 행·알림을 만들지 않는다. 기존 조회·resync·registry 예산을 바꾸지 않으며 발송 SAM만 같은 registry에 연결한다. F27·F28 메일함 상태 관리와 별도 기능 계약이다.
+
+선행 F28 전체 성공 뒤 F29 fixture가 마지막17표 strict/snapshot을 확인한다. 고정 f06의 V4/V5 report 원문 조각으로 synthetic report 표1/identity/index/check만 추가해18표를 비교하며 운영 DDL·migration·reader report ACL·앱 sequence ACL은 변경하지 않는다. writer 추가는 notes의 sender SELECT/발송9열 INSERT, mailbox5열 INSERT, requests5열 SELECT/INSERT, reports의 report_id/author_id/deleted_at SELECT로 제한한다. 권한 회수 중에는 marker/prior/current exact receipt로 소유 대상을 먼저 확인하고 GRANT 복원 뒤에만 새 full strict를 실행한다. 확장 후 이전17표 strict를 재호출해 완화하지 않는다.
+
+원문 고정 source full22·raw shared13+adapted advice1·generated3과 기존 `prepare_f29_legacy_oracle.py`를 재사용한다. workflow는 source object 확인/hosted 거부, 무자원 fixture24+runtime13 guard, prepare, `noteSendCompatibilityTest` UTC, `noteSendCompatibilitySeoulTest`의 한 시각 메서드, results, 필수 `jar_f29` 순서다. source/호환 코드가 executable JAR에 들어가지 않도록 F29 wrapper3을 기존 제외식에 더한다. 새 selector나 검증 모드는 없고 모든 `jar_f3..jar_f29`27개 및 owned cleanup까지28개 결과를 같은 source/head/base/tree/run/JAR에 묶어 감사한다. pilot 자격·기존6skip 조건은 넓히지 않으므로 이 기능은 full만 실행한다. package 한 번/동일 JAR·실패 gate·정리·발행 차단은 보존한다.
+
+실제 부모 PR183의55분 check 상한과 F26 full39분58초/이전42분20초에 근거한 여유 판단을 그대로 보존한다. F29까지의 실제 hosted 총시간이나55분 충분성을 보장하지 않는다. 개별 helper 예산·정확 결과 판정·항상 소유 정리 조건을 완화하지 않는다.
+
+원문 observer6과 formal MVC12, fixture24/runtime13 순수 모의37의 기존 로컬 성공은 재사용하는 근거다. PG26·Seoul 지정1은 소스/provider 기대값이며 실제 PG 성공이 아니고 JAR15HTTP=POST9/GET6·수신 note3/송신 note와 resync0·신규 note3/mailbox6/request3은 검산한 계획이다. 초기 private prefix의 REPORTS/SEOUL_METHOD=None은 준비 이력이다. 현재는 root가 source/provider를 검산해 UTC PG26(소스 기대)/MVC12(기존 로컬 실측), Seoul PG1(소스 기대)과 정확한 시각 메서드를 고정했다. 관련 측정 gate 모의4건은 root 인계상0.170초 통과했으며 실제 PG/JAR 성공은 아니다. results는 이후 실제 생성된 exact XML을 이 기대값·원문 receipt와 대조해야 하고, smoke도 실제 전달·상태·자원 종료를 별도로 증명해야 한다. 동적 UUID는 응답/DB/SSE 일치 후에만 ACK하고 응답 유실 commit은 exact request 소유 행으로만 정리하며, raw Instant와 DBµs는 문자열 동일 대신 최대1µs 정밀도 의미를 비교한다. 실제 PG/JAR/socket·CI 성공으로 확대하지 않는다.
+
+실제 F29 기준은 F26 post-CI와 결합 F27/F28의 검수·필수 CI/dev 통합 뒤 fresh base로 확인한다. 이 private 연결은 미래 branch/base나 게시를 확정하지 않는다. artifact에는 기존 txt/log와 특정 `f29-results.json`만 추가하며 토큰·전체 환경·전체 step outputs는 보존하지 않는다.

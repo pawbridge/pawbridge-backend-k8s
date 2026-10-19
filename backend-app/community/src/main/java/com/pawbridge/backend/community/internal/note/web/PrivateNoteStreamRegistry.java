@@ -1,6 +1,8 @@
 package com.pawbridge.backend.community.internal.note.web;
 
 import com.pawbridge.backend.community.internal.note.application.NoteChangeHints;
+import com.pawbridge.backend.community.internal.note.application.NoteDeliveryHints;
+import com.pawbridge.backend.community.internal.note.application.NoteNotifications;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.context.SmartLifecycle;
 import org.slf4j.Logger;
@@ -28,7 +30,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-public final class PrivateNoteStreamRegistry implements NoteChangeHints, SmartLifecycle, DisposableBean {
+public final class PrivateNoteStreamRegistry implements NoteChangeHints, NoteDeliveryHints, SmartLifecycle, DisposableBean {
     private static final Logger log = LoggerFactory.getLogger(PrivateNoteStreamRegistry.class);
     private static final long SHUTDOWN_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(5);
     private static final long MAX_CONNECTION_LIFETIME_MILLIS = 300_000;
@@ -171,6 +173,11 @@ public final class PrivateNoteStreamRegistry implements NoteChangeHints, SmartLi
     @Override
     public void resync(long memberId) {
         memberConnections(memberId).forEach(registration -> enqueue(() -> send(registration, "resync", null)));
+    }
+
+    @Override
+    public void publish(long memberId, NoteNotifications.Notification notification) {
+        memberConnections(memberId).forEach(registration -> enqueue(() -> send(registration, "note", notification)));
     }
 
     void heartbeat() {
