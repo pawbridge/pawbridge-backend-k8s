@@ -119,6 +119,9 @@ jobs:
           fi
           git cat-file -e "$F23_PINNED_SOURCE^{commit}"
 
+      - name: Require F24 to reuse the immutable F23 original-source Git object
+        run: git cat-file -e 'f06a72a06bd26662c647bde780dfc7a27bf7349c^{commit}'
+
       - name: Isolate Gradle state on the hosted runner
         run: |
           set -euo pipefail
@@ -274,6 +277,11 @@ jobs:
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f22-helper-refusal.txt
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f23-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f24_ci.py prepare > build/ci/f24-helper-refusal.txt 2>&1; then
+            printf 'F24 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f24-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -327,7 +335,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|f23LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|f23LegacyOracle|f24LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
@@ -925,6 +933,42 @@ jobs:
           assert result['remaining_application_connections'] == 0
           PYTHON
 
+      - name: Verify F24 owned writer, rollback, recovery and selected original guards without resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f24_ci_guards.py
+
+      - name: Extend only the existing member lock and outgoing block writer privileges for F24
+        run: python3 scripts/f24_ci.py prepare
+
+      - name: Compare only F24 owned unblock transactions and measured original MVC in UTC
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:noteBlockRemoveCompatibilityTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          python3 scripts/f24_ci.py results
+
+      - name: Verify packaged unblock, exact permitted writes and protected state recovery
+        run: |
+          set -euo pipefail
+          python3 scripts/f24_ci.py smoke
+          test -s build/ci/f24-oracle-sha256.txt
+          test -s build/ci/f24-fixture-write.txt
+          test -s build/ci/f24-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f24_ci as f24
+          f24.require_measurements()
+          result = json.loads(Path('build/ci/f24-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f24.COUNTERS} == f24.EXPECTED_JAR_COUNTS
+          assert result['delete_checks'] == result['successful_delete_checks'] + result['rejected_delete_checks']
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Remove only the owned disposable fixture
         if: always()
         run: python3 scripts/f3_ci.py cleanup
@@ -938,6 +982,7 @@ jobs:
             backend-app/**/build/test-results/**/TEST-*.xml
             backend-app/build/ci/*.txt
             backend-app/build/ci/*.log
+            backend-app/build/ci/f24-results.json
             backend-app/build/ci/boot-jar.sha256
           if-no-files-found: warn
           include-hidden-files: false
