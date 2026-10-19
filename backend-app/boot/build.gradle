@@ -15,6 +15,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f11LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f12LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f14LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -49,6 +50,8 @@ dependencies {
     compatibilityTestImplementation platform('org.springframework.cloud:spring-cloud-dependencies:2024.0.2')
     compatibilityTestImplementation 'org.springframework.cloud:spring-cloud-starter-openfeign'
     compatibilityTestImplementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // Compile/load only the original advice exception type; no Redis driver or runtime service.
+    compatibilityTestImplementation('org.springframework.data:spring-data-redis') { transitive = false }
     compatibilityTestCompileOnly 'org.projectlombok:lombok'
     compatibilityTestAnnotationProcessor platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     compatibilityTestAnnotationProcessor 'org.projectlombok:lombok'
@@ -166,8 +169,19 @@ tasks.register('prepareF13LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f13-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF14LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF13LegacyOracle')
+    inputs.files(rootProject.file('scripts/prepare_f14_legacy_oracle.py'), rootProject.file('scripts/prepare_f3_legacy_oracle.py'), rootProject.file('scripts/prepare_f13_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f14LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f14-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f14_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f14LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f14-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -183,6 +197,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentUpdateCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
     }
 }
 
@@ -274,3 +289,18 @@ tasks.named('profileCompatibilitySeoulTest') { shouldRunAfter tasks.named('profi
     }
 }
 tasks.named('nicknameCompatibilitySeoulTest') { shouldRunAfter tasks.named('nicknameCompatibilityTest') }
+
+
+tasks.register('favoriteStatusCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Checks only F14 favorite existence with the owned minimal reader in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('nicknameCompatibilitySeoulTest')
+}

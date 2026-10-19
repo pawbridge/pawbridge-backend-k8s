@@ -73,6 +73,9 @@ class PawBridgeApplicationTest {
                     assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.user.internal.nickname.application.ChangeUserNickname.class))).isTrue();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.nickname.web.UserNicknameController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.nickname.web.UserNicknameExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.favorite.application.FavoriteStatusQuery.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.application.CommentListReader.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.application.ListComments.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.web.CommentReadController.class)).hasSize(1);
