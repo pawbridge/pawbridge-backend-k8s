@@ -380,3 +380,15 @@ JAR probe는 실제 발급기 F26_CALLER/F26_OTHER의600초 토큰과 기존 전
 always owned cleanup·실패 증거 보존·발행/배포 차단·contents read·고정 runner와 selection5분/result2분을 보존한다. 완료한 F25 실제 CI validator가39분18초(run39285667745)였고 새 F26 PG·MVC·SSE 정상종료 단계를 더하므로 이 격리 check job 상한만40→45분으로 조정한다. selection5분/result2분·각 단계의 제한과 always 소유 정리·증거 보존·발행 차단은 유지한다.45분은 F26 실제 실행시간 측정값이나 후속 F27까지 충분하다는 보장이 아니며 다음 단계는 실제 tail을 다시 확인한다. artifact에는 `f26-results.json`만 명시 추가하고 token·모든 JSON glob은 넣지 않는다. 실제 feature head의 관측/PG/JAR·CI 결과는 해당 run 산출물로 별도 확인한다.
 
 전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21·F22·F23·F24·F25·F26 계획과 모듈형 모놀리스 전환 노트를 따른다.
+
+## CI 전체 기준과 F25 축소 비교
+
+일반 실행은 `full`이며 기존 필수 검사 이름 `Backend app CI result`를 유지한다. 공통 `package` 작업에서 일반·구조 검사와 실행 JAR 빌드를 한 번 수행하고, 현재 workflow run의 같은 artifact와 SHA-256을 각 격리 검증 작업이 사용한다. ZIP 생성 시각이 다른 별도 빌드를 같은 바이너리로 간주하지 않는다. 원문·PG 비교를 진행한 뒤와 최종 정리 뒤에도 producer의 JAR 해시를 확인한다. 단위·구조 XML은 package 산출물에, 실제 PG/원문 XML은 각 모드 산출물에 있으므로 전체 집계 시 합치되 중복 계산하지 않는다.
+
+첫 실험의 `f25-six-smoke-pilot`은 같은 저장소의 `ci/backend-contract-regression-scope` PR, 기준 `0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3`, 명시된 CI/README 다섯 경로만 바뀐 경우에만 full과 함께 추가된다. F16·F17·F19·F21·F22·F23 JAR 단계만 생략 후보이며, F3~F15·F18·F20·F24·F25의 17개 JAR 단계와 모든 기존 준비·원문/PG·인가·TX·정리 검증은 유지한다. 준비 데이터를 남기는 smoke를 단순히 끄지 않는다. 두 모드는 별도 hosted runner와 임시 자원을 사용하며 `fail-fast: false`로 pilot 실패가 full을 취소하지 않는다. 비교를 위해 별도 full을 더 실행하지 않는다.
+
+`backend_contract_profile.py`는 profile·source/head/base/tree·run/attempt·JAR 해시에 묶인 계획과 실제 step outcome/conclusion을 판정한다. 필수 실행 누락, 예정 밖 skip, continue-on-error로 가린 실패, 잘못된 모드/후보, 미지 JAR 단계, 정리 실패는 통과하지 않는다. `contract-plan.txt`와 `contract-execution.txt`만 현재 evidence artifact에 남기며 전체 환경·step outputs·토큰은 저장하지 않는다. 새로운 JAR 계약을 추가할 때는 workflow step ID와 공통 목록/정책 시험을 함께 갱신해야 한다. 전체 결과 gate는 package와 선택한 모든 모드의 성공을 요구한다.
+
+이 첫 실험은 일반 PR의 자동 축소를 활성화하지 않는다. fork·다른 기준·일반 기능/공통 인증/빌드 변경 등은 full로 실행하고, 명시적으로 부적격 pilot을 요청하면 거부한다. 기존 CI 39분18초와 생략 후보 단계 합계 11분04초는 과거 측정이며 실제 절감 시간은 같은 후보의 full/pilot 결과를 읽은 뒤 판단한다. 비교 결과와 일반 적용 여부는 Obsidian의 CI 개선 계획에 기록하며, 앱·운영·비밀값·데이터·복구 자료를 바꾸지 않는다.
+
+F26은 CI 개선 병합 dev `ce5898071c5022c09634c5e68b0c12c9dc66123e`를 인수하며 full 실행 목록에 `jar_f26`을 추가해 총24단계를 감사한다. F25 고정 비교의23/17 기록은 당시 결과다. 새 기준과 기능 변경은 그 pilot 조건에 해당하지 않으므로 F26은 full만 실행한다. 공통 package/XML 분리와45분 check 상한, 기존 F26 검증을 유지한다.
