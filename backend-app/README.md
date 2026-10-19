@@ -305,4 +305,18 @@ Seoul JAR는 성공 INSERT 이후 소유 User2/member3/note4/mailbox4 키만 사
 
 새 source object `cba94f8`은 기존 F21 object와 별도로 확인·필요시 origin에 읽기 전용 fetch한다. GitHub read token은 URL/전역 config에 넣지 않고 한 명령의 ephemeral GIT_CONFIG만 사용하며 base64 파생값은 생성 직후 add-mask한다. sparse checkout에서 Git object의 원본19 full hash·공유 raw12/F18 adapted1·선택12 service/annotated get/advice4/logger LF와 고유3 output+receipt의 충돌 선검사를 보호한다. production JAR의 f22LegacyOracle/기존 원본/ORM·Feign·시험 코드 제외를 유지한다. catalog 실패는 첫 ERROR/FATAL 한 줄512자만 환경 PASSWORD/SECRET/TOKEN을 마스킹해 별도 진단 파일에 남기며 SQL/DETAIL/command/stdout/trace는 쓰지 않는다. Python3개 AST·workflow82개 실행블록 문법·실제 원본 추출/관측·비교MVC14와 full/minimal guard34가 통과했다. 실제 PG·JAR는 이 로컬 근거로 성공 처리하지 않는다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21·F22 계획과 모듈형 모놀리스 전환 노트를 따른다.
+## F23 본인 쪽지 목록 조회
+
+기존 `GET /api/v1/notes`의 받은/보낸 쪽지와 즐겨찾기 페이지를 편입한다. page0..10000 → 정확한 INBOX/SENT → 현재 회원 → Clock1회 → count → 최대10행 목록 → nonnull 상대의 최초 순 distinct batch1회 → active INBOX 행마다 양방향 차단 순서다. count0이어도 목록을 읽고 요청 page를 보존한다. 정렬은 mailbox.created_at와 PostgreSQL UUID DESC, 응답 createdAt은 note.created_at이다. Page는 정확5필드, 행은 기존 단건과 같은10필드이며 raw body/닉네임·nullable ID/readAt/context·Instant를 그대로 돌려준다. 조회로 읽음·즐겨찾기·쪽지·차단을 쓰지 않는다.
+
+기존 F22 single reader SAM·단건 조립·User single/batch·block reader·Clock·두 pool을 유지하고 목록 전용 두 SQL adapter만 추가한다. count와 list는 각각 기존 RO3초 TX를 반환한 뒤 다음 단계로 간다. 외곽 TX·재시도·pair cache를 추가하지 않으므로 count/list 사이 원래 경쟁 창을 닫았다고 주장하지 않는다. 최대10 active INBOX의 source상 DB 호출 상한은14이며 실제 소유 PG 시험으로 별도 확인한다. 기존 exact root GET 거부2항목만 새 목록 계약에 인계하고 stream/쓰기/ADMIN/단건·static 경계는 유지한다.
+
+F22 전체 stage 뒤 `f23_ci.py prepare`는 현재 notes8/mailboxes6·blocks3 reader ACL과16표를 변경 없이 검증한다. 새 DDL·표·권한·writer·sequence·marker는0이다. `privateNoteListCompatibilityTest`는 UTC 원본 PG와 MVC exact2클래스, Seoul task는 지정 UUID정렬/Instant1메서드만 실행한다. SELECT 회수 중 복원은 기존 identity/F20·F21·F22 receipts를 먼저 확인하고 GRANT 후에만 strict를 재검사한다. count/list/batch/block의 실제 실패 단계는 PG가 맡고, JAR의 선행 실패를 late batch 실패로 확대하지 않는다.
+
+단일 Seoul JAR의 계획12요청은 목록GET9(성공6·거절3), 기존 detail GET1·stream 거부1·POST 거부1이다. 본인 INBOX12행의10/2/빈 page·SENT·favorites·page 우선400·mailbox timestamp SELECT503/복구·auth 선행을 확인한다. 마지막 PG의 실제 발급기로 F23_CALLER9977001만600초 발급하고 이전 키·0600을 보존한다. 각 요청 snapshot 뒤 사용키 TTL60초를 확인하며 무토큰에는 loader를 호출하지 않는다. 16표/S3 불변·성공한 자기 키만 FK 순 정리·두 pool 정상 종료/연결0을 검사한다.
+
+`prepare_f23_legacy_oracle.py`는 고정 원본 `f06a72a06bd26662c647bde780dfc7a27bf7349c`의 full19·공유 raw12/F18 adapted1·service14/annotated list1/advice4와 NOTE_PAGE_SIZE10/LF/logger를 검증한다. 고유 service/controller/advice3만 생성하고 모든 source/shared/unit/FQN/output/receipt 충돌을 쓰기 전에 거부한다. 원본 SQL/User getAll을 실제 호출하는 PG와 source-only DDL/index 근거를 구분한다. 원본 query6은 별도 actual MVC/compiled metadata를 먼저 관측하고 provider를 확정해야 한다. 미측정 `None`/null은 fail-fast이며 mock guard나 준비된 계수를 실제 실행 결과로 세지 않는다. 원본·fixture·시험·ORM/Feign은 production JAR에서 제외한다. F22가30분 상한에 도달한 이전 실측과 신규 목록 PG/MVC/JAR 단계를 고려해 이 격리 check job의 상한만35→40분으로 제한 조정한다. selection5분/result2분·검사/정리/발행 차단은 보존한다. F23 실제 시간·성공 근거를 뜻하지 않는다.
+
+현재는 고정 b64ad29 사본에서 원본 관측6·원본/후보 MVC12·호환 컴파일·User78/Community469/Boot731 합1278과 비교MVC12 합1290을 실제 확인했다. 임시 observer source/classes는 제거했다. 실제 기능 브랜치 기준과 hosted PG16/Seoul1/JAR12·최종 CI는 별도 gate이며 아직 성공으로 세지 않는다. 전체 결정과 후속 실행 결과는 Obsidian의 F23 계획에서 구분한다.
+
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21·F22·F23 계획과 모듈형 모놀리스 전환 노트를 따른다.

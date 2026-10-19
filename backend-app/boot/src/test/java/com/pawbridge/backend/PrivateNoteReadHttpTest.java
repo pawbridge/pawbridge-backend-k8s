@@ -306,7 +306,7 @@ class PrivateNoteReadHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GET /api/v1/notes", "GET /api/notes/f2200000-0000-0000-0000-000000000001",
+    @ValueSource(strings = {"GET /api/notes/f2200000-0000-0000-0000-000000000001",
             "GET /api/v1/notes/f2200000-0000-0000-0000-000000000001/", "HEAD /api/v1/notes/f2200000-0000-0000-0000-000000000001",
             "OPTIONS /api/v1/notes/f2200000-0000-0000-0000-000000000001", "POST /api/v1/notes/f2200000-0000-0000-0000-000000000001",
             "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/read", "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/favorite",

@@ -58,7 +58,7 @@ jobs:
     if: ${{ needs.selection.outputs.selected == 'true' }}
     name: Java 21 build and isolated PostgreSQL/S3 HTTP contracts
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
@@ -103,6 +103,21 @@ jobs:
               git fetch --no-tags --no-recurse-submodules --depth=1 origin "$F22_PINNED_SOURCE"
           fi
           git cat-file -e "$F22_PINNED_SOURCE^{commit}"
+
+      - name: Require the immutable F23 original-source Git object
+        env:
+          F23_PINNED_SOURCE: f06a72a06bd26662c647bde780dfc7a27bf7349c
+          F23_SOURCE_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$F23_PINNED_SOURCE^{commit}" 2>/dev/null; then
+            source_auth=$(printf 'x-access-token:%s' "$F23_SOURCE_READ_TOKEN" | base64 | tr -d '\n')
+            printf '::add-mask::%s\n' "$source_auth"
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $source_auth" \
+              git fetch --no-tags --no-recurse-submodules --depth=1 origin "$F23_PINNED_SOURCE"
+          fi
+          git cat-file -e "$F23_PINNED_SOURCE^{commit}"
 
       - name: Isolate Gradle state on the hosted runner
         run: |
@@ -253,7 +268,12 @@ jobs:
             printf 'F22 helper accepted a non-CI invocation\n' >&2
             exit 1
           fi
+          if env -u GITHUB_ACTIONS python3 scripts/f23_ci.py prepare > build/ci/f23-helper-refusal.txt 2>&1; then
+            printf 'F23 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f22-helper-refusal.txt
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f23-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -307,7 +327,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|f23LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
@@ -864,6 +884,42 @@ jobs:
           assert result['status'] == 'passed'
           assert {key: result[key] for key in f22.COUNTERS} == f22.EXPECTED_JAR_COUNTS
           assert result['detail_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
+      - name: Verify F23 unchanged fixture, owner, selected original and recovery guards without resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f23_ci_guards.py
+
+      - name: Reuse the exact F22 fixture for F23 without new DDL or privileges
+        run: python3 scripts/f23_ci.py prepare
+
+      - name: Compare only F23 owned mailbox pages in UTC and one Seoul sort and timestamp case
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:privateNoteListCompatibilityTest :boot:privateNoteListCompatibilitySeoulTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          python3 scripts/f23_ci.py results
+
+      - name: Verify packaged mailbox pages, separate count and list recovery and unchanged state
+        run: |
+          set -euo pipefail
+          python3 scripts/f23_ci.py smoke
+          test -s build/ci/f23-oracle-sha256.txt
+          test -s build/ci/f23-fixture-reuse.txt
+          test -s build/ci/f23-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f23_ci as f23
+          f23.require_measurements('jar')
+          result = json.loads(Path('build/ci/f23-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f23.COUNTERS} == f23.EXPECTED_JAR_COUNTS
+          assert result['list_get_checks'] == result['successful_checks'] + result['rejected_checks']
           assert result['database_changes'] == result['s3_requests'] == 0
           assert result['shutdown_pools'] == 2
           assert result['remaining_application_connections'] == 0
