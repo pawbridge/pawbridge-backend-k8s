@@ -107,6 +107,11 @@ class PawBridgeApplicationTest {
                     assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.community.internal.note.application.ListPrivateNotes.class))).isFalse();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.PrivateNoteListController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.PrivateNoteListExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteBlockRemoval.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.RemoveNoteBlock.class)).hasSize(1);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.community.internal.note.application.RemoveNoteBlock.class))).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockRemoveController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockRemoveExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler.class)).hasSize(1);
@@ -177,6 +182,23 @@ class PawBridgeApplicationTest {
                     assertThat(searchTransaction.isReadOnly()).isTrue();
                     assertThat(searchTransaction.getTransactionManager()).isSameAs(manager);
                     assertThat(readTransaction.getTransactionManager()).isSameAs(manager);
+                    var writeJdbc = context.getBean("writeJdbc", org.springframework.jdbc.core.JdbcTemplate.class);
+                    var writeManager = context.getBean("writeTransactionManager", org.springframework.jdbc.support.JdbcTransactionManager.class);
+                    var sharedWriteTransaction = context.getBean("writeTransaction", org.springframework.transaction.support.TransactionTemplate.class);
+                    assertThat(writeJdbc.getDataSource()).isSameAs(pools.get("writeDataSource"));
+                    assertThat(writeJdbc.getQueryTimeout()).isEqualTo(5);
+                    assertThat(writeManager.getDataSource()).isSameAs(pools.get("writeDataSource"));
+                    assertThat(sharedWriteTransaction.getTransactionManager()).isSameAs(writeManager);
+                    assertThat(sharedWriteTransaction.getTimeout()).isEqualTo(10);
+                    var blockRemoval = context.getBean(com.pawbridge.backend.community.internal.note.application.NoteBlockRemoval.class);
+                    assertThat(blockRemoval).isInstanceOf(com.pawbridge.backend.community.internal.note.infrastructure.JdbcNoteBlockRemoval.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(blockRemoval, "jdbc")).isSameAs(writeJdbc);
+                    var removalTransaction = (org.springframework.transaction.support.TransactionTemplate)
+                            org.springframework.test.util.ReflectionTestUtils.getField(blockRemoval, "transaction");
+                    assertThat(removalTransaction).isNotNull().isNotSameAs(sharedWriteTransaction);
+                    assertThat(removalTransaction.getTransactionManager()).isSameAs(writeManager);
+                    assertThat(removalTransaction.getTimeout()).isEqualTo(15);
+                    assertThat(removalTransaction.isReadOnly()).isFalse();
                     pools.values().forEach(pool -> {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();

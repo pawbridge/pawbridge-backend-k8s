@@ -319,4 +319,20 @@ F22 전체 stage 뒤 `f23_ci.py prepare`는 현재 notes8/mailboxes6·blocks3 re
 
 현재는 고정 b64ad29 사본에서 원본 관측6·원본/후보 MVC12·호환 컴파일·User78/Community469/Boot731 합1278과 비교MVC12 합1290을 실제 확인했다. 임시 observer source/classes는 제거했다. 실제 기능 브랜치 기준과 hosted PG16/Seoul1/JAR12·최종 CI는 별도 gate이며 아직 성공으로 세지 않는다. 전체 결정과 후속 실행 결과는 Obsidian의 F23 계획에서 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21·F22·F23 계획과 모듈형 모놀리스 전환 노트를 따른다.
+## F24 본인 쪽지 차단 해제
+
+기존 `DELETE /api/v1/notes/blocks/{member}`만 편입한다. current와 target 두 ID가 양수인지 TX 전에 확인하고, 어느 쪽이든0/음수면401이다. TX15초 안에서 sorted distinct ID마다 INSERT 뒤 같은 row FOR UPDATE를 수행한 다음 현재 회원 활성 조회1회와 outgoing DELETE1회를 실행한다. self·없는 차단·탈퇴/부재 target도 성공할 수 있으며 target User 조회는 없다. 성공은 빈200/no-store/no-cookie다. 없는 target의 member 행 INSERT는 허용된 변경이므로 전체 DB 무변경으로 표현하지 않는다. current 검증 실패 때 앞선 INSERT는 rollback되어야 한다.
+
+application의 좁은 동기 callback을 adapter가 잠금 뒤 정확1회 호출한다. User 정책은 application에 두며 callback 저장·비동기·재시도·예외 삼킴은 없다. 기존 writeJdbc와 writeTransactionManager를 재사용하고 이 operation 전용15초 TransactionTemplate만 조립한다. 같은 datasource의 활성 TX 잔여시간이 기존 queryTimeout5를 덮으므로 새 JdbcTemplate·pool·TM를 추가하지 않고 기존 공통10초 설정도 바꾸지 않는다. Clock·SSE·afterCommit·Outbox·새 User API는 없다. 원본 쓰기 오류 정책대로 typed User는 회원503, DAO만 저장소503이며 구체 TX3타입을 포함한 다른 Runtime은 일반503이다. scoped 로그에는 타입만 남기고 throwable·SQL·회원값을 전달하지 않는다.
+
+F23 전체 smoke까지 기존 strict·writer0 검사를 완료한 뒤 `f24_ci.py prepare`가 기존 members의 SELECT/INSERT/UPDATE(member_id), blocks의 SELECT(member_id,blocked_id)와 DELETE만 추가한다. 새 DDL·표·스키마·marker·sequence 권한은0이다. 확장 뒤 선행 writer0 checker를 다시 호출하거나 monkeypatch하지 않고 F24 명시 검사로 원본 shape/PK/FK/CHECK/index·postgres 소유·reader/최소 writer ACL을 확인한다. 회수 중에는 ACL 비의존 identity와 F20/F21/F22/F23/F24 exact receipts로 소유를 확인한 뒤 GRANT하고 복원 후에만 strict를 확인한다. 복원 실패를 passed로 처리하지 않는다.
+
+`prepare_f24_legacy_oracle.py`는 F23와 같은 고정 `f06a72a06bd26662c647bde780dfc7a27bf7349c`의 full19·공유 raw12/F18 adapted1·원문 service6/annotated DELETE1/advice4의11개 method receipt와 constructor/TX/logger/LF를 확인한다. 고유 wrapper3개와 receipt의 모든 충돌을 쓰기 전에 검사한다. workflow는 이미 F23가 준비한 동일 commit 객체를 추출 전 cat-file로 확인하며 추가 fetch·token·Git config·sparse 원본 경로를 만들지 않는다. 원본/생성물/시험/ORM·Feign의 실행 JAR 제외에 f24LegacyOracle만 더하고 기존 Hibernate Validator는 유지한다. 선택 원문과 기록 JDBC/MVC 근거를 원본 whole app·실제 Feign/Gateway·PG 실행으로 주장하지 않는다.
+
+`noteBlockRemoveCompatibilityTest`는 UTC의 정확 PG/MVC 두 FQN만 실행한다. 원본은 실제 Hibernate/JpaTM reference와 bounded 별도 User thread를 사용하고, 후보는 실제 Jdbc writer TM 안에서 User RO TM 종료 후 reader가 반환되며 writer가 계속 활성인지 비교한다. 초기 JPA metadata 연결과 요청 연결을 구분한다. 최소 writer ACL·부분 INSERT rollback·commit 오류 분류·실제 잠금 대기와 소유 키 정리는 hosted PG의 책임이다. 원본 대표6입력 관측과 원본/후보 MVC14는 고정 소스 사본의 실제 로컬 XML에서 실패·오류·skip0을 확인하고 provider·helper14를 채웠다. 예상 PG14는 아직 hosted XML 통과 수가 아니며 실제 PG/JAR 결과를 로컬 MVC로 대체하지 않는다. 시각이 없는 해제에 Seoul PG matrix를 추가하지 않는다. Gradle의 `f24.fixture.receipt`는 같은 run의 `build/ci/f24-fixture-write.txt`를 전달한다.
+
+기존 Seoul 자원 관리로 실제 JAR의 계획12요청을 수행한다: DELETE8(성공5/거부3), 차단 목록 GET2, stream GET 거부1, PUT 거부1이다. 읽기→해제→읽기·중복 해제·없는 target의 member 생성과 DELETE 권한 저장소503/복원·User nickname 권한 회원503/복원·인증 선행을 비교한다. 각 요청은16표/S3 snapshot 뒤 사용키 TTL60초를 확인하고 무토큰 reload는0이다. 마지막 PG에서 F24_CALLER9978001만 실제 발급기로600초 갱신하며 이전 키와0600을 보존한다. 요청별로 outgoing 차단1행 삭제와 없는 target member1행 추가만 허용하고 나머지 row/S3·private body/회원값/비밀 로그 불변을 검사한다. 성공 INSERT 소유 키만 FK 순 정리하며 두 child의 실패 시 종료, 두 pool 정상 종료/잔여 연결0, 시작 전16표로 복귀를 확인한다.
+
+workflow는 F23 smoke → 무자원 F24 guard → prepare → UTC PG/MVC → exact XML results → JAR smoke 순서를 지키며 기존 always owned cleanup·증거 보존·발행/배포 차단을 유지한다. 선행 F23의 check 상한40분을 그대로 유지한다. F22의 이전30분 취소 및 F23 추가 단계에 따른35→40 조정과 F24의 실제 실행시간을 구분하며, 아직 실제 F24 실행시간·성공 근거는 아니다. 추가 상향은 실제 선행 측정 후 별도 검토한다. F24 기능 브랜치의 base는 F23 병합 뒤 재확인하며, 아래 고정 사본 관측은 실제 기능 브랜치 생성 전의 준비 기록이다. 고정 b64ad29+F23 사본에서 원본 관측6·비교MVC14를 실제 통과했고 호환 컴파일도 완료했다. 이 로컬 선택 계약 관측은 실제 PG/JAR·CI·운영 검증을 대신하지 않으며, 실제 feature head의 결과는 해당 run 산출물로 확인한다.
+
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21·F22·F23·F24 계획과 모듈형 모놀리스 전환 노트를 따른다.

@@ -25,6 +25,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f21LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f22LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f23LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f24LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -287,8 +288,19 @@ tasks.register('prepareF23LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f23-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF24LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF23LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f24_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f24LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f24-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f24_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f24LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f24-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle'), tasks.named('prepareF17LegacyOracle'), tasks.named('prepareF18LegacyOracle'), tasks.named('prepareF19LegacyOracle'), tasks.named('prepareF20LegacyOracle'), tasks.named('prepareF21LegacyOracle'), tasks.named('prepareF22LegacyOracle'), tasks.named('prepareF23LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle'), tasks.named('prepareF17LegacyOracle'), tasks.named('prepareF18LegacyOracle'), tasks.named('prepareF19LegacyOracle'), tasks.named('prepareF20LegacyOracle'), tasks.named('prepareF21LegacyOracle'), tasks.named('prepareF22LegacyOracle'), tasks.named('prepareF23LegacyOracle'), tasks.named('prepareF24LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -323,6 +335,8 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F22LegacyPrivateNoteMvcTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlPrivateNoteListCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F23LegacyPrivateNoteListMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockRemoveCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F24LegacyNoteBlockRemoveMvcTest'
     }
 }
 
@@ -633,4 +647,20 @@ tasks.register('privateNoteListCompatibilitySeoulTest', Test) {
         includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlPrivateNoteListCompatibilityTest.givenMailboxUuidSortDiffersFromNoteAndJavaSignedOrder__whenListingAndSerializing__thenPreservePgOrderAndNoteReadInstantsWithoutZoneShift'
     }
     shouldRunAfter tasks.named('privateNoteListCompatibilityTest')
+}
+
+
+tasks.register('noteBlockRemoveCompatibilityTest', Test) {
+    description = 'Checks only F24 unblock with original JpaTM, candidate JdbcTM, owned privileges, rollback and measured MVC in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'f24.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f24-fixture-write.txt').get().asFile.absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockRemoveCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F24LegacyNoteBlockRemoveMvcTest'
+    }
+    shouldRunAfter tasks.named('privateNoteListCompatibilitySeoulTest')
 }
