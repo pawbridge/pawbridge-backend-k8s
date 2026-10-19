@@ -175,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[2345]_fixture|f[2345]LegacyOracle|compatibilityTest|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[2345]_fixture|f[2345]LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
           fi

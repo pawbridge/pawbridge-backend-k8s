@@ -39,6 +39,7 @@ class PostUpdateHttpTest {
     @MockitoBean PostMediaUploader uploader;
     @MockitoBean UserNicknameQuery users;
     @MockitoBean PostModification writer;
+    private PostSnapshot existing;
     private final LocalDateTime time=LocalDateTime.of(2026,1,1,0,0);
     @TestConfiguration(proxyBeanMethods=false) static class UseCase {
         @Bean UpdatePost updatePost(PostReader reader,PostMediaRemover remover,PostMediaUploader uploader,UserNicknameQuery users,PostModification writer){
@@ -46,11 +47,12 @@ class PostUpdateHttpTest {
         }
     }
     @BeforeEach void givenOwnerAndReturningWriter() {
-        when(reader.findById(42)).thenReturn(Optional.of(snapshot(7,"COMMUNICATION")));
+        existing=snapshot(7,"COMMUNICATION");
+        when(reader.findById(42)).thenReturn(Optional.of(existing));
         when(users.findNickname(anyLong())).thenReturn(Optional.of("작성자"));
         when(writer.update(anyLong(),anyLong(),nullable(String.class),nullable(String.class),nullable(List.class)))
                 .thenAnswer(call->{
-                    PostSnapshot old=reader.findById(call.getArgument(0)).orElseThrow();
+                    PostSnapshot old=existing;
                     String title=call.getArgument(2),content=call.getArgument(3);List<String> images=call.getArgument(4);
                     return new PostSnapshot(old.postId(),old.authorId(),title==null?old.title():title,content==null?old.content():content,
                             old.boardType(),images==null?old.imageUrls():images,time,time);
@@ -71,7 +73,8 @@ class PostUpdateHttpTest {
     }
     @ParameterizedTest @ValueSource(strings={"MISSING","PROTECTION","REPORT","ADOPTION","COMMUNICATION"})
     void given__existing_board__when__put_without_fields__then__do_not_apply_general_post_creation_restrictions(String board) throws Exception {
-        when(reader.findById(42)).thenReturn(Optional.of(snapshot(7,board)));
+        existing=snapshot(7,board);
+        when(reader.findById(42)).thenReturn(Optional.of(existing));
         mvc.perform(multipart(HttpMethod.PUT,"/api/v1/posts/42").header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_USER")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.boardType").value(board)).andExpect(jsonPath("$.data.title").value("제목"));
         verify(writer).update(42,7,null,null,null);verifyNoInteractions(remover,uploader);
