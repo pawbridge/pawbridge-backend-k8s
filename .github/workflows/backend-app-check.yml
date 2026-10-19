@@ -149,6 +149,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f7-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f8_ci.py prepare > build/ci/f8-helper-refusal.txt 2>&1; then
+            printf 'F8 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f8-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -177,6 +182,14 @@ jobs:
       - name: Grant only five search projection columns to the existing reader
         run: python3 scripts/f7_ci.py prepare
 
+      - name: Verify F8 ownership, fixture and oracle guards without starting resources
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f8_ci_guards.py
+          PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f8_s3_observation.py
+
+      - name: Extend the owned fixture with only the comment table and reader columns
+        run: python3 scripts/f8_ci.py prepare
+
       - name: Compare legacy reads/writes, issuer, atomicity and resource boundaries in UTC and Seoul
         run: |
           set -euo pipefail
@@ -188,7 +201,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[234567]_fixture|f[234567]LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[2345678]_fixture|f[2345678]LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
           fi
@@ -242,6 +255,24 @@ jobs:
           assert result['status'] == 'passed'
           assert result['search_get_checks'] >= 14
           assert result['search_get_database_changes'] == result['search_get_s3_requests'] == 0
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PY
+
+      - name: Verify packaged public comment reads, denied writes, zero side effects and recovery
+        run: |
+          set -euo pipefail
+          python3 scripts/f8_ci.py smoke
+          test -s build/ci/f8-oracle-sha256.txt
+          test -s build/ci/f8-helper-refusal.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f8-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['comment_get_checks'] >= 9
+          assert result['denied_route_checks'] == 10
+          assert result['comment_get_database_changes'] == result['comment_get_s3_requests'] == 0
           assert result['shutdown_pools'] == 2
           assert result['remaining_application_connections'] == 0
           PY

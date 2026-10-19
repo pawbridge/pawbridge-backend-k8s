@@ -93,6 +93,17 @@ class FixtureHandler(BaseHTTPRequestHandler):
         pass
 
     def _respond(self, status, body=b"", content_type="application/xml", extra=None):
+        # PUT/DELETE already record their upload/deletion metadata exactly once.
+        # Observe other object attempts too, without making state/failure controls
+        # change the request history that the CI snapshot is reading.
+        try:
+            request_path = urlsplit(self.path).path
+        except ValueError:
+            request_path = None
+        if (self.command not in ("PUT", "DELETE")
+                and request_path not in (
+                    "/__f3__/state", "/__f3__/fail-next-put", "/__f3__/fail-next-delete")):
+            self._record(status, self._key())
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -155,9 +166,13 @@ class FixtureHandler(BaseHTTPRequestHandler):
                          self.headers.get("Authorization", "")) is not None
 
     def _record(self, status, key=None, body=None):
+        try:
+            request_path = urlsplit(self.path).path
+        except ValueError:
+            request_path = None
         self.server.requests.append({
             "method": self.command,
-            "path": urlsplit(self.path).path,
+            "path": request_path,
             "key": key,
             "status": status,
             "content_type": self.headers.get("Content-Type"),

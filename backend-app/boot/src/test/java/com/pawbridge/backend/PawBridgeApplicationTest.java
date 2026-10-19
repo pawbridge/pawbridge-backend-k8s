@@ -65,6 +65,10 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.api.UserNicknameQuery.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.application.CommentListReader.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.application.ListComments.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.web.CommentReadController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.web.CommentReadExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.ListPosts.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.SearchPosts.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostSearchReader.class)).hasSize(1);
