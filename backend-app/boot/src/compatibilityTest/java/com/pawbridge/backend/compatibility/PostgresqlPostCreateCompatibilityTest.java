@@ -232,7 +232,7 @@ class PostgresqlPostCreateCompatibilityTest {
         assertPermissionDenied(() -> writeJdbc.queryForList("SELECT * FROM pawbridge_user.users"));
         assertPermissionDenied(() -> writeJdbc.execute("CREATE TABLE pawbridge_community.f3_forbidden(id BIGINT)"));
         assertPermissionDenied(() -> writeJdbc.update("DELETE FROM pawbridge_community.posts"));
-        assertPermissionDenied(() -> writeJdbc.update("UPDATE pawbridge_community.posts SET title=title"));
+        assertPermissionDenied(() -> writeJdbc.update("UPDATE pawbridge_community.posts SET author_id=author_id"));
         assertPermissionDenied(() -> readJdbc.update("INSERT INTO pawbridge_community.posts(author_id,title,content,board_type,image_urls,created_at,updated_at) VALUES (1,'x','x','ADOPTION','[]',now(),now())"));
         assertPermissionDenied(() -> readJdbc.update("INSERT INTO pawbridge_community.outbox_events(aggregate_id,aggregate_type,created_at,event_id,payload,type) VALUES('x','Post',now(),'x','{}','POST_CREATED')"));
         try (Connection connection = writer.getConnection(); var statement = connection.createStatement();

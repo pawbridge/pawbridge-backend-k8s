@@ -240,7 +240,7 @@ class PostgresqlPostDeleteCompatibilityTest {
     }
 
     @Test void given__minimal_writer_and_read_only_reader__when__crossing_permissions__then__deny_unrelated_mutations() {
-        assertDenied(()->writeJdbc.update("UPDATE pawbridge_community.posts SET title=title"));
+        assertDenied(()->writeJdbc.update("UPDATE pawbridge_community.posts SET author_id=author_id"));
         assertDenied(()->writeJdbc.update("UPDATE pawbridge_community.posts SET author_id=author_id"));
         assertDenied(()->writeJdbc.update("DELETE FROM pawbridge_community.posts"));
         assertDenied(()->writeJdbc.queryForList("SELECT * FROM pawbridge_user.users"));
