@@ -197,7 +197,7 @@ class NoteRecipientHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GET /api/v1/notes", "GET /api/v1/notes/blocks/status", "GET /api/v1/notes/stream",
+    @ValueSource(strings = {"GET /api/v1/notes", "GET /api/v1/notes/blocks", "GET /api/v1/notes/stream",
             "GET /api/v1/chats", "GET /api/v1/users/internal/8/contact", "DELETE /internal/private-notes/members/8",
             "GET /api/notes/recipients/8", "GET /api/v1/notes/recipients/8/", "HEAD /api/v1/notes/recipients/8",
             "OPTIONS /api/v1/notes/recipients/8", "POST /api/v1/notes/recipients/8", "PUT /api/v1/notes/recipients/8",
