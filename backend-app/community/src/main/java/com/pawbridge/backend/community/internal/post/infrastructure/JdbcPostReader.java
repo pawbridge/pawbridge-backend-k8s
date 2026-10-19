@@ -3,6 +3,7 @@ package com.pawbridge.backend.community.internal.post.infrastructure;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.backend.community.internal.post.application.PostListReader;
 import com.pawbridge.backend.community.internal.post.application.PostReader;
 import com.pawbridge.backend.community.internal.post.application.PostSnapshot;
 import java.sql.ResultSet;
@@ -14,11 +15,17 @@ import java.util.TimeZone;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.transaction.support.TransactionOperations;
 
-public final class JdbcPostReader implements PostReader {
+public final class JdbcPostReader implements PostReader, PostListReader {
     private static final String SELECT_POST = """
             SELECT post_id, author_id, title, content, board_type, image_urls, created_at, updated_at
             FROM pawbridge_community.posts
             WHERE post_id = ? AND deleted_at IS NULL
+            """;
+    private static final String SELECT_POSTS = """
+            SELECT post_id, author_id, title, content, board_type, image_urls, created_at, updated_at
+            FROM pawbridge_community.posts
+            WHERE deleted_at IS NULL
+            ORDER BY created_at DESC
             """;
     private static final TypeReference<List<String>> IMAGE_URLS_TYPE = new TypeReference<>() {};
 
@@ -36,6 +43,11 @@ public final class JdbcPostReader implements PostReader {
     public Optional<PostSnapshot> findById(long postId) {
         return transactions.execute(status ->
                 jdbc.query(SELECT_POST, this::mapPost, postId).stream().findFirst());
+    }
+
+    @Override
+    public List<PostSnapshot> findAll() {
+        return transactions.execute(status -> jdbc.query(SELECT_POSTS, this::mapPost));
     }
 
     private PostSnapshot mapPost(ResultSet row, int rowNumber) throws SQLException {

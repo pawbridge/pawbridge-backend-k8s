@@ -65,6 +65,11 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.api.UserNicknameQuery.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.ListPosts.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostReader.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostListReader.class)).hasSize(1);
+                    assertThat(context.getBean(com.pawbridge.backend.community.internal.post.application.PostReader.class))
+                            .isSameAs(context.getBean(com.pawbridge.backend.community.internal.post.application.PostListReader.class));
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostReadController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.DeletePost.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostMediaRemover.class)).hasSize(1);
@@ -75,6 +80,7 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostUpdateController.class)).hasSize(1);
                     var pools = context.getBeansOfType(com.zaxxer.hikari.HikariDataSource.class);
                     assertThat(pools.get("dataSource").isReadOnly()).isTrue();
+                    assertThat(pools.get("dataSource").getMaximumPoolSize()).isEqualTo(2);
                     assertThat(pools.get("writeDataSource").isReadOnly()).isFalse();
                     assertThat(pools.get("writeDataSource").getMaximumPoolSize()).isEqualTo(1);
                     pools.values().forEach(pool -> {

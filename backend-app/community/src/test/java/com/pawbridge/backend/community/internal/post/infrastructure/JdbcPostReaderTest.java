@@ -11,9 +11,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.backend.community.internal.post.application.ListPosts;
 import com.pawbridge.backend.community.internal.post.application.PostSnapshot;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
@@ -47,9 +49,9 @@ class JdbcPostReaderTest {
 
     @BeforeEach
     void prepareTransactionAndRow() throws Exception {
-        when(transactions.execute(ArgumentMatchers.<TransactionCallback<Optional<PostSnapshot>>>any()))
+        when(transactions.execute(ArgumentMatchers.<TransactionCallback<Object>>any()))
                 .thenAnswer(invocation -> {
-                    TransactionCallback<Optional<PostSnapshot>> callback = invocation.getArgument(0);
+                    TransactionCallback<Object> callback = invocation.getArgument(0);
                     transactionActive = true;
                     try {
                         return callback.doInTransaction(new SimpleTransactionStatus());
@@ -96,6 +98,68 @@ class JdbcPostReaderTest {
 
         assertEquals(expected, reader.findById(42L).orElseThrow().imageUrls());
         assertFalse(transactionActive);
+    }
+
+    @ParameterizedTest
+    @MethodSource("imageUrls")
+    void given__post_rows__when__find_all__then__existing_field_and_image_mapping_is_reused(
+            String stored, List<String> expected) throws Exception {
+        when(row.getString("image_urls")).thenReturn(stored);
+        prepareListQuery();
+
+        assertEquals(List.of(new PostSnapshot(
+                42L, 7L, "함께 찾아주세요", "게시글 본문", "REPORT", expected, createdAt, updatedAt)),
+                reader.findAll());
+        assertFalse(transactionActive);
+        verify(jdbc).query(anyString(), ArgumentMatchers.<RowMapper<PostSnapshot>>any());
+    }
+
+    @Test
+    void given__list_reader__when__nickname_is_queried__then__post_mapping_transaction_has_completed() throws Exception {
+        prepareListQuery();
+        ListPosts listPosts = new ListPosts(reader, authorId -> {
+            assertFalse(transactionActive);
+            assertEquals(7L, authorId);
+            return Optional.of("반려친구");
+        });
+
+        assertEquals("반려친구", listPosts.read().getFirst().authorNickname());
+        assertFalse(transactionActive);
+    }
+
+    @Test
+    void given__no_post_rows__when__find_all__then__empty_list_is_returned_after_transaction() {
+        doReturn(List.of()).when(jdbc).query(anyString(), ArgumentMatchers.<RowMapper<PostSnapshot>>any());
+
+        assertEquals(List.of(), reader.findAll());
+        assertFalse(transactionActive);
+    }
+
+    @Test
+    void given__invalid_list_image_json__when__find_all__then__mapping_failure_leaves_transaction() throws Exception {
+        prepareListQuery();
+        when(row.getString("image_urls")).thenReturn("{\"unexpected\":\"shape\"}");
+
+        assertThrows(IllegalStateException.class, reader::findAll);
+        assertFalse(transactionActive);
+    }
+
+    @Test
+    void given__list_query_failure__when__find_all__then__original_failure_propagates_after_transaction() {
+        DataAccessResourceFailureException failure = new DataAccessResourceFailureException("unavailable");
+        doThrow(failure).when(jdbc).query(anyString(), ArgumentMatchers.<RowMapper<PostSnapshot>>any());
+
+        assertSame(failure, assertThrows(DataAccessResourceFailureException.class, reader::findAll));
+        assertFalse(transactionActive);
+    }
+
+    private void prepareListQuery() {
+        when(jdbc.query(anyString(), ArgumentMatchers.<RowMapper<PostSnapshot>>any()))
+                .thenAnswer(invocation -> {
+                    assertTrue(transactionActive);
+                    RowMapper<PostSnapshot> mapper = invocation.getArgument(1);
+                    return List.of(mapper.mapRow(row, 0));
+                });
     }
 
     private static Stream<Arguments> imageUrls() {
