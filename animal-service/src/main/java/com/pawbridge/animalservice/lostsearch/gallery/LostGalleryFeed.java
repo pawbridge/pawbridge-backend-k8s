@@ -17,7 +17,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 public class LostGalleryFeed {
     static final int MAX_RECORDS = 100_000;
     static final int MAX_BODY_BYTES = 128 * 1024 * 1024;
-    static final String SQL = """
+    private static final String SQL_TEMPLATE = """
             SELECT a.id, a.species, a.status, a.happen_date, a.happen_place, a.color, a.special_mark, a.description,
                    p.object_key, p.stored_sha256, p.stored_bytes, p.content_type
             FROM apms_photo_archive p JOIN animals a ON a.id = p.animal_id
@@ -25,10 +25,20 @@ public class LostGalleryFeed {
               AND (p.state = 'READY' OR (p.state IN ('RETRY', 'PROCESSING')
                    AND p.object_key IS NOT NULL AND p.stored_sha256 IS NOT NULL
                    AND p.stored_bytes IS NOT NULL AND p.content_type IS NOT NULL))
-              AND p.source_url = p.archived_source_url AND p.source_url = a.image_url
+              AND COALESCE(p.error_code, '') NOT IN ('STORAGE_INTEGRITY', 'STORAGE_NOT_VISIBLE')
+              AND %s
               AND a.species IN ('DOG', 'CAT')
             ORDER BY a.id LIMIT 100001
             """;
+    static final String SQL = SQL_TEMPLATE.formatted(
+            "BINARY p.source_url = BINARY p.archived_source_url AND BINARY p.source_url = BINARY a.image_url");
+    private static final String POSTGRESQL_SQL = SQL_TEMPLATE.formatted(
+            "p.source_url COLLATE \"C\" = p.archived_source_url COLLATE \"C\" AND p.source_url COLLATE \"C\" = a.image_url COLLATE \"C\"");
+
+    private static String sql(java.sql.Connection connection) throws java.sql.SQLException {
+        return AnimalSqlDialect.from(connection).sql(SQL, POSTGRESQL_SQL);
+    }
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final S3Presigner signer;
@@ -64,7 +74,7 @@ public class LostGalleryFeed {
 
     Content readContent() {
         return jdbc.query(connection -> {
-            var statement = connection.prepareStatement(SQL);
+            var statement = connection.prepareStatement(sql(connection));
             statement.setQueryTimeout(20);
             // Driver-specific cursor batch; enclosing read transaction enables PostgreSQL streaming.
             statement.setFetchSize(AnimalSqlDialect.from(connection).streamingFetchSize());
@@ -102,16 +112,16 @@ public class LostGalleryFeed {
     /** One consistent DB read, consumed row by row before the snapshot is published. */
     @Transactional(readOnly = true, timeout = 120, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public void streamEntries(java.util.function.Consumer<LostGallerySnapshots.Entry> consumer) {
-        String conflicts = "SELECT stored_sha256 FROM (" + SQL + ") source GROUP BY stored_sha256 "
-                + "HAVING MIN(stored_bytes) <> MAX(stored_bytes) OR MIN(content_type) <> MAX(content_type) LIMIT 1";
         boolean conflict = Boolean.TRUE.equals(jdbc.query(connection -> {
+            String conflicts = "SELECT stored_sha256 FROM (" + sql(connection) + ") source GROUP BY stored_sha256 "
+                    + "HAVING MIN(stored_bytes) <> MAX(stored_bytes) OR MIN(content_type) <> MAX(content_type) LIMIT 1";
             var statement = connection.prepareStatement(conflicts);
             statement.setQueryTimeout(20);
             return statement;
         }, (org.springframework.jdbc.core.ResultSetExtractor<Boolean>) java.sql.ResultSet::next));
         if (conflict) throw new IllegalStateException("Conflicting photo integrity metadata");
         jdbc.query(connection -> {
-            var statement = connection.prepareStatement(SQL);
+            var statement = connection.prepareStatement(sql(connection));
             statement.setQueryTimeout(20);
             statement.setFetchSize(AnimalSqlDialect.from(connection).streamingFetchSize());
             return statement;

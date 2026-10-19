@@ -288,6 +288,39 @@ class AnimalPostgresqlCompatibilityTest {
     }
 
     @Test
+    void storage_integrity_failure_stays_quarantined_until_a_successful_archive_verification() {
+        seedAnimal();
+        PhotoArchiveStore store = new PhotoArchiveStore(jdbc,manager);
+        store.discover(50);
+        var original=store.claim(300).orElseThrow();
+        byte[] bytes={1,2,3};
+        var photo=new com.pawbridge.animalservice.photo.ArchivedPhoto(bytes,
+                com.pawbridge.animalservice.photo.ArchivedPhoto.sha256(bytes),
+                com.pawbridge.animalservice.photo.ArchivedPhoto.sha256(bytes),"image/png",1,1,"test-v1");
+        assertThat(store.complete(original,photo,60)).isTrue();
+        LostGalleryFeed feed=new LostGalleryFeed(jdbc,new ObjectMapper(),null);
+        TransactionTemplate tx=new TransactionTemplate(manager);tx.setReadOnly(true);
+        for(String code:java.util.List.of("STORAGE_INTEGRITY","STORAGE_NOT_VISIBLE")) {
+            jdbc.update("UPDATE apms_photo_archive SET next_attempt_at=CURRENT_TIMESTAMP");
+            var claim=store.claim(300).orElseThrow();assertThat(store.retry(claim,code,1)).isTrue();
+            jdbc.update("UPDATE apms_photo_archive SET next_attempt_at=CURRENT_TIMESTAMP");
+            var retry=store.claim(300).orElseThrow();
+            AtomicInteger count=new AtomicInteger();
+            tx.executeWithoutResult(status->feed.streamEntries(entry->count.incrementAndGet()));
+            assertThat(count.get()).isZero();
+            assertThat(store.retry(retry,"SOURCE_HTTP_404",1)).isTrue();
+            assertThat(jdbc.queryForObject("SELECT error_code FROM apms_photo_archive",String.class)).isEqualTo(code);
+            jdbc.update("UPDATE animals SET image_url='http://example.test/PHOTO.jpg'");for(int i=0;i<3;i++)store.discover(50);
+            jdbc.update("UPDATE animals SET image_url='http://example.test/photo.jpg'");for(int i=0;i<3;i++)store.discover(50);
+            assertThat(jdbc.queryForObject("SELECT error_code FROM apms_photo_archive",String.class)).isEqualTo(code);
+            var verified=store.claim(300).orElseThrow();assertThat(store.complete(verified,photo,60)).isTrue();
+            assertThat(jdbc.queryForObject("SELECT error_code FROM apms_photo_archive",String.class)).isNull();
+            tx.executeWithoutResult(status->feed.streamEntries(entry->count.incrementAndGet()));
+            assertThat(count.get()).isOne();
+        }
+    }
+
+    @Test
     void existing_jpa_entities_validate_against_the_postgresql_schema() {
         org.hibernate.boot.registry.StandardServiceRegistry registry = new org.hibernate.boot.registry.StandardServiceRegistryBuilder()
                 .applySetting("hibernate.connection.datasource",source)

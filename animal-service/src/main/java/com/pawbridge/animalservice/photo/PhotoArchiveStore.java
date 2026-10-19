@@ -67,7 +67,8 @@ public class PhotoArchiveStore {
                     + "VALUES (?,?,?,?,'PENDING')", animal.id(), slot, animal.desertionNo(), source);
         } else if (!Objects.equals(previous.get(0), source)) {
             jdbc.update("UPDATE apms_photo_archive SET source_url=?,generation=generation+1,state=?,attempts=0,"
-                            + "next_attempt_at=CURRENT_TIMESTAMP(6),lease_token=NULL,lease_until=NULL,error_code=NULL "
+                            + "next_attempt_at=CURRENT_TIMESTAMP(6),lease_token=NULL,lease_until=NULL,"
+                            + "error_code=CASE WHEN error_code IN ('STORAGE_INTEGRITY','STORAGE_NOT_VISIBLE') THEN error_code ELSE NULL END "
                             + "WHERE animal_id=? AND slot=?", source, source == null ? "ABSENT" : "PENDING", animal.id(), slot);
         }
     }
@@ -113,7 +114,9 @@ public class PhotoArchiveStore {
     }
 
     public boolean retry(Claim claim, String code, int seconds) {
-        return jdbc.update("UPDATE apms_photo_archive SET state='RETRY',attempts=attempts+1,error_code=?,"
+        // Only complete() can restore confidence in a known-invalid or missing archived object.
+        return jdbc.update("UPDATE apms_photo_archive SET state='RETRY',attempts=attempts+1,"
+                        + "error_code=CASE WHEN error_code IN ('STORAGE_INTEGRITY','STORAGE_NOT_VISIBLE') THEN error_code ELSE ? END,"
                         + "next_attempt_at=" + dialect.get().secondsFromNow() + ",lease_token=NULL,lease_until=NULL "
                         + "WHERE animal_id=? AND slot=? AND generation=? AND lease_token=? AND lease_until>CURRENT_TIMESTAMP(6)",
                 code, seconds, claim.animalId(), claim.slot(), claim.generation(), claim.token()) == 1;
