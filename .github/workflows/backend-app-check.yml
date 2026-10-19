@@ -74,6 +74,21 @@ jobs:
             .github/workflows/backend-app-check.yml
           sparse-checkout-cone-mode: false
 
+      - name: Require the immutable F21 original-source Git object
+        env:
+          F21_PINNED_SOURCE: d436e3c43fa220cd4004d9f39040f809915ec6ae
+          F21_SOURCE_READ_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$F21_PINNED_SOURCE^{commit}" 2>/dev/null; then
+            source_auth=$(printf 'x-access-token:%s' "$F21_SOURCE_READ_TOKEN" | base64 | tr -d '\n')
+            printf '::add-mask::%s\n' "$source_auth"
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $source_auth" \
+              git fetch --no-tags --no-recurse-submodules --depth=1 origin "$F21_PINNED_SOURCE"
+          fi
+          git cat-file -e "$F21_PINNED_SOURCE^{commit}"
+
       - name: Isolate Gradle state on the hosted runner
         run: |
           set -euo pipefail
@@ -214,6 +229,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f20-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f21_ci.py prepare > build/ci/f21-helper-refusal.txt 2>&1; then
+            printf 'F21 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f21-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -267,7 +287,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
@@ -752,6 +772,42 @@ jobs:
           assert result['empty_page_checks'] == result['invalid_page_checks'] == 1
           assert result['member_unavailable_checks'] == result['storage_unavailable_checks'] == 1
           assert result['authentication_checks'] == result['denied_route_checks'] == 1
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
+      - name: Verify F21 exact notes/mailbox DDL, ACL, owned rows and recovery guards without resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f21_ci_guards.py
+
+      - name: Extend the owned fixture with only original notes and mailboxes after F20
+        run: python3 scripts/f21_ci.py prepare
+
+      - name: Compare only F21 notifications in UTC and its one Seoul timestamp case
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:noteNotificationsCompatibilityTest :boot:noteNotificationsCompatibilitySeoulTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          python3 scripts/f21_ci.py results
+
+      - name: Verify packaged notifications, cursor and unread without writes or lifecycle execution
+        run: |
+          set -euo pipefail
+          python3 scripts/f21_ci.py smoke
+          test -s build/ci/f21-oracle-sha256.txt
+          test -s build/ci/f21-fixture-reuse.txt
+          test -s build/ci/f21-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f21_ci as f21
+          f21.require_measurements('jar')
+          result = json.loads(Path('build/ci/f21-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f21.COUNTERS} == f21.EXPECTED_JAR_COUNTS
+          assert result['notifications_get_checks'] == result['successful_checks'] + result['rejected_checks']
           assert result['database_changes'] == result['s3_requests'] == 0
           assert result['shutdown_pools'] == 2
           assert result['remaining_application_connections'] == 0
