@@ -133,6 +133,27 @@ class F4StartupTest(unittest.TestCase):
         self.stop.assert_called_once_with(self.children[0][1], 'F4 startup S3 stub')
         self.children[1][1].wait.assert_called_once_with(timeout=5)
 
+    def test_given_stale_or_foreign_start_markers__when_checking_readiness__then_reject_without_http_fallback(self):
+        child = Mock()
+        child.poll.return_value = None
+        endpoint = 'http://127.0.0.1:41001'
+        for label, metadata in (
+                ('previous attempt', {'endpoint': endpoint, 'owner': self.owner}),
+                ('wrong owner', {'endpoint': endpoint, 'owner': '999-1'}),
+                ('wrong endpoint', {'endpoint': 'http://127.0.0.1:41003', 'owner': self.owner})):
+            with self.subTest(marker=label):
+                log = Log()
+                log.append(json.dumps(metadata))
+                offset = len(log.read_bytes()) if label == 'previous attempt' else 0
+                self.assertFalse(f4.stub_ready(child, log, offset, endpoint, self.owner))
+        app_log = Log()
+        app_log.append('Tomcat started on port 41002 (http)')
+        self.assertFalse(f4.application_ready(child, app_log, len(app_log.read_bytes()),
+            41002, 'http://127.0.0.1:41002'))
+        f4.f3.expect.assert_not_called()
+        self.request.assert_not_called()
+        self.popen.assert_not_called()
+
     def test_given_database_failure_or_unconfirmed_timeout__when_starting__then_fail_without_retry(self):
         for mode in ('database', 'timeout'):
             with self.subTest(mode=mode):
