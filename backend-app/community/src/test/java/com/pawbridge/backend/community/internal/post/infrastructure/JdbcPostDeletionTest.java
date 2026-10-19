@@ -111,7 +111,7 @@ class JdbcPostDeletionTest {
         assertEquals("Post", outbox.values.get(2));
         assertEquals("42", outbox.values.get(3));
         assertEquals("POST_DELETED", outbox.values.get(4));
-        assertEquals(mapper.valueToTree(Map.of("postId", 42L)), mapper.readTree((String)outbox.values.get(5)));
+        assertEquals(mapper.readTree("{\"postId\":42}"), mapper.readTree((String)outbox.values.get(5)));
         assertEquals("UTC", outbox.calendars.get(6).getTimeZone().getID());
         assertTrue(calls.get(3).sql.contains("DELETE FROM pawbridge_community.post_search_documents WHERE post_id = ?"));
         assertEquals(Map.of(1,42L), calls.get(3).values);
@@ -153,7 +153,7 @@ class JdbcPostDeletionTest {
     @Test
     void given__commit_outcome_unknown__when__delete__then__original_transaction_failure_is_not_retried() {
         var unknown = new TransactionSystemException("synthetic commit outcome unknown");
-        when(transactions.execute(ArgumentMatchers.<TransactionCallback<Void>>any())).thenAnswer(call -> {
+        doAnswer(call -> {
             TransactionCallback<Void> callback = call.getArgument(0);
             transactionActive = true;
             try {
@@ -163,7 +163,7 @@ class JdbcPostDeletionTest {
             } finally {
                 transactionActive = false;
             }
-        });
+        }).when(transactions).execute(ArgumentMatchers.<TransactionCallback<Void>>any());
         assertSame(unknown, assertThrows(TransactionSystemException.class, () -> deletion().delete(42L, 7L)));
         assertEquals(4, calls.size());
         assertFalse(transactionActive);
