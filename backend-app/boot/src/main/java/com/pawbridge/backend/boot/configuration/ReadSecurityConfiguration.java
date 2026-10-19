@@ -5,6 +5,7 @@ import com.pawbridge.backend.boot.security.PostTokenAuthenticator;
 import com.pawbridge.backend.boot.security.PostBearerAuthenticationFilter;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -21,6 +22,8 @@ public class ReadSecurityConfiguration {
     @Bean
     SecurityFilterChain postReadSecurity(HttpSecurity http, PostTokenAuthenticator tokens) throws Exception {
         var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
+        var postDeletion = new AntPathRequestMatcher("/api/v1/posts/*", "DELETE");
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion);
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -30,9 +33,9 @@ public class ReadSecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read/*").permitAll()
-                        .requestMatchers(postCreation).authenticated()
+                        .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())
-                .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postCreation), AnonymousAuthenticationFilter.class)
+                .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postWriting), AnonymousAuthenticationFilter.class)
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> forbidden(response))
                         .accessDeniedHandler((request, response, exception) -> forbidden(response)))

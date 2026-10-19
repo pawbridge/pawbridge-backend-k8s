@@ -66,6 +66,10 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.api.UserNicknameQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostReadController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.DeletePost.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostMediaRemover.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostDeletion.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostDeleteController.class)).hasSize(1);
                     var pools = context.getBeansOfType(com.zaxxer.hikari.HikariDataSource.class);
                     assertThat(pools.get("dataSource").isReadOnly()).isTrue();
                     assertThat(pools.get("writeDataSource").isReadOnly()).isFalse();
