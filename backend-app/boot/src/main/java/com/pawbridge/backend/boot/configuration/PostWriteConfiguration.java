@@ -3,6 +3,14 @@ package com.pawbridge.backend.boot.configuration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator;
 import com.pawbridge.backend.community.internal.post.application.CreatePost;
+import com.pawbridge.backend.community.internal.post.application.DeletePost;
+import com.pawbridge.backend.community.internal.post.application.PostDeletion;
+import com.pawbridge.backend.community.internal.post.application.PostMediaRemover;
+import com.pawbridge.backend.community.internal.post.application.PostReader;
+import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostDeletion;
+import com.pawbridge.backend.community.internal.post.infrastructure.media.S3PostMediaRemover;
+import com.pawbridge.backend.community.internal.post.web.PostDeleteController;
+import com.pawbridge.backend.community.internal.post.web.PostDeleteExceptionHandler;
 import com.pawbridge.backend.community.internal.post.application.PostMediaUploader;
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostWriter;
 import com.pawbridge.backend.community.internal.post.infrastructure.media.S3PostMediaUploader;
@@ -81,6 +89,28 @@ public class PostWriteConfiguration {
 
     @Bean
     PostCreateController postCreateController(CreatePost createPost) { return new PostCreateController(createPost); }
+
+    @Bean
+    PostMediaRemover postMediaRemover(@Qualifier("postS3Client") S3Client client, PostWriteSettings settings) {
+        return new S3PostMediaRemover(client, settings.bucket(), settings.publicBaseUrl(), settings.objectPrefix());
+    }
+
+    @Bean
+    PostDeletion postDeletion(@Qualifier("writeJdbc") JdbcTemplate jdbc,
+            @Qualifier("writeTransaction") TransactionTemplate transaction, ObjectMapper mapper) {
+        return new JdbcPostDeletion(jdbc, transaction, mapper);
+    }
+
+    @Bean
+    DeletePost deletePost(PostReader reader, PostMediaRemover media, PostDeletion deletion) {
+        return new DeletePost(reader, media, deletion);
+    }
+
+    @Bean
+    PostDeleteController postDeleteController(DeletePost deletePost) { return new PostDeleteController(deletePost); }
+
+    @Bean
+    PostDeleteExceptionHandler postDeleteExceptionHandler() { return new PostDeleteExceptionHandler(); }
 
     @Bean
     PostCreateExceptionHandler postCreateExceptionHandler() { return new PostCreateExceptionHandler(); }

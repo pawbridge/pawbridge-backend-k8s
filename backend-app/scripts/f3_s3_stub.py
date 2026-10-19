@@ -6,6 +6,8 @@ CLI owner, bucket and prefix must describe the same unique run. Control calls ne
 X-F3-Owner. GET /__f3__/state reports metadata only; POST /__f3__/fail-next-put
 accepts {"after": 1, "count": 1, "status": 400} to fail after one successful PUT.
 Objects are bounded synthetic bytes and disappear when this process stops.
+DELETE stays denied by default; --allow-delete enables F4 deletion only for keys
+created by this process, with a separate bounded /__f3__/fail-next-delete control.
 """
 
 import argparse
@@ -31,6 +33,7 @@ def arguments():
     parser.add_argument("--owner", required=True)
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--prefix", required=True)
+    parser.add_argument("--allow-delete", action="store_true", help="Enable explicit F4 deletes of run-owned objects")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("port must be between 1 and 65535")
@@ -53,6 +56,10 @@ class FixtureServer(HTTPServer):
         self.requests = []
         self.fail_after = 0
         self.fail_count = 0
+        self.allow_delete = args.allow_delete
+        self.owned_keys = set()
+        self.delete_fail_after = 0
+        self.delete_fail_count = 0
 
     def state(self):
         return {
@@ -262,13 +269,31 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if self.server.fail_count:
             self.server.fail_after -= 1
         self.server.objects[key] = {"body": body, "content_type": self.headers.get("Content-Type")}
+        self.server.owned_keys.add(key)
         self._record(200, key, body)
         self._respond(200, extra={"ETag": '"' + hashlib.md5(body).hexdigest() + '"'})
 
     def do_DELETE(self):
-        # This flow never supports compensation. Keep attempted DELETE observable.
-        self._record(403, self._key())
-        self._error(403, "AccessDenied")
+        key = self._key()
+        if not self._local():
+            self._record(403, key)
+            return
+        if (not self.server.allow_delete or key is None or not self._synthetic_credentials()
+                or key not in self.server.owned_keys):
+            self._record(403, key)
+            self._error(403, "AccessDenied")
+            return
+        if self.server.delete_fail_count and self.server.delete_fail_after == 0:
+            self.server.delete_fail_count -= 1
+            self._record(400, key)
+            self._error(400)
+            return
+        if self.server.delete_fail_count:
+            self.server.delete_fail_after -= 1
+        # Known run-owned keys remain known after deletion: duplicate DELETE is idempotent.
+        self.server.objects.pop(key, None)
+        self._record(204, key)
+        self._respond(204)
 
     def do_GET(self):
         if urlsplit(self.path).path == "/__f3__/state":
@@ -293,9 +318,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self._respond(200, value["body"], value["content_type"] or "application/octet-stream")
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/__f3__/fail-next-put" or not self._control():
-            if urlsplit(self.path).path != "/__f3__/fail-next-put":
-                self._error(404, "NoSuchKey")
+        control_path = urlsplit(self.path).path
+        if (control_path not in ("/__f3__/fail-next-put", "/__f3__/fail-next-delete")
+                or (control_path.endswith("delete") and not self.server.allow_delete)):
+            self._error(404, "NoSuchKey")
+            return
+        if not self._control():
             return
         try:
             settings = json.loads(self._body())
@@ -311,8 +339,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError):
             self._error(400)
             return
-        self.server.fail_after = after
-        self.server.fail_count = count
+        if control_path.endswith("delete"):
+            self.server.delete_fail_after = after
+            self.server.delete_fail_count = count
+        else:
+            self.server.fail_after = after
+            self.server.fail_count = count
         self._json(200, {"after": after, "count": count, "status": status})
 
 

@@ -71,8 +71,17 @@ tasks.register('prepareF3LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f3-oracle-sha256.txt').get().asFile
 }
 
-tasks.named('compileCompatibilityTestJava') {
+tasks.register('prepareF4LegacyOracle', Exec) {
     dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f4_legacy_oracle.py'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f4-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f4_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            rootProject.layout.buildDirectory.file('ci/f4-oracle-sha256.txt').get().asFile
+}
+
+tasks.named('compileCompatibilityTestJava') {
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
