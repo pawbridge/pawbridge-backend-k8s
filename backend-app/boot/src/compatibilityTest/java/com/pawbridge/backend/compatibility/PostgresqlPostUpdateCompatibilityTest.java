@@ -192,7 +192,7 @@ class PostgresqlPostUpdateCompatibilityTest {
     private long updatedEvents(long id){return writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_UPDATED'",Long.class,Long.toString(id));}
     private void assertPayload(long id,PostSnapshot post)throws Exception{
         String text=writeJdbc.queryForObject("SELECT payload::text FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_UPDATED' ORDER BY outbox_id DESC LIMIT 1",String.class,Long.toString(id));
-        assertThat(mapper.readTree(text)).isEqualTo(mapper.valueToTree(Map.of("postId",id,"authorId",post.authorId(),"title",post.title(),"content",post.content(),"boardType",post.boardType(),"imageUrls",post.imageUrls())));
+        assertThat(mapper.readTree(text)).isEqualTo(mapper.readTree(mapper.writeValueAsString(Map.of("postId",id,"authorId",post.authorId(),"title",post.title(),"content",post.content(),"boardType",post.boardType(),"imageUrls",post.imageUrls()))));
     }
     private String business(long id){return writeJdbc.queryForObject("SELECT to_jsonb(p)::text||COALESCE((SELECT json_agg(d)::text FROM pawbridge_community.post_search_documents d WHERE d.post_id=p.post_id),'') FROM pawbridge_community.posts p WHERE post_id=?",String.class,id);}
     private HikariDataSource pool(String user,String password,int max,String name){var c=new HikariConfig();c.setJdbcUrl(fixture.reads().jdbcUrl());c.setUsername(user);c.setPassword(password);c.setMaximumPoolSize(max);c.setMinimumIdle(0);c.setConnectionTimeout(2000);c.setPoolName(name);return new HikariDataSource(c);}
