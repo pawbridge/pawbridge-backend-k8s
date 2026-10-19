@@ -42,6 +42,7 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/home/videos").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/visits/today").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/comments/posts/read/{postId}").permitAll()
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())
