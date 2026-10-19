@@ -38,6 +38,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.TransactionTimedOutException;
 
 @WebMvcTest(controllers = NoteBlockStatusController.class, excludeAutoConfiguration = org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
 @ContextConfiguration(classes = {NoteBlockStatusController.class, NoteBlockStatusExceptionHandler.class, ReadBlockedAuthors.class,
@@ -193,6 +197,14 @@ class NoteBlockStatusHttpTest {
                 Arguments.of("block", new DataAccessResourceFailureException("synthetic-private-block-query", new SQLException("synthetic-private-password")),
                         "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."),
                 Arguments.of("block", new IllegalStateException("Bearer synthetic-private-token"),
+                        "쪽지를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+                Arguments.of("BLOCK_BEGIN", new CannotCreateTransactionException("synthetic-private-begin"),
+                        "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."),
+                Arguments.of("BLOCK_COMMIT", new TransactionSystemException("synthetic-private-commit"),
+                        "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."),
+                Arguments.of("BLOCK_TIMEOUT", new TransactionTimedOutException("synthetic-private-timeout"),
+                        "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."),
+                Arguments.of("USAGE", new IllegalTransactionStateException("synthetic-private-usage"),
                         "쪽지를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."));
     }
 

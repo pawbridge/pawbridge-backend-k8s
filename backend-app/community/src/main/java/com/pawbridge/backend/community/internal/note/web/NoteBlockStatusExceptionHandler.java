@@ -10,6 +10,9 @@ import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.TransactionTimedOutException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -47,7 +50,8 @@ public final class NoteBlockStatusExceptionHandler {
         return error(503, "회원 정보를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.");
     }
 
-    @ExceptionHandler(DataAccessException.class)
+    @ExceptionHandler({DataAccessException.class, CannotCreateTransactionException.class,
+            TransactionSystemException.class, TransactionTimedOutException.class})
     public ResponseEntity<Map<String, String>> storageUnavailable() {
         return error(503, "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.");
     }
