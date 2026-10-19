@@ -397,7 +397,7 @@ class PostgresqlNoteSendCompatibilityTest {
   try(var privileges=expiryPrivileges()){
    try{
     UUID note=expiryId(41);seedExpiry(List.of(new ExpiryNote(note,expiryNow,null,true)),List.of());String before=snapshot();requireNoForeignExpiryCandidates();
-    candidateClock.reset(expiryNow);
+    candidateClock.reset(expiryNow);expiryObservationPhase="candidate-scheduler";
     context.getEnvironment().getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("f30-owned-lifecycle",Map.of("pawbridge.jobs.cleanup-enabled","true","spring.lifecycle.timeout-per-shutdown-phase","10s")));
     context.registerBean("writeDataSource",HikariDataSource.class,()->writer,definition->((org.springframework.beans.factory.support.AbstractBeanDefinition)definition).setDestroyMethodName("close"));
     context.registerBean("writeJdbc",JdbcTemplate.class,()->writeJdbc);
@@ -481,7 +481,9 @@ class PostgresqlNoteSendCompatibilityTest {
    assertThat(scalar("SELECT (SELECT count(*) FROM pawbridge_community.private_note_mailboxes WHERE note_id IN ("+ids+") AND member_id NOT IN ("+CALLER+","+TARGET+"))+(SELECT count(*) FROM pawbridge_community.private_notes WHERE reply_to IN ("+ids+") AND note_id NOT IN ("+ids+"))+(SELECT count(*) FROM pawbridge_community.private_note_requests WHERE note_id IN ("+ids+") AND "+foreignRequest+")")).as("No external FK may be changed by owned expiry").isZero();
   }
  }
+ private String expiryObservationPhase="unstarted";
  private void expireOwned(boolean source,int expectedCount){
+  expiryObservationPhase=source?"original":"candidate";
   try{requireNoForeignExpiryCandidates();}catch(SQLException failure){throw new IllegalStateException("Owned global expiry guard could not be read");}
   sourceClock.reset(expiryNow);candidateClock.reset(expiryNow);
   if(source)original.expire();else{var tx=new TransactionTemplate(new JdbcTransactionManager(writer));tx.setTimeout(15);int count=new com.pawbridge.backend.community.internal.note.infrastructure.JdbcNoteExpiry(writeJdbc,tx,candidateClock).expire();if(expectedCount>=0)assertThat(count).isEqualTo(expectedCount);}
@@ -498,7 +500,12 @@ class PostgresqlNoteSendCompatibilityTest {
     if(table.equals("private_note_requests")&&deletedNote)row.putNull("note_id");
    }
   }
-  assertThat(canonical(json(snapshot())).equals(canonical(json(expected.toString())))).as("Only the explicit owned note/mailbox/request/reply delta may change among all eighteen tables").isTrue();
+  var observed=canonical(json(snapshot()));var wanted=canonical(json(expected.toString()));
+  var changedTables=new ArrayList<String>();
+  for(var keys=wanted.fieldNames();keys.hasNext();){String table=keys.next();var expectedRows=wanted.get(table);var actualRows=observed.get(table);
+   if(!Objects.equals(expectedRows,actualRows))changedTables.add(table+":expectedRows="+expectedRows.size()+",actualRows="+(actualRows==null?-1:actualRows.size()));
+  }
+  assertThat(observed.equals(wanted)).as("Only the explicit owned note/mailbox/request/reply delta may change among all eighteen tables; phase=%s; changedTables=%s",expiryObservationPhase,changedTables).isTrue();
  }
  private AutoCloseable expiryPrivileges()throws SQLException{
   verifyOwnership();requireExpiryPrivileges(false);
