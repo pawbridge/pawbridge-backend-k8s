@@ -288,6 +288,9 @@ class F17GuardTest(unittest.TestCase):
             self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
             self.assertNotIn('Authorization', requests[12][1]['headers']); self.assertIn('not-a-number', requests[12][0])
             self.assertIn('/0?', requests[10][0]); self.assertEqual('POST', requests[17][1]['method'])
+            self.assertEqual(f17.PATH + str(f17.OTHER) + '/extra', requests[16][0])
+            self.assertEqual('GET', requests[16][1]['method'])
+            self.assertNotIn('/api/v1/notes', [path for path, _ in requests])
             self.assertTrue(all('/api/v1/notes' in p for p, _ in requests))
 
     def test_given_request_failure_during_revoked_acl__when_unwinding__then_restore_grant_stop_both_and_cleanup_owned_keys(self):
