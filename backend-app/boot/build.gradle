@@ -20,6 +20,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f16LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f17LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f18LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f19LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -227,8 +228,19 @@ tasks.register('prepareF18LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f18-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF19LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF18LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF13LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f19_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f19LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f19-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f19_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f19LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f19-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle'), tasks.named('prepareF17LegacyOracle'), tasks.named('prepareF18LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle'), tasks.named('prepareF17LegacyOracle'), tasks.named('prepareF18LegacyOracle'), tasks.named('prepareF19LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -253,6 +265,8 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F17LegacyRecipientLookupTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlBlockedAuthorsCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F18LegacyBlockedAuthorsMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlTotalUserCountCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F19LegacyTotalUserCountMvcTest'
     }
 }
 
@@ -434,4 +448,20 @@ tasks.register('blockedAuthorsCompatibilityTest', Test) {
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('noteRecipientCompatibilityTest')
+}
+
+// The single UTC inherited-JPA/restricted-JDBC count plus the selected original HTTP envelope.
+tasks.register('totalUserCountCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Checks F19 administrator total count and original HTTP envelopes in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlTotalUserCountCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F19LegacyTotalUserCountMvcTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('blockedAuthorsCompatibilityTest')
 }
