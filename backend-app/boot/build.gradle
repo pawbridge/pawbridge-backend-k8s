@@ -26,6 +26,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f22LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f23LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f24LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f25LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -337,6 +338,8 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F23LegacyPrivateNoteListMvcTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockRemoveCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F24LegacyNoteBlockRemoveMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockCreateCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F25LegacyNoteBlockCreateMvcTest'
     }
 }
 
@@ -663,4 +666,50 @@ tasks.register('noteBlockRemoveCompatibilityTest', Test) {
         includeTestsMatching 'com.pawbridge.backend.compatibility.F24LegacyNoteBlockRemoveMvcTest'
     }
     shouldRunAfter tasks.named('privateNoteListCompatibilitySeoulTest')
+}
+
+
+// F25 adds only its independent generated wrappers and isolated UTC/Seoul tasks.
+tasks.register('prepareF25LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF24LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f25_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f25LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f25-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f25_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f25LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f25-oracle-sha256.txt').get().asFile
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF25LegacyOracle') }
+
+tasks.register('noteBlockCreateCompatibilityTest', Test) {
+    description = 'Checks only F25 block creation under source JpaTM/candidate JdbcTM and measured original MVC in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'f24.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f24-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f25.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f25-fixture-write.txt').get().asFile.absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockCreateCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F25LegacyNoteBlockCreateMvcTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteBlockRemoveCompatibilityTest')
+}
+tasks.register('noteBlockCreateCompatibilitySeoulTest', Test) {
+    description = 'Repeats only F25 microsecond block Instant and duplicate timestamp preservation without a zone shift.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'Asia/Seoul'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'f24.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f24-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f25.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f25-fixture-write.txt').get().asFile.absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockCreateCompatibilityTest.givenTstzMicrosecondsAndALaterDuplicateClock__whenBothCreateAndSerializeInEitherZone__thenStoreTheSameInstantAndKeepTheFirstTimestampWithoutLocalShift'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteBlockCreateCompatibilityTest')
 }

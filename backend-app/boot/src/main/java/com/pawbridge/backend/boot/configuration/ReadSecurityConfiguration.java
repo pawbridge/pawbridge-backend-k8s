@@ -36,13 +36,14 @@ public class ReadSecurityConfiguration {
         var noteBlockStatus = new AntPathRequestMatcher("/api/v1/notes/blocks/status", "GET");
         var noteBlockList = new AntPathRequestMatcher("/api/v1/notes/blocks", "GET");
         var noteBlockRemove = new AntPathRequestMatcher("/api/v1/notes/blocks/{member}", "DELETE");
+        var noteBlockCreate = new AntPathRequestMatcher("/api/v1/notes/blocks/{member}", "PUT");
         var noteNotifications = new AntPathRequestMatcher("/api/v1/notes/notifications", "GET");
         var privateNoteList = new AntPathRequestMatcher("/api/v1/notes", "GET");
         var privateNote = new AndRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/notes/{id}", "GET"),
                 new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/notes/stream", "GET")));
         var totalUserCount = new AntPathRequestMatcher("/api/v1/admin/users/stats/total-users", "GET");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove);
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate);
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
