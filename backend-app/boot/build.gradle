@@ -9,6 +9,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f2LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f3LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f6LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f7LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -93,8 +94,19 @@ tasks.register('prepareF6LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f6-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF7LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF6LegacyOracle')
+    inputs.files(rootProject.file('scripts/prepare_f7_legacy_oracle.py'), rootProject.file('scripts/prepare_legacy_oracle.py'), rootProject.file('scripts/prepare_f3_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f7LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f7-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f7_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f7LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f7-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
