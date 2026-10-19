@@ -209,6 +209,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f19-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f20_ci.py prepare > build/ci/f20-helper-refusal.txt 2>&1; then
+            printf 'F20 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f20-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -262,7 +267,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
@@ -709,6 +714,43 @@ jobs:
           assert result['rejected_checks'] == 3
           assert result['total_user_count_get_checks'] == result['successful_checks'] + result['rejected_checks']
           assert result['administrator_denied_checks'] == result['sql_failure_checks'] == 1
+          assert result['authentication_checks'] == result['denied_route_checks'] == 1
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
+      - name: Verify F20 exact extended ACL, owned rows, oracle, tokens and recovery guards without resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f20_ci_guards.py
+
+      - name: Add only the existing block timestamp SELECT after the F19 regressions
+        run: python3 scripts/f20_ci.py prepare
+
+      - name: Compare F20 full UTC behavior and one Seoul timestamp method
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:noteBlockListCompatibilityTest :boot:noteBlockListCompatibilitySeoulTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          python3 scripts/f20_ci.py results
+
+      - name: Verify packaged block pages, display and timestamp with source-specific recovery
+        run: |
+          set -euo pipefail
+          python3 scripts/f20_ci.py smoke
+          test -s build/ci/f20-oracle-sha256.txt
+          test -s build/ci/f20-fixture-reuse.txt
+          test -s build/ci/f20-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f20-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['block_list_get_checks'] == 9
+          assert result['successful_checks'] == result['page_checks'] == 5
+          assert result['rejected_checks'] == 4
+          assert result['block_list_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['empty_page_checks'] == result['invalid_page_checks'] == 1
+          assert result['member_unavailable_checks'] == result['storage_unavailable_checks'] == 1
           assert result['authentication_checks'] == result['denied_route_checks'] == 1
           assert result['database_changes'] == result['s3_requests'] == 0
           assert result['shutdown_pools'] == 2

@@ -21,6 +21,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f17LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f18LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f19LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f20LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -239,8 +240,19 @@ tasks.register('prepareF19LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f19-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF20LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF19LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f20_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f20LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f20-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f20_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f20LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f20-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle'), tasks.named('prepareF17LegacyOracle'), tasks.named('prepareF18LegacyOracle'), tasks.named('prepareF19LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle'), tasks.named('prepareF17LegacyOracle'), tasks.named('prepareF18LegacyOracle'), tasks.named('prepareF19LegacyOracle'), tasks.named('prepareF20LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -267,6 +279,8 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F18LegacyBlockedAuthorsMvcTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlTotalUserCountCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F19LegacyTotalUserCountMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockListCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F20LegacyBlockListMvcTest'
     }
 }
 
@@ -464,4 +478,33 @@ tasks.register('totalUserCountCompatibilityTest', Test) {
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('blockedAuthorsCompatibilityTest')
+}
+
+// Full business/ACL comparison runs once in UTC; Seoul repeats only the new timestamp data slice.
+tasks.register('noteBlockListCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Checks F20 list/count/member batch and exact original MVC binding once in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockListCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F20LegacyBlockListMvcTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('totalUserCountCompatibilityTest')
+}
+tasks.register('noteBlockListCompatibilitySeoulTest', Test) {
+    group = 'verification'
+    description = 'Repeats only F20 timestamp-to-Instant data and JSON without a local zone shift.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    systemProperty 'user.timezone', 'Asia/Seoul'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockListCompatibilityTest.givenTstzMicroseconds__whenReadingAndSerializing__thenInstantIsStableWithoutLocalZoneShift'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteBlockListCompatibilityTest')
 }
