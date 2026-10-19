@@ -18,6 +18,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f14LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f15LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f16LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f17LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -203,8 +204,19 @@ tasks.register('prepareF16LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f16-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF17LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareLegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f17_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f17LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f17-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f17_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f17LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f17-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle'), tasks.named('prepareF17LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -225,6 +237,8 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayAccessTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F16LegacyVisitMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteRecipientCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F17LegacyRecipientLookupTest'
     }
 }
 
@@ -375,3 +389,19 @@ tasks.named('homeVideoCompatibilitySeoulTest') { shouldRunAfter tasks.named('hom
 }
 tasks.named('visitTodayCompatibilitySeoulTest') { shouldRunAfter tasks.named('visitTodayCompatibilityTest') }
 tasks.named('visitTodayLegacyMvcTest') { shouldRunAfter tasks.named('visitTodayCompatibilitySeoulTest') }
+
+// Only the new recipient SQL comparison and original transport-boundary branches run here.
+tasks.register('noteRecipientCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Checks F17 recipient lookup in UTC against pinned original methods.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteRecipientCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F17LegacyRecipientLookupTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('visitTodayLegacyMvcTest')
+}

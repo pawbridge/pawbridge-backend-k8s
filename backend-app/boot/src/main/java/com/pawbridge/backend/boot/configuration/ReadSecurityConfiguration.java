@@ -30,7 +30,8 @@ public class ReadSecurityConfiguration {
         var userProfile = new AntPathRequestMatcher("/api/v1/users/me", "GET");
         var userNickname = new AntPathRequestMatcher("/api/v1/users/me/nickname", "PUT");
         var favoriteStatus = new AntPathRequestMatcher("/api/v1/favorites/{animalId}/check", "GET");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus);
+        var noteRecipient = new AntPathRequestMatcher("/api/v1/notes/recipients/{member}", "GET");
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient);
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
