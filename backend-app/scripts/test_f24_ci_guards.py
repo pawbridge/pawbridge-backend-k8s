@@ -781,6 +781,7 @@ class F24GuardTest(unittest.TestCase):
             self.assertEqual(h['baseline'], h['database'])
             self.assertEqual(12, h['load'].call_count)  # mask once + eleven authenticated requests; missing-token request reloads zero
             self.assertNotIn('Authorization', h['requests'][5][1]['headers'])
+            self.assertEqual('/api/v1/notes/stream/extra', h['requests'][6][0])
             self.assertEqual('/api/v1/notes/blocks/' + str(f24.OTHER) + '/extra', h['requests'][7][0])
             for index, (_, kwargs) in enumerate(h['requests']):
                 self.assertEqual(str(f24.OTHER), kwargs['headers']['X-User-Id'])

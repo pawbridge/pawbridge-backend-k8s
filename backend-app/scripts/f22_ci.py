@@ -352,8 +352,8 @@ def smoke():
                     check(status=503, message=STORAGE_UNAVAILABLE, kind='storage_unavailable')
                 check()
                 check(status=401, token=None, message='인증 토큰이 필요합니다.', layer='auth', kind='authentication')
-                check(note='stream', status=403, message='접근할 수 없습니다.', layer='route', kind='stream_denied')
-                check(status=403, message='접근할 수 없습니다.', layer='route', kind='denied_write', method='PUT', suffix='/read')
+                check(note='stream/extra', status=403, message='접근할 수 없습니다.', layer='route', kind='stream_denied')
+                check(status=403, message='접근할 수 없습니다.', layer='route', kind='denied_write', method='PUT', suffix='/read/extra')
                 require_fixture()
             finally:
                 try:

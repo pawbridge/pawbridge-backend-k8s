@@ -32,7 +32,7 @@ class PostBearerAuthenticationFilterTest {
             assertThat(identity.isAuthenticated()).isTrue();
             assertThat(identity.getPrincipal()).isInstanceOf(Long.class).isEqualTo(7L);
             assertThat(identity.getCredentials()).isNull();
-            assertThat(identity.getDetails()).isNull();
+            assertThat(identity.getDetails()).isInstanceOf(java.time.Instant.class);
             assertThat(identity.getAuthorities()).extracting(GrantedAuthority::getAuthority)
                     .containsExactlyElementsOf(authorities);
         });
@@ -60,5 +60,49 @@ class PostBearerAuthenticationFilterTest {
         assertThat(response.getStatus()).isEqualTo(200);
         assertThat(response.getContentAsString()).isEmpty();
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    void givenVerifiedStreamExpiry__whenFiltering__thenSaveOnlyRequestContextWithLongIdentityAndInstantWithoutSessionOrCredentials() throws Exception {
+        var repository = org.mockito.Mockito.spy(new org.springframework.security.web.context.RequestAttributeSecurityContextRepository());
+        var filter = new PostBearerAuthenticationFilter(new PostTokenAuthenticator(F3TestInputs.KEY), request -> true,
+                request -> request.getRequestURI().equals("/api/v1/notes/stream"), repository);
+        var expiry = java.time.Instant.now().plusSeconds(120).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        String token = io.jsonwebtoken.Jwts.builder().claim("userId", 7).claim("role", "ROLE_USER")
+                .expiration(java.util.Date.from(expiry)).signWith(F3TestInputs.KEY).compact();
+        var request = new MockHttpServletRequest("GET", "/api/v1/notes/stream");
+        request.addHeader("Authorization", "Bearer " + token);
+        request.addHeader("X-Auth-Expires-At", Long.MAX_VALUE);
+        var response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (ignored, output) -> {
+            var identity = SecurityContextHolder.getContext().getAuthentication();
+            assertThat(identity.getPrincipal()).isEqualTo(7L); assertThat(identity.getDetails()).isEqualTo(expiry);
+            assertThat(identity.getCredentials()).isNull();
+            assertThat(repository.loadDeferredContext(request).get().getAuthentication()).isSameAs(identity);
+        });
+        org.mockito.Mockito.verify(repository).saveContext(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.same(request), org.mockito.ArgumentMatchers.same(response));
+        assertThat(request.getSession(false)).isNull();
+        assertThat(repository.loadDeferredContext(new MockHttpServletRequest("GET", "/api/v1/notes/stream")).get().getAuthentication()).isNull();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void givenSignedTokenWithoutExpiry__whenFilteringRestOrExactStream__thenRequireExpiryOnlyForStreamAndNeverSaveRest(boolean stream) throws Exception {
+        var repository = org.mockito.Mockito.spy(new org.springframework.security.web.context.RequestAttributeSecurityContextRepository());
+        var filter = new PostBearerAuthenticationFilter(new PostTokenAuthenticator(F3TestInputs.KEY), request -> true,
+                request -> request.getRequestURI().equals("/api/v1/notes/stream"), repository);
+        String token = io.jsonwebtoken.Jwts.builder().claim("userId", 7).claim("role", "ROLE_UNKNOWN").signWith(F3TestInputs.KEY).compact();
+        var request = new MockHttpServletRequest("GET", stream ? "/api/v1/notes/stream" : "/api/v1/notes");
+        request.addHeader("Authorization", "Bearer " + token);
+        var response = new MockHttpServletResponse(); var reached = new java.util.concurrent.atomic.AtomicBoolean();
+        filter.doFilter(request, response, (ignored, output) -> {
+            reached.set(true); assertThat(SecurityContextHolder.getContext().getAuthentication().getDetails()).isNull();
+        });
+        assertThat(reached.get()).isEqualTo(!stream); assertThat(response.getStatus()).isEqualTo(stream ? 401 : 200);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).saveContext(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(request.getSession(false)).isNull();
     }
 }

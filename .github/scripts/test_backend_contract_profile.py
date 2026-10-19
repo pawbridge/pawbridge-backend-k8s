@@ -72,19 +72,19 @@ class ContractProfileTest(unittest.TestCase):
         with self.assertRaises(profile.ProfileBlocked):
             profile.select_profiles(context(), PATHS + [PATHS[0]])
 
-    def test_given_fixed_profiles__when_planning__then_require_exact_twenty_three_or_seventeen_smokes(self):
-        self.assertEqual(tuple('jar_f' + str(n) for n in range(3, 26)), profile.expected_smokes(profile.FULL))
-        expected = tuple('jar_f' + str(n) for n in range(3, 26) if n not in (16, 17, 19, 21, 22, 23))
+    def test_given_fixed_profiles__when_planning__then_require_exact_twenty_four_or_eighteen_smokes(self):
+        self.assertEqual(tuple('jar_f' + str(n) for n in range(3, 27)), profile.expected_smokes(profile.FULL))
+        expected = tuple('jar_f' + str(n) for n in range(3, 27) if n not in (16, 17, 19, 21, 22, 23))
         self.assertEqual(expected, profile.expected_smokes(profile.PILOT))
         plan = profile.make_plan(context(), PATHS, profile.PILOT, JAR)
-        self.assertEqual(17, len(plan['required_smokes']))
+        self.assertEqual(18, len(plan['required_smokes']))
         self.assertEqual(list(profile.PILOT_SKIPS), plan['skipped_smokes'])
 
     def test_given_full_default_scope__when_planning__then_accept_nonpilot_changes(self):
         ctx = dict(context(), head_ref='feat/ordinary-api', base_sha='b' * 40)
         plan = profile.make_plan(ctx, ['backend-app/community/src/main/java/Changed.java'], profile.FULL, JAR)
         self.assertEqual([], plan['skipped_smokes'])
-        self.assertEqual(23, len(plan['required_smokes']))
+        self.assertEqual(24, len(plan['required_smokes']))
 
     def test_given_incomplete_or_invalid_identity_and_jar__when_planning__then_reject(self):
         for key in profile.IDENTITY_KEYS:
@@ -110,7 +110,7 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual('passed', result['status'])
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
-                self.assertEqual(24, len(result['step_results']))
+                self.assertEqual(25, len(result['step_results']))
 
     def test_given_other_source_base_head_tree_run_or_jar__when_auditing__then_reject_stale_evidence(self):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
@@ -128,10 +128,11 @@ class ContractProfileTest(unittest.TestCase):
 
     def test_given_missing_new_or_misnamed_packaged_steps__when_auditing__then_require_profile_review(self):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
-        for operation in ('missing', 'new-f26', 'misnamed'):
+        for operation in ('missing', 'missing-f26', 'new-f27', 'misnamed'):
             actual = steps(profile.FULL)
             if operation == 'missing': del actual['jar_f13']
-            elif operation == 'new-f26': actual['jar_f26'] = {'outcome': 'success', 'conclusion': 'success'}
+            elif operation == 'missing-f26': del actual['jar_f26']
+            elif operation == 'new-f27': actual['jar_f27'] = {'outcome': 'success', 'conclusion': 'success'}
             else: actual['jar_f03'] = actual.pop('jar_f3')
             with self.subTest(operation=operation), self.assertRaises(profile.ProfileBlocked):
                 profile.audit_execution(plan, context(), PATHS, profile.FULL, JAR, actual)
@@ -140,9 +141,10 @@ class ContractProfileTest(unittest.TestCase):
         plan = profile.make_plan(context(), PATHS, profile.PILOT, JAR)
         for outcome, conclusion in (('failure', 'failure'), ('failure', 'success'),
                                     ('cancelled', 'cancelled'), ('skipped', 'skipped'), ('success', 'failure')):
-            actual = steps(profile.PILOT); actual['jar_f12'] = dict(outcome=outcome, conclusion=conclusion)
-            with self.subTest(outcome=outcome, conclusion=conclusion), self.assertRaises(profile.ProfileBlocked):
-                profile.audit_execution(plan, context(), PATHS, profile.PILOT, JAR, actual)
+            for key in ('jar_f12', 'jar_f26'):
+                actual = steps(profile.PILOT); actual[key] = dict(outcome=outcome, conclusion=conclusion)
+                with self.subTest(step=key, outcome=outcome, conclusion=conclusion), self.assertRaises(profile.ProfileBlocked):
+                    profile.audit_execution(plan, context(), PATHS, profile.PILOT, JAR, actual)
 
     def test_given_planned_skip_was_run_failed_or_half_skipped__when_auditing__then_reject(self):
         plan = profile.make_plan(context(), PATHS, profile.PILOT, JAR)

@@ -165,8 +165,8 @@ class NoteBlockRemoveHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"MISSING", "INVALID", "VALID"})
-    void given__stream_with_missing_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_removal_or_sse_work(String token) throws Exception {
-        var request = get("/api/v1/notes/stream").accept(MediaType.TEXT_EVENT_STREAM);
+    void given__unexposed_stream_extension_with_missing_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_removal_or_sse_work(String token) throws Exception {
+        var request = get("/api/v1/notes/stream/extra").accept(MediaType.TEXT_EVENT_STREAM);
         if (!token.equals("MISSING")) request.header("Authorization", token.equals("INVALID") ? "Bearer invalid" : "Bearer " + F3TestInputs.token(7, "ROLE_USER"));
         mvc.perform(request).andExpect(status().isForbidden())
                 .andExpect(header().string("Cache-Control", SECURITY_CACHE)).andExpect(header().doesNotExist("Set-Cookie"))
@@ -175,7 +175,7 @@ class NoteBlockRemoveHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"PUT /api/v1/notes/00000000-0000-0000-0000-000000000008/read",
+    @ValueSource(strings = {"PUT /api/v1/notes/00000000-0000-0000-0000-000000000008/read/extra",
             "DELETE /api/v1/notes/00000000-0000-0000-0000-000000000008", "DELETE /api/v1/notes/blocks/8/extra"})
     void given__unexposed_block_note_mutation_or_deeper_path__when__requesting__then__retain_default_403_without_removal_work(String wire) throws Exception {
         String[] parts = wire.split(" ", 2);

@@ -209,7 +209,7 @@ class NoteBlockStatusHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GET /api/v1/notes/stream", "GET /api/v1/notes/blocks/status/", "GET /api/notes/blocks/status",
+    @ValueSource(strings = {"GET /api/v1/notes/stream/extra", "GET /api/v1/notes/blocks/status/", "GET /api/notes/blocks/status",
             "HEAD /api/v1/notes/blocks/status", "OPTIONS /api/v1/notes/blocks/status", "POST /api/v1/notes/blocks/status"})
     void given__unexposed_neighbor_path_or_method__when__requesting_with_a_valid_token__then__deny_before_dependencies(String request) throws Exception {
         String[] parts = request.split(" ", 2);

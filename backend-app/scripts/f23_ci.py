@@ -319,7 +319,7 @@ def smoke():
                     check(status=503, message=STORAGE_UNAVAILABLE, kind='storage_unavailable')
                 check()
                 check('?page=invalid', status=401, token=None, message='인증 토큰이 필요합니다.', layer='auth', kind='authentication')
-                check(status=403, message='접근할 수 없습니다.', layer='route', kind='stream_denied', suffix='/stream')
+                check(status=403, message='접근할 수 없습니다.', layer='route', kind='stream_denied', suffix='/stream/extra')
                 check(status=403, message='접근할 수 없습니다.', layer='route', kind='denied_write', method='POST')
                 check(kind='detail_get', suffix='/' + INBOX[-1])
                 require_fixture()

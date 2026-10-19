@@ -22,7 +22,7 @@ PILOT_PATHS = frozenset({
     '.github/scripts/test_backend_app_ci_policy.py',
     'backend-app/README.md',
 })
-ALL_SMOKES = tuple('jar_f' + str(number) for number in range(3, 26))
+ALL_SMOKES = tuple('jar_f' + str(number) for number in range(3, 27))
 PILOT_SKIPS = tuple('jar_f' + str(number) for number in (16, 17, 19, 21, 22, 23))
 IDENTITY_KEYS = ('event_name', 'repository', 'head_repository', 'head_ref',
                  'base_sha', 'head_sha', 'source_sha', 'tree_sha', 'run_id', 'run_attempt')

@@ -217,6 +217,30 @@ class PawBridgeApplicationTest {
                     assertThat(creationTransaction.getTransactionManager()).isSameAs(writeManager);
                     assertThat(creationTransaction.getTimeout()).isEqualTo(15);
                     assertThat(creationTransaction.isReadOnly()).isFalse();
+                    var streams = context.getBean(com.pawbridge.backend.community.internal.note.web.PrivateNoteStreamRegistry.class);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteChangeHints.class)).hasSize(1).containsValue(streams);
+                    assertThat(streams.isRunning()).isTrue();
+                    assertThat(streams.getPhase()).isEqualTo(Integer.MAX_VALUE);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(streams, "clock")).isSameAs(context.getBean("readClock"));
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.RequireActiveNoteStream.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteStreamController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteStreamExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.MarkPrivateNoteRead.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteReadMutationController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteReadMutationExceptionHandler.class)).hasSize(1);
+                    var markRead = context.getBean(com.pawbridge.backend.community.internal.note.application.MarkPrivateNoteRead.class);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(markRead)).isFalse();
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(markRead, "clock")).isSameAs(context.getBean("readClock"));
+                    var readMutation = context.getBean(com.pawbridge.backend.community.internal.note.application.NoteReadMutation.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(markRead, "mutation")).isSameAs(readMutation);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(readMutation, "jdbc")).isSameAs(writeJdbc);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(readMutation, "hints")).isSameAs(streams);
+                    var mutationTransaction = (org.springframework.transaction.support.TransactionTemplate)
+                            org.springframework.test.util.ReflectionTestUtils.getField(readMutation, "transaction");
+                    assertThat(mutationTransaction).isNotSameAs(sharedWriteTransaction);
+                    assertThat(mutationTransaction.getTransactionManager()).isSameAs(writeManager);
+                    assertThat(mutationTransaction.getTimeout()).isEqualTo(15);
+                    assertThat(mutationTransaction.isReadOnly()).isFalse();
                     pools.values().forEach(pool -> {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();

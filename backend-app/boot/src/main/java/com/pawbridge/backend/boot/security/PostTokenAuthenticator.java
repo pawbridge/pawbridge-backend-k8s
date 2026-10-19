@@ -4,6 +4,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import java.util.List;
+import java.util.Date;
 import javax.crypto.SecretKey;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -21,6 +22,10 @@ public final class PostTokenAuthenticator {
     }
 
     UsernamePasswordAuthenticationToken authenticateToken(String authorization) {
+        return authenticateToken(authorization, false);
+    }
+
+    UsernamePasswordAuthenticationToken authenticateToken(String authorization, boolean requireExpiry) {
         if (authorization == null || !authorization.startsWith("Bearer "))
             throw new Failure("인증 토큰이 필요합니다.");
         Claims claims;
@@ -30,9 +35,13 @@ public final class PostTokenAuthenticator {
             Long userId = claims.get("userId", Long.class);
             String role = claims.get("role", String.class);
             if (userId == null || userId <= 0 || role == null) throw new IllegalArgumentException();
+            Date expiration = claims.getExpiration();
+            if (requireExpiry && expiration == null) throw new IllegalArgumentException();
             List<SimpleGrantedAuthority> authorities = "ROLE_ADMIN".equals(role)
                     ? List.of(new SimpleGrantedAuthority("ROLE_ADMIN")) : List.of();
-            return new UsernamePasswordAuthenticationToken(userId, null, authorities);
+            var authentication = new UsernamePasswordAuthenticationToken(userId, null, authorities);
+            authentication.setDetails(expiration == null ? null : expiration.toInstant());
+            return authentication;
         } catch (RuntimeException failure) { throw new Failure("토큰 파싱에 실패했습니다."); }
     }
 
