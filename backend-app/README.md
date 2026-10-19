@@ -1,6 +1,6 @@
 # PawBridge 업무 통합 실행기
 
-Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정, F14의 본인 찜 여부 조회, F15의 공개 홈 영상 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정, F14의 본인 찜 여부 조회, F15의 공개 홈 영상 조회, F16의 공개 오늘 방문자 합계 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
 
 ## 업무 경계와 호출
 
@@ -8,7 +8,7 @@ Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2�
 |---|---|---|
 | boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
 | user | 공개 닉네임 조회 계약·내부 본인 정보 조회·본인 닉네임 수정·찜 여부 조회와 JDBC·HTTP 구현 | 없음 |
-| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·공개 홈 영상·REST 응답 | user |
+| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·공개 홈 영상·오늘 방문자 합계·REST 응답 | user |
 
 ```text
 boot -> community.internal.post.web -> community.internal.post.application
@@ -24,7 +24,7 @@ Community는 User의 공개 API만 참조한다. User 부재·명시된 조회 �
 
 ## DB·실행 설정
 
-읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`, `pawbridge_community.home_videos`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
+읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`, `pawbridge_community.home_videos`, `pawbridge_community.daily_visit_count`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
 
 | 환경 변수 | 의미 |
 |---|---|
@@ -181,6 +181,14 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 같은 reader·3초 read-only TX와 두 pool을 재사용한다. 원본 home()는 명시적 TX 없이 조회하므로 보호 TX 도입은 후보의 기술적 차이다. 독립 Clock.systemUTC만 조립하며 원본 PrivateNoteConfiguration·HomeVideoRefresh·YouTube client·API key·예약/metadata 갱신을 등록하지 않는다. board 권한·새 writer 권한·User/Outbox/search/S3 호출이나 JWT 발급/갱신은 없다. 관리자 편집과 구 실행기의 예약 소유권 이전·운영 배포는 이 후보에 포함되지 않는다.
 
+## F16 공개 오늘 방문자 합계 조회
+
+정확한 `GET /api/v1/visits/today`는 기존 `pawbridge.visits.enabled` 설정과 `DAILY_VISITORS_ENABLED` 환경 변수의 기본 false를 유지한다. true일 때만 조회 실행자·reader·controller·advice를 조립하며 서명키·VisitCookie·원본 lifecycle·시작 INSERT·집계 POST·정리/예약 작업은 등록하지 않는다. 공개 GET 보안 matcher는 두 상태에서 같고 false/누락은404다. 이404 본문을 원본 global envelope와 동일하다고 주장하지 않으며 미편입 경로를 열지 않는다.
+
+조회 실행자는 F15의 Clock에서 instant를 한 번 읽고 서울 날짜를 TX/연결 전에 결정한다. DATE 조건·BIGINT 합계만 읽어 정확한 date/count 두 필드와 부재0을 반환한다. Date.valueOf 바인딩, 원문 long JSON number와 최초 날짜를 보존하며 대기 중 자정 재검사·현재 시각 재조회·음수/null 보정은 없다. 익명·잘못된 Bearer·X-User 헤더·Origin·Cookie·bot 여부로 합계를 바꾸지 않는다. 성공과 DataAccessException503은 명시적 no-store이며 쿠키를 발급하지 않는다. DAO503은 `방문 통계를 불러올 수 없습니다.`, 일반 Runtime500은 `서버 에러!`다. 실제 commit 예외가 DAO로 번역되면503이며 TX 실패를 모두500/503으로 묶지 않는다. 일반500에는 별도 캐시 정책을 추가하지 않고 공통 보안 헤더를 구분한다.
+
+기존 reader의 3초 read-only TX는 원본 today()의 autocommit과 구분되는 후보 보호다. 새 pool/TM·JWT 정책/발급·서명키·외부 요청·쓰기·Outbox·이벤트는 없다. 시작 기록·집계·cleanup은 기존 실행기가 계속 소유하고 조회 편입을 운영 배포나 기존 실행기 종료로 표현하지 않는다.
+
 ## 구조 검사
 
 `gradle/architecture.gradle`의 `verifyArchitecture`와 `verifyBusinessPackages`를 유지한다.
@@ -212,9 +220,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 14. F3~F12 회귀를 각 단계 원래 권한에서 끝낸 뒤 F13 가드→기존 User ID/nickname 보존·고정 V1 UNIQUE/lower index·V2 8열 문자 CHECK·writer SELECT(user_id,nickname)/UPDATE(nickname,updated_at) 준비→nickname 전용 UTC/Seoul/XML→packaged를 실행한다. 확장 뒤 F12 무권한 helper를 호출하지 않고 F11 owner/정확한 포트/댓글 ACL 체인과 F12 schema/reader7, F13 writer exact ACL을 대조한다. JAR 직전 고정 원본 발급기로 600초 합성 토큰과 두 번째 principal을 갱신하며 stale token은 자식 시작 전에 거부한다. 실제 PUT→본인 정보/기존 댓글 작성자 표시, 동일값 무변경·case-only/타인 중복·인증/검증/부재·UPDATE 권한 실패/회복을 확인한다. 성공은 해당 회원 nickname/updated_at만 바꾸고, 동일값·오류·GET은 전체 DB/S3 불변이다. 원본 JPA 비교는 별도 compatibility 시험이며 운영 HTTP E2E가 아니다.
 15. 기존 F3~F13 staged 회귀 뒤 F14 owner/marker와 고정 V1 favorites4열·identity PK·회원/동물 UK·User RESTRICT FK·실제 animal index를 준비한다. reader에는 SELECT(user_id,animal_id)만 추가하고 writer의 favorites 권한·두 계정 sequence 권한은 금지한다. F13 strict 체인은 그대로 재사용하고 F12 strict는 호출하지 않는다. 실제 원본 derived exists와 후보를 전용 favoriteStatusCompatibilityTest UTC 한 번 및 비0/실패·오류·skip0 XML로 비교하며 시각 경로 없는 동일 사례를 Seoul에서 반복하지 않는다. JAR는 최종 갱신된 두 principal 토큰으로 true/false·회원 부재 false·인증/형식/SQL 실패와 권한 복구를 확인한다. 매 GET snapshot에 favorites를 포함해 전체 DB/S3 변경0, 정상 두 pool 종료·연결0을 검사하고 시험 행은 favorite→User 순서로 정리한다.
 16. 기존 F3~F14 staged 회귀 뒤 F15 owner/marker와 고정 V9 전체 board2열·revision0 초기행/videos11열·UUID PK·영상ID UNIQUE/형식 CHECK·refresh index를 준비한다. reader에는 videos11열 SELECT만 부여하고 board 및 writer의 두 테이블 권한·identity/sequence는 추가하지 않는다. F14→F13의 기존 target/owner/ACL 체인을 재사용하며 F15 catalog 실패는 별도 태그의 bounded/masked 진단만 남긴다. 전용 homeVideoCompatibilityTest/homeVideoCompatibilitySeoulTest는 실제 원본 Service/Repository와 TSTZ cutoff−1µs/동일/+1µs·정렬/3건·nullable metadata/Instant JSON을 UTC/Seoul에서 비교하고 두 exact-FQN XML의 비0·실패/오류/skip0을 확인한다. Seoul JAR는 하루 전 fresh/31일 전 stale로 공개 성공·malformed Bearer·권한503/복구·빈 배열을 확인한다. 영상/board/favorites와 기존 전체 업무 DB/Outbox/S3 snapshot은 GET 전후 불변이며 두 pool 정상 종료·연결0을 검사한다. 공개 GET용 토큰 재발급/TTL 검사는 추가하지 않는다.
-17. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
+17. 기존 F3~F15 staged 회귀 뒤 F16 owner/marker와 고정 V11 중 daily_visit_count 한 CREATE만 준비한다. 정확한 DATE PK·BIGINT NOT NULL/검증된 nonnegative CHECK·reader 두 열 SELECT·writer0/no-sequence를 catalog로 검사하며 F15 safe chain을 재사용한다. visitTodayCompatibilityTest는 UTC data/access 두 클래스, visitTodayCompatibilitySeoulTest는 같은 DATE data 클래스만, visitTodayLegacyMvcTest는 실제 원본 MVC를 UTC에서 한 번 실행한다. 정확한4개 XML·비0·실패/오류/skip0을 확인하고 일반 compatibility에서 세 클래스를 제외한다. 공개 Seoul JAR는 true5 GET과 false1 GET404로 나누고 JWT를 읽거나 갱신하지 않는다. 소유 인접일 합계와 요청 전후 서울 날짜로 실시간 자정 오판을 막고 GET·시작 전후 전체 업무 DB/S3 불변과 앱별 두 pool 정상 종료·연결0을 확인한다. 비활성 방문 bean0/JDBC mock 무호출은 Boot 시험 근거이며 JAR404·snapshot 불변을 SQL 시도0 증거로 과장하지 않는다.
+18. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
-`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f14_ci.py`·`f15_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`·`f14_fixture.sql`·`f15_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
+`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f14_ci.py`·`f15_ci.py`·`f16_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`·`f14_fixture.sql`·`f15_fixture.sql`·`f16_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
 
 `prepare_legacy_oracle.py`는 기준 `e8ad7b8ec9006772ccc5f5881334df2730dbd8de`의 정확히 6개 Java 파일만 해시 검증해 boot/build 안 test-only 경로로 추출한다. Post/BoardType/StringListConverter/PostResponse와 UserServiceClient 및 그 JDK-only 응답 의존 PrivateNoteModels다. legacy 전체 sourceDir·Application을 편입하지 않는다. 실제 source/버전 비교는 compatibility classpath에서만 이뤄지고 앱 JAR에는 들어가지 않는다.
 
@@ -240,8 +249,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 `prepare_f15_legacy_oracle.py`는 기준 `cb0082881391b3ba885293520c2a6024a15a2034`의 실제 HomeVideoModels·Repository·Service·YouTubeVideoClient·YouTubeVideoUrl5파일을 고정 해시로 검증해 전용 compatibility 경로에 추출한다. 실제 home()를 고정 Clock과 JDBC로 실행하며 YouTube mock 무호출과 원본 home의 TX 무호출을 확인한다. ORM·전체 원본 앱·스케줄러·실제 HttpClient/외부요청은 실행하지 않는다. 출력/evidence 경로·변조·기존 출력 덮어쓰기 거부는 무소켓 guard로 보호하고 원본/fixture/시험 생성물은 실행 JAR에서 거부한다. `f15_ci.py`는 고정 V9 전체 DDL과 기존 업무 행 보존을 대조한다.
 
+`prepare_f16_legacy_oracle.py`는 기준 `33cad5567767f8730fc2c4389815ecd031f41dc0`의 VisitService/Repository/Cookie/Models/Controller/Advice와 Community ResponseDTO/global advice/charset helper9개 실제 소스를 해시 고정한다. F7의 공통 오류 두 클래스는 원문 해시와 기존 generated bytes를 확인해 재사용한다. 실제 원본 GET과 scoped DAO503/global Runtime500의 body/headers를 최소 classpath에서 비교하고 원본 설정·lifecycle·예약은 등록하지 않는다. 원본 Cookie는 oracle에서만 합성 키로 생성하며 후보나 JAR는 키가 필요 없다. 경로·해시·공유 바이트·기존 출력 보존을 무소켓 guard로 확인하고 생성물은 JAR에서 제외한다.
+
 TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classpath를 사용한다. 실제 업무 build와 guard를 fixture에 복사하고, 본 빌드가 해결한 BOM/의존 cache를 offline으로 사용한다. 허용/금지 fixture의 이유를 검사하며 일반 컴파일·다운로드 오류를 구조 차단 성공으로 취급하지 않는다.
 
 Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15 계획과 모듈형 모놀리스 전환 노트를 따른다.
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16 계획과 모듈형 모놀리스 전환 노트를 따른다.

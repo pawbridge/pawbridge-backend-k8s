@@ -17,6 +17,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f14LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f15LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f16LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -191,8 +192,19 @@ tasks.register('prepareF15LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f15-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF16LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF7LegacyOracle')
+    inputs.files(rootProject.file('scripts/prepare_f16_legacy_oracle.py'), rootProject.file('scripts/prepare_f7_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f16LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f16-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f16_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f16LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f16-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle'), tasks.named('prepareF16LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -210,6 +222,9 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayAccessTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F16LegacyVisitMvcTest'
     }
 }
 
@@ -334,3 +349,29 @@ tasks.register('favoriteStatusCompatibilityTest', Test) {
     }
 }
 tasks.named('homeVideoCompatibilitySeoulTest') { shouldRunAfter tasks.named('homeVideoCompatibilityTest') }
+
+// Date binding uses two JVM zones; access/HTTP contracts run only once.
+['visitTodayCompatibilityTest': 'UTC', 'visitTodayCompatibilitySeoulTest': 'Asia/Seoul', 'visitTodayLegacyMvcTest': 'UTC'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = "Checks the isolated F16 visit GET contract in ${zone}."
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        filter {
+            if (taskName == 'visitTodayLegacyMvcTest') {
+                includeTestsMatching 'com.pawbridge.backend.compatibility.F16LegacyVisitMvcTest'
+            } else {
+                includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
+                if (taskName == 'visitTodayCompatibilityTest') {
+                    includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayAccessTest'
+                }
+            }
+            failOnNoMatchingTests = true
+        }
+        shouldRunAfter tasks.named('homeVideoCompatibilitySeoulTest')
+    }
+}
+tasks.named('visitTodayCompatibilitySeoulTest') { shouldRunAfter tasks.named('visitTodayCompatibilityTest') }
+tasks.named('visitTodayLegacyMvcTest') { shouldRunAfter tasks.named('visitTodayCompatibilitySeoulTest') }

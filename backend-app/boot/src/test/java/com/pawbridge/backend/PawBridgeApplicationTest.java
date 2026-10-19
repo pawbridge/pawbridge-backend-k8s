@@ -57,13 +57,17 @@ class PawBridgeApplicationTest {
                     context.getBeanFactory().registerSingleton("readDatabaseSettings", settings);
                     context.getBeanFactory().registerSingleton("postWriteSettings", writeSettings);
                 })
-                .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false")
+                .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.VisitCountReader.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.ReadTodayVisits.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.web.VisitTodayController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.web.VisitTodayExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(java.time.Clock.class)).containsOnlyKeys("readClock");
                     assertThat(context.getBean("readClock", java.time.Clock.class).getZone()).isEqualTo(java.time.ZoneOffset.UTC);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.application.HomeVideoReader.class)).hasSize(1);
@@ -160,6 +164,30 @@ class PawBridgeApplicationTest {
                     assertThat(servletConfig.getMaxFileSize()).isEqualTo(DataSize.ofMegabytes(100).toBytes());
                     assertThat(servletConfig.getMaxRequestSize()).isEqualTo(DataSize.ofMegabytes(200).toBytes());
                 });
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"false", "absent"})
+    void given__false_or_absent_visit_flag__when__assembling_actual_configuration__then__no_visit_beans_or_jdbc_calls(String flag) {
+        var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var transaction = org.mockito.Mockito.mock(org.springframework.transaction.support.TransactionTemplate.class);
+        var runner = new WebApplicationContextRunner()
+                .withUserConfiguration(com.pawbridge.backend.boot.configuration.VisitReadConfiguration.class)
+                .withInitializer(context -> {
+                    context.getBeanFactory().registerSingleton("readJdbc", jdbc);
+                    context.getBeanFactory().registerSingleton("readOnlyTransaction", transaction);
+                    context.getBeanFactory().registerSingleton("readClock", java.time.Clock.systemUTC());
+                });
+        if (!flag.equals("absent")) runner = runner.withPropertyValues("pawbridge.visits.enabled=" + flag);
+
+        runner.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.VisitCountReader.class)).isEmpty();
+            assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.ReadTodayVisits.class)).isEmpty();
+            assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.web.VisitTodayController.class)).isEmpty();
+            assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.web.VisitTodayExceptionHandler.class)).isEmpty();
+            org.mockito.Mockito.verifyNoInteractions(jdbc, transaction);
+        });
     }
 
     private static Map<String, String> inputs() {
