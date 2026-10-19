@@ -51,4 +51,10 @@ class PostTokenAuthenticatorTest {
                 Map.of("userId",-1,"role","ROLE_USER"),Map.of("userId","not-a-number","role","ROLE_USER"),
                 Map.of("userId",7),Map.of("userId",7,"role",Map.of("unexpected",true)));
     }
+
+    @Test
+    void givenSignedIdentityWithoutExpiry__whenAuthenticatingAnExistingRestContract__thenKeepItsOptionalExpiryPolicy() {
+        String token = Jwts.builder().claim("userId", 7).claim("role", "ROLE_UNKNOWN").signWith(F3TestInputs.KEY).compact();
+        assertThat(tokens.authenticate("Bearer " + token)).isEqualTo(7);
+    }
 }

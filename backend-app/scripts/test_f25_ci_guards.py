@@ -355,6 +355,7 @@ class F25GuardTest(unittest.TestCase):
             f25.smoke();value=json.loads((h['evidence']/'f25-packaged-result.txt').read_text())
             self.assertEqual(MOCK_COUNTS,{k:value[k] for k in f25.COUNTERS});self.assertEqual(('passed',2,0),(value['status'],value['shutdown_pools'],value['remaining_application_connections']))
             methods=[k['method'] for _,k in h['requests']];self.assertEqual((18,8,7,3),(len(methods),methods.count('PUT'),methods.count('GET'),methods.count('DELETE')))
+            self.assertEqual('/api/v1/notes/stream/extra',h['requests'][16][0])
             self.assertEqual('/api/v1/notes/blocks/'+str(f25.OTHER)+'/extra',h['requests'][-1][0]);self.assertNotIn('Authorization',h['requests'][15][1]['headers'])
             self.assertEqual(18,h['load'].call_count);self.assertEqual(['stop','stop','observe','cleanup'],[v for v in h['events'] if v in ('stop','observe','cleanup')]);h['cleanup'].assert_called_once_with(f25.OWNED,f25.USERS)
             self.assertEqual(h['baseline'],h['database'])

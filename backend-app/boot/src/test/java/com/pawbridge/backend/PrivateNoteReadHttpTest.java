@@ -211,8 +211,8 @@ class PrivateNoteReadHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"MISSING", "INVALID", "VALID"})
-    void given__stream_with_no_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_authentication_binding_or_sse_work(String token) throws Exception {
-        var request = get("/api/v1/notes/stream").accept(MediaType.TEXT_EVENT_STREAM).header("X-User-Id", "7");
+    void given__unexposed_stream_extension_with_no_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_authentication_binding_or_sse_work(String token) throws Exception {
+        var request = get("/api/v1/notes/stream/extra").accept(MediaType.TEXT_EVENT_STREAM).header("X-User-Id", "7");
         if (!token.equals("MISSING")) request.header("Authorization", token.equals("INVALID")
                 ? "Bearer invalid" : "Bearer " + F3TestInputs.token(7, "ROLE_USER"));
 
@@ -309,7 +309,7 @@ class PrivateNoteReadHttpTest {
     @ValueSource(strings = {"GET /api/notes/f2200000-0000-0000-0000-000000000001",
             "GET /api/v1/notes/f2200000-0000-0000-0000-000000000001/", "HEAD /api/v1/notes/f2200000-0000-0000-0000-000000000001",
             "OPTIONS /api/v1/notes/f2200000-0000-0000-0000-000000000001", "POST /api/v1/notes/f2200000-0000-0000-0000-000000000001",
-            "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/read", "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/favorite",
+            "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/read/extra", "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/favorite",
             "DELETE /api/v1/notes/f2200000-0000-0000-0000-000000000001"})
     void given__unexposed_neighbor_alias_or_method__when__requesting_with_valid_jwt__then__retain_default_deny_without_note_or_writer_work(String request) throws Exception {
         String[] parts = request.split(" ", 2);

@@ -255,8 +255,8 @@ class PrivateNoteListHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"MISSING", "INVALID", "VALID"})
-    void given__stream_with_no_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_list_or_sse_work(String token) throws Exception {
-        var request = get(PATH + "/stream").accept(MediaType.TEXT_EVENT_STREAM);
+    void given__stream_extension_with_no_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_list_or_sse_work(String token) throws Exception {
+        var request = get(PATH + "/stream/extra").accept(MediaType.TEXT_EVENT_STREAM);
         if (!token.equals("MISSING")) request.header("Authorization", token.equals("INVALID") ? "Bearer invalid" : "Bearer " + F3TestInputs.token(7, "ROLE_USER"));
         mvc.perform(request).andExpect(status().isForbidden()).andExpect(header().string("Cache-Control", SECURITY_CACHE))
                 .andExpect(header().doesNotExist("Set-Cookie"))

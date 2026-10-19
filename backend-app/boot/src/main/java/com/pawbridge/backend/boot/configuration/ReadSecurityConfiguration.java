@@ -18,6 +18,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 
 @Configuration(proxyBeanMethods = false)
 public class ReadSecurityConfiguration {
@@ -39,17 +40,21 @@ public class ReadSecurityConfiguration {
         var noteBlockCreate = new AntPathRequestMatcher("/api/v1/notes/blocks/{member}", "PUT");
         var noteNotifications = new AntPathRequestMatcher("/api/v1/notes/notifications", "GET");
         var privateNoteList = new AntPathRequestMatcher("/api/v1/notes", "GET");
+        var noteStream = new AntPathRequestMatcher("/api/v1/notes/stream", "GET");
+        var noteRead = new AntPathRequestMatcher("/api/v1/notes/{id}/read", "PUT");
         var privateNote = new AndRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/notes/{id}", "GET"),
                 new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/notes/stream", "GET")));
         var totalUserCount = new AntPathRequestMatcher("/api/v1/admin/users/stats/total-users", "GET");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate);
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead);
+        var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .requestCache(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
@@ -60,7 +65,7 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(totalUserCount).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())
-                .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postWriting), AnonymousAuthenticationFilter.class)
+                .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postWriting, noteStream, streamContexts), AnonymousAuthenticationFilter.class)
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> forbidden(response))
                         .accessDeniedHandler((request, response, exception) -> forbidden(response,

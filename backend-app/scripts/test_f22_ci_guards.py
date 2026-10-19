@@ -277,8 +277,8 @@ class F22GuardTest(unittest.TestCase):
             self.assertEqual('passed', result['status']); self.assertEqual(9, len(requests))
             self.assertEqual(MOCK_COUNTS, {key: result[key] for key in f22.COUNTERS})
             self.assertEqual([0, 0, 1, 2, 3, 4, 5, 7, 8], calls)
-            self.assertNotIn('Authorization', requests[6][1]['headers']); self.assertEqual('/api/v1/notes/stream', requests[7][0])
-            self.assertEqual('PUT', requests[8][1]['method']); self.assertTrue(requests[8][0].endswith('/read'))
+            self.assertNotIn('Authorization', requests[6][1]['headers']); self.assertEqual('/api/v1/notes/stream/extra', requests[7][0])
+            self.assertEqual('PUT', requests[8][1]['method']); self.assertEqual('/api/v1/notes/' + f22.INBOX + '/read/extra', requests[8][0])
             self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(f22.OWNED)
             self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
 

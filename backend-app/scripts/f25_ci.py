@@ -414,7 +414,7 @@ def smoke():
                 check(path,delta='insert',kind='recovery')
                 check(path,method='DELETE',delta='remove')
                 check('/api/v1/notes/blocks/9223372036854775808',status=401,token=None,message='인증 토큰이 필요합니다.',layer='auth',kind='authentication')
-                check('/api/v1/notes/stream',method='GET',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
+                check('/api/v1/notes/stream/extra',method='GET',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
                 check(path+'/extra',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
                 require_fixture()
             finally:
