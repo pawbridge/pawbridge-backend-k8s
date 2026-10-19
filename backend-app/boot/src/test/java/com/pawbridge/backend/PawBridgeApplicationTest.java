@@ -70,6 +70,9 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostMediaRemover.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostDeletion.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostDeleteController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.UpdatePost.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostModification.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostUpdateController.class)).hasSize(1);
                     var pools = context.getBeansOfType(com.zaxxer.hikari.HikariDataSource.class);
                     assertThat(pools.get("dataSource").isReadOnly()).isTrue();
                     assertThat(pools.get("writeDataSource").isReadOnly()).isFalse();

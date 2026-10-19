@@ -4,6 +4,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.community.internal.post.application.PostSnapshot;
 import com.pawbridge.backend.community.internal.post.application.PostWriter;
+import com.pawbridge.backend.community.internal.post.application.PostModification;
+import com.pawbridge.backend.community.internal.post.application.PostNotFoundException;
+import com.pawbridge.backend.community.internal.post.domain.PostOwnership;
+import com.fasterxml.jackson.core.type.TypeReference;
+import java.util.List;
+import java.util.Objects;
 import com.pawbridge.backend.community.internal.post.application.UnsupportedPostCharactersException;
 import com.pawbridge.backend.community.internal.post.domain.PostToCreate;
 import com.pawbridge.backend.community.internal.post.infrastructure.search.KoreanSearchTerms;
@@ -20,7 +26,7 @@ import java.util.UUID;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.transaction.support.TransactionOperations;
 
-public final class JdbcPostWriter implements PostWriter, AutoCloseable {
+public final class JdbcPostWriter implements PostWriter, PostModification, AutoCloseable {
     private static final String INSERT_POST = """
             INSERT INTO pawbridge_community.posts
                 (author_id, title, content, board_type, image_urls, created_at, updated_at)
@@ -41,6 +47,16 @@ public final class JdbcPostWriter implements PostWriter, AutoCloseable {
                 content_hash = excluded.content_hash, analyzer_version = excluded.analyzer_version,
                 tokens = excluded.tokens
             """;
+
+    private static final String LOCK_POST = """
+            SELECT post_id, author_id, title, content, board_type, image_urls, created_at, updated_at
+            FROM pawbridge_community.posts WHERE post_id = ? AND deleted_at IS NULL FOR UPDATE
+            """;
+    private static final String UPDATE_POST = """
+            UPDATE pawbridge_community.posts SET title = ?, content = ?, image_urls = CAST(? AS json), updated_at = ?
+            WHERE post_id = ? AND author_id = ? AND deleted_at IS NULL
+            """;
+    private static final TypeReference<List<String>> IMAGE_URLS_TYPE = new TypeReference<>() {};
 
     private final JdbcOperations jdbc;
     private final TransactionOperations transactions;
@@ -97,6 +113,57 @@ public final class JdbcPostWriter implements PostWriter, AutoCloseable {
                 terms.document(post.title()), terms.document(post.content())));
         return new PostSnapshot(postId, post.authorId(), post.title(), post.content(), post.boardType().name(),
                 post.imageUrls(), now, now);
+    }
+
+    @Override
+    public PostSnapshot update(long postId, long authorId, String title, String content, List<String> imageUrls) {
+        try {
+            return transactions.execute(status -> updateInTransaction(postId, authorId, title, content, imageUrls));
+        } catch (RuntimeException failure) {
+            if (PostgresqlRollbackCharsetViolation.matches(failure)) {
+                throw new UnsupportedPostCharactersException(failure);
+            }
+            throw failure;
+        }
+    }
+
+    private PostSnapshot updateInTransaction(long postId, long authorId, String title, String content, List<String> imageUrls) {
+        PostSnapshot current = jdbc.query(connection -> prepare(connection, LOCK_POST, postId), row -> {
+            if (!row.next()) throw new PostNotFoundException();
+            Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            return new PostSnapshot(row.getLong("post_id"), row.getLong("author_id"), row.getString("title"),
+                    row.getString("content"), row.getString("board_type"), images(row.getString("image_urls")),
+                    row.getTimestamp("created_at", utc).toLocalDateTime(), row.getTimestamp("updated_at", utc).toLocalDateTime());
+        });
+        if (current == null) throw new PostNotFoundException();
+        PostOwnership.requireAuthor(current.authorId(), authorId);
+        String nextTitle = title == null ? current.title() : title;
+        String nextContent = content == null ? current.content() : content;
+        List<String> nextImages = imageUrls == null ? current.imageUrls() : imageUrls;
+        // Legacy Map.of rejects JSON literal null images; do not silently normalize that failure.
+        String payload = json(Map.of("postId", postId, "authorId", authorId, "title", nextTitle,
+                "content", nextContent, "boardType", current.boardType(), "imageUrls", nextImages));
+        boolean changed = !Objects.equals(current.title(), nextTitle) || !Objects.equals(current.content(), nextContent)
+                || !Objects.equals(current.imageUrls(), nextImages);
+        if (changed) {
+            int updated = jdbc.update(connection -> prepare(connection, UPDATE_POST, nextTitle, nextContent,
+                    json(nextImages), LocalDateTime.now(clock), postId, authorId));
+            if (updated != 1) throw new PostNotFoundException();
+        }
+        // Even an unchanged legacy PUT emits POST_UPDATED and refreshes its search projection.
+        jdbc.update(connection -> prepare(connection, INSERT_OUTBOX, UUID.randomUUID().toString(),
+                "Post", Long.toString(postId), "POST_UPDATED", payload, LocalDateTime.now(clock)));
+        jdbc.update(connection -> prepare(connection, INSERT_SEARCH_DOCUMENT, postId, nextTitle, nextContent,
+                KoreanSearchTerms.VERSION, terms.document(nextTitle), terms.document(nextContent)));
+        // The legacy immutable response is built before JPA dirty flush updates updatedAt at commit.
+        return new PostSnapshot(postId, authorId, nextTitle, nextContent, current.boardType(), nextImages,
+                current.createdAt(), current.updatedAt());
+    }
+
+    private List<String> images(String value) {
+        if (value == null || value.isEmpty()) return List.of();
+        try { return objectMapper.readValue(value, IMAGE_URLS_TYPE); }
+        catch (JsonProcessingException failure) { throw new IllegalStateException("Failed to read post image URLs", failure); }
     }
 
     private PreparedStatement prepare(Connection connection, String sql, Object... values) throws SQLException {

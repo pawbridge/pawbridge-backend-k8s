@@ -23,7 +23,8 @@ public class ReadSecurityConfiguration {
     SecurityFilterChain postReadSecurity(HttpSecurity http, PostTokenAuthenticator tokens) throws Exception {
         var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
         var postDeletion = new AntPathRequestMatcher("/api/v1/posts/*", "DELETE");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion);
+        var postUpdate = new AntPathRequestMatcher("/api/v1/posts/*", "PUT");
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate);
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)

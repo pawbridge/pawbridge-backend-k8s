@@ -134,6 +134,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f4-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f5_ci.py prepare > build/ci/f5-helper-refusal.txt 2>&1; then
+            printf 'F5 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f5-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -156,6 +161,9 @@ jobs:
       - name: Extend the same owned PostgreSQL with F4 timestamp and search-delete permissions
         run: python3 scripts/f4_ci.py prepare
 
+      - name: Extend the same owned PostgreSQL with F5 partial-update permissions
+        run: python3 scripts/f5_ci.py prepare
+
       - name: Compare legacy reads/writes, issuer, atomicity and resource boundaries in UTC and Seoul
         run: |
           set -euo pipefail
@@ -167,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[234]_fixture|f[234]LegacyOracle|compatibilityTest|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[2345]_fixture|f[2345]LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
           fi
@@ -181,6 +189,9 @@ jobs:
 
       - name: Verify packaged owner deletion, best-effort storage and rollback recovery
         run: python3 scripts/f4_ci.py smoke
+
+      - name: Verify packaged owner PUT, SDK replacement and failure recovery
+        run: python3 scripts/f5_ci.py smoke
 
       - name: Remove only the owned disposable fixture
         if: always()
