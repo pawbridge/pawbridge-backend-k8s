@@ -1,6 +1,6 @@
 # PawBridge 업무 통합 실행기
 
-Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성을 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
 
 ## 업무 경계와 호출
 
@@ -8,7 +8,7 @@ Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2�
 |---|---|---|
 | boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
 | user | 공개 닉네임 조회 계약과 JDBC 구현 | 없음 |
-| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·미디어·검색 projection·REST 응답 | user |
+| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·삭제·미디어·검색 projection·REST 응답 | user |
 
 ```text
 boot -> community.internal.post.web -> community.internal.post.application
@@ -117,7 +117,7 @@ exact 목록 GET만 보안 허용 목록에 추가한다. 공개 목록은 불�
 
 ## F9 인증된 댓글 작성
 
-`POST /api/v1/comments/posts/{postId}`는 JSON `content`를 받아 검증된 기존 Bearer JWT의 양수 `userId`로 댓글 한 행을 생성한다. USER·ADMIN·SHELTER를 수용하며 위조 작성자 헤더를 신뢰하지 않는다. 성공은 HTTP/code200·`댓글이 생성되었습니다.`·F8과 같은 정확히 7필드다. identity ID를 사용하며201·연속 ID·중복 방지를 추가하지 않는다. 별도 댓글 수정·삭제 경로는 열지 않는다. F8에서 거부하던 이 POST의 익명 요청은 인증 필요401로 바뀌고 공개 GET은 유지한다.
+`POST /api/v1/comments/posts/{postId}`는 JSON `content`를 받아 검증된 기존 Bearer JWT의 양수 `userId`로 댓글 한 행을 생성한다. USER·ADMIN·SHELTER를 수용하며 위조 작성자 헤더를 신뢰하지 않는다. 성공은 HTTP/code200·`댓글이 생성되었습니다.`·F8과 같은 정확히 7필드다. identity ID를 사용하며201·연속 ID·중복 방지를 추가하지 않는다. F9 단계의 쓰기는 작성 한 계약이며 삭제는 아래 F10 계약으로 추가한다. F8에서 거부하던 이 POST의 익명 요청은 인증 필요401로 바뀌고 공개 GET은 유지한다.
 
 실제 기존 요청 DTO의 `@NotBlank`만 적용한다. 누락/null/빈 문자열/기존 ASCII blank는400·`content: 내용은 필수입니다`이며 잘못된 JSON·누락 본문은400·`요청 본문 형식이 올바르지 않습니다.`다. 검증 provider의 기존 trim 기반 의미를 유지하여 U+2003·전각 공백·앞뒤 공백·줄바꿈을 임의로 제거하거나 새 길이 제한을 두지 않는다. malformed/long 초과 경로는 기존 안전한500이며0·음수는 부모 조회 결과를 따른다. 버전 관리된 V3 `ck_rollback_charset_comments` 위반만400·`일부 이모지 등 지원하지 않는 문자를 제외해 주세요.`로 구분하고, NUL 등 다른 SQL 실패는 안전한500이다.
 
@@ -126,6 +126,20 @@ exact 목록 GET만 보안 허용 목록에 추가한다. 공개 목록은 불�
 작성자 부재·명시적 조회 불가는 `사용자{id}`, 빈 닉네임은null, 공백은 원문을 유지한다. 예상 밖 User 오류는 쓰기 전500으로 닫는다. legacy의 INSERT 뒤 Feign 호출·넓은 `catch(Exception)` 순서와 모든 장애를 동등하게 재현했다고 주장하지 않는다. 확정 SQL/commit rollback은 댓글 행을 남기지 않으며 sequence gap은 허용한다. commit 결과 불명·응답 전송 실패를 확정 rollback으로 표현하거나 서버가 POST를 자동 재시도하지 않는다. 즉시 응답 시각의 정밀도와 DB `TIMESTAMP(6)`를 재조회한 정밀도를 억지로 같게 만들지 않는다.
 
 Outbox·검색 projection·S3는 호출하지 않는다. 기존 두 pool·JDBC URL·writer/JWT/S3 필수 설정을 재사용하며 새 운영 환경 변수는 없다. 기존 JSON Bean Validation에 필요한 `starter-validation`/validation API만 추가하고 버전은 BOM을 따른다. 실행 JAR 검사는 정상 `BOOT-INF/lib/hibernate-validator-<version>.jar`만 좁게 허용하며 Hibernate ORM·JPA·레거시·테스트 artifact 차단을 유지한다.
+
+## F10 본인 댓글 삭제
+
+정확한 `DELETE /api/v1/comments/{commentId}`만 기존 JWT 인증 대상에 추가한다. 검증된 principal만 사용하고 위조 작성자 헤더를 무시한다. USER·ADMIN·SHELTER의 본인 댓글은 허용하며 타인 ADMIN도403·`댓글에 접근할 권한이 없습니다.`다. 미삭제 댓글을 먼저 찾고 부재·이미 삭제는404·`댓글을 찾을 수 없습니다.`다. 익명은 경로 바인딩보다 먼저401이며 malformed/overflow ID는 기존 안전한500,0·음수는 조회 결과를 따른다. 성공은 HTTP/code200·`댓글이 삭제되었습니다.`·`data:null`이다. DELETE 본문은 읽거나 검증하지 않으며 댓글 PUT과 인접 경로는 닫아 둔다.
+
+같은 writer 트랜잭션에서 활성 댓글 작성자를 일반 SELECT → 소유권 확인 → 두 시각 생성 → ID 조건의 UPDATE → commit 순서로 처리한다. 물리 행·ID·부모 ID·작성자·본문·생성 시각은 보존하고 `deleted_at`, `updated_at`만 갱신한다. 삭제 시각과 auditing 시각을 새 동일값 불변식으로 만들지 않는다. 부모 존재/삭제·게시판·User 상태와 무관하며 부모·User·S3·Outbox·검색을 호출하지 않는다. 기존 writer pool max1과 두 pool/JDBC/TM·운영 설정을 그대로 사용한다.
+
+레거시 댓글에는 버전·명시적 잠금이 없으므로 F4 게시글의 단일 승자 정책을 옮기지 않는다. 두 삭제가 활성 상태를 먼저 읽으면 둘 다200일 수 있고 순차 재삭제만404다. `FOR UPDATE`·active/author UPDATE 조건·재조회·자동 재시도를 추가하지 않는다. 조회 뒤 물리 행이 사라져 UPDATE0이면 기존 stale-state와 같은 안전한500이다. 후보의 두 열 갱신은 레거시의 넓은 Hibernate flush와 달리 동시 PUT의 본문을 덮지 않는 의도된 차이다. 모든 수정/삭제 경쟁이 동일하거나 역방향 legacy PUT의 삭제 재활성화까지 해결됐다고 표현하지 않는다.
+
+구조화된 community rollback charset SQLState23514만 기존 메시지400으로 보존하고 다른 CHECK·SQL·commit 오류는 안전한500이다. 이는 DELETE 본문 문자 검증을 추가하는 것이 아니다. 확정 rollback의 행 보존을 확인하며 commit 결과 불명·응답 전송 실패를 확정 rollback으로 표현하지 않는다.
+
+CI는 F3~F9의 원래 ACL 검증을 모두 끝낸 뒤 F10 권한을 보완한다. F10 준비 전 `f9.require_fixture()`의 strict 검사를 유지하고, 준비 후에는 F8의 owner/정확한 loopback port 체인과 F9/F10 owner·marker, 기존 문자 CHECK/7열 및 정확한 확장 ACL을 확인한다. 기존 writer에 `SELECT(author_id,deleted_at)`, `UPDATE(deleted_at,updated_at)`만 추가하며 물리 DELETE·본문 UPDATE·sequence·User 쓰기·schema CREATE 권한은 없다. F10 단계에서 F9 strict helper를 재호출하지 않고 작성은 실제 F9 HTTP API로 확인한다.
+
+같은 compatibility sourceSet에서 기존 UTC/Seoul 두 task는 F10 클래스만 제외하고 `commentDeleteCompatibilityTest`·`commentDeleteCompatibilitySeoulTest`는 그 정확한 FQN만 선택한다. 새 sourceSet·계정·pool은 없다. 두 전용 XML에 실제 실행 건수가 있고 실패·오류·skip이 없는지 별도로 확인한다. 경합 시험의 독립 연결2개는 시험 도구이며 production writer pool을 늘리지 않는다. 기존 F8 packaged 거부 검사에서도 새 DELETE 익명 응답만401로 갱신한다.
 
 ## 구조 검사
 
@@ -152,9 +166,10 @@ Outbox·검색 projection·S3는 호출하지 않는다. 기존 두 pool·JDBC U
 8. F7는 실제 고정 PostgreSQL 검색 service/분석기를 동일 fixture에서 실행해 UTC/Seoul 날짜·정렬Top10·전역 readiness·입력/권한/회복을 비교한다. 같은 reader의 최소 projection SELECT만 보완한다. packaged 시험은 작성→검색·수정→새 검색/이전 검색 제외·삭제→검색 제외를 확인하며 각 검색 GET의 DB/S3 무변경과 정상 종료를 별도로 검사한다.
 9. F8는 고정된 실제 Comment entity·Spring Data repository·응답을 같은 합성 fixture에서 실행해 7필드·createdAt 정렬·동률군·댓글 삭제 제외·부모 soft delete/부재·닉네임 실패/회복과 reader 연결 반환을 UTC/Seoul에서 비교한다. legacy Controller·Service·Feign을 함께 실행하는 HTTP oracle은 아니다. F2→F3→F4→F5의 기존 owner/admin/reader/token marker 체인과 F7 최소 조회 권한을 확인하고, JDBC 주소가 label 소유 컨테이너의 실제 단일 loopback 공개 포트와 일치하는지 대조한 뒤 F8 marker·댓글 표·최소 SELECT만 준비한다. packaged 시험은 각 댓글 GET과 거부 경로 전후의 posts/comments/기존 F4 댓글·쪽지/Outbox/search 및 S3 요청을 비교하며, SQL 권한 실패/회복과 두 pool의 정상 종료·잔여 연결0을 검사한다. S3 stub은 기존 PUT/DELETE 기록과 함께 제어 경로를 제외한 GET/HEAD/POST의 성공·부재·거부 응답도 기록한다. 상태 조회 제어 호출은 기록하지 않아 snapshot 자체가 관측치를 바꾸지 않으며, 이 동작은 소켓을 열지 않는 별도 시험으로 확인한다.
 10. F9는 F8의 owner·정확한 컨테이너 포트·marker 체인을 확인한 같은 fixture에 F9 marker·V3 comments 문자 CHECK·기존 writer의 5열 INSERT/ID SELECT만 보완한다. PostgreSQL identity에는 별도 sequence 권한이 필요 없으므로 sequence USAGE/SELECT/UPDATE가 모두 없는지 검사한다. UPDATE/DELETE·User 쓰기·schema CREATE도 주지 않는다. 고정된 실제 요청 DTO validator·공유 Comment entity/repository/DTO·JPA auditing과 후보를 UTC/Seoul에서 비교한다. packaged 시험은 기존 발급기 인증·모든 게시판·타인 글·JSON/blank/Unicode·부모404·SQL 실패·INSERT/RETURNING 권한 회복·닉네임 fallback/회복과 POST→F8 GET을 확인한다. 성공 POST는 댓글 한 행만 추가하고 기존 댓글/User/posts/F4 댓글·쪽지/Outbox/search/S3를 유지하며, 실패 요청과 GET은 DB/S3 전체 무변경을 확인한다. 즉시/저장 시각의 정밀도 차이·두 pool 종료·잔여 연결0·로그 크기/비밀값 비노출을 별도로 검사한다.
-11. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
+11. 기존 F3~F9 PG/packaged 회귀와 정상 종료를 원래 ACL에서 끝낸 뒤 F10 가드→권한 준비→삭제 전용 UTC/Seoul→packaged 순서로 진행한다. 기존 고정 Comment entity/repository/DTO·실제 auditing을 재사용해 두 시각·물리 보존·부모/User 조회 불필요·SQL/commit rollback·경쟁과 최소 갱신 차이를 비교한다. 전체 legacy Controller/Service E2E는 아니다. packaged 시험은 실제 F9 POST→F8 GET→본인 DELETE→GET 제외, 역할·타인/부재/재삭제·본문 무시·부모/User 부재·SELECT/UPDATE 실패와 회복을 확인한다. 모든 요청에서 댓글 외 User/posts/F4 댓글·쪽지/Outbox/search/S3 불변을 검사하고 삭제는 기존 행과 두 시각 외 열을 보존한다. 실패 요청·GET은 전체 DB/S3 무변경이며 두 pool 정상 종료·잔여 연결0·로그 크기/비밀값 비노출을 확인한다.
+12. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
-`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
+`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
 
 `prepare_legacy_oracle.py`는 기준 `e8ad7b8ec9006772ccc5f5881334df2730dbd8de`의 정확히 6개 Java 파일만 해시 검증해 boot/build 안 test-only 경로로 추출한다. Post/BoardType/StringListConverter/PostResponse와 UserServiceClient 및 그 JDK-only 응답 의존 PrivateNoteModels다. legacy 전체 sourceDir·Application을 편입하지 않는다. 실제 source/버전 비교는 compatibility classpath에서만 이뤄지고 앱 JAR에는 들어가지 않는다.
 
@@ -174,4 +189,4 @@ TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classp
 
 Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9 계획과 모듈형 모놀리스 전환 노트를 따른다.
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10 계획과 모듈형 모놀리스 전환 노트를 따른다.

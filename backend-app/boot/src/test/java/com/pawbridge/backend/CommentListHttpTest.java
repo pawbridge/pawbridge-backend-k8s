@@ -134,7 +134,7 @@ class CommentListHttpTest {
             "GET /api/v1/comments/posts/read/", "GET /api/v1/comments/posts/read/42/", "GET /api/v1/comments/posts/read/42/extra",
             "GET /api/v1/comments/posts/reading/42", "GET /api/comments/posts/read/42", "GET /api/v1/admin/comments/posts/read/42",
             "HEAD /api/v1/comments/posts/read/42", "OPTIONS /api/v1/comments/posts/read/42",
-            "PUT /api/v1/comments/12", "DELETE /api/v1/comments/12",
+            "PUT /api/v1/comments/12",
             "POST /api/v1/comments/posts/read/42", "PUT /api/v1/comments/posts/read/42",
             "PATCH /api/v1/comments/posts/read/42", "DELETE /api/v1/comments/posts/read/42"})
     void given__unexposed_method_or_adjacent_path__when__requesting__then__deny_without_comment_or_post_lookup(String request) throws Exception {

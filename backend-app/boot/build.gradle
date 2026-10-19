@@ -142,8 +142,27 @@ tasks.named('compileCompatibilityTestJava') {
         systemProperty 'user.timezone', zone
         systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         shouldRunAfter tasks.named('test')
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentDeleteCompatibilityTest'
     }
 }
+
+['commentDeleteCompatibilityTest': 'UTC', 'commentDeleteCompatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = "Checks only F10 comment deletion after the owned ACL extension in ${zone}."
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        filter {
+            includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentDeleteCompatibilityTest'
+            failOnNoMatchingTests = true
+        }
+        shouldRunAfter tasks.named('compatibilitySeoulTest')
+    }
+}
+
+tasks.named('commentDeleteCompatibilitySeoulTest') { shouldRunAfter tasks.named('commentDeleteCompatibilityTest') }
 
 tasks.named('compatibilitySeoulTest') { shouldRunAfter tasks.named('compatibilityTest') }
 

@@ -214,7 +214,8 @@ def smoke():
                     ('PUT', '/api/v1/comments/9800011'),
                     ('DELETE', '/api/v1/comments/9800011')]:
                 before = snapshot()
-                expected = 401 if (method, path) == ('POST', '/api/v1/comments/posts/9800001') else 403
+                expected = 401 if (method, path) in (('POST', '/api/v1/comments/posts/9800001'),
+                    ('DELETE', '/api/v1/comments/9800011')) else 403
                 f3.expect(base, path, expected, method)
                 if snapshot() != before:
                     raise AssertionError('Denied comment route changed DB or contacted S3')
