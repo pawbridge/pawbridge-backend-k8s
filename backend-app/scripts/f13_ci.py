@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import stat
 import subprocess
 import sys
@@ -72,6 +73,27 @@ def verified_ddl():
     return ddl, 'source_sha=' + SOURCE + '\n' + '\n'.join(entries) + '\n'
 
 
+def fixture_acl(query):
+    """Only the static catalog ACL query gets a bounded primary-error diagnostic."""
+    try:
+        return f3.sql(query)
+    except subprocess.CalledProcessError as failure:
+        stderr = failure.stderr if isinstance(failure.stderr, str) else ''
+        primary = next((line.strip() for line in stderr.splitlines()
+                        if re.match(r'^\s*(?:ERROR|FATAL):', line)), '(no PostgreSQL primary error captured)')
+        # This catalog-only query never reads business values. Still redact any configured
+        # credentials before bounding the line, and exclude SQL/DETAIL/CONTEXT/stdout/cmd.
+        for key, value in os.environ.items():
+            if value and any(label in key.upper() for label in ('PASSWORD', 'SECRET', 'TOKEN')):
+                primary = primary.replace(value, '[redacted]')
+        primary = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', primary)
+        primary = ''.join(character for character in primary if character.isprintable())[:512]
+        EVIDENCE.mkdir(parents=True, exist_ok=True)
+        (EVIDENCE / 'f13-fixture-acl-error.txt').write_text(
+            'stage=f13-user-catalog-acl\nreturncode=' + str(failure.returncode) + '\nstderr=' + primary + '\n')
+        raise SystemExit('F13 fixture ACL query failed; see bounded f13-fixture-acl-error.txt') from None
+
+
 def require_fixture():
     # F12's no-User-writer assertion remains strict; never call it after this extension.
     owner = f11.require_fixture()
@@ -89,7 +111,7 @@ def require_fixture():
             "('provider_id','character varying',100,'YES',0),('updated_at','timestamp without time zone',0,'YES',6))) "
             "FROM information_schema.columns WHERE table_schema='pawbridge_user' AND table_name='users'") != 't':
         raise SystemExit('F13 fixture lacks the exact eleven-column User shape')
-    if f3.sql("SELECT count(*)=11 AND bool_and("
+    if fixture_acl("SELECT count(*)=11 AND bool_and("
             "has_column_privilege('pawbridge_f2_reader','pawbridge_user.users',column_name,'SELECT') "
             "= (column_name IN ('user_id','email','name','nickname','provider','role','created_at')) "
             "AND NOT has_column_privilege('pawbridge_f2_reader','pawbridge_user.users',column_name,'INSERT,UPDATE,REFERENCES') "
@@ -104,8 +126,8 @@ def require_fixture():
             "AND NOT has_schema_privilege('pawbridge_f2_reader','pawbridge_user','CREATE') "
             "AND NOT has_schema_privilege('pawbridge_f3_writer','pawbridge_user','CREATE') "
             "AND NOT EXISTS(SELECT 1 FROM pg_class s JOIN pg_namespace n ON n.oid=s.relnamespace "
-            "WHERE n.nspname='pawbridge_user' AND s.relkind='S' "
-            "AND has_sequence_privilege('pawbridge_f3_writer',s.oid,'USAGE,SELECT,UPDATE')) "
+            "WHERE n.nspname='pawbridge_user' AND CASE WHEN s.relkind='S' "
+            "THEN has_sequence_privilege('pawbridge_f3_writer',s.oid,'USAGE,SELECT,UPDATE') ELSE false END) "
             "FROM information_schema.columns WHERE table_schema='pawbridge_user' AND table_name='users'") != 't':
         raise SystemExit('F13 fixture lacks the exact reader-seven/writer-two-SELECT/two-UPDATE ACL')
     if f3.sql("SELECT count(*)=1 FROM pg_constraint WHERE conrelid='pawbridge_user.users'::regclass "

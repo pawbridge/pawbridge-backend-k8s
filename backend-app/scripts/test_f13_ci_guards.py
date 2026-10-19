@@ -301,5 +301,39 @@ class F13GuardTest(unittest.TestCase):
             self.assertEqual({output / 'synthetic/Input.java', evidence}, {path for path in root.rglob('*') if path.is_file()})
 
 
+    def test_given_mixed_relation_catalog__when_checking_sequence_acl__then_case_guards_the_sequence_only_function(self):
+        # Structural regression only: actual PostgreSQL planner behavior is verified by hosted CI.
+        with patch.dict(os.environ, HOSTED, clear=True), patch.object(f13.f11, 'require_fixture', return_value='123-1'), \
+                patch.object(f13.f3, 'sql', side_effect=[f13.f12.MARKER + ':123-1', f13.MARKER + ':123-1', 't', 't', 't', 't']) as sql:
+            f13.require_fixture()
+        acl = sql.call_args_list[3].args[0]
+        self.assertIn("CASE WHEN s.relkind='S' THEN has_sequence_privilege('pawbridge_f3_writer',s.oid,'USAGE,SELECT,UPDATE') ELSE false END", acl)
+        self.assertNotIn("s.relkind='S' AND has_sequence_privilege", acl)
+
+    def test_given_catalog_sql_failure__when_recording__then_preserve_only_bounded_masked_primary_error_without_command_or_details(self):
+        for primary in ('ERROR: relation "users" is not a sequence', 'FATAL: fixture connection refused', None):
+            with self.subTest(primary=primary), tempfile.TemporaryDirectory() as directory, \
+                    patch.dict(os.environ, {'F2_TEST_ADMIN_PASSWORD': 'private-password', 'F3_TEST_JWT_SECRET': 'private-secret'}, clear=True), \
+                    patch.object(f13, 'EVIDENCE', Path(directory)):
+                stderr = None if primary is None else (primary + ' private-password private-secret \x1b[31m' + 'x' * 800
+                         + '\nLINE 1: private-sql\nDETAIL: private-detail\nHINT: private-hint\nCONTEXT: private-context')
+                failure = f13.subprocess.CalledProcessError(1, ['private-command', 'private-sql'],
+                                                          output='private-stdout', stderr=stderr)
+                with patch.object(f13.f3, 'sql', side_effect=failure):
+                    with self.assertRaisesRegex(SystemExit, 'bounded f13-fixture-acl-error.txt') as raised:
+                        f13.fixture_acl('SELECT static catalog metadata')
+                evidence = (Path(directory) / 'f13-fixture-acl-error.txt').read_text()
+                self.assertLessEqual(len(evidence), 600)
+                self.assertIn('stage=f13-user-catalog-acl\nreturncode=1\nstderr=', evidence)
+                for forbidden in ('private-password', 'private-secret', 'private-command', 'private-sql', 'private-stdout',
+                                  'private-detail', 'private-hint', 'private-context', '\x1b', 'LINE 1:', 'DETAIL:', 'HINT:', 'CONTEXT:'):
+                    self.assertNotIn(forbidden, evidence)
+                    self.assertNotIn(forbidden, str(raised.exception))
+                if primary is None:
+                    self.assertIn('(no PostgreSQL primary error captured)', evidence)
+                else:
+                    self.assertIn(primary, evidence); self.assertIn('[redacted]', evidence)
+
+
 if __name__ == '__main__':
     unittest.main()
