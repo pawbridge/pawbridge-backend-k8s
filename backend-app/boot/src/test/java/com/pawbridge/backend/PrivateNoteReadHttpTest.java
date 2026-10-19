@@ -309,8 +309,8 @@ class PrivateNoteReadHttpTest {
     @ValueSource(strings = {"GET /api/notes/f2200000-0000-0000-0000-000000000001",
             "GET /api/v1/notes/f2200000-0000-0000-0000-000000000001/", "HEAD /api/v1/notes/f2200000-0000-0000-0000-000000000001",
             "OPTIONS /api/v1/notes/f2200000-0000-0000-0000-000000000001", "POST /api/v1/notes/f2200000-0000-0000-0000-000000000001",
-            "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/read/extra", "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/favorite",
-            "DELETE /api/v1/notes/f2200000-0000-0000-0000-000000000001"})
+            "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/read/extra", "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/favorite/extra",
+            "DELETE /api/v1/notes/f2200000-0000-0000-0000-000000000001/extra"})
     void given__unexposed_neighbor_alias_or_method__when__requesting_with_valid_jwt__then__retain_default_deny_without_note_or_writer_work(String request) throws Exception {
         String[] parts = request.split(" ", 2);
         mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))

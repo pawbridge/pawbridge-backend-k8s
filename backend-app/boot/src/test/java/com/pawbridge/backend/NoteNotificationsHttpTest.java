@@ -263,7 +263,7 @@ class NoteNotificationsHttpTest {
     @ParameterizedTest
     @ValueSource(strings = {"GET /api/v1/notes/stream/extra", "GET /api/v1/notes/notifications/", "GET /api/notes/notifications",
             "HEAD /api/v1/notes/notifications", "OPTIONS /api/v1/notes/notifications", "POST /api/v1/notes/notifications",
-            "PUT /api/v1/notes/notifications", "DELETE /api/v1/notes/notifications"})
+            "PUT /api/v1/notes/notifications", "DELETE /api/v1/notes/notifications/extra"})
     void given__unexposed_neighbor_path_or_method__when__requesting_with_a_valid_token__then__deny_before_all_dependencies(String request) throws Exception {
         String[] parts = request.split(" ", 2);
 

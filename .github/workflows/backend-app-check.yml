@@ -188,7 +188,7 @@ jobs:
       CONTRACT_PROFILE: ${{ matrix.profile }}
       EXPECTED_CANDIDATE_JAR_SHA256: ${{ needs.package.outputs.jar_sha256 }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 55
     defaults:
       run:
         shell: bash
@@ -258,6 +258,12 @@ jobs:
         run: git cat-file -e 'f06a72a06bd26662c647bde780dfc7a27bf7349c^{commit}'
 
       - name: Require F26 to reuse the immutable F23 original-source Git object
+        run: git cat-file -e 'f06a72a06bd26662c647bde780dfc7a27bf7349c^{commit}'
+
+      - name: Require F27 to reuse the immutable F23 original-source Git object
+        run: git cat-file -e 'f06a72a06bd26662c647bde780dfc7a27bf7349c^{commit}'
+
+      - name: Require F28 to reuse the immutable F23 original-source Git object
         run: git cat-file -e 'f06a72a06bd26662c647bde780dfc7a27bf7349c^{commit}'
 
       - name: Isolate Gradle state on the hosted runner
@@ -430,6 +436,16 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f26-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f27_ci.py prepare > build/ci/f27-helper-refusal.txt 2>&1; then
+            printf 'F27 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f27-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f28_ci.py prepare > build/ci/f28-helper-refusal.txt 2>&1; then
+            printf 'F28 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f28-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -490,7 +506,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|f23LegacyOracle|f24LegacyOracle|f25LegacyOracle|f26LegacyOracle|F25LegacyNoteBlockCreate(Service|Controller|ExceptionAdvice)|F26LegacyNoteRead(Service|Controller|ExceptionAdvice)|com/pawbridge/communityservice/contact/PrivateNoteStream|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|f23LegacyOracle|f24LegacyOracle|f25LegacyOracle|f26LegacyOracle|F25LegacyNoteBlockCreate(Service|Controller|ExceptionAdvice)|F26LegacyNoteRead(Service|Controller|ExceptionAdvice)|F27LegacyNoteFavorite(Service|Controller|ExceptionAdvice)|f27LegacyOracle|F28LegacyNoteDeletion(Service|Controller|ExceptionAdvice)|f28LegacyOracle|com/pawbridge/communityservice/contact/PrivateNoteStream|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
@@ -1251,6 +1267,111 @@ jobs:
           assert result['remaining_application_connections'] == 0
           PYTHON
 
+      - name: Verify F27 favorite fixture, original receipts and recovery guards without resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f27_ci_guards.py
+
+      - name: Verify F27 favorite probe controls with mocked stream, process and database boundaries
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f27_stream_probe.py
+
+      - name: Extend only mailbox favorite UPDATE after the complete F26 stage
+        run: python3 scripts/f27_ci.py prepare
+
+      - name: Compare F27 owned favorite mutations and measured original MVC only in UTC
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:noteFavoriteCompatibilityTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+
+      - name: Require exact F27 UTC reports with unchanged original byte receipts
+        run: python3 scripts/f27_ci.py results
+
+      - name: Verify packaged favorite commit, own resync, read projections and resource shutdown
+        id: jar_f27
+        run: |
+          set -euo pipefail
+          python3 scripts/f27_ci.py smoke
+          test -s build/ci/f27-oracle-sha256.txt
+          test -s build/ci/f27-fixture-write.txt
+          test -s build/ci/f27-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f27_ci as f27
+          import f27_stream_probe as probe
+          f27.require_measurements('jar')
+          result = json.loads(Path('build/ci/f27-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert f27.COUNTERS == probe.COUNTERS
+          assert f27.EXPECTED_JAR_COUNTS == probe.EXPECTED_JAR_COUNTS
+          assert {key: result[key] for key in f27.COUNTERS} == f27.EXPECTED_JAR_COUNTS
+          assert result['request_checks'] == result['put_checks'] + result['get_checks']
+          assert result['put_checks'] == result['successful_put_checks'] + result['rejected_put_checks']
+          assert result['stream_ready_checks'] == result['stream_open_checks']
+          assert result['other_resync_checks'] == 0
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['stream_resources_stopped'] is True
+          assert result['server_closed_open_streams'] == 2
+          assert result['owned_cleanup_restored'] is True
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
+      - name: Verify F28 fixed request DDL, writer deletion, ownership and receipt guards without resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f28_ci_guards.py
+
+      - name: Verify F28 deletion and owned FK probe controls with mocked resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f28_stream_probe.py
+
+      - name: Add only the original requests table and two DELETE grants after the complete F27 stage
+        run: python3 scripts/f28_ci.py prepare
+
+      - name: Compare F28 owned mailbox deletion and measured original MVC only in UTC
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:noteDeletionCompatibilityTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+
+      - name: Require exact F28 UTC reports with original source and generated receipts
+        run: python3 scripts/f28_ci.py results
+
+      - name: Verify packaged deletion, protected counterpart, owned FK changes, resync and shutdown
+        id: jar_f28
+        run: |
+          set -euo pipefail
+          python3 scripts/f28_ci.py smoke
+          test -s build/ci/f28-oracle-sha256.txt
+          test -s build/ci/f28-fixture-write.txt
+          test -s build/ci/f28-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f28_ci as f28
+          import f28_stream_probe as probe
+          f28.require_measurements('jar')
+          result = json.loads(Path('build/ci/f28-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert f28.COUNTERS == probe.COUNTERS
+          assert f28.EXPECTED_JAR_COUNTS == probe.EXPECTED_JAR_COUNTS
+          assert {key: result[key] for key in f28.COUNTERS} == f28.EXPECTED_JAR_COUNTS
+          assert result['request_checks'] == result['delete_checks'] + result['get_checks']
+          assert result['delete_checks'] == result['successful_delete_checks'] + result['rejected_delete_checks']
+          assert result['stream_ready_checks'] == result['stream_open_checks']
+          assert result['other_resync_checks'] == 0
+          assert result['deleted_mailbox_rows'] == 3
+          assert result['deleted_note_rows'] == 2
+          assert result['cleared_request_links'] == result['cleared_reply_links'] == 1
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['stream_resources_stopped'] is True
+          assert result['server_closed_open_streams'] == 2
+          assert result['owned_cleanup_restored'] is True
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Remove only the owned disposable fixture
         id: owned_cleanup
         if: always()
@@ -1279,6 +1400,8 @@ jobs:
             backend-app/build/ci/f24-results.json
             backend-app/build/ci/f25-results.json
             backend-app/build/ci/f26-results.json
+            backend-app/build/ci/f27-results.json
+            backend-app/build/ci/f28-results.json
             backend-app/build/ci/boot-jar.sha256
           if-no-files-found: warn
           include-hidden-files: false

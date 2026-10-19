@@ -176,7 +176,7 @@ class NoteBlockRemoveHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"PUT /api/v1/notes/00000000-0000-0000-0000-000000000008/read/extra",
-            "DELETE /api/v1/notes/00000000-0000-0000-0000-000000000008", "DELETE /api/v1/notes/blocks/8/extra"})
+            "DELETE /api/v1/notes/00000000-0000-0000-0000-000000000008/extra", "DELETE /api/v1/notes/blocks/8/extra"})
     void given__unexposed_block_note_mutation_or_deeper_path__when__requesting__then__retain_default_403_without_removal_work(String wire) throws Exception {
         String[] parts = wire.split(" ", 2);
         mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
