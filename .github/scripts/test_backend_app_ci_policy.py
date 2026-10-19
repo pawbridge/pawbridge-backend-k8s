@@ -1,16 +1,19 @@
 """Observe the dev-only application selection and final gate without running the app."""
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import textwrap
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import ci_branch_policy
+import backend_contract_profile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,25 +35,35 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertTrue(marker in body, 'Required workflow script is missing: ' + name)
         return textwrap.dedent(body.split(marker, 1)[1])
 
-    def select(self, paths):
+    def select(self, paths, *, pilot=False, raw=False):
         script = self.script('selection')
         marker = 'python3 - <<\'PY\' >> "$GITHUB_OUTPUT"\n'
         self.assertIn(marker, script)
         program = script.split(marker, 1)[1].rsplit('\nPY', 1)[0]
         output = io.StringIO()
-        with patch.dict(os.environ, {}, clear=True), \
-                patch.object(sys, 'path', list(sys.path)), \
-                patch.object(ci_branch_policy, 'validate_event', return_value='pull_request'), \
-                patch.object(ci_branch_policy, 'changed_paths', return_value=paths), \
-                contextlib.redirect_stdout(output):
-            exec(compile(program, str(WORKFLOW), 'exec'), {})
-        return output.getvalue()
+        payload = {'pull_request': {'head': {'repo': {'full_name': backend_contract_profile.REPOSITORY},
+                                            'ref': backend_contract_profile.PILOT_REF if pilot else 'feat/ordinary'},
+                                    'base': {'sha': backend_contract_profile.PILOT_BASE}}}
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory) / 'event.json'
+            event.write_text(json.dumps(payload))
+            env = {'GITHUB_EVENT_PATH': str(event), 'GITHUB_EVENT_NAME': 'pull_request',
+                   'GITHUB_REPOSITORY': backend_contract_profile.REPOSITORY}
+            with patch.dict(os.environ, env, clear=True), \
+                    patch.object(sys, 'path', list(sys.path)), \
+                    patch.object(ci_branch_policy, 'validate_event', return_value='pull_request'), \
+                    patch.object(ci_branch_policy, 'changed_paths', return_value=paths), \
+                    contextlib.redirect_stdout(output):
+                exec(compile(program, str(WORKFLOW), 'exec'), {})
+        value = output.getvalue()
+        return value if raw else value.splitlines()[0] + '\n'
 
-    def gate(self, selection='success', selected='true', check='success'):
+    def gate(self, selection='success', selected='true', check='success', package=None):
         return subprocess.run(
             ['bash', '-euc', self.script('ci-result')],
             env={'PATH': os.environ.get('PATH', ''), 'SELECTION_RESULT': selection,
-                 'MODULE_SELECTED': selected, 'MODULE_RESULT': check},
+                 'MODULE_SELECTED': selected, 'MODULE_RESULT': check,
+                 'PACKAGE_RESULT': package if package is not None else ('skipped' if selected == 'false' else 'success')},
             capture_output=True, text=True, timeout=3,
         )
 
@@ -67,7 +80,9 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         for path in ('backend-app/boot/src/main/java/Example.java',
                      '.github/workflows/backend-app-check.yml',
                      '.github/scripts/test_backend_app_ci_policy.py',
-                     '.github/scripts/ci_branch_policy.py'):
+                     '.github/scripts/ci_branch_policy.py',
+                     '.github/scripts/backend_contract_profile.py',
+                     '.github/scripts/test_backend_contract_profile.py'):
             with self.subTest(path=path):
                 self.assertEqual('selected=true\n', self.select([path]))
 
@@ -118,18 +133,19 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('PULL_REQUEST_BASE_REF: ${{ github.base_ref }}', selection)
         self.assertIn('PUSH_BEFORE_SHA: ${{ github.event.before }}', selection)
         check = self.job('check')
-        self.assertIn('needs: selection', check)
+        self.assertIn('needs: [selection, package]', check)
         self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' }}", check)
         gate = self.job('ci-result')
-        self.assertIn('needs: [selection, check]', gate)
+        self.assertIn('needs: [selection, package, check]', gate)
         self.assertIn('SELECTION_RESULT: ${{ needs.selection.result }}', gate)
         self.assertIn('MODULE_SELECTED: ${{ needs.selection.outputs.selected }}', gate)
         self.assertIn('MODULE_RESULT: ${{ needs.check.result }}', gate)
+        self.assertIn('PACKAGE_RESULT: ${{ needs.package.result }}', gate)
 
     def test_given_application_checks_are_selected__when_running__then_preserve_the_full_runtime_contract(self):
         check = self.job('check')
-        for command in ('bash ./gradlew projects check :boot:bootJar',
-                        'bash ./gradlew :boot:compatibilityTest :boot:compatibilitySeoulTest',
+        self.assertIn('bash ./gradlew projects check :boot:bootJar', self.job('package'))
+        for command in ('bash ./gradlew :boot:compatibilityTest :boot:compatibilitySeoulTest',
                         'python3 scripts/f2_ci.py prepare', 'python3 scripts/f3_ci.py prepare',
                         'python3 scripts/f3_ci.py smoke', 'python3 scripts/f3_ci.py cleanup'):
             with self.subTest(command=command):
@@ -149,6 +165,74 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                           'docker/build-push-action', 'pawbridge-infra-k8s', 'gh pr '):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, text)
+
+
+    def test_given_fixed_pilot_ci_pr__when_selecting__then_add_only_one_bounded_comparison(self):
+        path = '.github/workflows/backend-app-check.yml'
+        actual = self.select([path], pilot=True, raw=True)
+        self.assertEqual({'selected': 'true', 'profiles': '["full","f25-six-smoke-pilot"]'},
+                         dict(line.split('=', 1) for line in actual.splitlines()))
+        actual = self.select([path, 'backend-app/boot/build.gradle'], pilot=True, raw=True)
+        self.assertIn('profiles=["full"]', actual)
+
+    def test_given_failed_missing_or_unexpected_package__when_gating__then_reject_even_successful_runtime(self):
+        for selected, package in (('true', 'failure'), ('true', 'cancelled'), ('true', 'skipped'),
+                                  ('true', ''), ('false', 'success'), ('false', 'failure')):
+            with self.subTest(selected=selected, package=package):
+                self.assertNotEqual(0, self.gate(selected=selected,
+                    check='skipped' if selected == 'false' else 'success', package=package).returncode)
+
+    def test_given_profile_matrix__when_running__then_share_one_binary_without_cancelling_full(self):
+        check, package = self.job('check'), self.job('package')
+        self.assertIn('fail-fast: false', check)
+        self.assertIn('profile: ${{ fromJSON(needs.selection.outputs.profiles) }}', check)
+        self.assertIn('Java 21 build and isolated PostgreSQL/S3 HTTP contracts', check)
+        self.assertEqual(1, WORKFLOW.read_text().count('bash ./gradlew projects check :boot:bootJar'))
+        self.assertNotIn('continue-on-error', check + package)
+        self.assertIn('jar_sha256: ${{ steps.package.outputs.jar_sha256 }}', package)
+        self.assertIn('EXPECTED_CANDIDATE_JAR_SHA256: ${{ needs.package.outputs.jar_sha256 }}', check)
+        self.assertEqual(3, check.count('= "$EXPECTED_CANDIDATE_JAR_SHA256"'))
+        self.assertIn('digest-mismatch: error', check)
+        self.assertNotIn('github-token:', check)
+        self.assertIn("name: backend-app-candidate-${{ github.run_id }}-${{ github.run_attempt }}", package)
+        self.assertIn("name: backend-app-candidate-${{ github.run_id }}-${{ github.run_attempt }}", check)
+        self.assertIn('name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}', check)
+        evidence = package.split('      - name: Preserve shared unit and architecture evidence even on failure', 1)[1]
+        self.assertIn('if: always()', evidence)
+        self.assertIn('TEST-*.xml', evidence)
+
+    def test_given_runtime_stage_conditions__when_selecting_pilot__then_only_the_six_smokes_can_be_skipped(self):
+        check = self.job('check')
+        parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)
+        found, conditional = [], []
+        allowed_conditions = {'Remove only the owned disposable fixture',
+                              'Reject missing, failed or falsely skipped runtime contracts',
+                              'Preserve tests and bounded runtime evidence',
+                              'Preserve the verified executable JAR'}
+        for part in parts[1:]:
+            name = part.splitlines()[0].removeprefix('      - name: ')
+            smoke = re.findall(r'^\s*(?:run: )?python3 scripts/(f[0-9]+)_ci.py smoke\s*$', part, re.MULTILINE)
+            if smoke:
+                self.assertEqual(1, len(smoke))
+                key = 'jar_' + smoke[0]
+                found.append(key)
+                self.assertIn('        id: ' + key + '\n', part)
+                if '        if:' in part:
+                    conditional.append(key)
+                    self.assertIn("        if: ${{ matrix.profile == 'full' }}", part)
+            elif '        if:' in part:
+                self.assertIn(name, allowed_conditions)
+        self.assertEqual(list(backend_contract_profile.ALL_SMOKES), found)
+        self.assertEqual(list(backend_contract_profile.PILOT_SKIPS), conditional)
+        self.assertIn('id: owned_cleanup', check)
+        audit = check.split('      - name: Reject missing, failed or falsely skipped runtime contracts', 1)[1]
+        audit = audit.split('      - name:', 1)[0]
+        self.assertIn('if: always()', audit)
+        self.assertIn('CONTRACT_STEPS_JSON: ${{ toJSON(steps) }}', audit)
+        self.assertIn('--mode audit --profile "$CONTRACT_PROFILE"', audit)
+        self.assertLess(check.index('id: owned_cleanup'), check.index('--mode audit'))
+        for path in ('.github/scripts/backend_contract_profile.py', '.github/scripts/ci_branch_policy.py'):
+            self.assertIn('            ' + path + '\n', check)
 
 
 if __name__ == '__main__':

@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       selected: ${{ steps.selection.outputs.selected }}
+      profiles: ${{ steps.selection.outputs.profiles }}
     steps:
       - name: Check out source for selection
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,10 +36,13 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
           import os
           import sys
+          from pathlib import Path
           sys.path.insert(0, ".github/scripts")
           from ci_branch_policy import changed_paths, validate_event
+          from backend_contract_profile import select_profiles
 
           paths = changed_paths(os.environ, validate_event(os.environ))
           selected = any(
@@ -47,16 +51,142 @@ jobs:
                   ".github/workflows/backend-app-check.yml",
                   ".github/scripts/test_backend_app_ci_policy.py",
                   ".github/scripts/ci_branch_policy.py",
+                  ".github/scripts/backend_contract_profile.py",
+                  ".github/scripts/test_backend_contract_profile.py",
               }
               for path in paths
           )
+          payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          pr = payload.get("pull_request", {})
+          context = {
+              "event_name": os.environ.get("GITHUB_EVENT_NAME", ""),
+              "repository": os.environ.get("GITHUB_REPOSITORY", ""),
+              "head_repository": pr.get("head", {}).get("repo", {}).get("full_name", ""),
+              "head_ref": pr.get("head", {}).get("ref", ""),
+              "base_sha": pr.get("base", {}).get("sha", ""),
+          }
+          profiles = select_profiles(context, paths)
           print("selected=" + str(selected).lower())
+          print("profiles=" + json.dumps(profiles, separators=(",", ":")))
           PY
 
-  check:
+
+  package:
     needs: selection
     if: ${{ needs.selection.outputs.selected == 'true' }}
-    name: Java 21 build and isolated PostgreSQL/S3 HTTP contracts
+    name: Build the shared Java 21 candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      jar_sha256: ${{ steps.package.outputs.jar_sha256 }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend-app
+    steps:
+      - name: Check out candidate and pinned legacy Git objects
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          sparse-checkout: |
+            backend-app
+            .github/workflows/backend-app-check.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Isolate Gradle state on the hosted runner
+        run: |
+          set -euo pipefail
+          printf 'GRADLE_USER_HOME=%s\n' "$RUNNER_TEMP/pawbridge-backend-app-gradle" >> "$GITHUB_ENV"
+
+      - name: Set up Java 21
+        id: java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: x64
+          check-latest: true
+
+      - name: Set up Gradle Wrapper validation
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          validate-wrappers: true
+          cache-disabled: true
+          dependency-graph: disabled
+          build-scan-publish: false
+          add-job-summary-as-pr-comment: never
+
+      - name: Record the tested runtime
+        env:
+          JDK_DISTRIBUTION: ${{ steps.java.outputs.distribution }}
+          JDK_VERSION: ${{ steps.java.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/ci
+          {
+            printf 'source_sha=%s\n' "$(git rev-parse HEAD)"
+            printf 'runner_image_os=%s\n' "${ImageOS:-unknown}"
+            printf 'runner_image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'runner_architecture=%s\n' "$(uname -m)"
+            printf 'jdk_distribution=%s\n' "$JDK_DISTRIBUTION"
+            printf 'jdk_version=%s\n' "$JDK_VERSION"
+            java -version 2>&1
+          } | tee build/ci/runtime-metadata.txt
+          bash ./gradlew --version --no-daemon --max-workers=1 -Dorg.gradle.parallel=false | tee build/ci/gradle-version.txt
+          grep -Fx 'Gradle 8.14.3' build/ci/gradle-version.txt
+
+      - name: Check modules, boundaries, unit tests and executable JAR
+        run: |
+          set -euo pipefail
+          bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+
+      - name: Bind the candidate JAR to this checked source
+        id: package
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          sha256sum boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar.sha256
+          printf 'jar_sha256=%s\n' "$(cut -d ' ' -f 1 build/ci/boot-jar.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Share only this run's exact candidate JAR
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-app-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backend-app/boot/build/libs/pawbridge-backend-app.jar
+          if-no-files-found: error
+          include-hidden-files: false
+          compression-level: 0
+          retention-days: 7
+
+      - name: Preserve shared unit and architecture evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-app-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backend-app/**/build/test-results/**/TEST-*.xml
+            backend-app/build/ci/runtime-metadata.txt
+            backend-app/build/ci/gradle-version.txt
+            backend-app/build/ci/boot-jar.sha256
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
+  check:
+    needs: [selection, package]
+    if: ${{ needs.selection.outputs.selected == 'true' }}
+    name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || 'F25 six-smoke pilot with the same candidate JAR' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJSON(needs.selection.outputs.profiles) }}
+    env:
+      PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PULL_REQUEST_BASE_REF: ${{ github.base_ref }}
+      PUSH_BEFORE_SHA: ${{ github.event.before }}
+      CONTRACT_PROFILE: ${{ matrix.profile }}
+      EXPECTED_CANDIDATE_JAR_SHA256: ${{ needs.package.outputs.jar_sha256 }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
@@ -72,6 +202,8 @@ jobs:
           sparse-checkout: |
             backend-app
             .github/workflows/backend-app-check.yml
+            .github/scripts/backend_contract_profile.py
+            .github/scripts/ci_branch_policy.py
           sparse-checkout-cone-mode: false
 
       - name: Require the immutable F21 original-source Git object
@@ -296,10 +428,17 @@ jobs:
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f3-stub-refusal.txt
 
-      - name: Check modules, boundaries, unit tests and executable JAR
+      - name: Download the same checked candidate JAR
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: backend-app-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backend-app/boot/build/libs
+          digest-mismatch: error
+
+      - name: Require the shared candidate JAR checksum
         run: |
           set -euo pipefail
-          bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          test "$(sha256sum boot/build/libs/pawbridge-backend-app.jar | cut -d ' ' -f 1)" = "$EXPECTED_CANDIDATE_JAR_SHA256"
 
       - name: Prepare owned synthetic PostgreSQL 17
         run: |
@@ -350,22 +489,34 @@ jobs:
           fi
           sha256sum boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar.sha256
 
+      - name: Bind the execution plan to this profile and candidate
+        id: contract_plan
+        run: |
+          set -euo pipefail
+          test "$(sha256sum boot/build/libs/pawbridge-backend-app.jar | cut -d ' ' -f 1)" = "$EXPECTED_CANDIDATE_JAR_SHA256"
+          python3 ../.github/scripts/backend_contract_profile.py --mode plan --profile "$CONTRACT_PROFILE" \
+            --jar boot/build/libs/pawbridge-backend-app.jar --plan build/ci/contract-plan.txt
+
       - name: Verify packaged POST/GET, synthetic SDK uploads, failures and normal termination
+        id: jar_f3
         run: python3 scripts/f3_ci.py smoke
 
       - name: Verify F4 listener startup with socket and process mocks only
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f4_ci_startup.py
 
       - name: Verify packaged owner deletion, best-effort storage and rollback recovery
+        id: jar_f4
         run: python3 scripts/f4_ci.py smoke
 
       - name: Verify packaged owner PUT, SDK replacement and failure recovery
+        id: jar_f5
         run: python3 scripts/f5_ci.py smoke
 
       - name: Verify F6 ownership and oracle guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f6_ci_guards.py
 
       - name: Verify packaged public list journey, per-GET zero writes and recovery
+        id: jar_f6
         run: |
           set -euo pipefail
           python3 scripts/f6_ci.py smoke
@@ -386,6 +537,7 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f7_ci_guards.py
 
       - name: Verify packaged public search journey, per-GET zero writes and recovery
+        id: jar_f7
         run: |
           set -euo pipefail
           python3 scripts/f7_ci.py smoke
@@ -403,6 +555,7 @@ jobs:
           PY
 
       - name: Verify packaged public comment reads, denied writes, zero side effects and recovery
+        id: jar_f8
         run: |
           set -euo pipefail
           python3 scripts/f8_ci.py smoke
@@ -421,6 +574,7 @@ jobs:
           PY
 
       - name: Verify packaged authenticated comment POST, F8 GET and isolated rollback recovery
+        id: jar_f9
         run: |
           set -euo pipefail
           python3 scripts/f9_ci.py smoke
@@ -454,6 +608,7 @@ jobs:
           python3 scripts/f10_ci.py results
 
       - name: Verify packaged authenticated comment deletion, preserved rows and rollback recovery
+        id: jar_f10
         run: |
           set -euo pipefail
           python3 scripts/f10_ci.py smoke
@@ -488,6 +643,7 @@ jobs:
           python3 scripts/f11_ci.py results
 
       - name: Verify packaged comment PUT, old response timestamps, no-op writes and rollback recovery
+        id: jar_f11
         run: |
           set -euo pipefail
           python3 scripts/f11_ci.py smoke
@@ -524,6 +680,7 @@ jobs:
           python3 scripts/f12_ci.py results
 
       - name: Verify packaged authenticated profile reads, private-column exclusion and recovery
+        id: jar_f12
         run: |
           set -euo pipefail
           python3 scripts/f12_ci.py smoke
@@ -557,6 +714,7 @@ jobs:
           python3 scripts/f13_ci.py results
 
       - name: Verify packaged nickname PUT, profile and Community visibility, no-op and recovery
+        id: jar_f13
         run: |
           set -euo pipefail
           python3 scripts/f13_ci.py smoke
@@ -593,6 +751,7 @@ jobs:
           python3 scripts/f14_ci.py results
 
       - name: Verify packaged favorite Boolean GET, missing-user false, no side effects and permission recovery
+        id: jar_f14
         run: |
           set -euo pipefail
           python3 scripts/f14_ci.py smoke
@@ -627,6 +786,7 @@ jobs:
           python3 scripts/f15_ci.py results
 
       - name: Verify packaged public home videos, expiry, permission recovery and no side effects
+        id: jar_f15
         run: |
           set -euo pipefail
           python3 scripts/f15_ci.py smoke
@@ -662,6 +822,8 @@ jobs:
           python3 scripts/f16_ci.py results
 
       - name: Verify packaged enabled totals and one disabled404 phase without JWT refresh
+        id: jar_f16
+        if: ${{ matrix.profile == 'full' }}
         run: |
           set -euo pipefail
           python3 scripts/f16_ci.py smoke
@@ -700,6 +862,8 @@ jobs:
           python3 scripts/f17_ci.py results
 
       - name: Verify packaged note recipients, source-specific SQL recovery and unchanged business snapshots
+        id: jar_f17
+        if: ${{ matrix.profile == 'full' }}
         run: |
           set -euo pipefail
           python3 scripts/f17_ci.py smoke
@@ -735,6 +899,7 @@ jobs:
           python3 scripts/f18_ci.py results
 
       - name: Verify packaged block status, mixed errors, invalid-before-active and SQL recovery
+        id: jar_f18
         run: |
           set -euo pipefail
           python3 scripts/f18_ci.py smoke
@@ -774,6 +939,8 @@ jobs:
           python3 scripts/f19_ci.py results
 
       - name: Verify packaged exact administrator count, SQL failure and safe recovery
+        id: jar_f19
+        if: ${{ matrix.profile == 'full' }}
         run: |
           set -euo pipefail
           python3 scripts/f19_ci.py smoke
@@ -810,6 +977,7 @@ jobs:
           python3 scripts/f20_ci.py results
 
       - name: Verify packaged block pages, display and timestamp with source-specific recovery
+        id: jar_f20
         run: |
           set -euo pipefail
           python3 scripts/f20_ci.py smoke
@@ -847,6 +1015,8 @@ jobs:
           python3 scripts/f21_ci.py results
 
       - name: Verify packaged notifications, cursor and unread without writes or lifecycle execution
+        id: jar_f21
+        if: ${{ matrix.profile == 'full' }}
         run: |
           set -euo pipefail
           python3 scripts/f21_ci.py smoke
@@ -883,6 +1053,8 @@ jobs:
           python3 scripts/f22_ci.py results
 
       - name: Verify packaged owned note detail, unchanged read state, strict body failure recovery and denied stream/write
+        id: jar_f22
+        if: ${{ matrix.profile == 'full' }}
         run: |
           set -euo pipefail
           python3 scripts/f22_ci.py smoke
@@ -919,6 +1091,8 @@ jobs:
           python3 scripts/f23_ci.py results
 
       - name: Verify packaged mailbox pages, separate count and list recovery and unchanged state
+        id: jar_f23
+        if: ${{ matrix.profile == 'full' }}
         run: |
           set -euo pipefail
           python3 scripts/f23_ci.py smoke
@@ -955,6 +1129,7 @@ jobs:
           python3 scripts/f24_ci.py results
 
       - name: Verify packaged unblock, exact permitted writes and protected state recovery
+        id: jar_f24
         run: |
           set -euo pipefail
           python3 scripts/f24_ci.py smoke
@@ -993,6 +1168,7 @@ jobs:
         run: python3 scripts/f25_ci.py results
 
       - name: Verify packaged block creation, duplicate timestamps and protected state recovery
+        id: jar_f25
         run: |
           set -euo pipefail
           python3 scripts/f25_ci.py smoke
@@ -1017,14 +1193,26 @@ jobs:
           PYTHON
 
       - name: Remove only the owned disposable fixture
+        id: owned_cleanup
         if: always()
         run: python3 scripts/f3_ci.py cleanup
+
+      - name: Reject missing, failed or falsely skipped runtime contracts
+        if: always()
+        env:
+          CONTRACT_STEPS_JSON: ${{ toJSON(steps) }}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum boot/build/libs/pawbridge-backend-app.jar | cut -d ' ' -f 1)" = "$EXPECTED_CANDIDATE_JAR_SHA256"
+          python3 ../.github/scripts/backend_contract_profile.py --mode audit --profile "$CONTRACT_PROFILE" \
+            --jar boot/build/libs/pawbridge-backend-app.jar --plan build/ci/contract-plan.txt \
+            --execution build/ci/contract-execution.txt
 
       - name: Preserve tests and bounded runtime evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}
+          name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}
           path: |
             backend-app/**/build/test-results/**/TEST-*.xml
             backend-app/build/ci/*.txt
@@ -1037,7 +1225,7 @@ jobs:
           retention-days: 7
 
       - name: Preserve the verified executable JAR
-        if: success()
+        if: ${{ success() && matrix.profile == 'full' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-app-boot-jar-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1049,7 +1237,7 @@ jobs:
 
   ci-result:
     name: Backend app CI result
-    needs: [selection, check]
+    needs: [selection, package, check]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -1059,10 +1247,11 @@ jobs:
           SELECTION_RESULT: ${{ needs.selection.result }}
           MODULE_SELECTED: ${{ needs.selection.outputs.selected }}
           MODULE_RESULT: ${{ needs.check.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
         run: |
           set -euo pipefail
           test "$SELECTION_RESULT" = success
-          case "$MODULE_SELECTED:$MODULE_RESULT" in
-            true:success|false:skipped) ;;
+          case "$MODULE_SELECTED:$PACKAGE_RESULT:$MODULE_RESULT" in
+            true:success:success|false:skipped:skipped) ;;
             *) printf 'Backend app checks failed or were unexpectedly skipped\n' >&2; exit 1 ;;
           esac
