@@ -157,10 +157,76 @@ def require_fixture():
     return owner
 
 
-def database_snapshot():
+# Fixed late-stage F25 projection: raw rows and the original PostgreSQL ORDER BY expressions.
+# F24 and earlier helpers keep their original snapshots; do not import a later stage here.
+SNAPSHOT_TABLES = (
+    ('users','pawbridge_user.users','user_id'), ('favorites','pawbridge_user.favorites','favorite_id'),
+    ('posts','pawbridge_community.posts','post_id'), ('comments','pawbridge_community.comments','comment_id'),
+    ('f4comments','pawbridge_f4_fixture.comments','comment_id'), ('notes','pawbridge_f4_fixture.private_notes','note_id'),
+    ('outbox','pawbridge_community.outbox_events','outbox_id'), ('search','pawbridge_community.post_search_documents','post_id'),
+    ('videos','pawbridge_community.home_videos','id'), ('board','pawbridge_community.home_video_board','id'),
+    ('daily_visit_count','pawbridge_community.daily_visit_count','visit_date'),
+    ('contact_deletions','pawbridge_user.contact_deletions','user_id'),
+    ('private_note_members','pawbridge_community.private_note_members','member_id'),
+    ('private_note_blocks','pawbridge_community.private_note_blocks','member_id,blocked_id'),
+    ('private_notes','pawbridge_community.private_notes','note_id'),
+    ('private_note_mailboxes','pawbridge_community.private_note_mailboxes','member_id,note_id'),
+)
+
+
+def old_reference_snapshot():
     value=f24.database_snapshot()
     if len(value)!=16:raise SystemExit('F25 requires all sixteen inherited tables')
     return value
+
+
+def _snapshot_bytes(value):
+    if (type(value) is not dict or len(value)!=16 or set(value)!={row[0] for row in SNAPSHOT_TABLES}
+            or any(type(rows) is not list or any(type(row) is not dict for row in rows) for rows in value.values())):
+        raise SystemExit('F25 requires exactly sixteen raw-row table snapshots')
+    try:
+        # Object key order is immaterial; array order and bool/int/float/null/string values remain exact.
+        return json.dumps(value,sort_keys=True,ensure_ascii=False,allow_nan=False,separators=(',',':')).encode('utf-8')
+    except (TypeError,ValueError,UnicodeError):
+        raise SystemExit('F25 snapshot contains a malformed JSON value') from None
+
+
+def database_snapshot():
+    f2.require_hosted()
+    if len(SNAPSHOT_TABLES)!=16 or len({row[0] for row in SNAPSHOT_TABLES})!=16:
+        raise SystemExit('F25 fixed snapshot table definitions differ')
+    fields=[f4.literal(name)+',(SELECT COALESCE(json_agg(r ORDER BY '+order
+            +"),'[]'::json) FROM "+relation+' r)' for name,relation,order in SNAPSHOT_TABLES]
+    try:
+        value=json.loads(owned_sql('SELECT json_build_object('+','.join(fields)+')'))
+    except (ValueError,TypeError):
+        raise SystemExit('F25 complete sixteen-table snapshot is malformed') from None
+    _snapshot_bytes(value)
+    return value
+
+
+def compare_snapshots(boundary,expected=None):
+    f2.require_hosted()
+    if boundary not in ('before_start','after_stop'):
+        raise ValueError('F25 snapshot comparison requires a fixed quiescent boundary')
+    reference=_snapshot_bytes(expected) if expected is not None else None
+    samples=[]
+    # Balanced small sample, not an estimate of whole-workflow savings. No writes between calls.
+    for mode in ('old','new','new','old'):
+        started=time.perf_counter()
+        value=old_reference_snapshot() if mode=='old' else database_snapshot()
+        elapsed=time.perf_counter()-started
+        encoded=_snapshot_bytes(value)
+        if reference is None:reference=encoded
+        if encoded!=reference:
+            raise SystemExit('F25 quiescent old/new snapshot values, JSON types or array order differ')
+        samples.append({'mode':mode,'wall_seconds':elapsed,'snapshot_calls':1,
+                        'row_count':sum(len(rows) for rows in value.values()),'canonical_json_bytes':len(encoded),
+                        'static_business_selects':7 if mode=='old' else 1,
+                        'static_marker_selects':7 if mode=='old' else 1,
+                        'static_docker_subprocesses':21 if mode=='old' else 3})
+    return {'status':'passed','boundary':boundary,'tables':16,'order':['old','new','new','old'],
+            'call_counts_basis':'static source path, not observed subprocess instrumentation','samples':samples}
 
 
 def prepare():
@@ -329,15 +395,15 @@ def smoke():
         F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',F3_STORAGE_REGION='us-east-1')
     result=dict.fromkeys(COUNTERS,0)
     result.update(status='incomplete',timezone='Asia/Seoul',reader_pool_maximum=1,writer_pool_maximum=1,
-                  protected_database_changes=0,s3_requests=0,permitted_delta='one outgoing block and initially absent reserved member keys')
+                  protected_database_changes=0,s3_requests=0,permitted_delta='one outgoing block and initially absent reserved member keys',snapshot_comparisons={})
     EVIDENCE.mkdir(parents=True,exist_ok=True)
     app_path,stub_path=EVIDENCE/'f25-packaged-startup.log',EVIDENCE/'f25-s3-stub.log'
-    baseline=database_snapshot();owned=();base=endpoint='';first_created_at=None
+    baseline=database_snapshot();verified_database=baseline;journey_verified=False;owned=();base=endpoint='';first_created_at=None
     def snapshot():
         state=f3.expect(endpoint,'/__f3__/state',200,headers=controls)
         return database_snapshot(),state['counts'],state['objects'],len(state['requests'])
     def check(path,*,method='PUT',status=200,token='F25_CALLER',message=None,layer='business',kind=None,delta=None,view=None):
-        nonlocal first_created_at
+        nonlocal first_created_at,verified_database
         headers={'X-User-Id':str(OTHER),'X-User-Role':'ROLE_ADMIN'}
         before=snapshot();expected=copy.deepcopy(before[0])
         if token is not None:headers['Authorization']='Bearer '+load_tokens()[token]
@@ -380,6 +446,7 @@ def smoke():
             else:wanted={'message':message} if layer=='business' else {'code':status,'message':message,'data':None}
             if body!=wanted:raise AssertionError('F25 exact payload differs')
         if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)")!='0':raise AssertionError('F25 request left an active transaction')
+        verified_database=copy.deepcopy(after[0])
         result['request_checks']+=1
         if method=='PUT':
             result['put_checks']+=1;result['successful_put_checks' if status==200 else 'rejected_put_checks']+=1
@@ -388,8 +455,9 @@ def smoke():
         if kind:result[kind+'_checks']+=1
         if after[0]!=before[0]:result['approved_database_write_checks']+=1
     try:
+        result['snapshot_comparisons']['before_start']=compare_snapshots('before_start',baseline)
         with app_path.open('w') as app_log,stub_path.open('w') as stub_log:
-            app=stub=None;offset=0
+            app=stub=None;offset=0;app_stopped=stub_stopped=False
             try:
                 app,stub,base,endpoint,attempts,offset=f4.start_ready_children(jar,app_env,base_env,owner,bucket,prefix,stub_log,app_log,stub_path,app_path)
                 result['startup_attempts']=attempts
@@ -416,16 +484,25 @@ def smoke():
                 check('/api/v1/notes/blocks/9223372036854775808',status=401,token=None,message='인증 토큰이 필요합니다.',layer='auth',kind='authentication')
                 check('/api/v1/notes/stream/extra',method='GET',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
                 check(path+'/extra',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
-                require_fixture()
+                require_fixture();journey_verified=True
             finally:
                 try:
-                    if app is not None:result['app_sigterm_exit']=f3.stop_owned_child(app,'F25 packaged application')
+                    if app is not None:
+                        result['app_sigterm_exit']=f3.stop_owned_child(app,'F25 packaged application');app_stopped=True
                 finally:
                     try:
-                        if stub is not None:result['stub_sigterm_exit']=f3.stop_owned_child(stub,'F25 S3 stub')
+                        if stub is not None:
+                            result['stub_sigterm_exit']=f3.stop_owned_child(stub,'F25 S3 stub');stub_stopped=True
                     finally:
-                        if owned:cleanup_business_rows(owned,observe_created_members(owned))
+                        try:
+                            if app_stopped and stub_stopped:
+                                result['snapshot_comparisons']['after_stop']=compare_snapshots('after_stop',verified_database if journey_verified else None)
+                        finally:
+                            if owned:cleanup_business_rows(owned,observe_created_members(owned))
         if database_snapshot()!=baseline:raise AssertionError('F25 cleanup did not restore all sixteen tables')
+        if (set(result['snapshot_comparisons'])!={'before_start','after_stop'}
+                or any(type(proof) is not dict or proof.get('status')!='passed' for proof in result['snapshot_comparisons'].values())):
+            raise AssertionError('F25 quiescent snapshot comparison evidence is incomplete')
         if app_path.stat().st_size>1024*1024 or stub_path.stat().st_size>1024*1024:raise AssertionError('F25 child log budget exceeded')
         text=f4.fresh_log(app_path,offset)
         if text.count('Shutdown completed.')!=2 or 'Graceful shutdown complete' not in text:raise AssertionError('F25 exact two-pool graceful shutdown evidence missing')
