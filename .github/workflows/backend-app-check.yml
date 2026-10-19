@@ -159,6 +159,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f9-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f10_ci.py prepare > build/ci/f10-helper-refusal.txt 2>&1; then
+            printf 'F10 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f10-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -212,7 +217,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f[23456789]LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f[23456789]LegacyOracle|f10LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
@@ -304,6 +309,40 @@ jobs:
           assert result['rejected_post_checks'] >= 28
           assert result['comment_post_checks'] == result['comments_created'] + result['rejected_post_checks']
           assert result['comment_get_checks'] >= result['comments_created']
+          assert result['unrelated_database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PY
+
+      - name: Verify F10 staged ownership, ACL, report and workflow guards without starting resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f10_ci_guards.py
+
+      - name: Extend the owned fixture with exact F10 comment deletion permissions
+        run: python3 scripts/f10_ci.py prepare
+
+      - name: Compare only F10 comment deletion in UTC and Seoul with the extended ACL
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:commentDeleteCompatibilityTest :boot:commentDeleteCompatibilitySeoulTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          python3 scripts/f10_ci.py results
+
+      - name: Verify packaged authenticated comment deletion, preserved rows and rollback recovery
+        run: |
+          set -euo pipefail
+          python3 scripts/f10_ci.py smoke
+          test -s build/ci/f8-oracle-sha256.txt
+          test -s build/ci/f10-helper-refusal.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f10-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['comment_post_checks'] >= 10
+          assert result['comment_get_checks'] >= 20
+          assert result['comments_deleted'] >= 10
+          assert result['rejected_delete_checks'] >= 25
+          assert result['comment_delete_checks'] == result['comments_deleted'] + result['rejected_delete_checks']
           assert result['unrelated_database_changes'] == result['s3_requests'] == 0
           assert result['shutdown_pools'] == 2
           assert result['remaining_application_connections'] == 0
