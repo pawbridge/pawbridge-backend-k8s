@@ -1,13 +1,13 @@
 # PawBridge 업무 통합 실행기
 
-Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정을 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정, F14의 본인 찜 여부 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
 
 ## 업무 경계와 호출
 
 | 모듈 | 책임 | 직접 프로젝트 의존성 |
 |---|---|---|
 | boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
-| user | 공개 닉네임 조회 계약·내부 본인 정보 조회·본인 닉네임 수정과 JDBC·HTTP 구현 | 없음 |
+| user | 공개 닉네임 조회 계약·내부 본인 정보 조회·본인 닉네임 수정·찜 여부 조회와 JDBC·HTTP 구현 | 없음 |
 | community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·REST 응답 | user |
 
 ```text
@@ -24,7 +24,7 @@ Community는 User의 공개 API만 참조한다. User 부재·명시된 조회 �
 
 ## DB·실행 설정
 
-읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
+읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
 
 | 환경 변수 | 의미 |
 |---|---|
@@ -171,6 +171,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 `PUT /api/v1/users/me/nickname`은 기존 검증된 JWT principal의 본인만 대상으로 JSON nickname을 처리한다. 실제 요청 DTO의 NotBlank·길이2~30·한글/영문을 최소 하나 포함하는 한글/영문/숫자 패턴을 유지하고 trim·대소문자 정규화·새 회원 정책은 추가하지 않는다. `ChangeUserNickname`의 실제 Spring proxy가 기존 `writeTransactionManager` 한 트랜잭션 안에서 현재 nickname 조회→원문 동일값이면 중복 조회·UPDATE·auditing 생략→DB lower 중복 조회→nickname/updated_at 두 열 갱신을 수행한다. 성공은 동일값도 HTTP/code200·`닉네임이 변경되었습니다.`·data:null이다. 회원 부재400·사전 중복409를 유지한다. 원본의 managed save 이후 UNIQUE 경합23505는 메서드 catch 밖 commit에서 실패하며, 후보도 JDBC UPDATE에서 발생한 실제 DB 경합을 일괄409로 바꾸지 않고 안전한500으로 표현한다. 구조화된 User schema·23514·rollback charset 제약 metadata만 고정400으로 표현한다. 후보의 좁은 UPDATE는 원본 전체행 flush와 달리 동시 변경된 role/비밀번호를 덮지 않는다. 새 pool·환경 설정·잠금·version·retry·Outbox·S3 호출은 없다. 로컬 시험과 JAR 빌드는 운영 배포나 실제 운영 DB 권한 변경의 근거가 아니며, 이 후보는 미배포 상태다.
 
+## F14 본인 찜 여부 조회
+
+`GET /api/v1/favorites/{animalId}/check`는 검증된 JWT principal의 userId와 경로의 원문 Long animalId로 존재 여부만 조회한다. User/Animal 부재 확인이나 양수 검증·외부 호출을 추가하지 않는다. 성공은 HTTP/code200·기본 성공 문구·boolean data이며 찜이 없거나 회원이 없어도 false다. X-User-*·query·GET body로 식별자를 바꾸지 않는다. 기존 reader의 3초 read-only 트랜잭션에서 두 열만 조건으로 사용하며 SQL/연결/트랜잭션 오류를 false로 숨기지 않고 안전한500으로 반환한다. 원본 Controller/Advice의 실제 변환 오류도500을 유지하며 새400 개선을 섞지 않는다. 새 pool/TM·환경 변수·모듈 공개 API·Outbox·S3 호출은 없다. 찜 POST/DELETE와 운영 DB 권한·배포는 이 후보 범위가 아니다.
+
 ## 구조 검사
 
 `gradle/architecture.gradle`의 `verifyArchitecture`와 `verifyBusinessPackages`를 유지한다.
@@ -200,9 +204,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 12. F10 회귀를 끝낸 뒤 F11 가드→content 한 열 권한 준비→수정 전용 UTC/Seoul/XML→packaged 순서로 진행한다. 실제 고정 요청 validator·managed JPA dirty checking·commit auditing과 후보의 oldupdatedAt 응답·저장 시각·동일 본문 no-op·경합 차이를 비교한다. packaged 시험은 실제 POST→저장된 GET snapshot→changed/same PUT→GET→DELETE와 인증·소유권·JSON/blank/Unicode·부재/삭제·부모 무관·닉네임 fallback/회복을 확인한다. UPDATE(content,updated_at) 권한을 회수한 상태에서 동일 본문은 성공하고 변경은500이어야 하며 복원 후 회복을 확인한다. 성공 변경은 content/updated_at만 바꾸고 다른 댓글/User/posts/F4 댓글·쪽지/Outbox/search/S3는 유지한다. 동일 본문·실패·GET은 전체 DB/S3 무변경, 두 pool 정상 종료·잔여 연결0·로그 크기/비밀값 비노출을 확인한다.
 13. 원래 F3~F11 회귀 뒤 F12 가드→User fixture 준비·ID/nickname 보존→profile 전용 UTC/Seoul/XML→packaged를 실행한다. 고정된 실제 User JPA/DTO와 가입일 null·날짜 경계·마이크로초·역할/닉네임을 비교한다. JAR는 본인 정보 exact7·DB/JWT 값 차이·두 principal·200/400/401/500·인접 경로403과 SQL 권한 회복을 확인하고 각 요청의 전체 DB/S3 불변·두 pool 종료/접속0·민감 필드 응답/로그 제외를 검사한다.
 14. F3~F12 회귀를 각 단계 원래 권한에서 끝낸 뒤 F13 가드→기존 User ID/nickname 보존·고정 V1 UNIQUE/lower index·V2 8열 문자 CHECK·writer SELECT(user_id,nickname)/UPDATE(nickname,updated_at) 준비→nickname 전용 UTC/Seoul/XML→packaged를 실행한다. 확장 뒤 F12 무권한 helper를 호출하지 않고 F11 owner/정확한 포트/댓글 ACL 체인과 F12 schema/reader7, F13 writer exact ACL을 대조한다. JAR 직전 고정 원본 발급기로 600초 합성 토큰과 두 번째 principal을 갱신하며 stale token은 자식 시작 전에 거부한다. 실제 PUT→본인 정보/기존 댓글 작성자 표시, 동일값 무변경·case-only/타인 중복·인증/검증/부재·UPDATE 권한 실패/회복을 확인한다. 성공은 해당 회원 nickname/updated_at만 바꾸고, 동일값·오류·GET은 전체 DB/S3 불변이다. 원본 JPA 비교는 별도 compatibility 시험이며 운영 HTTP E2E가 아니다.
-15. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
+15. 기존 F3~F13 staged 회귀 뒤 F14 owner/marker와 고정 V1 favorites4열·identity PK·회원/동물 UK·User RESTRICT FK·실제 animal index를 준비한다. reader에는 SELECT(user_id,animal_id)만 추가하고 writer의 favorites 권한·두 계정 sequence 권한은 금지한다. F13 strict 체인은 그대로 재사용하고 F12 strict는 호출하지 않는다. 실제 원본 derived exists와 후보를 전용 favoriteStatusCompatibilityTest UTC 한 번 및 비0/실패·오류·skip0 XML로 비교하며 시각 경로 없는 동일 사례를 Seoul에서 반복하지 않는다. JAR는 최종 갱신된 두 principal 토큰으로 true/false·회원 부재 false·인증/형식/SQL 실패와 권한 복구를 확인한다. 매 GET snapshot에 favorites를 포함해 전체 DB/S3 변경0, 정상 두 pool 종료·연결0을 검사하고 시험 행은 favorite→User 순서로 정리한다.
+16. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
-`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
+`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f14_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`·`f14_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
 
 `prepare_legacy_oracle.py`는 기준 `e8ad7b8ec9006772ccc5f5881334df2730dbd8de`의 정확히 6개 Java 파일만 해시 검증해 boot/build 안 test-only 경로로 추출한다. Post/BoardType/StringListConverter/PostResponse와 UserServiceClient 및 그 JDK-only 응답 의존 PrivateNoteModels다. legacy 전체 sourceDir·Application을 편입하지 않는다. 실제 source/버전 비교는 compatibility classpath에서만 이뤄지고 앱 JAR에는 들어가지 않는다.
 
@@ -224,8 +229,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 `prepare_f13_legacy_oracle.py`는 고정 원본 User/Role와 요청 DTO·Repository·컴파일 의존 및 실제 updateNickname 메서드 원문으로 제한된 compatibility oracle을 구성한다. 관리자 JPQL 전체를 초기화하지 않으며 실제 중복 @Query와 inherited findById/save·auditing·proxy commit 경계를 비교한다. `f13_ci.py`는 고정 V1/V2 파일 해시와 실제 fixture DDL을 대조하며 전체 User charset CHECK의 생성 정의를 marker에 보관해 이후 변조도 거부한다. 신규 원본과 공유 generated bytes는 해시로 고정하고 앱 JAR에서 제외한다.
 
+`prepare_f14_legacy_oracle.py`는 고정 Favorite/FavoriteRepository와 실제 MVC Controller/Advice·필요한 DTO 의존만 compatibility 전용으로 추출한다. 공유 User/Role·기존 오류 타입은 고정 해시와 generated bytes를 대조한다. 실제 derived exists는 ID projection에 favorite_id가 필요하므로 owned-admin read-only oracle와 후보의 reader 두 열 권한을 구분한다. Controller·Advice의 순수 MVC 비교는 DB 없이 실행한다. Advice의 Redis 예외 타입을 위한 spring-data-redis 한 artifact만 transitive 없이 compatibility에 두며 JAR 격리 검사에서 거부한다. 원본 전체 UserService/OAuth/Animal Feign·Redis 서버는 기동하지 않는다. `f14_ci.py`는 고정 V1 해시·실제 favorites DDL과 기존 User 행 보존을 확인한다.
+
 TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classpath를 사용한다. 실제 업무 build와 guard를 fixture에 복사하고, 본 빌드가 해결한 BOM/의존 cache를 offline으로 사용한다. 허용/금지 fixture의 이유를 검사하며 일반 컴파일·다운로드 오류를 구조 차단 성공으로 취급하지 않는다.
 
 Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13 계획과 모듈형 모놀리스 전환 노트를 따른다.
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14 계획과 모듈형 모놀리스 전환 노트를 따른다.
