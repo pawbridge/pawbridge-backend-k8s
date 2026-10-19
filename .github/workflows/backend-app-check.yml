@@ -1435,6 +1435,26 @@ jobs:
           assert result['remaining_application_connections'] == 0
           PYTHON
 
+      - name: Verify owned note expiry, original limits, rollback and active scheduler shutdown in UTC
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:noteExpiryCompatibilityTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          root = Path('boot/build/test-results/noteExpiryCompatibilityTest')
+          reports = list(root.glob('TEST-*.xml'))
+          assert len(reports) == 1
+          suite = ET.parse(reports[0]).getroot()
+          assert suite.attrib['name'] == 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest'
+          cases = list(suite.iter('testcase'))
+          assert int(suite.attrib['tests']) == len(cases) == 6
+          assert len({case.attrib['name'] for case in cases}) == 6
+          assert all(int(suite.attrib.get(key, 0)) == 0 for key in ('failures', 'errors', 'skipped', 'disabled'))
+          assert not any(case.find(key) is not None for case in cases for key in ('failure', 'error', 'skipped'))
+          PYTHON
+
       - name: Remove only the owned disposable fixture
         id: owned_cleanup
         if: always()

@@ -274,4 +274,249 @@ class PostgresqlNoteSendCompatibilityTest {
         assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isFalse();
         if(reader!=null){assertThat(TransactionSynchronizationManager.hasResource(reader)).isFalse();assertThat(reader.getHikariPoolMXBean().getActiveConnections()).isZero();}if(writer!=null){assertThat(TransactionSynchronizationManager.hasResource(writer)).isFalse();assertThat(writer.getHikariPoolMXBean().getActiveConnections()).isZero();}if(original!=null)assertThat(original.isResourceBound()).isFalse();
     }
+
+ // F30 only: selected by note-expiry tag; every pre-existing F29 method above remains byte-for-byte unchanged.
+ private static final String EXPIRY_BODY="F30 synthetic expiry";
+ private final Set<UUID> expiryReservedNotes=new LinkedHashSet<>(),expiryReservedRequests=new LinkedHashSet<>();
+ private Instant expiryNow;
+ private record ExpiryNote(UUID id,Instant expires,UUID replyTo,boolean bothMailboxes){}
+ private record ExpiryRequest(UUID id,UUID note,Instant created){}
+
+ @Test @Tag("note-expiry")
+ void givenOwnedExpiryAndFortyEightHourBoundaries__whenBothExpireTwice__thenKeepForeignBaselineAndApplyFkThenOrphanCleanupEvenWhenFirstDeleteIsZero()throws Exception{
+  beginExpiry();
+  try(var privileges=expiryPrivileges()){
+   for(boolean source:new boolean[]{true,false}){
+    UUID equal=expiryId(1),before=expiryId(2),live=expiryId(3),child=expiryId(4);
+    UUID linkedOld=expiryId(101),exact=expiryId(102),orphanOld=expiryId(103),fresh=expiryId(104),liveLinked=expiryId(105);
+    try{
+     seedExpiry(List.of(new ExpiryNote(equal,expiryNow,null,true),new ExpiryNote(before,expiryNow.minusNanos(1000),null,false),
+       new ExpiryNote(live,expiryNow.plusNanos(1000),null,false),new ExpiryNote(child,expiryNow.plusSeconds(60),equal,false)),
+       List.of(new ExpiryRequest(linkedOld,equal,expiryNow.minusSeconds(172801)),new ExpiryRequest(exact,null,expiryNow.minusSeconds(172800)),
+       new ExpiryRequest(orphanOld,null,expiryNow.minusSeconds(172801)),new ExpiryRequest(fresh,null,expiryNow.minusSeconds(1)),new ExpiryRequest(liveLinked,live,expiryNow.minusSeconds(172801))));
+     String first=snapshot();expireOwned(source,2);assertExpiryDelta(first,Set.of(equal,before),Set.of(linkedOld,orphanOld));
+     try(Connection c=admin();var s=c.prepareStatement("UPDATE pawbridge_community.private_note_requests SET created_at=? WHERE sender_id=? AND request_id=?")){
+      s.setObject(1,OffsetDateTime.ofInstant(expiryNow.minusSeconds(172801),ZoneOffset.UTC));s.setLong(2,CALLER);s.setObject(3,fresh);assertThat(s.executeUpdate()).isOne();
+     }
+     String second=snapshot();expireOwned(source,0);assertExpiryDelta(second,Set.of(),Set.of(fresh));
+    }finally{finishExpiryRound();}
+   }
+  }
+ }
+
+ @Test @Tag("note-expiry")
+ void givenThreeHundredAndOneOwnedCandidatesPerTable__whenBothExpireOneBatch__thenDeleteExactlyTheOldestThreeHundredPerSqlWithoutDraining()throws Exception{
+  beginExpiry();
+  try(var privileges=expiryPrivileges()){
+   for(boolean source:new boolean[]{true,false}){
+    try{
+     var ns=new ArrayList<ExpiryNote>();var rs=new ArrayList<ExpiryRequest>();var removedNotes=new LinkedHashSet<UUID>();var removedRequests=new LinkedHashSet<UUID>();
+     for(int i=0;i<301;i++){
+      UUID note=expiryId(1000+i),request=expiryId(2000+i);
+      ns.add(new ExpiryNote(note,expiryNow.minusSeconds(301-i),null,false));rs.add(new ExpiryRequest(request,null,expiryNow.minusSeconds(172800+301-i)));
+      if(i<300){removedNotes.add(note);removedRequests.add(request);}
+     }
+     seedExpiry(ns,rs);String before=snapshot();expireOwned(source,300);assertExpiryDelta(before,removedNotes,removedRequests);
+    }finally{finishExpiryRound();}
+   }
+  }
+ }
+
+ @Test @Tag("note-expiry")
+ void givenOneLockedOwnedNoteAndOrphanRequest__whenBothExpire__thenSkipThoseRowsAndDeleteTheUnlockedOwnedCandidates()throws Exception{
+  beginExpiry();
+  try(var privileges=expiryPrivileges()){
+   for(boolean source:new boolean[]{true,false}){
+    UUID locked=expiryId(11),free=expiryId(12),lockedRequest=expiryId(111),freeRequest=expiryId(112);
+    try{
+     seedExpiry(List.of(new ExpiryNote(locked,expiryNow.minusSeconds(2),null,false),new ExpiryNote(free,expiryNow.minusSeconds(1),null,false)),
+       List.of(new ExpiryRequest(lockedRequest,null,expiryNow.minusSeconds(172802)),new ExpiryRequest(freeRequest,null,expiryNow.minusSeconds(172801))));
+     String before=snapshot();
+     try(Connection blocker=admin()){
+      blocker.setAutoCommit(false);
+      try(var s=blocker.createStatement()){
+       s.executeQuery("SELECT note_id FROM pawbridge_community.private_notes WHERE note_id='"+locked+"' FOR UPDATE").close();
+       s.executeQuery("SELECT request_id FROM pawbridge_community.private_note_requests WHERE sender_id="+CALLER+" AND request_id='"+lockedRequest+"' FOR UPDATE").close();
+      }
+      try{expireOwned(source,1);assertExpiryDelta(before,Set.of(free),Set.of(freeRequest));}finally{blocker.rollback();}
+     }
+    }finally{finishExpiryRound();}
+   }
+  }
+ }
+
+ @Test @Tag("note-expiry")
+ void givenOwnedRequestDeletePermissionFailure__whenCandidateHasAlreadyDeletedTheExpiredNote__thenRollbackBothSqlAndRestoreOnlyOwnedPrivileges()throws Exception{
+  beginExpiry();
+  try(var privileges=expiryPrivileges()){
+   try{
+    UUID note=expiryId(21),request=expiryId(121);
+    seedExpiry(List.of(new ExpiryNote(note,expiryNow,null,true)),List.of(new ExpiryRequest(request,note,expiryNow.minusSeconds(172801))));
+    String before=snapshot();verifyOwnership();execute("REVOKE DELETE ON pawbridge_community.private_note_requests FROM pawbridge_f3_writer");
+    try{assertThat(failure(()->expireOwned(false,-1))).isInstanceOf(DataAccessException.class);returned();assertSame(before);}
+    finally{verifyOwnership();execute("GRANT DELETE ON pawbridge_community.private_note_requests TO pawbridge_f3_writer");requireExpiryPrivileges(true);}
+   }finally{finishExpiryRound();}
+  }
+ }
+
+ @Test @Tag("note-expiry")
+ void givenAnOwnedDeferredDeleteConstraint__whenBothCommitExpiry__thenRejectFromThatConstraintAndRollbackAllEighteenTableChanges()throws Exception{
+  beginExpiry();String name="f30_owned_expiry_rejection";verifyOwnership();
+  assertThat(scalar("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='pawbridge_community' AND p.proname='"+name+"'")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pg_trigger WHERE tgrelid='pawbridge_community.private_notes'::regclass AND tgname='"+name+"'")).isZero();
+  boolean function=false,trigger=false;
+  try(var privileges=expiryPrivileges()){
+   try{
+    execute("CREATE FUNCTION pawbridge_community."+name+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'owned synthetic constraint' USING ERRCODE='23514',CONSTRAINT='"+name+"'; END $$");function=true;
+    execute("CREATE CONSTRAINT TRIGGER "+name+" AFTER DELETE ON pawbridge_community.private_notes DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (OLD.sender_id="+CALLER+") EXECUTE FUNCTION pawbridge_community."+name+"()");trigger=true;
+    for(boolean source:new boolean[]{true,false}){
+     try{
+      UUID note=expiryId(31),request=expiryId(131);seedExpiry(List.of(new ExpiryNote(note,expiryNow,null,true)),List.of(new ExpiryRequest(request,note,expiryNow.minusSeconds(172801))));
+      String before=snapshot();requireOwnedExpiryCommitFailure(failure(()->expireOwned(source,-1)));returned();assertSame(before);assertThat(hints).isEmpty();assertThat(contacts).isEmpty();assertThat(original.contactIds()).isEmpty();
+     }finally{
+      // The deferred trigger must be removed before normal owned cleanup DELETEs.
+      if(trigger){verifyOwnership();execute("DROP TRIGGER "+name+" ON pawbridge_community.private_notes");trigger=false;}
+      finishExpiryRound();
+     }
+     if(source){execute("CREATE CONSTRAINT TRIGGER "+name+" AFTER DELETE ON pawbridge_community.private_notes DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (OLD.sender_id="+CALLER+") EXECUTE FUNCTION pawbridge_community."+name+"()");trigger=true;}
+    }
+   }finally{
+    verifyOwnership();try{if(trigger)execute("DROP TRIGGER "+name+" ON pawbridge_community.private_notes");}
+    finally{if(function)execute("DROP FUNCTION pawbridge_community."+name+"()");}
+   }
+  }
+ }
+
+ @Test @Tag("note-expiry") @Order(Integer.MAX_VALUE-1) @Timeout(45)
+ void givenAnActiveExpiryWaitingForOwnedMailboxFk__whenActualBootSchedulerContextCloses__thenReturnTheTransactionBeforeWriterPoolDestructionAndNeverReschedule()throws Exception{
+  beginExpiry();
+  var released=new java.util.concurrent.atomic.AtomicBoolean();var observed=new java.util.concurrent.atomic.AtomicReference<RuntimeException>();
+  var closeStarted=new CountDownLatch(1);
+  var closer=Executors.newSingleThreadExecutor(action->{var t=new Thread(action,"f30-context-close");t.setDaemon(true);return t;});
+  var context=new org.springframework.context.annotation.AnnotationConfigApplicationContext();Future<?> task=null,closing=null;
+  try(var privileges=expiryPrivileges()){
+   try{
+    UUID note=expiryId(41);seedExpiry(List.of(new ExpiryNote(note,expiryNow,null,true)),List.of());String before=snapshot();requireNoForeignExpiryCandidates();
+    candidateClock.reset(expiryNow);
+    context.getEnvironment().getPropertySources().addFirst(new org.springframework.core.env.MapPropertySource("f30-owned-lifecycle",Map.of("pawbridge.jobs.cleanup-enabled","true","spring.lifecycle.timeout-per-shutdown-phase","10s")));
+    context.registerBean("writeDataSource",HikariDataSource.class,()->writer,definition->((org.springframework.beans.factory.support.AbstractBeanDefinition)definition).setDestroyMethodName("close"));
+    context.registerBean("writeJdbc",JdbcTemplate.class,()->writeJdbc);
+    context.registerBean("writeTransactionManager",JdbcTransactionManager.class,()->new JdbcTransactionManager(writer));
+    context.registerBean("readClock",Clock.class,()->candidateClock);
+    org.springframework.context.ApplicationListener<org.springframework.context.event.ContextClosedEvent> closingListener=event->closeStarted.countDown();context.addApplicationListener(closingListener);
+    context.register(org.springframework.boot.autoconfigure.context.LifecycleAutoConfiguration.class,com.pawbridge.backend.boot.configuration.NoteExpiryConfiguration.class);context.refresh();
+    var scheduler=context.getBean("noteExpiryScheduler",org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class);
+    var job=context.getBean("noteExpiryJob",com.pawbridge.backend.boot.configuration.NoteExpiryConfiguration.NoteExpiryJob.class);
+    try(Connection blocker=admin()){
+     blocker.setAutoCommit(false);try(var s=blocker.createStatement()){s.executeQuery("SELECT member_id FROM pawbridge_community.private_note_mailboxes WHERE note_id='"+note+"' FOR UPDATE").close();}
+     try{
+      task=scheduler.submit(()->{try{job.expire();}catch(RuntimeException failure){observed.set(failure);throw failure;}finally{released.set(!writer.isClosed()&&!TransactionSynchronizationManager.isActualTransactionActive()&&!TransactionSynchronizationManager.hasResource(writer)&&writer.getHikariPoolMXBean().getActiveConnections()==0);}});
+      awaitBlocked("f29-note-send-writer");closing=closer.submit(context::close);
+      assertThat(closeStarted.await(2,TimeUnit.SECONDS)).as("Context close begins while the actual owned expiry is waiting on its FK row").isTrue();assertThat(closing.isDone()).isFalse();assertThat(writer.isClosed()).isFalse();
+      blocker.rollback();closing.get(20,TimeUnit.SECONDS);task.get(2,TimeUnit.SECONDS);
+      assertThat(released.get()).as("Actual TX/connection returns before owned writer close").isTrue();assertThat(writer.isClosed()).isTrue();assertThat(scheduler.getScheduledExecutor().isTerminated()).isTrue();assertThat(scheduler.getScheduledThreadPoolExecutor().getQueue()).isEmpty();assertThat(scheduler.getScheduledThreadPoolExecutor().getActiveCount()).isZero();
+      assertThat(observed.get()).isNull();assertThat(candidateClock.calls.get()).isOne();assertExpiryDelta(before,Set.of(note),Set.of());
+     }finally{blocker.rollback();}
+    }
+   }finally{
+    if(closing!=null&&!closing.isDone())closing.cancel(true);
+    // An unclosed context may still own the writer; remove the FK blocker before this bounded cleanup.
+    if(context.isActive()){var finalClose=closer.submit(context::close);finalClose.get(20,TimeUnit.SECONDS);}
+    if(task!=null&&!task.isDone())task.cancel(true);
+    finishExpiryRound();
+   }
+  }finally{closer.shutdownNow();assertThat(closer.awaitTermination(5,TimeUnit.SECONDS)).isTrue();}
+ }
+
+ private void beginExpiry()throws Exception{
+  assertThat(expiryReservedNotes).isEmpty();assertThat(expiryReservedRequests).isEmpty();
+  // Select once before owned seed: production Clock and every original F29 FIRST/method remain unchanged.
+  Instant safe=FIRST;var state=json(snapshot());
+  try{
+   for(var n:state.get("private_notes")){Instant at=OffsetDateTime.parse(n.get("expires_at").asText()).toInstant();if(at.isBefore(safe))safe=at;}
+   for(var r:state.get("private_note_requests"))if(r.get("note_id").isNull()){Instant at=OffsetDateTime.parse(r.get("created_at").asText()).toInstant().plusSeconds(172800);if(at.isBefore(safe))safe=at;}
+   expiryNow=safe.minusSeconds(1);Timestamp.from(expiryNow.minusSeconds(172802));
+  }catch(java.time.DateTimeException|ArithmeticException failure){throw new IllegalStateException("Refusing a non-finite or unsupported owned expiry test clock");}
+  requireNoForeignExpiryCandidates();
+ }
+ private UUID expiryId(int n){return UUID.fromString(String.format(Locale.ROOT,"f3000000-0000-0000-0000-%012d",n));}
+ private void seedExpiry(List<ExpiryNote> ns,List<ExpiryRequest> rs)throws Exception{
+  verifyOwnership();member(CALLER);member(TARGET);
+  var newNotes=ns.stream().map(ExpiryNote::id).toList();var newRequests=rs.stream().map(ExpiryRequest::id).toList();
+  if(!newNotes.isEmpty())assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_notes WHERE note_id IN ("+uuidList(newNotes)+")")).isZero();
+  if(!newRequests.isEmpty())assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_note_requests WHERE request_id IN ("+uuidList(newRequests)+")")).isZero();
+  expiryReservedNotes.addAll(newNotes);expiryReservedRequests.addAll(newRequests);
+  try(Connection c=admin()){
+   c.setAutoCommit(false);
+   try(var n=c.prepareStatement("INSERT INTO pawbridge_community.private_notes(note_id,sender_id,recipient_id,body,reply_to,created_at,expires_at) VALUES(?,?,?,?,?,?,?)");
+       var m=c.prepareStatement("INSERT INTO pawbridge_community.private_note_mailboxes(member_id,note_id,direction,created_at) VALUES(?,?,?,?)");
+       var r=c.prepareStatement("INSERT INTO pawbridge_community.private_note_requests(sender_id,request_id,request_hash,note_id,created_at) VALUES(?,?,?,?,?)")){
+    for(var x:ns){n.setObject(1,x.id());n.setLong(2,CALLER);n.setLong(3,TARGET);n.setString(4,EXPIRY_BODY);n.setObject(5,x.replyTo());n.setObject(6,OffsetDateTime.ofInstant(expiryNow.minusSeconds(600000),ZoneOffset.UTC));n.setObject(7,OffsetDateTime.ofInstant(x.expires(),ZoneOffset.UTC));n.addBatch();}
+    n.executeBatch();
+    for(var x:ns)for(long member:x.bothMailboxes()?new long[]{CALLER,TARGET}:new long[]{CALLER}){m.setLong(1,member);m.setObject(2,x.id());m.setString(3,member==CALLER?"INBOX":"SENT");m.setObject(4,OffsetDateTime.ofInstant(expiryNow.minusSeconds(60),ZoneOffset.UTC));m.addBatch();}m.executeBatch();
+    for(var x:rs){r.setLong(1,CALLER);r.setObject(2,x.id());r.setString(3,"F30 owned request");r.setObject(4,x.note());r.setObject(5,OffsetDateTime.ofInstant(x.created(),ZoneOffset.UTC));r.addBatch();}r.executeBatch();c.commit();
+   }catch(Exception|Error failure){c.rollback();throw failure;}
+  }finally{reobserveExpirySeeds();}
+ }
+ private void reobserveExpirySeeds()throws Exception{
+  verifyOwnership();var state=json(snapshot());
+  for(var n:state.get("private_notes"))if(expiryReservedNotes.contains(UUID.fromString(n.get("note_id").asText()))){
+   if(n.get("sender_id").asLong()!=CALLER||n.get("recipient_id").asLong()!=TARGET||!EXPIRY_BODY.equals(n.get("body").asText()))throw new IllegalStateException("Refusing an altered reserved expiry note identity");
+   notes.add(UUID.fromString(n.get("note_id").asText()));
+  }
+  for(var r:state.get("private_note_requests"))if(expiryReservedRequests.contains(UUID.fromString(r.get("request_id").asText()))){
+   if(r.get("sender_id").asLong()!=CALLER||!"F30 owned request".equals(r.get("request_hash").asText()))throw new IllegalStateException("Refusing an altered reserved expiry request identity");
+   requestKeys.add(UUID.fromString(r.get("request_id").asText()));
+  }
+ }
+ private void finishExpiryRound()throws Exception{try{reobserveExpirySeeds();cleanup();reset();}finally{expiryReservedNotes.clear();expiryReservedRequests.clear();}}
+ private void requireNoForeignExpiryCandidates()throws SQLException{
+  verifyOwnership();String outsideNotes=expiryReservedNotes.isEmpty()?"TRUE":"note_id NOT IN ("+uuidList(expiryReservedNotes)+")";
+  String outsideRequests=expiryReservedRequests.isEmpty()?"TRUE":"NOT(sender_id="+CALLER+" AND request_id IN ("+uuidList(expiryReservedRequests)+"))";
+  try(Connection c=admin();var s=c.prepareStatement("SELECT (SELECT count(*) FROM pawbridge_community.private_notes WHERE expires_at<=? AND "+outsideNotes+")+(SELECT count(*) FROM pawbridge_community.private_note_requests WHERE note_id IS NULL AND created_at<? AND "+outsideRequests+")")){
+   s.setTimestamp(1,Timestamp.from(expiryNow));s.setTimestamp(2,Timestamp.from(expiryNow.minusSeconds(172800)));try(var r=s.executeQuery()){assertThat(r.next()).isTrue();assertThat(r.getLong(1)).as("No globally eligible unowned rows may exist before expiry").isZero();}
+  }
+  if(!expiryReservedNotes.isEmpty()){
+   String ids=uuidList(expiryReservedNotes),foreignRequest=expiryReservedRequests.isEmpty()?"TRUE":"NOT(sender_id="+CALLER+" AND request_id IN ("+uuidList(expiryReservedRequests)+"))";
+   assertThat(scalar("SELECT (SELECT count(*) FROM pawbridge_community.private_note_mailboxes WHERE note_id IN ("+ids+") AND member_id NOT IN ("+CALLER+","+TARGET+"))+(SELECT count(*) FROM pawbridge_community.private_notes WHERE reply_to IN ("+ids+") AND note_id NOT IN ("+ids+"))+(SELECT count(*) FROM pawbridge_community.private_note_requests WHERE note_id IN ("+ids+") AND "+foreignRequest+")")).as("No external FK may be changed by owned expiry").isZero();
+  }
+ }
+ private void expireOwned(boolean source,int expectedCount){
+  try{requireNoForeignExpiryCandidates();}catch(SQLException failure){throw new IllegalStateException("Owned global expiry guard could not be read");}
+  sourceClock.reset(expiryNow);candidateClock.reset(expiryNow);
+  if(source)original.expire();else{var tx=new TransactionTemplate(new JdbcTransactionManager(writer));tx.setTimeout(15);int count=new com.pawbridge.backend.community.internal.note.infrastructure.JdbcNoteExpiry(writeJdbc,tx,candidateClock).expire();if(expectedCount>=0)assertThat(count).isEqualTo(expectedCount);}
+  returned();assertThat((source?sourceClock:candidateClock).calls.get()).isOne();assertThat(hints).isEmpty();assertThat(contacts).isEmpty();assertThat(original.contactIds()).isEmpty();
+ }
+ private void assertExpiryDelta(String before,Set<UUID> deletedNotes,Set<UUID> deletedRequests)throws SQLException{
+  assertThat(expiryReservedNotes.containsAll(deletedNotes)).isTrue();assertThat(expiryReservedRequests.containsAll(deletedRequests)).isTrue();
+  var expected=(ObjectNode)json(before).deepCopy();
+  for(String table:List.of("private_notes","mailboxes","private_note_requests")){
+   var rows=(ArrayNode)expected.get(table);
+   for(int i=rows.size()-1;i>=0;i--){var row=(ObjectNode)rows.get(i);boolean deletedNote=row.hasNonNull("note_id")&&deletedNotes.contains(UUID.fromString(row.get("note_id").asText()));
+    if(table.equals("private_notes")&&deletedNote||table.equals("mailboxes")&&deletedNote||table.equals("private_note_requests")&&deletedRequests.contains(UUID.fromString(row.get("request_id").asText()))){rows.remove(i);continue;}
+    if(table.equals("private_notes")&&row.hasNonNull("reply_to")&&deletedNotes.contains(UUID.fromString(row.get("reply_to").asText())))row.putNull("reply_to");
+    if(table.equals("private_note_requests")&&deletedNote)row.putNull("note_id");
+   }
+  }
+  assertThat(canonical(json(snapshot())).equals(canonical(json(expected.toString())))).as("Only the explicit owned note/mailbox/request/reply delta may change among all eighteen tables").isTrue();
+ }
+ private AutoCloseable expiryPrivileges()throws SQLException{
+  verifyOwnership();requireExpiryPrivileges(false);
+  try{execute("BEGIN; GRANT DELETE,UPDATE(request_id) ON pawbridge_community.private_note_requests TO pawbridge_f3_writer; COMMIT;");requireExpiryPrivileges(true);}
+  catch(SQLException|RuntimeException|Error failure){restoreExpiryPrivileges();throw failure;}
+  return this::restoreExpiryPrivileges;
+ }
+ private void restoreExpiryPrivileges()throws SQLException{
+  // Existing receipt/marker checks intentionally avoid strict old ACL while the two test-only rights are granted.
+  verifyOwnership();execute("BEGIN; REVOKE DELETE,UPDATE(request_id) ON pawbridge_community.private_note_requests FROM pawbridge_f3_writer; COMMIT;");requireExpiryPrivileges(false);requireWriterPrivileges();
+ }
+ private void requireExpiryPrivileges(boolean enabled)throws SQLException{
+  assertThat(scalar("SELECT has_table_privilege('pawbridge_f3_writer','pawbridge_community.private_note_requests','DELETE')::int")).isEqualTo(enabled?1:0);
+  assertThat(scalar("SELECT (count(*)=5 AND bool_and(has_column_privilege('pawbridge_f3_writer','pawbridge_community.private_note_requests',column_name,'UPDATE')=(column_name='request_id' AND "+enabled+")) AND NOT has_table_privilege('pawbridge_f3_writer','pawbridge_community.private_note_requests','UPDATE'))::int FROM information_schema.columns WHERE table_schema='pawbridge_community' AND table_name='private_note_requests'")).isOne();
+ }
+ private void requireOwnedExpiryCommitFailure(Throwable failure){
+  var seen=Collections.newSetFromMap(new IdentityHashMap<Throwable,Boolean>());var queue=new ArrayDeque<Throwable>();queue.add(failure);boolean found=false;
+  while(!queue.isEmpty()&&seen.size()<32){var value=queue.removeFirst();if(!seen.add(value))continue;if(value instanceof PSQLException p&&"23514".equals(p.getSQLState())&&p.getServerErrorMessage()!=null&&"f30_owned_expiry_rejection".equals(p.getServerErrorMessage().getConstraint()))found=true;if(value.getCause()!=null)queue.add(value.getCause());if(value instanceof SQLException s&&s.getNextException()!=null)queue.add(s.getNextException());}
+  assertThat(found).as("The actual owned deferred constraint, not an arbitrary commit exception, rejected both managers").isTrue();
+ }
 }

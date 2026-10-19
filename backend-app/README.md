@@ -442,3 +442,16 @@ workflow는 F27 전체 → 무자원 F28 guards → 원문 requests1표/index3/D
 원문 observer6과 formal MVC12, fixture24/runtime13 순수 모의37의 기존 로컬 성공은 재사용하는 근거다. PG26·Seoul 지정1은 소스/provider 기대값이며 실제 PG 성공이 아니고 JAR15HTTP=POST9/GET6·수신 note3/송신 note와 resync0·신규 note3/mailbox6/request3은 검산한 계획이다. 초기 private prefix의 REPORTS/SEOUL_METHOD=None은 준비 이력이다. 현재는 root가 source/provider를 검산해 UTC PG26(소스 기대)/MVC12(기존 로컬 실측), Seoul PG1(소스 기대)과 정확한 시각 메서드를 고정했다. 관련 측정 gate 모의4건은 root 인계상0.170초 통과했으며 실제 PG/JAR 성공은 아니다. results는 이후 실제 생성된 exact XML을 이 기대값·원문 receipt와 대조해야 하고, smoke도 실제 전달·상태·자원 종료를 별도로 증명해야 한다. 동적 UUID는 응답/DB/SSE 일치 후에만 ACK하고 응답 유실 commit은 exact request 소유 행으로만 정리하며, raw Instant와 DBµs는 문자열 동일 대신 최대1µs 정밀도 의미를 비교한다. 실제 PG/JAR/socket·CI 성공으로 확대하지 않는다.
 
 실제 F29 기준은 F26 post-CI와 결합 F27/F28의 검수·필수 CI/dev 통합 뒤 fresh base로 확인한다. 이 private 연결은 미래 branch/base나 게시를 확정하지 않는다. artifact에는 기존 txt/log와 특정 `f29-results.json`만 추가하며 토큰·전체 환경·전체 step outputs는 보존하지 않는다.
+
+
+### 쪽지 만료 정리 후보
+
+`pawbridge.jobs.cleanup-enabled=true`에서만 기존 writer/TM/Clock으로 쪽지 만료 정리를 등록한다.
+기본값과 false는 off이며 기존 Community의 공통 정리 설정을 끄거나 운영 실행 소유권을 이전하지 않는다.
+최초 지연과 이전 완료 후 지연은 각각 5분이다. 원문대로 각 SQL은 최대 300건만 처리한다.
+조건부 ordinary scheduler는 새 예약을 막고 기존 phase 10초 대기 뒤 destroy의 지역 대기 5초를 사용한다.
+이는 전체 15초 종료나 JDBC interrupt 보장이 아니다. TX 잔여 timeout은 JDBC query timeout보다 우선할 수 있다.
+CI는 기존 F29 원문/JpaTM·18표 소유 fixture를 재사용하여 UTC expiry tag 6사례를 별도 선택한다.
+동일 클래스의 기존 F29 26사례와 Seoul 1사례에서는 expiry tag를 제외한다.
+실제 활성 작업의 FK 잠금→context close→정상 잠금 해제→commit/연결 반환→pool 종료를 확인한다.
+이 증거는 실행 JAR의 강제 취소나 운영 예약 인수 완료를 뜻하지 않는다. 새 HTTP/JAR 여정은 복제하지 않는다.
