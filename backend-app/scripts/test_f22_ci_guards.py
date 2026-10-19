@@ -431,13 +431,16 @@ class F22GuardTest(unittest.TestCase):
         self.assertEqual(1, stage.count(':boot:' + f22.TASK + ' ')); self.assertEqual(1, stage.count(':boot:' + f22.SEOUL_TASK))
         cleanup = stage.index('- name: Remove only the owned disposable fixture'); self.assertIn('if: always()', stage[cleanup:cleanup + 180])
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-9]|2[01])_ci\.py (?:prepare|smoke)')
-        source_step = workflow[workflow.index('- name: Require the immutable F22 original-source Git object'):workflow.index('- name: Isolate Gradle state')]
+        source_start = workflow.index('- name: Require the immutable F22 original-source Git object')
+        source_end = workflow.index('\n      - name:', source_start)
+        source_step = workflow[source_start:source_end]
         for value in (f22.SOURCE, 'git cat-file -e', 'git fetch --no-tags --no-recurse-submodules --depth=1 origin',
                       'GIT_CONFIG_COUNT=1', 'F22_SOURCE_READ_TOKEN: ${{ github.token }}', 'printf \'::add-mask::%s\\n\' "$source_auth"'):
             self.assertIn(value, source_step)
         self.assertNotIn('--force', source_step); self.assertNotIn('git config ', source_step); self.assertNotIn('export GIT_CONFIG', source_step)
         self.assertNotRegex(source_step, r'https://[^\s]*\$(?:F22_SOURCE_READ_TOKEN|source_auth)')
         self.assertLess(source_step.index('::add-mask::'), source_step.index('GIT_CONFIG_COUNT=1'))
+        self.assertEqual(1, source_step.count('GIT_CONFIG_COUNT=1'))
         self.assertIn('sparse-checkout:', workflow); self.assertNotIn('            community-service\n', workflow)
         denied = next(line for line in workflow.splitlines() if "if grep -E '" in line).split("if grep -E '", 1)[1].split("' build/ci/", 1)[0]
         self.assertIsNotNone(re.search(denied, 'BOOT-INF/classes/f22LegacyOracle/Input.class'))

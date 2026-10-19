@@ -469,7 +469,9 @@ class F21GuardTest(unittest.TestCase):
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-9]|20)_ci\.py (?:prepare|smoke)')
         self.assertIn('f21-oracle-sha256.txt', workflow); self.assertIn('f21-fixture-reuse.txt', workflow); self.assertIn('f21-helper-refusal.txt', workflow)
         self.assertIn('sparse-checkout:', workflow); self.assertNotIn('            community-service\n', workflow)
-        source_step = workflow[workflow.index('- name: Require the immutable F21 original-source Git object'):workflow.index('- name: Isolate Gradle state')]
+        source_start = workflow.index('- name: Require the immutable F21 original-source Git object')
+        source_end = workflow.index('\n      - name:', source_start)
+        source_step = workflow[source_start:source_end]
         for value in (f21.SOURCE, 'git cat-file -e', 'git fetch --no-tags --no-recurse-submodules --depth=1 origin',
                       'GIT_CONFIG_COUNT=1', 'F21_SOURCE_READ_TOKEN: ${{ github.token }}', 'printf \'::add-mask::%s\\n\' "$source_auth"'):
             self.assertIn(value, source_step)
