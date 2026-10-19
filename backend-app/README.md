@@ -1,14 +1,14 @@
 # PawBridge 업무 통합 실행기
 
-Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정, F14의 본인 찜 여부 조회, F15의 공개 홈 영상 조회, F16의 공개 오늘 방문자 합계 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정, F14의 본인 찜 여부 조회, F15의 공개 홈 영상 조회, F16의 공개 오늘 방문자 합계 조회, F17의 인증된 쪽지 수신자 확인 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
 
 ## 업무 경계와 호출
 
 | 모듈 | 책임 | 직접 프로젝트 의존성 |
 |---|---|---|
 | boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
-| user | 공개 닉네임 조회 계약·내부 본인 정보 조회·본인 닉네임 수정·찜 여부 조회와 JDBC·HTTP 구현 | 없음 |
-| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·공개 홈 영상·오늘 방문자 합계·REST 응답 | user |
+| user | 공개 닉네임/연락 회원 조회 계약·내부 본인 정보 조회·본인 닉네임 수정·찜 여부 조회와 JDBC·HTTP 구현 | 없음 |
+| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·공개 홈 영상·오늘 방문자 합계·쪽지 수신자 정책·REST 응답 | user |
 
 ```text
 boot -> community.internal.post.web -> community.internal.post.application
@@ -22,9 +22,11 @@ Community는 User의 공개 API만 참조한다. User 부재·명시된 조회 �
 
 공개 게시글 GET은 `/api/v1/posts/read/{postId}` 단건, `/api/v1/posts/read` 목록, `/api/v1/posts/search?keyword=...` 검색이다. 기존 envelope와 data 9필드, 이미지 null/순서/중복과 LocalDateTime 의미를 보존한다. 공개 댓글 GET `/api/v1/comments/posts/read/{postId}`는 아래 F8의 7필드 배열 계약을 따른다. 기존 malformed ID의 generic 500 동작은 유지하며 400 개선을 섞지 않는다. `/api/posts/...` alias rewrite는 기존 Gateway 책임이다. 작성자 닉네임 조회는 업무 간 Java 계약으로 연결한다. 본인 닉네임 수정 HTTP는 아래 F13의 정확한 PUT 경로만 제공하며 로그인·신규 토큰 발급 API는 없다. F3는 같은 기존 경로 `POST /api/v1/posts`의 multipart 작성만 추가한다.
 
+F17은 `GET /api/v1/notes/recipients/{member}`만 추가한다. 서명 JWT의 Long principal로 요청자를 확인한 뒤 자기 자신→양방향 차단→상대 active 순서로 검사하고, User 소유의 `ContactMemberQuery.get(long)`가 제공하는 원문 닉네임·active/deletionPending을 사용한다. 신규 reader 권한은 `contact_deletions.user_id`와 `private_note_blocks.member_id/blocked_id` 세 열뿐이며 본문/메일함/연락처 PII·member/시각 열·writer 권한을 추가하지 않는다. User 조회→차단 조회→상대 조회마다 기존 짧은 RO tx/연결을 반환하며 외곽 TX·Feign·새 pool·event·SSE·탈퇴/차단 쓰기·예약을 편입하지 않는다. 성공은 정확한 4필드, 서비스/바인딩 오류는 message-only와 no-store이며 User 조회 불가503과 차단 저장소503을 구분한다. 인증 오류의 기존 envelope는 유지한다. 이는 후보 코드이며 운영 라우팅이나 원본 서비스 종료를 뜻하지 않는다.
+
 ## DB·실행 설정
 
-읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`, `pawbridge_community.home_videos`, `pawbridge_community.daily_visit_count`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
+읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`, `pawbridge_community.home_videos`, `pawbridge_community.daily_visit_count`, `pawbridge_user.contact_deletions`, `pawbridge_community.private_note_blocks`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
 
 | 환경 변수 | 의미 |
 |---|---|
@@ -221,9 +223,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 15. 기존 F3~F13 staged 회귀 뒤 F14 owner/marker와 고정 V1 favorites4열·identity PK·회원/동물 UK·User RESTRICT FK·실제 animal index를 준비한다. reader에는 SELECT(user_id,animal_id)만 추가하고 writer의 favorites 권한·두 계정 sequence 권한은 금지한다. F13 strict 체인은 그대로 재사용하고 F12 strict는 호출하지 않는다. 실제 원본 derived exists와 후보를 전용 favoriteStatusCompatibilityTest UTC 한 번 및 비0/실패·오류·skip0 XML로 비교하며 시각 경로 없는 동일 사례를 Seoul에서 반복하지 않는다. JAR는 최종 갱신된 두 principal 토큰으로 true/false·회원 부재 false·인증/형식/SQL 실패와 권한 복구를 확인한다. 매 GET snapshot에 favorites를 포함해 전체 DB/S3 변경0, 정상 두 pool 종료·연결0을 검사하고 시험 행은 favorite→User 순서로 정리한다.
 16. 기존 F3~F14 staged 회귀 뒤 F15 owner/marker와 고정 V9 전체 board2열·revision0 초기행/videos11열·UUID PK·영상ID UNIQUE/형식 CHECK·refresh index를 준비한다. reader에는 videos11열 SELECT만 부여하고 board 및 writer의 두 테이블 권한·identity/sequence는 추가하지 않는다. F14→F13의 기존 target/owner/ACL 체인을 재사용하며 F15 catalog 실패는 별도 태그의 bounded/masked 진단만 남긴다. 전용 homeVideoCompatibilityTest/homeVideoCompatibilitySeoulTest는 실제 원본 Service/Repository와 TSTZ cutoff−1µs/동일/+1µs·정렬/3건·nullable metadata/Instant JSON을 UTC/Seoul에서 비교하고 두 exact-FQN XML의 비0·실패/오류/skip0을 확인한다. Seoul JAR는 하루 전 fresh/31일 전 stale로 공개 성공·malformed Bearer·권한503/복구·빈 배열을 확인한다. 영상/board/favorites와 기존 전체 업무 DB/Outbox/S3 snapshot은 GET 전후 불변이며 두 pool 정상 종료·연결0을 검사한다. 공개 GET용 토큰 재발급/TTL 검사는 추가하지 않는다.
 17. 기존 F3~F15 staged 회귀 뒤 F16 owner/marker와 고정 V11 중 daily_visit_count 한 CREATE만 준비한다. 정확한 DATE PK·BIGINT NOT NULL/검증된 nonnegative CHECK·reader 두 열 SELECT·writer0/no-sequence를 catalog로 검사하며 F15 safe chain을 재사용한다. visitTodayCompatibilityTest는 UTC data/access 두 클래스, visitTodayCompatibilitySeoulTest는 같은 DATE data 클래스만, visitTodayLegacyMvcTest는 실제 원본 MVC를 UTC에서 한 번 실행한다. 정확한4개 XML·비0·실패/오류/skip0을 확인하고 일반 compatibility에서 세 클래스를 제외한다. 공개 Seoul JAR는 true5 GET과 false1 GET404로 나누고 JWT를 읽거나 갱신하지 않는다. 소유 인접일 합계와 요청 전후 서울 날짜로 실시간 자정 오판을 막고 GET·시작 전후 전체 업무 DB/S3 불변과 앱별 두 pool 정상 종료·연결0을 확인한다. 비활성 방문 bean0/JDBC mock 무호출은 Boot 시험 근거이며 JAR404·snapshot 불변을 SQL 시도0 증거로 과장하지 않는다.
-18. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
+18. 기존 F3~F16 staged 회귀와 F16의 두 JAR phase를 끝낸 뒤 F17 owner/marker와 고정 V3 contact_deletions·V6 members/blocks CREATE·V8 blocked index만 추가한다. reader는 pending ID1/차단 ID2, members/시각/writer 권한0이며 이전 F16 safe chain과 정확한 PK/FK/CHECK/index를 검사한다. noteRecipientCompatibilityTest UTC 한 번에서 실제 원본 query/3개 원문 클래스+6메서드 wrapper 및 가벼운 원본 Feign/null 경계를 비교하고 정확한 두 XML의 비0·실패/오류/skip0을 확인한다. 마지막 PG 단계가 실제 원본 발급기로 필요한 두 principal/expired 키만 갱신하고 기존 token map·0600·owner를 보존한다. Seoul JAR는 새 소유 회원 둘만 시드해 정상4필드·self/양방향 차단/pending403·늦은0/음수401·회원/저장소503과 복구·인증 선행·미편입 거부를 검증한다. 모든 GET의 기존 전체 DB/새3표/S3 snapshot은 불변이며 blocks→pending→members→users의 소유 키만 정리한다. 두 pool 정상 종료·잔여 연결0과 로그의 합성 회원/인증값 비노출을 확인한다.
+19. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
-`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f14_ci.py`·`f15_ci.py`·`f16_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`·`f14_fixture.sql`·`f15_fixture.sql`·`f16_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
+`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f14_ci.py`·`f15_ci.py`·`f16_ci.py`·`f17_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`·`f14_fixture.sql`·`f15_fixture.sql`·`f16_fixture.sql`·`f17_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
 
 `prepare_legacy_oracle.py`는 기준 `e8ad7b8ec9006772ccc5f5881334df2730dbd8de`의 정확히 6개 Java 파일만 해시 검증해 boot/build 안 test-only 경로로 추출한다. Post/BoardType/StringListConverter/PostResponse와 UserServiceClient 및 그 JDK-only 응답 의존 PrivateNoteModels다. legacy 전체 sourceDir·Application을 편입하지 않는다. 실제 source/버전 비교는 compatibility classpath에서만 이뤄지고 앱 JAR에는 들어가지 않는다.
 
@@ -251,8 +254,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 `prepare_f16_legacy_oracle.py`는 기준 `33cad5567767f8730fc2c4389815ecd031f41dc0`의 VisitService/Repository/Cookie/Models/Controller/Advice와 Community ResponseDTO/global advice/charset helper9개 실제 소스를 해시 고정한다. F7의 공통 오류 두 클래스는 원문 해시와 기존 generated bytes를 확인해 재사용한다. 실제 원본 GET과 scoped DAO503/global Runtime500의 body/headers를 최소 classpath에서 비교하고 원본 설정·lifecycle·예약은 등록하지 않는다. 원본 Cookie는 oracle에서만 합성 키로 생성하며 후보나 JAR는 키가 필요 없다. 경로·해시·공유 바이트·기존 출력 보존을 무소켓 guard로 확인하고 생성물은 JAR에서 제외한다. sparse checkout에 없는 원본 입력은 고정 커밋의 read-only Git 객체에서 해시를 검증해 읽으며 원본 디렉터리 존재나 로컬 전체 checkout을 전제하지 않는다. guard의 모의 자원 검증을 실제 PG/JAR 실행 근거로 표현하지 않는다.
 
+`prepare_f17_legacy_oracle.py`는 고정 `33cad5567767f8730fc2c4389815ecd031f41dc0`의 원본9파일과 PrivateNoteService6메서드 원문을 해시 검증한다. 실제 User ContactMember/Query·Community PrivateNoteRepository3개와 명시적 시험용 wrapper만 생성하고 F2 Client/Models는 기존 generated bytes 대조 후 재사용한다. 전체 원본 service·앱·HTTP/Feign 전송을 실행한 oracle는 아니며 User query→Community DTO bridge의 전송 실패 의미와 실제 저장 SQL/정책을 구분한다. `f17_ci.py`는 착수 `17a8bc72caf9f3a46b52e133e0a46c492ae52614`의 변경 없는 전체 V3/V6/V8 해시와 최소 fixture 원문 조각을 대조한다. sparse checkout의 입력은 해시 고정 read-only Git 객체로 읽고 모든 입력/공유 바이트/메서드/기존 출력 검사를 쓰기 전에 수행한다. 무소켓 guard의 자원 모의를 실제 PG/JAR 증거로 표현하지 않으며 원본·fixture·생성물은 실행 JAR에서 제외한다.
+
 TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classpath를 사용한다. 실제 업무 build와 guard를 fixture에 복사하고, 본 빌드가 해결한 BOM/의존 cache를 offline으로 사용한다. 허용/금지 fixture의 이유를 검사하며 일반 컴파일·다운로드 오류를 구조 차단 성공으로 취급하지 않는다.
 
 Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16 계획과 모듈형 모놀리스 전환 노트를 따른다.
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17 계획과 모듈형 모놀리스 전환 노트를 따른다.
