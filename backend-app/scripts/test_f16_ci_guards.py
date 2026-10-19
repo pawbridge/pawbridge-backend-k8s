@@ -1,4 +1,4 @@
-"""Mock-only F16 CI regressions: no sockets, DB, JVM, Git commands or real JAR proof."""
+"""F16 CI guards: mocked resources; read-only pinned Git objects supply sparse-checkout inputs."""
 from contextlib import ExitStack, contextmanager, redirect_stdout
 import datetime
 import hashlib
@@ -19,6 +19,23 @@ from test_f15_ci_guards import HOSTED as F15_HOSTED
 HOSTED = dict(F15_HOSTED, F16_CI_OWNER='123-1')
 DAY = datetime.date(2026, 10, 19)
 COUNTS = {'2026-10-18': 7, '2026-10-19': 9007199254740993, '2026-10-20': 11}
+
+
+def pinned_source(source, repository=None):
+    # Read immutable objects before installing a subprocess mock: legacy paths are not checked out in CI.
+    if source == f16.DDL_SOURCE:
+        expected = f16.DDL_HASH
+    elif source in oracle.EXPECTED:
+        expected = oracle.EXPECTED[source]
+    elif source in oracle.SHARED:
+        expected = oracle.f7.EXPECTED[source]
+    else:
+        raise ValueError('F16 guard source must be explicitly hash-pinned')
+    content = subprocess.check_output(['git', 'show', f16.SOURCE + ':' + source],
+                                      cwd=repository if repository is not None else f16.ROOT.parent)
+    if hashlib.sha256(content).hexdigest() != expected:
+        raise AssertionError('Fixed F16 guard input checksum mismatch: ' + source)
+    return content
 
 
 def oracle_paths(directory):
@@ -61,6 +78,27 @@ def packaged_harness(directory, failure=None, mutation=False, cache='no-store', 
 
 
 class F16GuardTest(unittest.TestCase):
+    def test_given_minimal_checkout_without_legacy_dirs__when_loading_inputs__then_verify_pinned_git_objects(self):
+        repository = f16.ROOT.parent
+        marker = repository / '.git'
+        if marker.is_file():
+            git_dir = Path(marker.read_text().removeprefix('gitdir:').strip())
+            if not git_dir.is_absolute(): git_dir = (repository / git_dir).resolve()
+        else:
+            git_dir = marker.resolve()
+        # A temporary pointer reads the same object store; it never registers/resets a worktree or changes Git state.
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory)
+            (checkout / '.git').write_text('gitdir: ' + str(git_dir) + '\n')
+            (checkout / 'backend-app').mkdir(); (checkout / '.github/workflows').mkdir(parents=True)
+            self.assertFalse((checkout / 'community-service').exists())
+            self.assertFalse((checkout / 'user-service').exists())
+            for source in (f16.DDL_SOURCE, *oracle.SHARED, *oracle.EXPECTED):
+                self.assertTrue(pinned_source(source, repository=checkout))
+            self.assertFalse((checkout / 'community-service').exists())
+        with patch.object(subprocess, 'check_output', return_value=b'tampered'):
+            with self.assertRaisesRegex(AssertionError, 'input checksum mismatch'): pinned_source(f16.DDL_SOURCE)
+
     def test_given_non_hosted_invocation__when_calling_actions__then_refuse_before_resources(self):
         for action in (f16.prepare, f16.require_fixture, f16.prepare_business_rows, lambda: f16.cleanup_business_rows({}),
                        f16.smoke, f16.verify_results, f16.verified_ddl):
@@ -104,7 +142,7 @@ class F16GuardTest(unittest.TestCase):
             success.assert_not_called()
 
     def test_given_pinned_v11_bytes__when_verifying__then_only_original_count_create_and_two_reader_columns(self):
-        raw = (f16.ROOT.parent / f16.DDL_SOURCE).read_bytes()
+        raw = pinned_source(f16.DDL_SOURCE)
         with patch.dict(os.environ, HOSTED, clear=True), patch.object(f16.subprocess, 'check_output', return_value=raw) as git:
             ddl, evidence = f16.verified_ddl()
         git.assert_called_once_with(['git', 'show', f16.SOURCE + ':' + f16.DDL_SOURCE], cwd=f16.ROOT.parent)
@@ -120,7 +158,7 @@ class F16GuardTest(unittest.TestCase):
         with patch.dict(os.environ, HOSTED, clear=True), patch.object(f16.subprocess, 'check_output', return_value=b'changed'), patch.object(Path, 'read_text') as read:
             with self.assertRaisesRegex(SystemExit, 'checksum mismatch'): f16.verified_ddl()
             read.assert_not_called()
-        raw = (f16.ROOT.parent / f16.DDL_SOURCE).read_bytes()
+        raw = pinned_source(f16.DDL_SOURCE)
         ddl = (f16.ROOT / 'scripts/f16_fixture.sql').read_text()
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, HOSTED, clear=True):
             root = Path(directory); (root / 'scripts').mkdir(); (root / 'scripts/f16_fixture.sql').write_text(ddl.replace('>= 0', '> 0'))
@@ -281,7 +319,7 @@ class F16GuardTest(unittest.TestCase):
 
     def test_given_shared_f7_source_or_generated_tamper__when_extracting__then_write_nothing(self):
         source = oracle.SHARED[0]
-        original = (f16.ROOT.parent / source).read_bytes()
+        original = pinned_source(source)
         for source_bytes, generated_bytes in ((b'changed', original), (original, b'changed')):
             with tempfile.TemporaryDirectory() as directory:
                 root, output, evidence = oracle_paths(directory)
@@ -304,7 +342,7 @@ class F16GuardTest(unittest.TestCase):
                 self.assertFalse((output / 'First.java').exists()); self.assertEqual(b'preserve', target.read_bytes()); self.assertFalse(evidence.exists())
 
     def test_given_nine_original_bytes_and_shared_f7__when_extracting__then_write_verbatim_no_duplicate_shared_fqn(self):
-        sources = {source: (f16.ROOT.parent / source).read_bytes() for source in (*oracle.SHARED, *oracle.EXPECTED)}
+        sources = {source: pinned_source(source) for source in (*oracle.SHARED, *oracle.EXPECTED)}
         with tempfile.TemporaryDirectory() as directory:
             root, output, evidence = oracle_paths(directory)
             for source in oracle.SHARED:
@@ -330,6 +368,6 @@ class F16GuardTest(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    print('Mock-only F16 guards: no real PostgreSQL, JAR, JVM, socket or Git-command execution.', flush=True)
+    print('F16 guards: mocked PostgreSQL/JAR/JVM/sockets; fixed inputs use read-only git show, no Git mutations.', flush=True)
     with redirect_stdout(io.StringIO()):
         unittest.main()
