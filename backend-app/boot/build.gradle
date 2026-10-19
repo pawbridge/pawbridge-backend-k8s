@@ -14,6 +14,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f9LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f11LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f12LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -42,6 +43,7 @@ dependencies {
     testImplementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'org.postgresql:postgresql'
 
     compatibilityTestImplementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
     compatibilityTestImplementation platform('org.springframework.cloud:spring-cloud-dependencies:2024.0.2')
@@ -153,8 +155,19 @@ tasks.register('prepareF12LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f12-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF13LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF3LegacyOracle')
+    inputs.files(rootProject.file('scripts/prepare_f13_legacy_oracle.py'), rootProject.file('scripts/prepare_f3_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f13-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f13_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f13-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -169,6 +182,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentDeleteCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentUpdateCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
     }
 }
 
@@ -243,3 +257,20 @@ tasks.named('check') { dependsOn tasks.named('architectureTest') }
 }
 
 tasks.named('profileCompatibilitySeoulTest') { shouldRunAfter tasks.named('profileCompatibilityTest') }
+
+['nicknameCompatibilityTest': 'UTC', 'nicknameCompatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = "Checks only F13 nickname changes after the owned User writer ACL extension in " + zone + "."
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        filter {
+            includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
+            failOnNoMatchingTests = true
+        }
+        shouldRunAfter tasks.named('profileCompatibilitySeoulTest')
+    }
+}
+tasks.named('nicknameCompatibilitySeoulTest') { shouldRunAfter tasks.named('nicknameCompatibilityTest') }
