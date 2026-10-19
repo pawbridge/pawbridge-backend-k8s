@@ -33,7 +33,7 @@ public class ReadSecurityConfiguration {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/posts/read/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())
                 .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postWriting), AnonymousAuthenticationFilter.class)

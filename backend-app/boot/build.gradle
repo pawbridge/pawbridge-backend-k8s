@@ -8,6 +8,7 @@ sourceSets {
     compatibilityTest {
         java.srcDir layout.buildDirectory.dir('generated/sources/f2LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f3LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f6LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -80,8 +81,20 @@ tasks.register('prepareF4LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f4-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF6LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareLegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f6_legacy_oracle.py'))
+    inputs.file(rootProject.file('scripts/prepare_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f6LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f6-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f6_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f6LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f6-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->

@@ -1,6 +1,6 @@
 # PawBridge 업무 통합 실행기
 
-Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정을 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록을 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
 
 ## 업무 경계와 호출
 
@@ -8,7 +8,7 @@ Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2�
 |---|---|---|
 | boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
 | user | 공개 닉네임 조회 계약과 JDBC 구현 | 없음 |
-| community | 게시글 읽기·작성·수정·삭제·미디어·검색 projection·REST 응답 | user |
+| community | 게시글 단건·목록·작성·수정·삭제·미디어·검색 projection·REST 응답 | user |
 
 ```text
 boot -> community.internal.post.web -> community.internal.post.application
@@ -20,7 +20,7 @@ boot -> community.internal.post.web -> community.internal.post.application
 
 Community는 User의 공개 API만 참조한다. User 부재·명시된 조회 실패는 `사용자{id}`로 표시하고, 빈 HTTP 응답이 null로 decode되던 동작은 빈 저장 닉네임의 표시 호환에 반영한다. 공백은 그대로 둔다. 게시글 없음/soft-delete는 404이며 게시글 DB·JSON 오류는 닉네임 fallback로 숨기지 않는다.
 
-공개 GET은 `/api/v1/posts/read/{postId}` 하나다. 기존 envelope와 data 9필드, 이미지 null/순서/중복과 LocalDateTime 의미를 보존한다. 기존 malformed ID의 generic 500 동작은 유지하며 400 개선을 섞지 않는다. `/api/posts/...` alias rewrite는 기존 Gateway 책임이다. 후보는 별도 nickname HTTP·로그인 API를 제공하지 않는다. F3는 같은 기존 경로 `POST /api/v1/posts`의 multipart 작성만 추가한다.
+공개 GET은 `/api/v1/posts/read/{postId}` 단건과 `/api/v1/posts/read` 목록이다. 기존 envelope와 data 9필드, 이미지 null/순서/중복과 LocalDateTime 의미를 보존한다. 기존 malformed ID의 generic 500 동작은 유지하며 400 개선을 섞지 않는다. `/api/posts/...` alias rewrite는 기존 Gateway 책임이다. 후보는 별도 nickname HTTP·로그인 API를 제공하지 않는다. F3는 같은 기존 경로 `POST /api/v1/posts`의 multipart 작성만 추가한다.
 
 ## DB·실행 설정
 
@@ -81,6 +81,16 @@ reader 조회·소유권 확인 → 필요할 때 기존 파일 삭제 시도 �
 
 첨부 파싱은 컨트롤러 선택 전에 실패할 수 있으므로, `MultipartException`만 받는 공통 advice를 boot에서 명시적으로 조립한다. POST/PUT의 잘못된 multipart·용량 초과는 기존500/code/message/data 응답을 유지하고 로그에는 예외 클래스만 남긴다. 일반 업무/인증 오류의 담당,100MB/200MB 한도와 기본 eager parsing은 그대로다. 실제 resolver의 `getParts()` 실패를 주입한 회귀에서 handler=null·무토큰401/파싱0회·인증 후 안전한500·DB 연결0을 확인한다. 이 시험은 실제 대용량 바이트 전송이나 운영 저장소 시험이 아니다.
 
+## F6 공개 목록 계약
+
+`GET /api/v1/posts/read`는 비로그인 공개 API이며 기존 200 envelope의 `data`에 9필드 게시글 배열을 반환한다. 빈 결과는 `[]`다. `page`·`size`·`boardType` 쿼리로 서버 필터나 페이지를 만들지 않는다. 기존 프런트가 전체 배열에서 게시판과 화면 페이지를 계산하므로 응답을 임의로 줄이지 않는다. 관리자 Page·검색 readiness/순위/10건 제한은 이 계약과 별개다.
+
+기존 `JdbcPostReader`는 같은 reader 연결·행 mapper로 미삭제 게시글을 한 번 조회하고 `created_at DESC` 순서로 전부 매핑한 뒤 tx와 연결을 반환한다. 같은 생성 시각의 ID 보조 정렬은 추가하지 않는다. 이후 application이 행 순서대로 `UserNicknameQuery`를 호출하며 같은 작성자도 행마다 조회한다. User 테이블을 Community SQL에 JOIN하거나 nickname cache·새 pool·새 읽기 권한을 추가하지 않는다.
+
+닉네임은 F2의 명시된 부재·조회 실패만 `사용자{id}`로 표시하고 빈 닉네임의 null 호환·공백은 유지한다. 옛 HTTP helper의 넓은 `catch(Exception)`과 같은 예외 범위라고 주장하지 않으며, 예상 밖 nickname 오류나 게시글 SQL/JSON 매핑 실패는 목록 전체의 안전한500으로 처리한다. 실패 행 생략·부분200·오류를 빈 배열로 숨기는 처리는 없다. SQL NULL 이미지→빈 배열·JSON literal null→null과 기존 날짜 의미도 재사용한다.
+
+exact 목록 GET만 보안 허용 목록에 추가한다. 공개 목록은 불필요하게 Bearer 인증을 요구하지 않으며 기존 단건·쓰기 보안과 오류 처리는 유지한다. 실행기 자체는 여전히 F3의 writer/JWT/S3 설정을 요구한다. 전체 배열·행별 닉네임의 운영 데이터량에 대한 성능·메모리 수용성이나 구 서비스 종료는 이 후보의 기능 검증과 구분한다.
+
 ## 구조 검사
 
 `gradle/architecture.gradle`의 `verifyArchitecture`와 `verifyBusinessPackages`를 유지한다.
@@ -102,9 +112,10 @@ reader 조회·소유권 확인 → 필요할 때 기존 파일 삭제 시도 �
 4. 실제 JAR와 run 전용 S3 HTTP stub을 loopback에 띄워 기존 GET 회귀와 실제 발급기 JWT → multipart POST → GET을 확인한다. SDK가 전송한 bytes/MIME/순서, 인증·게시판 거부의 무부작용, Outbox/search 원자성, 권한·부분 업로드 실패 후 복구, 객체 유지·미삭제, 두 pool의 SIGTERM 종료·연결 해제를 검사한다. 필수 설정 누락도 listener·외부 접속 전에 거부하는지 확인한다.
 5. F4는 같은 합성 DB의 최소 timestamp UPDATE·검색 DELETE 권한을 보완하고, 기존260건에 삭제 원자성·독립 연결의 행잠금·미디어 중 연결 반환·UTC/Seoul legacy auditing 비교를 더한다. 시험용 두 포트를 서로 다르게 선택하고 이번 자식의 bind 로그·readiness를 확인한다. 실제 bind 충돌이 확인된 경우만 최대3회 시도하고, 일반 기동 오류·timeout·강제 정리는 실패로 유지한다. 업무 fixture 초기화는 두 listener가 준비된 뒤에만 수행한다. F3 packaged 시험 뒤 opt-in DELETE를 허용한 같은 run 소유의 S3 stub으로 작성→삭제→조회404, 소유권·저장소 실패·DB rollback/회복·정상 종료를 확인한다.
 6. F5는 같은 소유 fixture에서 부분 수정 권한만 추가하고 실제 legacy JPA의 null/dirty checking·응답/commit 시각을 UTC와 Seoul에서 비교한다. SDK stub을 재사용해 실제 JAR의 작성→수정→조회→삭제, 빈 파일·미디어 실패·DB rollback/회복·정상 종료를 확인한다. 새 모델·운영 데이터·외부 R2를 사용하지 않는다.
-7. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
+7. F6는 같은 fixture와 reader만 사용해 전체 목록·9필드·삭제/5종 게시판·동률 시각군·닉네임 실패/회복과 연결 반환을 검증한다. 실제 고정 Spring Data repository를 후보 SQL과 UTC/Seoul에서 비교한다. packaged 시험은 목록→단건·작성/수정 노출·삭제 제외를 실행하며 각 목록 GET 전후의 posts/Outbox/search와 S3 요청이 변하지 않는지 별도로 확인한다.
+8. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
-`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
+`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
 
 `prepare_legacy_oracle.py`는 기준 `e8ad7b8ec9006772ccc5f5881334df2730dbd8de`의 정확히 6개 Java 파일만 해시 검증해 boot/build 안 test-only 경로로 추출한다. Post/BoardType/StringListConverter/PostResponse와 UserServiceClient 및 그 JDK-only 응답 의존 PrivateNoteModels다. legacy 전체 sourceDir·Application을 편입하지 않는다. 실제 source/버전 비교는 compatibility classpath에서만 이뤄지고 앱 JAR에는 들어가지 않는다.
 
@@ -112,8 +123,10 @@ reader 조회·소유권 확인 → 필요할 때 기존 파일 삭제 시도 �
 
 `prepare_f4_legacy_oracle.py`는 고정 F3 기준의 Post·BoardType·StringListConverter·OutboxEvent 해시와 이미 추출한 F2/F3 클래스를 대조한다. 같은 FQCN을 다시 생성하지 않는다. legacy JPA auditing 비교는 CI 소유 관리자 연결만 사용하고 후보 writer의 최소 권한과 구분한다.
 
+`prepare_f6_legacy_oracle.py`는 고정 `a57ad47970a6df3fdad1d29d5c269f1f4ba8fff7`의 실제 PostRepository와 컴파일에 필요한 통계 응답2개를 해시 검증해 test-only 경로에 추출한다. 공유 엔티티·변환기·응답은 기존 F2 생성물과 바이트를 대조해 중복 클래스를 만들지 않는다. 동률 시각군은 행 구성과 필드를 비교하고 군 내부 배열 순서를 새 보장으로 고정하지 않는다. 새 fixture/권한은 만들지 않으며 기존 hosted owner/marker 체인을 재사용한다.
+
 TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classpath를 사용한다. 실제 업무 build와 guard를 fixture에 복사하고, 본 빌드가 해결한 BOM/의존 cache를 offline으로 사용한다. 허용/금지 fixture의 이유를 검사하며 일반 컴파일·다운로드 오류를 구조 차단 성공으로 취급하지 않는다.
 
 Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5 계획과 모듈형 모놀리스 전환 노트를 따른다.
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6 계획과 모듈형 모놀리스 전환 노트를 따른다.

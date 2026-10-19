@@ -1,6 +1,8 @@
 package com.pawbridge.backend.boot.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.backend.community.internal.post.application.ListPosts;
+import com.pawbridge.backend.community.internal.post.application.PostListReader;
 import com.pawbridge.backend.community.internal.post.application.PostReader;
 import com.pawbridge.backend.community.internal.post.application.ReadPost;
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostReader;
@@ -66,7 +68,7 @@ public class ReadConfiguration {
     }
 
     @Bean
-    PostReader postReader(@Qualifier("readJdbc") JdbcTemplate readJdbc, @Qualifier("readOnlyTransaction") TransactionTemplate readOnlyTransaction, ObjectMapper mapper) {
+    JdbcPostReader postReader(@Qualifier("readJdbc") JdbcTemplate readJdbc, @Qualifier("readOnlyTransaction") TransactionTemplate readOnlyTransaction, ObjectMapper mapper) {
         return new JdbcPostReader(readJdbc, readOnlyTransaction, mapper);
     }
 
@@ -74,7 +76,10 @@ public class ReadConfiguration {
     ReadPost readPost(PostReader posts, UserNicknameQuery users) { return new ReadPost(posts, users); }
 
     @Bean
-    PostReadController postReadController(ReadPost readPost) { return new PostReadController(readPost); }
+    ListPosts listPosts(PostListReader posts, UserNicknameQuery users) { return new ListPosts(posts, users); }
+
+    @Bean
+    PostReadController postReadController(ReadPost readPost, ListPosts listPosts) { return new PostReadController(readPost, listPosts); }
 
     @Bean
     PostReadExceptionHandler postReadExceptionHandler() { return new PostReadExceptionHandler(); }

@@ -1,6 +1,7 @@
 package com.pawbridge.backend;
 
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration;
+import com.pawbridge.backend.community.internal.post.application.ListPosts;
 import com.pawbridge.backend.community.internal.post.application.PostDetails;
 import com.pawbridge.backend.community.internal.post.application.PostNotFoundException;
 import com.pawbridge.backend.community.internal.post.application.ReadPost;
@@ -25,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class PostReadHttpTest {
     @Autowired MockMvc mvc;
     @MockitoBean ReadPost readPost;
+    @MockitoBean ListPosts listPosts;
 
     @Test
     void given__public_post_with_untrusted_authorization__when__getting_post__then__keep_json_contract() throws Exception {
@@ -70,7 +72,7 @@ class PostReadHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"abc", "9223372036854775808"})
+    @ValueSource(strings = {"abc", "search", "9223372036854775808"})
     void given__unparseable_post_id__when__getting_post__then__preserve_legacy_500(String value) throws Exception {
         mvc.perform(get("/api/v1/posts/read/" + value)).andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.message").value("서버 에러!"));
