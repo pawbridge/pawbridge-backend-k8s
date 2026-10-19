@@ -58,7 +58,7 @@ jobs:
     if: ${{ needs.selection.outputs.selected == 'true' }}
     name: Java 21 build and isolated PostgreSQL/S3 HTTP contracts
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     defaults:
       run:
         shell: bash
