@@ -1,13 +1,13 @@
 # PawBridge 업무 통합 실행기
 
-Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정을 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
 
 ## 업무 경계와 호출
 
 | 모듈 | 책임 | 직접 프로젝트 의존성 |
 |---|---|---|
 | boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
-| user | 공개 닉네임 조회 계약·내부 본인 정보 조회와 JDBC·HTTP 구현 | 없음 |
+| user | 공개 닉네임 조회 계약·내부 본인 정보 조회·본인 닉네임 수정과 JDBC·HTTP 구현 | 없음 |
 | community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·REST 응답 | user |
 
 ```text
@@ -20,11 +20,11 @@ boot -> community.internal.post.web -> community.internal.post.application
 
 Community는 User의 공개 API만 참조한다. User 부재·명시된 조회 실패는 `사용자{id}`로 표시하고, 빈 HTTP 응답이 null로 decode되던 동작은 빈 저장 닉네임의 표시 호환에 반영한다. 공백은 그대로 둔다. 게시글 없음/soft-delete는 404이며 게시글 DB·JSON 오류는 닉네임 fallback로 숨기지 않는다.
 
-공개 게시글 GET은 `/api/v1/posts/read/{postId}` 단건, `/api/v1/posts/read` 목록, `/api/v1/posts/search?keyword=...` 검색이다. 기존 envelope와 data 9필드, 이미지 null/순서/중복과 LocalDateTime 의미를 보존한다. 공개 댓글 GET `/api/v1/comments/posts/read/{postId}`는 아래 F8의 7필드 배열 계약을 따른다. 기존 malformed ID의 generic 500 동작은 유지하며 400 개선을 섞지 않는다. `/api/posts/...` alias rewrite는 기존 Gateway 책임이다. 후보는 별도 nickname HTTP·로그인 API를 제공하지 않는다. F3는 같은 기존 경로 `POST /api/v1/posts`의 multipart 작성만 추가한다.
+공개 게시글 GET은 `/api/v1/posts/read/{postId}` 단건, `/api/v1/posts/read` 목록, `/api/v1/posts/search?keyword=...` 검색이다. 기존 envelope와 data 9필드, 이미지 null/순서/중복과 LocalDateTime 의미를 보존한다. 공개 댓글 GET `/api/v1/comments/posts/read/{postId}`는 아래 F8의 7필드 배열 계약을 따른다. 기존 malformed ID의 generic 500 동작은 유지하며 400 개선을 섞지 않는다. `/api/posts/...` alias rewrite는 기존 Gateway 책임이다. 작성자 닉네임 조회는 업무 간 Java 계약으로 연결한다. 본인 닉네임 수정 HTTP는 아래 F13의 정확한 PUT 경로만 제공하며 로그인·신규 토큰 발급 API는 없다. F3는 같은 기존 경로 `POST /api/v1/posts`의 multipart 작성만 추가한다.
 
 ## DB·실행 설정
 
-읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`의 필요한 열만 읽는다. Community 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 tx를 시작한다. application 조합에 외곽 tx나 REQUIRES_NEW를 두지 않는다. SQL의 schema와 parameter binding을 명시한다.
+읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
 
 | 환경 변수 | 의미 |
 |---|---|
@@ -34,7 +34,7 @@ Community는 User의 공개 API만 참조한다. User 부재·명시된 조회 �
 | F2_POOL_MAX_SIZE | 후보 시험 pool 상한, 기본 2; 운영 pool 확정값 아님 |
 | F2_PORT | loopback HTTP 포트. 기본 0(임의 포트) |
 
-필수 설정이 없으면 main은 Spring 기동/DB 접속 전에 실패한다. 운영 기본 주소나 기존 .env를 자동 탐색하지 않는다. readOnly tx와 SQL READ ONLY를 적용하며 CI 앱 계정도 SELECT-only로 제한한다. 앱 classpath에 SQL 초기화·Flyway·기존 migration/consumer/스케줄러·Feign·JPA·Redis·Kafka·ES·OAuth를 추가하지 않는다. F3의 S3 SDK는 명시적 endpoint·region·정적 credential만 사용한다. 기본 AWS credential/region 탐색 체인이나 기존 Secret 파일을 사용하지 않는다.
+필수 설정이 없으면 main은 Spring 기동/DB 접속 전에 실패한다. 운영 기본 주소나 기존 .env를 자동 탐색하지 않는다. 조회에는 readOnly tx와 SQL READ ONLY를 적용하며 CI reader 계정도 SELECT-only로 제한한다. 앱 classpath에 SQL 초기화·Flyway·기존 migration/consumer/스케줄러·Feign·JPA·Redis·Kafka·ES·OAuth를 추가하지 않는다. F3의 S3 SDK는 명시적 endpoint·region·정적 credential만 사용한다. 기본 AWS credential/region 탐색 체인이나 기존 Secret 파일을 사용하지 않는다.
 
 DB의 `TIMESTAMP(6)`와 기존 Hibernate UTC JDBC 추출 의미를 보존하도록 mapper를 비교한다. 문자열에 Z를 붙이거나 무조건 9시간을 더하지 않는다. 이 후보를 운영으로 연결하기 전에는 운영 DB 권한·기존/신규 JVM timezone·총 pool 예산과 라우팅 인계를 별도 검증해야 한다.
 
@@ -44,11 +44,11 @@ DB의 `TIMESTAMP(6)`와 기존 Hibernate UTC JDBC 추출 의미를 보존하도�
 
 일반 게시판 3종만 작성하고 MISSING/REPORT는 업로드 전에 전용 등록 안내로 거부한다. 기존에 적용되지 않던 NotBlank 등 새 입력 규칙은 추가하지 않는다. 작성 순서는 게시판 검증 → S3 업로드 → 독립된 짧은 User 닉네임 조회 → writer 트랜잭션 → 응답이다. 예상 밖 닉네임 오류가 DB commit 뒤에 발생하지 않도록 기존 HTTP 호출 순서를 조정했다. User 부재·명시적 unavailable fallback은 F2와 같으며, 닉네임과 게시글의 동일 시점 snapshot을 보장하지 않는다.
 
-writer는 같은 명시적 JDBC URL에 별도 계정·pool max1/minIdle0으로 연결한다. reader 기본 max2와 합쳐 후보 기본 상한은 3이며 운영 pool 예산을 확정한 수치는 아니다. 두 연결·JDBC·TM은 qualifier로 조립한다. application 외곽 트랜잭션·REQUIRES_NEW·XA는 없다. `posts`, `outbox_events`, `post_search_documents`의 3개 쓰기는 writer의 단일 트랜잭션에 참여한다. 기존 POST_CREATED JSON·Nori 9.12.3·검색 가중치·UTC JDBC 바인딩 의미를 보존한다. F3 범위에는 검색 조회나 이벤트 소비자를 추가하지 않으며 검색 조회는 아래 F7 계약으로 구분한다.
+writer는 같은 명시적 JDBC URL에 별도 계정·pool max1/minIdle0으로 연결한다. reader 기본 max2와 합쳐 후보 기본 상한은 3이며 운영 pool 예산을 확정한 수치는 아니다. 두 연결·JDBC·TM은 qualifier로 조립한다. F3 게시글 작성 조합에는 application 외곽 트랜잭션·REQUIRES_NEW·XA를 추가하지 않는다. `posts`, `outbox_events`, `post_search_documents`의 3개 쓰기는 writer의 단일 트랜잭션에 참여한다. 기존 POST_CREATED JSON·Nori 9.12.3·검색 가중치·UTC JDBC 바인딩 의미를 보존한다. F3 범위에는 검색 조회나 이벤트 소비자를 추가하지 않으며 검색 조회는 아래 F7 계약으로 구분한다.
 
 | 추가 필수 환경 변수 | 의미 |
 |---|---|
-| F3_DB_WRITER_USER / F3_DB_WRITER_PASSWORD | reader와 다른 최소 쓰기 계정. User 쓰기·DDL·소유권 권한을 부여하지 않음 |
+| F3_DB_WRITER_USER / F3_DB_WRITER_PASSWORD | reader와 다른 최소 쓰기 계정. F3~F12는 User 쓰기를 거부하며 F13은 nickname/updated_at 두 열 UPDATE만 허용. DDL·소유권 권한 없음 |
 | F3_JWT_SECRET | 기존 발급기 검증용 UTF-8 HMAC 키. 출력·이미지 포함 금지 |
 | F3_STORAGE_ENDPOINT / F3_STORAGE_REGION | 명시적인 S3 호환 endpoint와 region |
 | F3_STORAGE_BUCKET / F3_STORAGE_PUBLIC_BASE_URL | 업로드 bucket과 반환 URL 기준 |
@@ -167,6 +167,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 `profileCompatibilityTest`·`profileCompatibilitySeoulTest`는 같은 sourceSet에서 F12 클래스만 실행하고 두 XML의 실제 비0·실패/오류/skip0을 검사한다. 실제 고정 User/Role·SimpleJpaRepository.findById·DTO/Jackson을 UTC/Seoul에서 비교하며 전체 UserService·Controller·Gateway 실행 oracle은 아니다. JAR는 현재 단계에서 기존 실제 발급기로 갱신한 합성 토큰과 별도 본인 ID를 사용해 역할·위조 ID·현재 DB·빈/공백/null·회원 부재·권한 실패/회복·요청 간 principal 정리를 확인한다. raw 날짜는 기존 F11의 순수 UTC→Seoul 비교를 재사용한다. 요청마다 User/댓글/posts/F4 댓글·쪽지/Outbox/search/S3 전체 불변, 민감값 비노출·두 pool 정상 종료·연결0을 확인한다.
 
+## F13 본인 닉네임 수정
+
+`PUT /api/v1/users/me/nickname`은 기존 검증된 JWT principal의 본인만 대상으로 JSON nickname을 처리한다. 실제 요청 DTO의 NotBlank·길이2~30·한글/영문을 최소 하나 포함하는 한글/영문/숫자 패턴을 유지하고 trim·대소문자 정규화·새 회원 정책은 추가하지 않는다. `ChangeUserNickname`의 실제 Spring proxy가 기존 `writeTransactionManager` 한 트랜잭션 안에서 현재 nickname 조회→원문 동일값이면 중복 조회·UPDATE·auditing 생략→DB lower 중복 조회→nickname/updated_at 두 열 갱신을 수행한다. 성공은 동일값도 HTTP/code200·`닉네임이 변경되었습니다.`·data:null이다. 회원 부재400·사전 중복409를 유지한다. 원본의 managed save 이후 UNIQUE 경합23505는 메서드 catch 밖 commit에서 실패하며, 후보도 JDBC UPDATE에서 발생한 실제 DB 경합을 일괄409로 바꾸지 않고 안전한500으로 표현한다. 구조화된 User schema·23514·rollback charset 제약 metadata만 고정400으로 표현한다. 후보의 좁은 UPDATE는 원본 전체행 flush와 달리 동시 변경된 role/비밀번호를 덮지 않는다. 새 pool·환경 설정·잠금·version·retry·Outbox·S3 호출은 없다. 로컬 시험과 JAR 빌드는 운영 배포나 실제 운영 DB 권한 변경의 근거가 아니며, 이 후보는 미배포 상태다.
+
 ## 구조 검사
 
 `gradle/architecture.gradle`의 `verifyArchitecture`와 `verifyBusinessPackages`를 유지한다.
@@ -195,9 +199,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 11. 기존 F3~F9 PG/packaged 회귀와 정상 종료를 원래 ACL에서 끝낸 뒤 F10 가드→권한 준비→삭제 전용 UTC/Seoul→packaged 순서로 진행한다. 기존 고정 Comment entity/repository/DTO·실제 auditing을 재사용해 두 시각·물리 보존·부모/User 조회 불필요·SQL/commit rollback·경쟁과 최소 갱신 차이를 비교한다. 전체 legacy Controller/Service E2E는 아니다. packaged 시험은 실제 F9 POST→F8 GET→본인 DELETE→GET 제외, 역할·타인/부재/재삭제·본문 무시·부모/User 부재·SELECT/UPDATE 실패와 회복을 확인한다. 모든 요청에서 댓글 외 User/posts/F4 댓글·쪽지/Outbox/search/S3 불변을 검사하고 삭제는 기존 행과 두 시각 외 열을 보존한다. 실패 요청·GET은 전체 DB/S3 무변경이며 두 pool 정상 종료·잔여 연결0·로그 크기/비밀값 비노출을 확인한다.
 12. F10 회귀를 끝낸 뒤 F11 가드→content 한 열 권한 준비→수정 전용 UTC/Seoul/XML→packaged 순서로 진행한다. 실제 고정 요청 validator·managed JPA dirty checking·commit auditing과 후보의 oldupdatedAt 응답·저장 시각·동일 본문 no-op·경합 차이를 비교한다. packaged 시험은 실제 POST→저장된 GET snapshot→changed/same PUT→GET→DELETE와 인증·소유권·JSON/blank/Unicode·부재/삭제·부모 무관·닉네임 fallback/회복을 확인한다. UPDATE(content,updated_at) 권한을 회수한 상태에서 동일 본문은 성공하고 변경은500이어야 하며 복원 후 회복을 확인한다. 성공 변경은 content/updated_at만 바꾸고 다른 댓글/User/posts/F4 댓글·쪽지/Outbox/search/S3는 유지한다. 동일 본문·실패·GET은 전체 DB/S3 무변경, 두 pool 정상 종료·잔여 연결0·로그 크기/비밀값 비노출을 확인한다.
 13. 원래 F3~F11 회귀 뒤 F12 가드→User fixture 준비·ID/nickname 보존→profile 전용 UTC/Seoul/XML→packaged를 실행한다. 고정된 실제 User JPA/DTO와 가입일 null·날짜 경계·마이크로초·역할/닉네임을 비교한다. JAR는 본인 정보 exact7·DB/JWT 값 차이·두 principal·200/400/401/500·인접 경로403과 SQL 권한 회복을 확인하고 각 요청의 전체 DB/S3 불변·두 pool 종료/접속0·민감 필드 응답/로그 제외를 검사한다.
-14. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
+14. F3~F12 회귀를 각 단계 원래 권한에서 끝낸 뒤 F13 가드→기존 User ID/nickname 보존·고정 V1 UNIQUE/lower index·V2 8열 문자 CHECK·writer SELECT(user_id,nickname)/UPDATE(nickname,updated_at) 준비→nickname 전용 UTC/Seoul/XML→packaged를 실행한다. 확장 뒤 F12 무권한 helper를 호출하지 않고 F11 owner/정확한 포트/댓글 ACL 체인과 F12 schema/reader7, F13 writer exact ACL을 대조한다. JAR 직전 고정 원본 발급기로 600초 합성 토큰과 두 번째 principal을 갱신하며 stale token은 자식 시작 전에 거부한다. 실제 PUT→본인 정보/기존 댓글 작성자 표시, 동일값 무변경·case-only/타인 중복·인증/검증/부재·UPDATE 권한 실패/회복을 확인한다. 성공은 해당 회원 nickname/updated_at만 바꾸고, 동일값·오류·GET은 전체 DB/S3 불변이다. 원본 JPA 비교는 별도 compatibility 시험이며 운영 HTTP E2E가 아니다.
+15. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
-`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
+`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
 
 `prepare_legacy_oracle.py`는 기준 `e8ad7b8ec9006772ccc5f5881334df2730dbd8de`의 정확히 6개 Java 파일만 해시 검증해 boot/build 안 test-only 경로로 추출한다. Post/BoardType/StringListConverter/PostResponse와 UserServiceClient 및 그 JDK-only 응답 의존 PrivateNoteModels다. legacy 전체 sourceDir·Application을 편입하지 않는다. 실제 source/버전 비교는 compatibility classpath에서만 이뤄지고 앱 JAR에는 들어가지 않는다.
 
@@ -217,8 +222,10 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 `prepare_f12_legacy_oracle.py`는 기준 `5473c4ccd95ae974c79acc7030228d4a717af3b3`의 실제 UserInfoResponseDto 한 파일만 고정 해시로 추출한다. F3 공유 User/Role는 같은 source SHA의 해시와 기존 generated bytes를 대조하고 중복 생성하지 않는다. 전용 output/evidence 경로·공유/신규 변조·기존 생성물 덮어쓰기 거부를 무소켓 Python 검사로 보호한다. 다른 관리자 JPQL·DTO·OAuth·Kafka와 JPA 도구는 runtime/JAR에 편입하지 않는다.
 
+`prepare_f13_legacy_oracle.py`는 고정 원본 User/Role와 요청 DTO·Repository·컴파일 의존 및 실제 updateNickname 메서드 원문으로 제한된 compatibility oracle을 구성한다. 관리자 JPQL 전체를 초기화하지 않으며 실제 중복 @Query와 inherited findById/save·auditing·proxy commit 경계를 비교한다. `f13_ci.py`는 고정 V1/V2 파일 해시와 실제 fixture DDL을 대조하며 전체 User charset CHECK의 생성 정의를 marker에 보관해 이후 변조도 거부한다. 신규 원본과 공유 generated bytes는 해시로 고정하고 앱 JAR에서 제외한다.
+
 TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classpath를 사용한다. 실제 업무 build와 guard를 fixture에 복사하고, 본 빌드가 해결한 BOM/의존 cache를 offline으로 사용한다. 허용/금지 fixture의 이유를 검사하며 일반 컴파일·다운로드 오류를 구조 차단 성공으로 취급하지 않는다.
 
 Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12 계획과 모듈형 모놀리스 전환 노트를 따른다.
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13 계획과 모듈형 모놀리스 전환 노트를 따른다.
