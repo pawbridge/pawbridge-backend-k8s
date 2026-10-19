@@ -86,6 +86,9 @@ class PawBridgeApplicationTest {
                     assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.community.internal.note.application.ReadBlockedAuthors.class))).isFalse();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockStatusController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockStatusExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.application.UserProfileQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.web.UserProfileController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler.class)).hasSize(1);

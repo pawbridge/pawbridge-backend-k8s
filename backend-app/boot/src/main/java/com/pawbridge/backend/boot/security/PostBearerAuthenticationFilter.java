@@ -7,7 +7,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.LinkedHashMap;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,8 +30,8 @@ public final class PostBearerAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        long userId;
-        try { userId = tokens.authenticate(request.getHeader("Authorization")); }
+        UsernamePasswordAuthenticationToken authentication;
+        try { authentication = tokens.authenticateToken(request.getHeader("Authorization")); }
         catch (PostTokenAuthenticator.Failure failure) {
             SecurityContextHolder.clearContext();
             response.setStatus(401);
@@ -44,7 +43,7 @@ public final class PostBearerAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         var context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(new UsernamePasswordAuthenticationToken(userId, null, List.of()));
+        context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);
         // Business and commit failures are deliberately outside the authentication catch.
         try { chain.doFilter(request, response); }

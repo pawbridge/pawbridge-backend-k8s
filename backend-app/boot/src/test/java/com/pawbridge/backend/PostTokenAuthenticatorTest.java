@@ -16,7 +16,7 @@ class PostTokenAuthenticatorTest {
     private final PostTokenAuthenticator tokens = new PostTokenAuthenticator(F3TestInputs.KEY);
 
     @ParameterizedTest
-    @ValueSource(strings={"ROLE_USER","ROLE_ADMIN","ROLE_SHELTER"})
+    @ValueSource(strings={"ROLE_USER","ROLE_ADMIN","ROLE_SHELTER",""," ","ROLE_UNKNOWN","ROLE_ADMIN "})
     void given__signed_access_identity__when__authenticating__then__use_claim_user_id_for_every_existing_role(String role) {
         assertThat(tokens.authenticate("Bearer "+F3TestInputs.token(7,role))).isEqualTo(7);
     }

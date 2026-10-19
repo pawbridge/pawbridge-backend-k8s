@@ -32,7 +32,8 @@ public class ReadSecurityConfiguration {
         var favoriteStatus = new AntPathRequestMatcher("/api/v1/favorites/{animalId}/check", "GET");
         var noteRecipient = new AntPathRequestMatcher("/api/v1/notes/recipients/{member}", "GET");
         var noteBlockStatus = new AntPathRequestMatcher("/api/v1/notes/blocks/status", "GET");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus);
+        var totalUserCount = new AntPathRequestMatcher("/api/v1/admin/users/stats/total-users", "GET");
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount);
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -46,19 +47,25 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/home/videos").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/visits/today").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/comments/posts/read/{postId}").permitAll()
+                        .requestMatchers(totalUserCount).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())
                 .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postWriting), AnonymousAuthenticationFilter.class)
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> forbidden(response))
-                        .accessDeniedHandler((request, response, exception) -> forbidden(response)))
+                        .accessDeniedHandler((request, response, exception) -> forbidden(response,
+                                totalUserCount.matches(request) ? "관리자 권한이 필요합니다." : "접근할 수 없습니다.")))
                 .build();
     }
 
     private static void forbidden(HttpServletResponse response) throws IOException {
+        forbidden(response, "접근할 수 없습니다.");
+    }
+
+    private static void forbidden(HttpServletResponse response, String message) throws IOException {
         response.setStatus(403);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType("application/json");
-        response.getWriter().write("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}");
+        response.getWriter().write("{\"code\":403,\"message\":\"" + message + "\",\"data\":null}");
     }
 }
