@@ -134,6 +134,7 @@ class PostgresqlCommentDeleteCompatibilityTest {
     void givenRealDeleteAndDistinctAuditingTime__whenDeleting__thenTwoStoredTimesAndPreservedColumnsMatchJpa()
             throws Exception {
         seed(BASE + 1, AUTHOR, null); seed(BASE + 2, AUTHOR, null);
+        JsonNode originalCandidate = row(BASE + 2);
         String unrelated = unrelatedState();
         LocalDateTime deleted;
         LocalDateTime modified;
@@ -151,7 +152,9 @@ class PostgresqlCommentDeleteCompatibilityTest {
         new JdbcCommentDeletion(writeJdbc, writeTx, new TwoReadClock(deleted, modified)).delete(BASE + 2, AUTHOR);
         assertThat(withoutIdentity(row(BASE + 2))).isEqualTo(withoutIdentity(row(BASE + 1)));
         assertThat(row(BASE + 2).get("deleted_at")).isNotEqualTo(row(BASE + 2).get("updated_at"));
-        assertThat(row(BASE + 2).get("created_at").asText()).startsWith("2025-01-02");
+        // UTC JDBC binding can place the raw TIMESTAMP on the previous date in Seoul.
+        // Deletion must preserve the actual stored creation value, independently of that representation.
+        assertThat(row(BASE + 2).get("created_at")).isEqualTo(originalCandidate.get("created_at"));
         assertThat(row(BASE + 2).get("content").asText()).isEqualTo(CONTENT);
         assertThat(comments.findByPostId(PARENT)).isEmpty();
         JsonNode after = row(BASE + 2);
