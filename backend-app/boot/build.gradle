@@ -13,6 +13,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f8LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f9LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f11LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f12LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -141,8 +142,19 @@ tasks.register('prepareF11LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f11-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF12LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF3LegacyOracle')
+    inputs.files(rootProject.file('scripts/prepare_f12_legacy_oracle.py'), rootProject.file('scripts/prepare_f3_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f12LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f12-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f12_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f12LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f12-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -156,6 +168,7 @@ tasks.named('compileCompatibilityTestJava') {
         shouldRunAfter tasks.named('test')
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentDeleteCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentUpdateCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
     }
 }
 
@@ -211,3 +224,22 @@ tasks.register('architectureTest', Test) {
 }
 
 tasks.named('check') { dependsOn tasks.named('architectureTest') }
+
+
+['profileCompatibilityTest': 'UTC', 'profileCompatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = "Checks only F12 profile reads after the owned User fixture extension in " + zone + "."
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        filter {
+            includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
+            failOnNoMatchingTests = true
+        }
+        shouldRunAfter tasks.named('commentUpdateCompatibilitySeoulTest')
+    }
+}
+
+tasks.named('profileCompatibilitySeoulTest') { shouldRunAfter tasks.named('profileCompatibilityTest') }

@@ -14,7 +14,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** Applied only inside the security chain, before the matching POST, PUT or DELETE reaches MVC. */
+/** Applied only inside the security chain, before the matching protected GET, POST, PUT or DELETE reaches MVC. */
 public final class PostBearerAuthenticationFilter extends OncePerRequestFilter {
     private final PostTokenAuthenticator tokens;
     private final RequestMatcher protectedRequest;
