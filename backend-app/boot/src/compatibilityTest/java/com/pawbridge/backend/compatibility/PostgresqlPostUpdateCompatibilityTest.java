@@ -65,7 +65,7 @@ class PostgresqlPostUpdateCompatibilityTest {
         var expected=oracle.update(legacy.postId(),title,content,images);
         var actual=updates.update(candidate.postId(),F3PostgresqlFixture.AUTHOR,title,content,images);
         assertThat(actual.title()).isEqualTo(expected.title());assertThat(actual.content()).isEqualTo(expected.content());
-        assertThat(actual.imageUrls()).isEqualTo(expected.imageUrls());assertThat(actual.boardType()).isEqualTo(expected.boardType());
+        assertThat(actual.imageUrls()).isEqualTo(expected.imageUrls());assertThat(actual.boardType()).isEqualTo(expected.boardType().name());
         assertThat(actual.createdAt()).isEqualTo(expected.createdAt());assertThat(actual.updatedAt()).isEqualTo(expected.updatedAt());
         assertThat(reads.findById(candidate.postId()).orElseThrow().updatedAt()).isEqualTo(oracle.read(legacy.postId()).updatedAt());
         assertThat(updatedEvents(candidate.postId())).isOne();assertPayload(candidate.postId(),actual);

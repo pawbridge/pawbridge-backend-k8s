@@ -241,13 +241,13 @@ class PostgresqlPostDeleteCompatibilityTest {
 
     @Test void given__minimal_writer_and_read_only_reader__when__crossing_permissions__then__deny_unrelated_mutations() {
         assertDenied(()->writeJdbc.update("UPDATE pawbridge_community.posts SET author_id=author_id"));
-        assertDenied(()->writeJdbc.update("UPDATE pawbridge_community.posts SET author_id=author_id"));
+        assertDenied(()->writeJdbc.update("UPDATE pawbridge_community.posts SET board_type=board_type"));
         assertDenied(()->writeJdbc.update("DELETE FROM pawbridge_community.posts"));
         assertDenied(()->writeJdbc.queryForList("SELECT * FROM pawbridge_user.users"));
         assertDenied(()->writeJdbc.execute("CREATE TABLE pawbridge_community.f4_forbidden(id BIGINT)"));
         assertDenied(()->readJdbc.update("UPDATE pawbridge_community.posts SET deleted_at=now()"));
         assertThat(writeJdbc.queryForObject("SELECT has_column_privilege(current_user,'pawbridge_community.posts','deleted_at','UPDATE') AND has_column_privilege(current_user,'pawbridge_community.posts','updated_at','UPDATE')",Boolean.class)).isTrue();
-        assertThat(writeJdbc.queryForObject("SELECT has_column_privilege(current_user,'pawbridge_community.posts','title','UPDATE')",Boolean.class)).isFalse();
+        assertThat(writeJdbc.queryForObject("SELECT has_column_privilege(current_user,'pawbridge_community.posts','author_id','UPDATE')",Boolean.class)).isFalse();
         returned();
     }
 
