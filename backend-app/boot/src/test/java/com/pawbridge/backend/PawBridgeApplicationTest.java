@@ -64,6 +64,12 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
+                    assertThat(context.getBeansOfType(java.time.Clock.class)).containsOnlyKeys("readClock");
+                    assertThat(context.getBean("readClock", java.time.Clock.class).getZone()).isEqualTo(java.time.ZoneOffset.UTC);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.application.HomeVideoReader.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.application.ReadHomeVideos.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.web.HomeVideoController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.web.HomeVideoExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.api.UserNicknameQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.application.UserProfileQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.web.UserProfileController.class)).hasSize(1);
