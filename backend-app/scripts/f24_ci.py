@@ -373,7 +373,7 @@ def smoke():
                 check('/api/v1/notes/blocks/'+str(MISSING),delta='member',kind='missing_target')
                 check('/api/v1/notes/blocks/9223372036854775808',status=401,token=None,message='인증 토큰이 필요합니다.',layer='auth',kind='authentication')
                 check('/api/v1/notes/stream',method='GET',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
-                check('/api/v1/notes/blocks/'+str(OTHER),method='PUT',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
+                check('/api/v1/notes/blocks/'+str(OTHER)+'/extra',method='PUT',status=403,message='접근할 수 없습니다.',layer='route',kind='adjacent_denied')
                 with denied_privilege('delete'):check('/api/v1/notes/blocks/'+str(OTHER),status=503,message=STORAGE,kind='storage_unavailable')
                 check('/api/v1/notes/blocks/'+str(OTHER),kind='recovery')
                 with denied_privilege('nickname'):check('/api/v1/notes/blocks/'+str(OTHER),status=503,message=MEMBER_UNAVAILABLE,kind='member_unavailable')

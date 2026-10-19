@@ -112,6 +112,14 @@ class PawBridgeApplicationTest {
                     assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.community.internal.note.application.RemoveNoteBlock.class))).isFalse();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockRemoveController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockRemoveExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteBlockCreation.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.CreateNoteBlock.class)).hasSize(1);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.community.internal.note.application.CreateNoteBlock.class))).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockCreateController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteBlockCreateExceptionHandler.class)).hasSize(1);
+                    var createNoteBlock = context.getBean(com.pawbridge.backend.community.internal.note.application.CreateNoteBlock.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(createNoteBlock, "clock")).isSameAs(context.getBean("readClock"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(createNoteBlock, "members")).isSameAs(context.getBean(com.pawbridge.backend.user.api.ContactMemberQuery.class));
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler.class)).hasSize(1);
@@ -199,6 +207,16 @@ class PawBridgeApplicationTest {
                     assertThat(removalTransaction.getTransactionManager()).isSameAs(writeManager);
                     assertThat(removalTransaction.getTimeout()).isEqualTo(15);
                     assertThat(removalTransaction.isReadOnly()).isFalse();
+                    var blockCreation = context.getBean(com.pawbridge.backend.community.internal.note.application.NoteBlockCreation.class);
+                    assertThat(blockCreation).isInstanceOf(com.pawbridge.backend.community.internal.note.infrastructure.JdbcNoteBlockCreation.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(blockCreation, "jdbc")).isSameAs(writeJdbc);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(createNoteBlock, "creation")).isSameAs(blockCreation);
+                    var creationTransaction = (org.springframework.transaction.support.TransactionTemplate)
+                            org.springframework.test.util.ReflectionTestUtils.getField(blockCreation, "transaction");
+                    assertThat(creationTransaction).isNotNull().isNotSameAs(sharedWriteTransaction);
+                    assertThat(creationTransaction.getTransactionManager()).isSameAs(writeManager);
+                    assertThat(creationTransaction.getTimeout()).isEqualTo(15);
+                    assertThat(creationTransaction.isReadOnly()).isFalse();
                     pools.values().forEach(pool -> {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();
