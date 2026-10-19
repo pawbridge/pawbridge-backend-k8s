@@ -3,6 +3,7 @@ package com.pawbridge.backend.community.internal.post.infrastructure.media;
 import com.pawbridge.backend.community.internal.post.application.PostMediaRemover;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -11,6 +12,9 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 /** Explicit, best-effort deletion of media URLs read from the post itself. */
 public final class S3PostMediaRemover implements PostMediaRemover {
     private static final Logger LOG = LoggerFactory.getLogger(S3PostMediaRemover.class);
+    private static final Pattern UPLOADED_KEY = Pattern.compile(
+            "posts/(?:images|videos)/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+                    + "(?:\\.[^.]*)?");
     private final S3Client s3;
     private final String bucket;
     private final String publicBaseUrl;
@@ -46,8 +50,17 @@ public final class S3PostMediaRemover implements PostMediaRemover {
             throw new IllegalArgumentException("Unregistered post media URL");
         }
         String key = url.substring(publicPrefix.length());
-        if (key.isBlank() || !key.startsWith(objectPrefix) || key.length() == objectPrefix.length()
-                || key.contains("\\") || key.contains("%") || key.contains("?") || key.contains("#")
+        if (key.isBlank() || !key.startsWith(objectPrefix) || key.length() == objectPrefix.length()) {
+            throw new IllegalArgumentException("Post media key outside configured storage path");
+        }
+        // The uploader appends UUID.randomUUID() and the substring from the filename's last dot.
+        // That suffix cannot contain another dot, so it cannot introduce a period-only path segment.
+        // Preserve its percent signs, separators and control characters as one opaque SDK key:
+        // parsing, decoding or normalizing the returned string could select a different object.
+        if (UPLOADED_KEY.matcher(key.substring(objectPrefix.length())).matches()) {
+            return key;
+        }
+        if (key.contains("\\") || key.contains("%") || key.contains("?") || key.contains("#")
                 || key.chars().anyMatch(character -> character < 32 || character == 127)
                 || Arrays.stream(key.split("/", -1)).anyMatch(segment ->
                     segment.isEmpty() || segment.equals(".") || segment.equals(".."))) {
