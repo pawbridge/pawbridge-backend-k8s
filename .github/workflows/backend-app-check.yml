@@ -266,6 +266,9 @@ jobs:
       - name: Require F28 to reuse the immutable F23 original-source Git object
         run: git cat-file -e 'f06a72a06bd26662c647bde780dfc7a27bf7349c^{commit}'
 
+      - name: Require F29 to reuse the immutable F23 original-source Git object
+        run: git cat-file -e 'f06a72a06bd26662c647bde780dfc7a27bf7349c^{commit}'
+
       - name: Isolate Gradle state on the hosted runner
         run: |
           set -euo pipefail
@@ -446,6 +449,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f28-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f29_ci.py prepare > build/ci/f29-helper-refusal.txt 2>&1; then
+            printf 'F29 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f29-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -506,7 +514,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|f23LegacyOracle|f24LegacyOracle|f25LegacyOracle|f26LegacyOracle|F25LegacyNoteBlockCreate(Service|Controller|ExceptionAdvice)|F26LegacyNoteRead(Service|Controller|ExceptionAdvice)|F27LegacyNoteFavorite(Service|Controller|ExceptionAdvice)|f27LegacyOracle|F28LegacyNoteDeletion(Service|Controller|ExceptionAdvice)|f28LegacyOracle|com/pawbridge/communityservice/contact/PrivateNoteStream|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f10_fixture|f11_fixture|f12_fixture|f13_fixture|f14_fixture|f15_fixture|f16_fixture|f17_fixture|f[23456789]LegacyOracle|f10LegacyOracle|f11LegacyOracle|f12LegacyOracle|f13LegacyOracle|f14LegacyOracle|f15LegacyOracle|f16LegacyOracle|f17LegacyOracle|f18LegacyOracle|f19LegacyOracle|f20LegacyOracle|f21LegacyOracle|f22LegacyOracle|f23LegacyOracle|f24LegacyOracle|f25LegacyOracle|f26LegacyOracle|F25LegacyNoteBlockCreate(Service|Controller|ExceptionAdvice)|F26LegacyNoteRead(Service|Controller|ExceptionAdvice)|F27LegacyNoteFavorite(Service|Controller|ExceptionAdvice)|f27LegacyOracle|F28LegacyNoteDeletion(Service|Controller|ExceptionAdvice)|f28LegacyOracle|F29LegacyNoteSend(Service|Controller|ExceptionAdvice)|f29LegacyOracle|com/pawbridge/communityservice/contact/PrivateNoteStream|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
@@ -1372,6 +1380,61 @@ jobs:
           assert result['remaining_application_connections'] == 0
           PYTHON
 
+      - name: Verify F29 fixed report fragments, send columns, ownership and XML guards without resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f29_ci_guards.py
+
+      - name: Verify F29 send, replay, recipient note and owned cleanup controls with mocked resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f29_stream_probe.py
+
+      - name: Add only pinned report context and exact send columns after the complete F28 stage
+        run: python3 scripts/f29_ci.py prepare
+
+      - name: Compare F29 owned sends in UTC and only one timestamp slice in Seoul
+        run: |
+          set -euo pipefail
+          bash ./gradlew :boot:noteSendCompatibilityTest :boot:noteSendCompatibilitySeoulTest \
+            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+
+      - name: Require exact F29 UTC and thin Seoul reports with original byte receipts
+        run: python3 scripts/f29_ci.py results
+
+      - name: Verify packaged send, recipient note, replay, REST recovery and owned shutdown
+        id: jar_f29
+        run: |
+          set -euo pipefail
+          python3 scripts/f29_ci.py smoke
+          test -s build/ci/f29-oracle-sha256.txt
+          test -s build/ci/f29-fixture-write.txt
+          test -s build/ci/f29-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f29_ci as f29
+          import f29_stream_probe as probe
+          f29.require_measurements('jar')
+          result = json.loads(Path('build/ci/f29-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert f29.COUNTERS == probe.COUNTERS
+          assert f29.EXPECTED_JAR_COUNTS == probe.EXPECTED_JAR_COUNTS
+          assert {key: result[key] for key in f29.COUNTERS} == f29.EXPECTED_JAR_COUNTS
+          assert result['request_checks'] == result['post_checks'] + result['get_checks']
+          assert result['post_checks'] == result['successful_post_checks'] + result['rejected_post_checks']
+          assert result['request_checks'] == result['nonstreaming_checks'] + result['stream_open_checks']
+          assert result['stream_ready_checks'] == result['stream_open_checks']
+          assert result['sender_note_checks'] == result['resync_checks'] == 0
+          assert result['inserted_mailbox_rows'] == 2 * result['inserted_note_rows']
+          assert result['inserted_request_rows'] == result['inserted_note_rows']
+          assert result['recipient_note_checks'] == result['inserted_note_rows']
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['stream_resources_stopped'] is True
+          assert result['server_closed_open_streams'] == 2
+          assert result['owned_cleanup_restored'] is True
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Remove only the owned disposable fixture
         id: owned_cleanup
         if: always()
@@ -1402,6 +1465,7 @@ jobs:
             backend-app/build/ci/f26-results.json
             backend-app/build/ci/f27-results.json
             backend-app/build/ci/f28-results.json
+            backend-app/build/ci/f29-results.json
             backend-app/build/ci/boot-jar.sha256
           if-no-files-found: warn
           include-hidden-files: false

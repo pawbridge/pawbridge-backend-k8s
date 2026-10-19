@@ -277,6 +277,25 @@ class PawBridgeApplicationTest {
                     assertThat(deletionTransaction.getTransactionManager()).isSameAs(writeManager);
                     assertThat(deletionTransaction.getTimeout()).isEqualTo(15);
                     assertThat(deletionTransaction.isReadOnly()).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteSendStore.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.SendPrivateNote.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteSendController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteSendExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteDeliveryHints.class)).hasSize(1).containsValue(streams);
+                    var sending = context.getBean(com.pawbridge.backend.community.internal.note.application.SendPrivateNote.class);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(sending)).isFalse();
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(sending, "members")).isSameAs(context.getBean(com.pawbridge.backend.user.api.ContactMemberQuery.class));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(sending, "clock")).isSameAs(context.getBean("readClock"));
+                    var sendStore = context.getBean(com.pawbridge.backend.community.internal.note.application.NoteSendStore.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(sending, "store")).isSameAs(sendStore);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(sendStore, "jdbc")).isSameAs(writeJdbc);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(sendStore, "hints")).isSameAs(streams);
+                    var sendTransaction = (org.springframework.transaction.support.TransactionTemplate)
+                            org.springframework.test.util.ReflectionTestUtils.getField(sendStore, "transaction");
+                    assertThat(sendTransaction).isNotSameAs(sharedWriteTransaction).isNotSameAs(mutationTransaction).isNotSameAs(favoriteTransaction).isNotSameAs(deletionTransaction);
+                    assertThat(sendTransaction.getTransactionManager()).isSameAs(writeManager);
+                    assertThat(sendTransaction.getTimeout()).isEqualTo(15);
+                    assertThat(sendTransaction.isReadOnly()).isFalse();
                     pools.values().forEach(pool -> {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();

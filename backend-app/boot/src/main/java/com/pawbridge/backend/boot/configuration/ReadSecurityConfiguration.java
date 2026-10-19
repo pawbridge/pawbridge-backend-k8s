@@ -43,12 +43,13 @@ public class ReadSecurityConfiguration {
         var noteStream = new AntPathRequestMatcher("/api/v1/notes/stream", "GET");
         var noteRead = new AntPathRequestMatcher("/api/v1/notes/{id}/read", "PUT");
         var noteFavorite = new AntPathRequestMatcher("/api/v1/notes/{id}/favorite", "PUT");
+        var noteSend = new AntPathRequestMatcher("/api/v1/notes", "POST");
         var noteDeletion = new AntPathRequestMatcher("/api/v1/notes/{id}", "DELETE");
         var privateNote = new AndRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/notes/{id}", "GET"),
                 new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/notes/stream", "GET")));
         var totalUserCount = new AntPathRequestMatcher("/api/v1/admin/users/stats/total-users", "GET");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion);
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)

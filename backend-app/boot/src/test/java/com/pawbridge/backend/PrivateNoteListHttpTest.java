@@ -286,7 +286,7 @@ class PrivateNoteListHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"HEAD /api/v1/notes", "OPTIONS /api/v1/notes", "POST /api/v1/notes", "GET /api/notes", "GET /api/v1/notes/"})
+    @ValueSource(strings = {"HEAD /api/v1/notes", "OPTIONS /api/v1/notes", "POST /api/v1/notes/unexposed/send", "GET /api/notes", "GET /api/v1/notes/"})
     void given__unexposed_root_alias_trailing_slash_or_method__when__requesting__then__deny_without_list_or_writer_work(String wire) throws Exception {
         String[] parts = wire.split(" ", 2);
         mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))

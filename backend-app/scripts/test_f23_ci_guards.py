@@ -241,7 +241,8 @@ class F23GuardTest(unittest.TestCase):
             self.assertEqual(MOCK_COUNTS, {key: result[key] for key in f23.COUNTERS})
             self.assertEqual([0, 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11], calls)
             self.assertNotIn('Authorization', requests[8][1]['headers']); self.assertEqual('/api/v1/notes/stream/extra', requests[9][0])
-            self.assertEqual('POST', requests[10][1]['method']); self.assertEqual('/api/v1/notes/' + f23.INBOX[-1], requests[11][0])
+            self.assertEqual('POST', requests[10][1]['method']); self.assertEqual('/api/v1/notes/unexposed/send', requests[10][0])
+            self.assertEqual('/api/v1/notes/' + f23.INBOX[-1], requests[11][0])
             self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(f23.OWNED)
             self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
 

@@ -30,6 +30,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f26LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f27LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f28LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f29LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -348,7 +349,9 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteFavoriteCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F27LegacyNoteFavoriteMvcTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteDeletionCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F28LegacyNoteDeletionMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F29LegacyNoteSendMvcTest'
     }
 }
 
@@ -833,4 +836,53 @@ tasks.register('noteDeletionCompatibilityTest', Test) {
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('noteFavoriteCompatibilityTest')
+}
+
+// F29 selected original send remains compatibility-only. No producer/observer enters the executable JAR.
+tasks.register('prepareF29LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF28LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f29_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f29LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f29-oracle-sha256.txt'))
+    workingDir rootProject.projectDir
+    commandLine 'python3', rootProject.file('scripts/prepare_f29_legacy_oracle.py').absolutePath,
+            rootProject.projectDir.parentFile.absolutePath,
+            layout.buildDirectory.dir('generated/sources/f29LegacyOracle/java').get().asFile.absolutePath,
+            rootProject.file('build/ci/f29-oracle-sha256.txt').absolutePath
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF29LegacyOracle') }
+
+tasks.register('noteSendCompatibilityTest', Test) {
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
+        systemProperty "${stage}.fixture.receipt", rootProject.file("build/ci/${stage}-fixture-write.txt").absolutePath
+    }
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F29LegacyNoteSendMvcTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteDeletionCompatibilityTest')
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('noteSendCompatibilitySeoulTest', Test) {
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'Asia/Seoul'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
+        systemProperty "${stage}.fixture.receipt", rootProject.file("build/ci/${stage}-fixture-write.txt").absolutePath
+    }
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest.givenMicrosecondLeapYearSend__whenPersistingAndSerializingInEitherZone__thenKeepOneInstantAcrossBothMailboxesRequestAndNotification'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteSendCompatibilityTest')
+    outputs.upToDateWhen { false }
 }

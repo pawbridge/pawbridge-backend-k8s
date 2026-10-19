@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import com.pawbridge.backend.community.internal.note.application.RequireActiveNoteStream;
+import com.pawbridge.backend.community.internal.note.application.NoteNotifications;
 import com.pawbridge.backend.user.api.ContactMember;
 import com.pawbridge.backend.user.api.ContactMemberQuery;
 import java.io.IOException;
@@ -30,6 +31,47 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** Manual executors/emitters verify registry policy; they do not model real sockets or servlet shutdown. */
 class PrivateNoteStreamRegistryTest {
+    @Test
+    void givenRecipientTabsAndAnotherMember__whenPublishingCommittedNote__thenUseOnlyTheSameBoundedRecipientRegistryAndExactPayload() throws Exception {
+        try (var f = new Fixture()) {
+            f.streams.open(7, f.expiry()); f.streams.open(7, f.expiry()); f.streams.open(8, f.expiry());
+            var payload = notification(f.clock.instant());
+            f.streams.publish(7, payload);
+            assertThat(f.writes.tasks).hasSize(2);
+            assertThat(f.emitters).allSatisfy(emitter -> assertThat(emitter.sends).hasValue(1));
+            f.writes.runAll();
+            for (int index : new int[]{0, 1}) {
+                var frames = f.emitters.get(index).frames;
+                assertThat(frames).hasSize(2);
+                assertThat(frames.getLast()).contains(payload);
+                assertThat(frames.getLast().stream().filter(String.class::isInstance).map(Object::toString).toList())
+                        .anySatisfy(part -> assertThat(part).contains("event:note\n"));
+            }
+            assertThat(f.emitters.get(2).frames).hasSize(1);
+        }
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"expired", "full"})
+    void givenExpiredConnectionOrFullWriteQueue__whenPublishingNote__thenKeepExistingBoundedBestEffortWithoutLateDelivery(String condition) throws Exception {
+        try (var f = new Fixture()) {
+            f.streams.open(7, f.clock.instant().plusSeconds(condition.equals("expired") ? 1 : 60));
+            var payload = notification(f.clock.instant());
+            f.writes.capacity = 1;
+            f.streams.publish(7, payload);
+            if (condition.equals("expired")) f.clock.advance(2);
+            else assertThatCode(() -> f.streams.publish(7, payload)).doesNotThrowAnyException();
+            assertThat(f.writes.tasks).hasSize(1);
+            f.writes.runAll(); f.completions.runAll();
+            assertThat(f.emitters.getFirst().sends).hasValue(condition.equals("expired") ? 1 : 2);
+            assertThat(f.emitters.getFirst().completed).hasValue(condition.equals("expired") ? 1 : 0);
+        }
+    }
+
+    private static NoteNotifications.Notification notification(Instant now) {
+        return new NoteNotifications.Notification(UUID.fromString("f2900000-0000-0000-0000-000000000001"),
+                "PRIVATE_NOTE", 8L, " raw nickname ", now, false, "/notes/f2900000-0000-0000-0000-000000000001");
+    }
+
     @ParameterizedTest @ValueSource(strings = {"member", "global", "pending"})
     void givenConnectionBudget__whenOpeningBeyondIt__thenReturn429WithRetryAfterAndKeepExistingConnections(String budget) throws Exception {
         try (var f = new Fixture()) {
@@ -196,11 +238,15 @@ class PrivateNoteStreamRegistryTest {
     }
     private static final class TrackingEmitter extends PrivateNoteStreamRegistry.StreamEmitter {
         final AtomicInteger sends = new AtomicInteger(), completed = new AtomicInteger();
+        final List<List<Object>> frames = new ArrayList<>();
         Runnable completion;
         Runnable timeout;
         Consumer<Throwable> error;
         TrackingEmitter(long timeout) { super(timeout); }
-        @Override public void send(SseEventBuilder event) throws IOException { sends.incrementAndGet(); }
+        @Override public void send(SseEventBuilder event) throws IOException {
+            frames.add(event.build().stream().map(part -> part.getData()).toList());
+            sends.incrementAndGet();
+        }
         @Override public void onCompletion(Runnable callback) { completion = callback; }
         @Override public void onTimeout(Runnable callback) { timeout = callback; }
         @Override public void onError(Consumer<Throwable> callback) { error = callback; }
