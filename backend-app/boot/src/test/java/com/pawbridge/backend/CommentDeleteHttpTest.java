@@ -222,7 +222,7 @@ class CommentDeleteHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GET /api/v1/comments/12", "POST /api/v1/comments/12", "PUT /api/v1/comments/12",
+    @ValueSource(strings = {"GET /api/v1/comments/12", "POST /api/v1/comments/12",
             "PATCH /api/v1/comments/12", "HEAD /api/v1/comments/12", "OPTIONS /api/v1/comments/12",
             "DELETE /api/v1/comments", "DELETE /api/v1/comments/", "DELETE /api/v1/comments/12/",
             "DELETE /api/v1/comments/12/extra", "DELETE /api/v1/comments/posts/42",

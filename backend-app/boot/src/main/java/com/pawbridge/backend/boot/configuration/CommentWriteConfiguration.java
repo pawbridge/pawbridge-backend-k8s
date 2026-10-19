@@ -3,12 +3,17 @@ package com.pawbridge.backend.boot.configuration;
 import com.pawbridge.backend.community.internal.comment.application.CommentWriter;
 import com.pawbridge.backend.community.internal.comment.application.CommentDeletion;
 import com.pawbridge.backend.community.internal.comment.application.CreateComment;
+import com.pawbridge.backend.community.internal.comment.application.CommentReader;
+import com.pawbridge.backend.community.internal.comment.application.CommentModification;
+import com.pawbridge.backend.community.internal.comment.application.UpdateComment;
 import com.pawbridge.backend.community.internal.comment.infrastructure.JdbcCommentWriter;
 import com.pawbridge.backend.community.internal.comment.infrastructure.JdbcCommentDeletion;
 import com.pawbridge.backend.community.internal.comment.web.CommentCreateController;
 import com.pawbridge.backend.community.internal.comment.web.CommentCreateExceptionHandler;
 import com.pawbridge.backend.community.internal.comment.web.CommentDeleteController;
 import com.pawbridge.backend.community.internal.comment.web.CommentDeleteExceptionHandler;
+import com.pawbridge.backend.community.internal.comment.web.CommentUpdateController;
+import com.pawbridge.backend.community.internal.comment.web.CommentUpdateExceptionHandler;
 import com.pawbridge.backend.community.internal.post.application.PostReader;
 import com.pawbridge.backend.user.api.UserNicknameQuery;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -49,4 +54,15 @@ public class CommentWriteConfiguration {
 
     @Bean
     CommentDeleteExceptionHandler commentDeleteExceptionHandler() { return new CommentDeleteExceptionHandler(); }
+
+    @Bean
+    UpdateComment updateComment(CommentReader comments, UserNicknameQuery users, CommentModification modification) {
+        return new UpdateComment(comments, users, modification);
+    }
+
+    @Bean
+    CommentUpdateController commentUpdateController(UpdateComment updateComment) { return new CommentUpdateController(updateComment); }
+
+    @Bean
+    CommentUpdateExceptionHandler commentUpdateExceptionHandler() { return new CommentUpdateExceptionHandler(); }
 }

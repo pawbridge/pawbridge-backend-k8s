@@ -202,7 +202,7 @@ def smoke():
                 f3.sql('GRANT SELECT(content) ON pawbridge_community.comments TO pawbridge_f2_reader')
             if by_id(comments(9800001)) != by_id(rows):
                 raise AssertionError('Comment SQL did not recover after restoring SELECT')
-            # F9's newly supported POST requires authentication; other writes/near paths stay denied.
+            # Supported comment POST/PUT/DELETE require authentication; adjacent paths stay denied.
             for method, path in [('POST', '/api/v1/comments/posts/read/9800001'),
                     ('PUT', '/api/v1/comments/posts/read/9800001'),
                     ('DELETE', '/api/v1/comments/posts/read/9800001'),
@@ -215,6 +215,7 @@ def smoke():
                     ('DELETE', '/api/v1/comments/9800011')]:
                 before = snapshot()
                 expected = 401 if (method, path) in (('POST', '/api/v1/comments/posts/9800001'),
+                    ('PUT', '/api/v1/comments/9800011'),
                     ('DELETE', '/api/v1/comments/9800011')) else 403
                 f3.expect(base, path, expected, method)
                 if snapshot() != before:

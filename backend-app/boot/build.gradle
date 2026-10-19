@@ -12,6 +12,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f7LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f8LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f9LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f11LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -129,8 +130,19 @@ tasks.register('prepareF9LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f9-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF11LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF9LegacyOracle')
+    inputs.files(rootProject.file('scripts/prepare_f11_legacy_oracle.py'), rootProject.file('scripts/prepare_f9_legacy_oracle.py'), rootProject.file('scripts/prepare_f8_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f11LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f11-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f11_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f11LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f11-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -143,6 +155,7 @@ tasks.named('compileCompatibilityTestJava') {
         systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         shouldRunAfter tasks.named('test')
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentDeleteCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentUpdateCompatibilityTest'
     }
 }
 
@@ -163,6 +176,25 @@ tasks.named('compileCompatibilityTestJava') {
 }
 
 tasks.named('commentDeleteCompatibilitySeoulTest') { shouldRunAfter tasks.named('commentDeleteCompatibilityTest') }
+
+['commentUpdateCompatibilityTest': 'UTC', 'commentUpdateCompatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = "Checks only F11 comment update after the owned content-UPDATE grant in ${zone}."
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        filter {
+            includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentUpdateCompatibilityTest'
+            failOnNoMatchingTests = true
+        }
+        shouldRunAfter tasks.named('commentDeleteCompatibilitySeoulTest')
+    }
+}
+
+tasks.named('commentUpdateCompatibilitySeoulTest') { shouldRunAfter tasks.named('commentUpdateCompatibilityTest') }
+
 
 tasks.named('compatibilitySeoulTest') { shouldRunAfter tasks.named('compatibilityTest') }
 
