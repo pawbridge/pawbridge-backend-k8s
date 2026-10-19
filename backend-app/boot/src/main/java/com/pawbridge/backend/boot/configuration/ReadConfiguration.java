@@ -1,6 +1,11 @@
 package com.pawbridge.backend.boot.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.backend.community.internal.comment.application.CommentListReader;
+import com.pawbridge.backend.community.internal.comment.application.ListComments;
+import com.pawbridge.backend.community.internal.comment.infrastructure.JdbcCommentReader;
+import com.pawbridge.backend.community.internal.comment.web.CommentReadController;
+import com.pawbridge.backend.community.internal.comment.web.CommentReadExceptionHandler;
 import com.pawbridge.backend.community.internal.post.application.ListPosts;
 import com.pawbridge.backend.community.internal.post.application.PostListReader;
 import com.pawbridge.backend.community.internal.post.application.PostReader;
@@ -103,6 +108,21 @@ public class ReadConfiguration {
 
     @Bean
     PostReadExceptionHandler postReadExceptionHandler() { return new PostReadExceptionHandler(); }
+
+    @Bean
+    JdbcCommentReader commentReader(@Qualifier("readJdbc") JdbcTemplate readJdbc,
+                                   @Qualifier("readOnlyTransaction") TransactionTemplate readOnlyTransaction) {
+        return new JdbcCommentReader(readJdbc, readOnlyTransaction);
+    }
+
+    @Bean
+    ListComments listComments(CommentListReader comments, UserNicknameQuery users) { return new ListComments(comments, users); }
+
+    @Bean
+    CommentReadController commentReadController(ListComments listComments) { return new CommentReadController(listComments); }
+
+    @Bean
+    CommentReadExceptionHandler commentReadExceptionHandler() { return new CommentReadExceptionHandler(); }
 
     @Bean(destroyMethod = "close")
     JdbcPostSearchReader postSearchReader(@Qualifier("searchJdbc") JdbcTemplate searchJdbc,
