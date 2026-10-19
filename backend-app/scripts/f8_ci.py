@@ -202,7 +202,7 @@ def smoke():
                 f3.sql('GRANT SELECT(content) ON pawbridge_community.comments TO pawbridge_f2_reader')
             if by_id(comments(9800001)) != by_id(rows):
                 raise AssertionError('Comment SQL did not recover after restoring SELECT')
-            # Wrong methods, neighboring paths and legacy writes remain denied anonymously.
+            # F9's newly supported POST requires authentication; other writes/near paths stay denied.
             for method, path in [('POST', '/api/v1/comments/posts/read/9800001'),
                     ('PUT', '/api/v1/comments/posts/read/9800001'),
                     ('DELETE', '/api/v1/comments/posts/read/9800001'),
@@ -214,7 +214,8 @@ def smoke():
                     ('PUT', '/api/v1/comments/9800011'),
                     ('DELETE', '/api/v1/comments/9800011')]:
                 before = snapshot()
-                f3.expect(base, path, 403, method)
+                expected = 401 if (method, path) == ('POST', '/api/v1/comments/posts/9800001') else 403
+                f3.expect(base, path, expected, method)
                 if snapshot() != before:
                     raise AssertionError('Denied comment route changed DB or contacted S3')
                 result['denied_route_checks'] += 1

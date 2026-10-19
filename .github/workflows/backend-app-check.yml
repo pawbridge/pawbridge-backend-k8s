@@ -154,6 +154,11 @@ jobs:
             exit 1
           fi
           grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f8-helper-refusal.txt
+          if env -u GITHUB_ACTIONS python3 scripts/f9_ci.py prepare > build/ci/f9-helper-refusal.txt 2>&1; then
+            printf 'F9 helper accepted a non-CI invocation\n' >&2
+            exit 1
+          fi
+          grep -F 'restricted to this repository on GitHub-hosted Linux' build/ci/f9-helper-refusal.txt
           if env -u GITHUB_ACTIONS python3 scripts/f3_s3_stub.py > build/ci/f3-stub-refusal.txt 2>&1; then
             printf 'F3 stub accepted a non-CI invocation\n' >&2
             exit 1
@@ -190,6 +195,12 @@ jobs:
       - name: Extend the owned fixture with only the comment table and reader columns
         run: python3 scripts/f8_ci.py prepare
 
+      - name: Verify F9 fixture, oracle and workflow guards without starting resources
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f9_ci_guards.py
+
+      - name: Extend the owned fixture with minimal F9 comment INSERT permissions
+        run: python3 scripts/f9_ci.py prepare
+
       - name: Compare legacy reads/writes, issuer, atomicity and resource boundaries in UTC and Seoul
         run: |
           set -euo pipefail
@@ -201,7 +212,8 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[2345678]_fixture|f[2345678]LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt; then
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-cloud|feign)[^/]*\.jar$|f[23456789]_fixture|f[23456789]LegacyOracle|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/(communityservice|userservice)/' build/ci/boot-jar-contents.txt \
+            | grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\.jar$'; then
             printf 'Test/legacy/integration code must not enter the application JAR\n' >&2
             exit 1
           fi
@@ -273,6 +285,26 @@ jobs:
           assert result['comment_get_checks'] >= 9
           assert result['denied_route_checks'] == 10
           assert result['comment_get_database_changes'] == result['comment_get_s3_requests'] == 0
+          assert result['shutdown_pools'] == 2
+          assert result['remaining_application_connections'] == 0
+          PY
+
+      - name: Verify packaged authenticated comment POST, F8 GET and isolated rollback recovery
+        run: |
+          set -euo pipefail
+          python3 scripts/f9_ci.py smoke
+          test -s build/ci/f9-oracle-sha256.txt
+          test -s build/ci/f9-helper-refusal.txt
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f9-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['comments_created'] >= 15
+          assert result['rejected_post_checks'] >= 28
+          assert result['comment_post_checks'] == result['comments_created'] + result['rejected_post_checks']
+          assert result['comment_get_checks'] >= result['comments_created']
+          assert result['unrelated_database_changes'] == result['s3_requests'] == 0
           assert result['shutdown_pools'] == 2
           assert result['remaining_application_connections'] == 0
           PY

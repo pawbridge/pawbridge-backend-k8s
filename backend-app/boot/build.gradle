@@ -11,6 +11,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f6LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f7LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f8LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f9LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -24,6 +25,7 @@ configurations {
 dependencies {
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
     runtimeOnly 'org.postgresql:postgresql'
@@ -116,8 +118,19 @@ tasks.register('prepareF8LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f8-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF9LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF8LegacyOracle')
+    inputs.files(rootProject.file('scripts/prepare_f9_legacy_oracle.py'), rootProject.file('scripts/prepare_f8_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f9LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f9-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f9_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f9LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f9-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
