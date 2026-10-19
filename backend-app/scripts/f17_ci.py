@@ -362,7 +362,7 @@ def smoke():
                 check(token='expired', status=401, message='유효하지 않거나 만료된 토큰입니다.', layer='auth')
                 check(token='definitely-not-a-jwt', status=401, message='유효하지 않거나 만료된 토큰입니다.', layer='auth')
                 check('not-a-number', status=400, message=INVALID)
-                check(status=403, message='접근할 수 없습니다.', layer='route', path='/api/v1/notes')
+                check(status=403, message='접근할 수 없습니다.', layer='route', path=PATH + str(OTHER) + '/extra')
                 check(status=403, message='접근할 수 없습니다.', layer='route', method='POST', path=PATH + str(OTHER))
                 require_fixture()
             finally:
