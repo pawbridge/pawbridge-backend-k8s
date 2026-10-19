@@ -97,6 +97,11 @@ class PawBridgeApplicationTest {
                     assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.community.internal.note.application.ReadNoteNotifications.class))).isFalse();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteNotificationsController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteNotificationsExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.PrivateNoteReader.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.ReadPrivateNote.class)).hasSize(1);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(context.getBean(com.pawbridge.backend.community.internal.note.application.ReadPrivateNote.class))).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.PrivateNoteReadController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.PrivateNoteReadExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler.class)).hasSize(1);

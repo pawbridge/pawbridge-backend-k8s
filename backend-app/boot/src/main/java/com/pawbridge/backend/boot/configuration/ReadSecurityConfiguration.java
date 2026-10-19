@@ -6,6 +6,8 @@ import com.pawbridge.backend.boot.security.PostBearerAuthenticationFilter;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.web.util.matcher.AndRequestMatcher;
+import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -34,8 +36,11 @@ public class ReadSecurityConfiguration {
         var noteBlockStatus = new AntPathRequestMatcher("/api/v1/notes/blocks/status", "GET");
         var noteBlockList = new AntPathRequestMatcher("/api/v1/notes/blocks", "GET");
         var noteNotifications = new AntPathRequestMatcher("/api/v1/notes/notifications", "GET");
+        var privateNote = new AndRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/notes/{id}", "GET"),
+                new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/notes/stream", "GET")));
         var totalUserCount = new AntPathRequestMatcher("/api/v1/admin/users/stats/total-users", "GET");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications);
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, noteBlockList, noteNotifications, privateNote);
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
