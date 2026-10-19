@@ -247,7 +247,7 @@ class CommentCreateHttpTest {
             "HEAD /api/v1/comments/posts/42", "OPTIONS /api/v1/comments/posts/42", "PATCH /api/v1/comments/posts/42",
             "POST /api/v1/comments/posts", "POST /api/v1/comments/posts/", "POST /api/v1/comments/posts/42/",
             "POST /api/v1/comments/posts/42/extra", "POST /api/v1/comments/posts/read/42", "POST /api/comments/posts/42",
-            "POST /api/v1/admin/comments/posts/42", "PUT /api/v1/comments/12"})
+            "POST /api/v1/admin/comments/posts/42"})
     void given__unexposed_method_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_business_calls(String request) throws Exception {
         String[] parts = request.split(" ", 2);
         mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])

@@ -76,6 +76,13 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.application.CommentDeletion.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.web.CommentDeleteController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.web.CommentDeleteExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.application.UpdateComment.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.web.CommentUpdateController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.comment.web.CommentUpdateExceptionHandler.class)).hasSize(1);
+                    assertThat(context.getBean(com.pawbridge.backend.community.internal.comment.application.CommentReader.class))
+                            .isSameAs(context.getBean(com.pawbridge.backend.community.internal.comment.application.CommentListReader.class));
+                    assertThat(context.getBean(com.pawbridge.backend.community.internal.comment.application.CommentModification.class))
+                            .isSameAs(context.getBean(com.pawbridge.backend.community.internal.comment.application.CommentWriter.class));
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.ListPosts.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.SearchPosts.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostSearchReader.class)).hasSize(1);

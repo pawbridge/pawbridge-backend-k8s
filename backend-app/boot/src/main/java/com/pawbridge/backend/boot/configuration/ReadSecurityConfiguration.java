@@ -26,7 +26,8 @@ public class ReadSecurityConfiguration {
         var postUpdate = new AntPathRequestMatcher("/api/v1/posts/*", "PUT");
         var commentCreation = new AntPathRequestMatcher("/api/v1/comments/posts/{postId}", "POST");
         var commentDeletion = new AntPathRequestMatcher("/api/v1/comments/{commentId}", "DELETE");
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion);
+        var commentUpdate = new AntPathRequestMatcher("/api/v1/comments/{commentId}", "PUT");
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate);
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
