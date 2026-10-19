@@ -13,6 +13,7 @@ import com.pawbridge.animalservice.shelter.ShelterDirectoryStore;
 import com.pawbridge.animalservice.travel.PetTravelCatalog;
 import com.pawbridge.animalservice.travel.TourApiClient;
 import com.pawbridge.animalservice.lostsearch.gallery.LostGalleryFeed;
+import com.pawbridge.animalservice.lostsearch.gallery.LostGallerySnapshots;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.sql.Connection;
@@ -240,6 +241,83 @@ class AnimalPostgresqlCompatibilityTest {
         assertThatThrownBy(()->transaction.executeWithoutResult(status -> feed.streamEntries(entry->{throw new IllegalStateException("consumer stopped");})))
                 .hasMessage("consumer stopped");
         assertThat(source.getHikariPoolMXBean().getActiveConnections()).isZero();
+    }
+
+    @Test
+    void current_archived_photo_remains_available_during_recheck_and_retry() {
+        seedAnimal();
+        jdbc.update("INSERT INTO apms_photo_archive(animal_id,slot,desertion_no,source_url,state,archived_source_url,stored_sha256,object_key,stored_bytes,content_type) VALUES (1,1,'test-desertion','http://example.test/photo.jpg','READY','http://example.test/photo.jpg',?, ?,1,'image/webp')", "a".repeat(64),"apms/photos/"+"a".repeat(64)+".webp");
+        LostGalleryFeed feed = new LostGalleryFeed(jdbc,new ObjectMapper(),null);
+        TransactionTemplate transaction = new TransactionTemplate(manager);transaction.setReadOnly(true);
+        transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        for (String state : java.util.List.of("READY", "PROCESSING", "RETRY")) {
+            jdbc.update("UPDATE apms_photo_archive SET state=?,error_code=?",state,
+                    state.equals("RETRY") ? "SOURCE_HTTP_404" : null);
+            var entries = new java.util.ArrayList<LostGallerySnapshots.Entry>();
+            transaction.executeWithoutResult(status -> feed.streamEntries(entries::add));
+            assertThat(entries).as(state).hasSize(1);
+            assertThat(entries.get(0).record()).containsEntry("id",1L)
+                    .containsEntry("source_sha256","a".repeat(64));
+        }
+    }
+
+    @Test
+    void retry_without_an_archive_or_with_a_changed_source_is_not_a_gallery_photo() {
+        seedAnimal();
+        jdbc.update("INSERT INTO apms_photo_archive(animal_id,slot,desertion_no,source_url,state) VALUES (1,1,'test-desertion','http://example.test/photo.jpg','RETRY')");
+        LostGalleryFeed feed = new LostGalleryFeed(jdbc,new ObjectMapper(),null);
+        TransactionTemplate transaction = new TransactionTemplate(manager);transaction.setReadOnly(true);
+        AtomicInteger count = new AtomicInteger();
+        transaction.executeWithoutResult(status -> feed.streamEntries(entry -> count.incrementAndGet()));
+        assertThat(count.get()).isZero();
+        jdbc.update("UPDATE apms_photo_archive SET archived_source_url=source_url,stored_sha256=?,object_key=?,stored_bytes=1,content_type='image/webp'", "a".repeat(64),"apms/photos/"+"a".repeat(64)+".webp");
+        jdbc.update("UPDATE animals SET image_url='http://example.test/changed.jpg'");
+        transaction.executeWithoutResult(status -> feed.streamEntries(entry -> count.incrementAndGet()));
+        assertThat(count.get()).isZero();
+        jdbc.update("UPDATE animals SET image_url='http://example.test/photo.jpg'");
+        jdbc.update("UPDATE apms_photo_archive SET source_url='http://example.test/changed.jpg'");
+        transaction.executeWithoutResult(status -> feed.streamEntries(entry -> count.incrementAndGet()));
+        assertThat(count.get()).isZero();
+        jdbc.update("UPDATE apms_photo_archive SET source_url=archived_source_url,state='ABSENT'");
+        transaction.executeWithoutResult(status -> feed.streamEntries(entry -> count.incrementAndGet()));
+        assertThat(count.get()).isZero();
+        jdbc.update("UPDATE apms_photo_archive SET state='RETRY',stored_sha256='invalid'");
+        assertThatThrownBy(() -> transaction.executeWithoutResult(status -> feed.streamEntries(entry -> {})))
+                .hasMessage("Invalid archived photo metadata");
+        assertThat(source.getHikariPoolMXBean().getActiveConnections()).isZero();
+    }
+
+    @Test
+    void storage_integrity_failure_stays_quarantined_until_a_successful_archive_verification() {
+        seedAnimal();
+        PhotoArchiveStore store = new PhotoArchiveStore(jdbc,manager);
+        store.discover(50);
+        var original=store.claim(300).orElseThrow();
+        byte[] bytes={1,2,3};
+        var photo=new com.pawbridge.animalservice.photo.ArchivedPhoto(bytes,
+                com.pawbridge.animalservice.photo.ArchivedPhoto.sha256(bytes),
+                com.pawbridge.animalservice.photo.ArchivedPhoto.sha256(bytes),"image/png",1,1,"test-v1");
+        assertThat(store.complete(original,photo,60)).isTrue();
+        LostGalleryFeed feed=new LostGalleryFeed(jdbc,new ObjectMapper(),null);
+        TransactionTemplate tx=new TransactionTemplate(manager);tx.setReadOnly(true);
+        for(String code:java.util.List.of("STORAGE_INTEGRITY","STORAGE_NOT_VISIBLE")) {
+            jdbc.update("UPDATE apms_photo_archive SET next_attempt_at=CURRENT_TIMESTAMP");
+            var claim=store.claim(300).orElseThrow();assertThat(store.retry(claim,code,1)).isTrue();
+            jdbc.update("UPDATE apms_photo_archive SET next_attempt_at=CURRENT_TIMESTAMP");
+            var retry=store.claim(300).orElseThrow();
+            AtomicInteger count=new AtomicInteger();
+            tx.executeWithoutResult(status->feed.streamEntries(entry->count.incrementAndGet()));
+            assertThat(count.get()).isZero();
+            assertThat(store.retry(retry,"SOURCE_HTTP_404",1)).isTrue();
+            assertThat(jdbc.queryForObject("SELECT error_code FROM apms_photo_archive",String.class)).isEqualTo(code);
+            jdbc.update("UPDATE animals SET image_url='http://example.test/PHOTO.jpg'");for(int i=0;i<3;i++)store.discover(50);
+            jdbc.update("UPDATE animals SET image_url='http://example.test/photo.jpg'");for(int i=0;i<3;i++)store.discover(50);
+            assertThat(jdbc.queryForObject("SELECT error_code FROM apms_photo_archive",String.class)).isEqualTo(code);
+            var verified=store.claim(300).orElseThrow();assertThat(store.complete(verified,photo,60)).isTrue();
+            assertThat(jdbc.queryForObject("SELECT error_code FROM apms_photo_archive",String.class)).isNull();
+            tx.executeWithoutResult(status->feed.streamEntries(entry->count.incrementAndGet()));
+            assertThat(count.get()).isOne();
+        }
     }
 
     @Test

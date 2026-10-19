@@ -60,6 +60,21 @@ class PhotoArchiveMysqlTest {
     private void rescan(){for(int i=0;i<3;i++)store.discover(50);}
     private String state(){return jdbc.queryForObject("SELECT state FROM apms_photo_archive WHERE animal_id=1 AND slot=1",String.class);}
 
+    @Test void gallery_compares_case_sensitive_source_paths_on_case_insensitive_mysql_columns() {
+        animal(1,"http://openapi.animal.go.kr/Photo.jpg",null);store.discover(50);
+        assertThat(store.complete(store.claim(300).orElseThrow(),photo,60)).isTrue();
+        var feed=new com.pawbridge.animalservice.lostsearch.gallery.LostGalleryFeed(jdbc,new com.fasterxml.jackson.databind.ObjectMapper(),null);
+        var count=new java.util.concurrent.atomic.AtomicInteger();
+        feed.streamEntries(entry->count.incrementAndGet());assertThat(count.get()).isOne();
+        jdbc.update("UPDATE animals SET image_url='http://openapi.animal.go.kr/photo.jpg'");
+        count.set(0);feed.streamEntries(entry->count.incrementAndGet());assertThat(count.get()).isZero();
+        assertThat(jdbc.queryForObject("SELECT source_url=LOWER(source_url) FROM apms_photo_archive",Boolean.class)).isTrue();
+        rescan();var claim=store.claim(300).orElseThrow();
+        feed.streamEntries(entry->count.incrementAndGet());assertThat(count.get()).isZero();
+        assertThat(store.retry(claim,"SOURCE_HTTP_404",60)).isTrue();
+        feed.streamEntries(entry->count.incrementAndGet());assertThat(count.get()).isZero();
+    }
+
     @Test void discovery_tracks_two_slots_and_notice_reuse_without_manual_animals() {
         animal(1,"http://openapi.animal.go.kr/a","http://openapi.animal.go.kr/b");
         animal(2,"http://openapi.animal.go.kr/c",null);
