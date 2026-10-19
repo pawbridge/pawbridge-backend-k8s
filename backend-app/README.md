@@ -1,6 +1,14 @@
 # PawBridge 업무 통합 실행기
 
-Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정, F14의 본인 찜 여부 조회, F15의 공개 홈 영상 조회, F16의 공개 오늘 방문자 합계 조회, F17의 인증된 쪽지 수신자 확인 조회, F18의 표시 작성자 중 본인 차단 여부 조회, F19의 관리자 전체 회원 수 조회, F20의 본인 차단 목록 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2의 게시글 단건 GET·작성자 닉네임 조회, F3의 인증된 일반 게시글 작성, F4의 본인 게시글 삭제, F5의 본인 게시글 수정, F6의 공개 게시글 목록, F7의 공개 게시글 검색, F8의 공개 댓글 목록, F9의 인증된 댓글 작성, F10의 본인 댓글 삭제, F11의 본인 댓글 수정, F12의 인증된 본인 정보 조회, F13의 본인 닉네임 수정, F14의 본인 찜 여부 조회, F15의 공개 홈 영상 조회, F16의 공개 오늘 방문자 합계 조회, F17의 인증된 쪽지 수신자 확인 조회, F18의 표시 작성자 중 본인 차단 여부 조회, F19의 관리자 전체 회원 수 조회, F20의 본인 차단 목록 조회, F21의 본인 쪽지 알림 조회를 편입하는 후보이며 운영 Gateway를 이 실행기로 연결하거나 기존 서비스를 종료하지 않는다.
+
+## F21 본인 쪽지 알림 조회
+
+정확한 `GET /api/v1/notes/notifications?cursor=...`만 추가한다. 현재 회원 active → Clock 시각1회 → 받은함21행 → 표시20행의 null 제외·첫 등장 순서 sender 일괄 조회 → 다음 cursor → 전체 unreadCount 순서를 유지한다. 같은 요청 시각을 쓰지만 여러 조회의 원자 snapshot을 보장하지 않으며 단계별로 기존 RO tx/연결을 반환한다. User 단건·batch와 Clock·두 pool을 재사용한다.
+
+정렬은 mailbox.created_at/UUID 내림차순이고 응답 createdAt은 note.created_at이다. 만료는 note.expires_at > now이며, 본인 INBOX 커서 anchor에는 만료 조건을 붙이지 않는다. 다른 회원·SENT·없는 cursor는 빈 content와 전체 unreadCount를 반환한다. 결과3필드·알림7필드와 nullable actorId·탈퇴 표시·원문 공백 nickname·Instant 미세초·read·href를 보존하고 본문은 읽거나 반환하지 않는다. 회원/저장소/일반503과 scoped no-store를 구분하며 발송·읽음·SSE·예약·원본 실행기 종료는 추가하지 않는다.
+
+원본 annotated optional UUID의 실제 MVC12 관측을 먼저 수행해 기대값을 고정했다. missing/empty/space/empty-repeated는 null로200, 축약 UUID도 정규화되어200, 반복 값은 첫 값을 사용하고 CSV·잘못된 값·범위 초과 component는 서비스 호출 전400이다. 관측용 임시 클래스는 게시하지 않는다.
 
 ## 업무 경계와 호출
 
@@ -8,7 +16,7 @@ Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2�
 |---|---|---|
 | boot | MVC·보안·DB·업무 구현 조립과 실행 JAR | user, community |
 | user | 공개 닉네임/연락 회원 조회 계약·내부 본인 정보 조회·본인 닉네임 수정·찜 여부 조회와 JDBC·HTTP 구현 | 없음 |
-| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·공개 홈 영상·오늘 방문자 합계·쪽지 수신자·표시 작성자 차단 상태 정책·REST 응답 | user |
+| community | 게시글 단건·목록·검색·작성·수정·삭제·댓글 목록·작성·수정·삭제·미디어·검색 projection·공개 홈 영상·오늘 방문자 합계·쪽지 수신자·표시 작성자 차단 상태·차단 목록·쪽지 알림 정책·REST 응답 | user |
 
 ```text
 boot -> community.internal.post.web -> community.internal.post.application
@@ -273,4 +281,14 @@ TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classp
 
 Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·oracle hash·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
 
-전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20 계획과 모듈형 모놀리스 전환 노트를 따른다.
+F21은 F20 전체 stage 뒤 고정d436e3c의 V6 notes/mailboxes 두 표와 V7 새 두 표용3 index·V8 reply index만 격리 fixture에 추가한다. 전체 migration3개와 원문 fragment6개의 hash·기존 F17의 동일 hash key를 검증하고, source/owner/F20 receipt/출력 receipt 충돌·새 표 부재를 모두 확인한 뒤 한 TX로 추가한다. 기존 members/blocks/F20 exact3열 ACL과 소유 evidence를 재사용하며 requests·새 schema/marker/writer/sequence는 없다. 원본 notes9열/mailboxes6열·PK/FK/CHECK·각5 index·소유 postgres를 검사하고 reader는 notes4/mailboxes5열만 허용한다. 원본 n.*는 owned-admin reference에서 비교하며 candidate에게 body SELECT를 주지 않는다.
+
+F21의 실제 PG·JAR는 hosted CI에서 확인한다. PG8메서드/UTC13·Seoul TSTZ1과 JAR9요청 분기를 검산해 예상 exact 계약으로 고정했다. 원본/후보 MVC2메서드14는 로컬에서 통과했다. 이 예상 수를 통과 수로 기록하지 않으며 실제 XML의 정확 FQN/건수·실패/오류/skip0과 JAR 관측 결과가 있어야 통과한다. 향후 값이 None/미정이면 results/smoke gate가 거부한다. 원본 binder는 실제12입력 관측 이후 기대값을 채웠다. noteNotificationsCompatibilityTest는 정확 PG/MVC 두 FQN, noteNotificationsCompatibilitySeoulTest는 PostgresqlNoteNotificationsCompatibilityTest의 지정 TSTZ 한 메서드만 실행한다. guard의 합성 건수와 자원 모의를 실제 PG/JAR/JVM 성공 근거로 표현하지 않는다.
+
+Seoul JAR 초안은 소유6 member/5 User/26 note·26 mailbox/pending1만 seed하여 20+3/cursor·foreign cursor 빈 목록·nullable actor/탈퇴·원문 nickname/µs Instant·read/unread, expiry 권한503/복원·User nickname 회원503/복원·missing401·POST deny를 관찰한다. 예상9요청은 GET8(성공5/거부3)+POST1이며 아직 실행 건수가 아니다. batch/unread의 정확한 실패 phase는 PG hook 근거이며 JAR 선행 caller/list 실패를 그 근거로 부르지 않는다. 마지막 PG가 실제 발급기로 F21_CALLER9975001만600초 발급하고 기존 키·0600을 보존한다. 매 인증 요청은 전체 snapshot 뒤 Authorization 설정 직전에 사용키 TTL60초만 재검사하며 요청마다 재발급하지 않고 무토큰 reload0이다. 회수 중에는 ACL 비의존 marker identity+exact F20/F21 receipt로 소유를 확인한 뒤에만 GRANT를 복원하고 full fixture는 복원 뒤 확인한다. 기존14+새2=정확16표/S3의 요청·기동 전후 불변, 자기 성공 INSERT 키만 mailbox→note→member/pending→User FK 순서 정리, private body/회원/인증값 비노출·두 pool 정상 종료/연결0을 확인한다. 기존 stage와 always cleanup은 보존하고 원본 lifecycle/예약/SSE/전용 전역 filter는 등록하지 않는다. 실제 PG/JAR 및 운영 검증 성공은 이 설명만으로 선언하지 않는다.
+
+`scripts/f21_ci.py`도 기존 helper와 같은 GitHub-hosted Linux·정확한 target·run owner 제한을 사용한다. F21 DDL은 원본 Git 객체에서 최소 fragment를 조립하며 새 fixture SQL 파일/앱 resource를 만들지 않는다. 고정 catalog SELECT 실패만 F21 stage와 최대512자 첫 ERROR/FATAL을 기록하고 PASSWORD/SECRET/TOKEN 환경값을 지운다. SQL/DETAIL/command/stdout 전체를 기록하지 않으며 업무 SQL 실패는 원문 없이 중단한다. workflow는 고정d436e3c commit 객체를 명시적으로 확인하고 부재 시 일시적인 read token 환경으로 해당 객체만 fetch한다. sparse checkout은 backend-app과 workflow만 유지하고 새 generated oracle/compatibility 코드는 production JAR에서 거부한다. 기존 cleanup/artifact 보존은 그대로다.
+
+`prepare_f21_legacy_oracle.py`의 원본19 full hash·공유 raw12/F18 adapted1과 선택11 service 메서드·annotated cursor controller·advice4/logger/LF를 guard로 보호한다. 잘못된 경로/늦은 source·shared·unit 변경/출력·receipt 충돌/중복 FQN은 쓰기 전에 거부하고, 성공 경로는 고유3 wrapper만 생성하며 공유13개를 보존한다. 이 source/모의 추출 guard도 실제 원본 whole app·SSE·Feign·PG를 실행했다는 뜻이 아니다. 로컬 full/minimal checkout에서 각34개 guard가 통과했고 Python3개 AST·workflow77개 실행블록 문법·nested JAR의 원본/시험/ORM·Feign 제외를 확인했다. 기존 Hibernate Validator는 보존한다.
+
+전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21 계획과 모듈형 모놀리스 전환 노트를 따른다.
