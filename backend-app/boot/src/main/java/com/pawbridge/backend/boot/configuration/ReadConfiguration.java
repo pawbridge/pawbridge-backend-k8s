@@ -4,10 +4,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.community.internal.post.application.ListPosts;
 import com.pawbridge.backend.community.internal.post.application.PostListReader;
 import com.pawbridge.backend.community.internal.post.application.PostReader;
+import com.pawbridge.backend.community.internal.post.application.PostSearchReader;
 import com.pawbridge.backend.community.internal.post.application.ReadPost;
+import com.pawbridge.backend.community.internal.post.application.SearchPosts;
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostReader;
+import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchReader;
 import com.pawbridge.backend.community.internal.post.web.PostReadController;
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler;
+import com.pawbridge.backend.community.internal.post.web.PostSearchController;
+import com.pawbridge.backend.community.internal.post.web.PostSearchExceptionHandler;
 import com.pawbridge.backend.user.api.UserNicknameQuery;
 import com.pawbridge.backend.user.internal.nickname.infrastructure.JdbcUserNicknameQuery;
 import com.zaxxer.hikari.HikariConfig;
@@ -63,6 +68,21 @@ public class ReadConfiguration {
     }
 
     @Bean
+    JdbcTemplate searchJdbc(@Qualifier("dataSource") DataSource dataSource) {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.setQueryTimeout(5);
+        return jdbc;
+    }
+
+    @Bean
+    TransactionTemplate searchReadOnlyTransaction(@Qualifier("transactionManager") JdbcTransactionManager manager) {
+        TransactionTemplate transaction = new TransactionTemplate(manager);
+        transaction.setReadOnly(true);
+        transaction.setTimeout(5);
+        return transaction;
+    }
+
+    @Bean
     UserNicknameQuery userNicknameQuery(@Qualifier("readJdbc") JdbcTemplate readJdbc, @Qualifier("readOnlyTransaction") TransactionTemplate readOnlyTransaction) {
         return new JdbcUserNicknameQuery(readJdbc, readOnlyTransaction);
     }
@@ -83,4 +103,20 @@ public class ReadConfiguration {
 
     @Bean
     PostReadExceptionHandler postReadExceptionHandler() { return new PostReadExceptionHandler(); }
+
+    @Bean(destroyMethod = "close")
+    JdbcPostSearchReader postSearchReader(@Qualifier("searchJdbc") JdbcTemplate searchJdbc,
+                                        @Qualifier("searchReadOnlyTransaction") TransactionTemplate searchReadOnlyTransaction,
+                                        ObjectMapper mapper) {
+        return new JdbcPostSearchReader(searchJdbc, searchReadOnlyTransaction, mapper);
+    }
+
+    @Bean
+    SearchPosts searchPosts(PostSearchReader posts, UserNicknameQuery users) { return new SearchPosts(posts, users); }
+
+    @Bean
+    PostSearchController postSearchController(SearchPosts searchPosts) { return new PostSearchController(searchPosts); }
+
+    @Bean
+    PostSearchExceptionHandler postSearchExceptionHandler() { return new PostSearchExceptionHandler(); }
 }

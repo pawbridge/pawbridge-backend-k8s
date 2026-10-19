@@ -66,6 +66,10 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.api.UserNicknameQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.ListPosts.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.SearchPosts.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostSearchReader.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostSearchController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostSearchExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostReader.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostListReader.class)).hasSize(1);
                     assertThat(context.getBean(com.pawbridge.backend.community.internal.post.application.PostReader.class))
@@ -83,6 +87,22 @@ class PawBridgeApplicationTest {
                     assertThat(pools.get("dataSource").getMaximumPoolSize()).isEqualTo(2);
                     assertThat(pools.get("writeDataSource").isReadOnly()).isFalse();
                     assertThat(pools.get("writeDataSource").getMaximumPoolSize()).isEqualTo(1);
+                    var readJdbc = context.getBean("readJdbc", org.springframework.jdbc.core.JdbcTemplate.class);
+                    var searchJdbc = context.getBean("searchJdbc", org.springframework.jdbc.core.JdbcTemplate.class);
+                    assertThat(readJdbc.getQueryTimeout()).isEqualTo(3);
+                    assertThat(searchJdbc.getQueryTimeout()).isEqualTo(5);
+                    assertThat(searchJdbc.getDataSource()).isSameAs(pools.get("dataSource"));
+                    assertThat(readJdbc.getDataSource()).isSameAs(searchJdbc.getDataSource());
+                    var manager = context.getBean("transactionManager", org.springframework.jdbc.support.JdbcTransactionManager.class);
+                    assertThat(manager.isEnforceReadOnly()).isTrue();
+                    var readTransaction = context.getBean("readOnlyTransaction", org.springframework.transaction.support.TransactionTemplate.class);
+                    var searchTransaction = context.getBean("searchReadOnlyTransaction", org.springframework.transaction.support.TransactionTemplate.class);
+                    assertThat(readTransaction.getTimeout()).isEqualTo(3);
+                    assertThat(searchTransaction.getTimeout()).isEqualTo(5);
+                    assertThat(readTransaction.isReadOnly()).isTrue();
+                    assertThat(searchTransaction.isReadOnly()).isTrue();
+                    assertThat(searchTransaction.getTransactionManager()).isSameAs(manager);
+                    assertThat(readTransaction.getTransactionManager()).isSameAs(manager);
                     pools.values().forEach(pool -> {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();

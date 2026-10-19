@@ -115,7 +115,7 @@ class PostListHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GET /api/v1/posts", "GET /api/v1/posts/search", "GET /api/posts/read",
+    @ValueSource(strings = {"GET /api/v1/posts", "GET /api/v1/posts/search/extra", "GET /api/posts/read",
             "GET /api/v1/admin/posts/read", "GET /api/v1/posts/read/42/extra",
             "HEAD /api/v1/posts/read", "OPTIONS /api/v1/posts/read", "POST /api/v1/posts/read", "PATCH /api/v1/posts/read"})
     void given__unexposed_method_or_path__when__requesting__then__deny_without_list_or_single_lookup(String request) throws Exception {
