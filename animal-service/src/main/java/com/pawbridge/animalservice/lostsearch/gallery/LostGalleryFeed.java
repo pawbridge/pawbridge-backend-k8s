@@ -21,7 +21,10 @@ public class LostGalleryFeed {
             SELECT a.id, a.species, a.status, a.happen_date, a.happen_place, a.color, a.special_mark, a.description,
                    p.object_key, p.stored_sha256, p.stored_bytes, p.content_type
             FROM apms_photo_archive p JOIN animals a ON a.id = p.animal_id
-            WHERE p.state = 'READY' AND p.slot = 1
+            WHERE p.slot = 1
+              AND (p.state = 'READY' OR (p.state IN ('RETRY', 'PROCESSING')
+                   AND p.object_key IS NOT NULL AND p.stored_sha256 IS NOT NULL
+                   AND p.stored_bytes IS NOT NULL AND p.content_type IS NOT NULL))
               AND p.source_url = p.archived_source_url AND p.source_url = a.image_url
               AND a.species IN ('DOG', 'CAT')
             ORDER BY a.id LIMIT 100001
