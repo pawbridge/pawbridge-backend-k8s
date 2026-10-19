@@ -320,7 +320,8 @@ def smoke():
                 check()
                 check('?page=invalid', status=401, token=None, message='인증 토큰이 필요합니다.', layer='auth', kind='authentication')
                 check(status=403, message='접근할 수 없습니다.', layer='route', kind='stream_denied', suffix='/stream/extra')
-                check(status=403, message='접근할 수 없습니다.', layer='route', kind='denied_write', method='POST')
+                # Exact POST is now assigned to note sending; deeper write routes remain denied.
+                check(status=403, message='접근할 수 없습니다.', layer='route', kind='denied_write', method='POST', suffix='/unexposed/send')
                 check(kind='detail_get', suffix='/' + INBOX[-1])
                 require_fixture()
             finally:
