@@ -26,7 +26,7 @@ F17은 `GET /api/v1/notes/recipients/{member}`만 추가한다. 서명 JWT의 Lo
 
 F18은 `GET /api/v1/notes/blocks/status?memberIds=...`만 추가한다. 원래 입력 목록의 1~100개 양수 검증→현재 회원 active→중복 제거→본인이 차단한 outgoing ID 오름차순 조회를 보존한다. F17 User API·세 표·기존 reader 권한을 재사용하며 target User 조회·새 DDL/ACL·writer·page·추가 필드·외곽 TX를 만들지 않는다. 성공 data는 `memberIds` 한 필드이고 reverse-only/미일치는 제외한다. 누락400은 공통 envelope, 변환/서비스 오류는 message-only이며 no-store와 쿠키 없음은 해당 GET에 한정한다. 빈 query 값의 service400과 CSV+반복 혼합의 변환400은 실제 원본 MVC 관측에 맞춘다. F17 수신자 조회와 미편입 notes/chats·쓰기 경로 기본 거부를 유지하며 운영 라우팅은 변경하지 않는다.
 
-F18의 새 RO TX에서 연결 생성·시스템 완료·deadline 실패는 구체적인 CannotCreateTransactionException/TransactionSystemException/TransactionTimedOutException만 저장소503으로 분류한다. User typed 실패는 회원503, transaction usage와 그 외 Runtime은 일반 쪽지503을 유지한다. 원본 autocommit의 DAO 연결 실패가 후보의 TX 예외로 감싸지는 기술적 차이에 대한 명시적 적응이다.
+F17과 F18의 새 RO TX에서 연결 생성·시스템 완료·deadline 실패는 구체적인 CannotCreateTransactionException/TransactionSystemException/TransactionTimedOutException만 저장소503으로 분류한다. User typed 실패는 회원503, transaction usage와 그 외 Runtime은 일반 쪽지503을 유지한다. 원본 autocommit의 DAO 연결 실패가 후보의 TX 예외로 감싸지는 기술적 차이에 대한 명시적 적응이다.
 
 ## DB·실행 설정
 
