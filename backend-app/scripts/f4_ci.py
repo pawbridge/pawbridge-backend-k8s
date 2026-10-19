@@ -3,6 +3,7 @@
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import uuid
@@ -38,15 +39,100 @@ def literal(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def smoke():
-    owner = require_fixture()
-    jar = ROOT / 'boot/build/libs/pawbridge-backend-app.jar'
-    if not jar.is_file():
-        raise SystemExit('Packaged JAR missing')
-    tokens = json.loads(pathlib.Path(os.environ['F3_TEST_TOKENS_PATH']).read_text())
-    for token in tokens.values():
-        print('::add-mask::' + token)
-    # No FK is added before the unchanged F3 smoke's TRUNCATE has completed.
+def distinct_ports():
+    first = f3.port()
+    for _ in range(8):
+        second = f3.port()
+        if second != first:
+            return first, second
+    raise AssertionError('Could not select distinct F4 listener ports')
+
+
+def fresh_log(path, offset):
+    return path.read_bytes()[offset:].decode('utf-8', errors='replace')
+
+
+def stub_ready(process, log, offset, endpoint, owner):
+    if process.poll() is not None:
+        return False
+    started = False
+    for line in fresh_log(log, offset).splitlines():
+        try:
+            metadata = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(metadata, dict) and metadata.get('endpoint') == endpoint and metadata.get('owner') == owner:
+            started = True
+            break
+    return started and f3.expect(endpoint, '/__f3__/state', 200, headers={'X-F3-Owner': owner})['owner'] == owner
+
+
+def application_ready(process, log, offset, port, base):
+    # An unrelated listener returning 404 is not evidence that our child bound its port.
+    return (process.poll() is None
+        and ('Tomcat started on port ' + str(port) + ' ') in fresh_log(log, offset)
+        and f3.request(base, '/api/v1/posts/read/99999999')[0] == 404)
+
+
+def confirmed_bind_failure(failure, process, text):
+    if (not isinstance(failure, AssertionError) or not str(failure).endswith(' exited before readiness')
+            or process is None or process.poll() in (None, 0)):
+        return False
+    return ('[Errno 98] Address already in use' in text
+        or 'java.net.BindException: Address already in use' in text
+        or re.search(r'Port [0-9]+ was already in use\.', text) is not None)
+
+
+def stop_startup_child(process, label):
+    if process is not None:
+        if process.poll() is None:
+            # This helper raises after a forced kill; never turn forced cleanup into success/retry.
+            f3.stop_owned_child(process, label)
+        else:
+            process.wait(timeout=5)
+
+
+def start_ready_children(jar, app_env, base_env, owner, bucket, prefix,
+                         stub_log, app_log, stub_path, app_path):
+    if owner != f2.require_hosted():
+        raise SystemExit('F4 startup owner mismatch')
+    for attempt in range(1, 4):
+        stub_port, app_port = distinct_ports()
+        endpoint = 'http://127.0.0.1:' + str(stub_port)
+        base = 'http://127.0.0.1:' + str(app_port)
+        stub_offset, app_offset = len(stub_path.read_bytes()), len(app_path.read_bytes())
+        stub = app = None
+        try:
+            stub = subprocess.Popen([sys.executable, str(ROOT / 'scripts/f3_s3_stub.py'), '--host', '127.0.0.1',
+                '--port', str(stub_port), '--bucket', bucket, '--prefix', prefix,
+                '--owner', owner, '--allow-delete'], env=dict(base_env, GITHUB_ACTIONS='true',
+                RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux', GITHUB_REPOSITORY=os.environ['GITHUB_REPOSITORY'],
+                GITHUB_RUN_ID=os.environ['GITHUB_RUN_ID'], GITHUB_RUN_ATTEMPT=os.environ['GITHUB_RUN_ATTEMPT']),
+                stdout=stub_log, stderr=subprocess.STDOUT)
+            f3.wait_ready(stub, lambda: stub_ready(stub, stub_path, stub_offset, endpoint, owner), 'F4 S3 stub')
+            f3.verify_continue_handshake(endpoint, owner)
+            app = subprocess.Popen(['java', '-Duser.timezone=Asia/Seoul', '-Xmx256m', '-jar', str(jar),
+                '--spring.main.banner-mode=off'],
+                env=dict(app_env, F2_PORT=str(app_port), F3_STORAGE_ENDPOINT=endpoint),
+                stdout=app_log, stderr=subprocess.STDOUT)
+            f3.wait_ready(app, lambda: application_ready(app, app_path, app_offset, app_port, base),
+                          'F4 packaged application')
+            return app, stub, base, endpoint, attempt, app_offset
+        except BaseException as failure:
+            try:
+                retry = (confirmed_bind_failure(failure, stub, fresh_log(stub_path, stub_offset))
+                         or confirmed_bind_failure(failure, app, fresh_log(app_path, app_offset)))
+            finally:
+                try:
+                    stop_startup_child(app, 'F4 startup application')
+                finally:
+                    stop_startup_child(stub, 'F4 startup S3 stub')
+            if not retry or attempt == 3:
+                raise
+
+
+def prepare_business_rows():
+    # Called only after both owned listeners are ready, and after unchanged F3 smoke.
     f3.sql('TRUNCATE pawbridge_community.post_search_documents,pawbridge_community.outbox_events,'
            'pawbridge_community.posts,pawbridge_user.users; '
            "INSERT INTO pawbridge_user.users VALUES(42,'합성작성자'); "
@@ -55,7 +141,17 @@ def smoke():
            'post_id BIGINT REFERENCES pawbridge_community.posts(post_id)); '
            'CREATE TABLE pawbridge_f4_fixture.private_notes(note_id BIGINT PRIMARY KEY,'
            'post_id BIGINT REFERENCES pawbridge_community.posts(post_id))')
-    endpoint = 'http://127.0.0.1:' + str(f3.port())
+
+
+def smoke():
+    owner = require_fixture()
+    jar = ROOT / 'boot/build/libs/pawbridge-backend-app.jar'
+    if not jar.is_file():
+        raise SystemExit('Packaged JAR missing')
+    tokens = json.loads(pathlib.Path(os.environ['F3_TEST_TOKENS_PATH']).read_text())
+    for token in tokens.values():
+        print('::add-mask::' + token)
+    endpoint = ''
     bucket = 'f3-' + owner
     prefix = bucket + '/'
     controls = {'X-F3-Owner': owner}
@@ -63,13 +159,13 @@ def smoke():
                 if key in os.environ}
     app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
         F2_DB_USER=os.environ['F2_TEST_DB_USER'], F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'],
-        F2_POOL_MAX_SIZE='2', F2_PORT=str(f3.port()), F3_DB_WRITER_USER=f3.WRITER,
+        F2_POOL_MAX_SIZE='2', F3_DB_WRITER_USER=f3.WRITER,
         F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], F3_STORAGE_ENDPOINT=endpoint,
+        F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
         F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',
         F3_STORAGE_OBJECT_PREFIX=prefix, F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',
         F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
-    base = 'http://127.0.0.1:' + app_env['F2_PORT']
+    base = ''
     state = lambda: f3.expect(endpoint, '/__f3__/state', 200, headers=controls)
     result = {'timezone': 'Asia/Seoul', 'reader_pool_maximum': 2, 'writer_pool_maximum': 1,
               'synthetic_database': f2.DATABASE, 'status': 'incomplete'}
@@ -131,20 +227,14 @@ def smoke():
             raise AssertionError('Repeated deletion changed DB rows or contacted storage')
 
     with (EVIDENCE / 'f4-s3-stub.log').open('w') as stub_log, logs.open('w') as app_log:
-        stub = subprocess.Popen([sys.executable, str(ROOT / 'scripts/f3_s3_stub.py'), '--host', '127.0.0.1',
-            '--port', endpoint.rsplit(':', 1)[1], '--bucket', bucket, '--prefix', prefix,
-            '--owner', owner, '--allow-delete'], env=dict(base_env, GITHUB_ACTIONS='true',
-            RUNNER_ENVIRONMENT='github-hosted', RUNNER_OS='Linux', GITHUB_REPOSITORY=os.environ['GITHUB_REPOSITORY'],
-            GITHUB_RUN_ID=os.environ['GITHUB_RUN_ID'], GITHUB_RUN_ATTEMPT=os.environ['GITHUB_RUN_ATTEMPT']),
-            stdout=stub_log, stderr=subprocess.STDOUT)
-        app = None
+        stub = app = None
         try:
-            f3.wait_ready(stub, lambda: state()['owner'] == owner, 'F4 S3 stub')
-            f3.verify_continue_handshake(endpoint, owner)
-            app = subprocess.Popen(['java', '-Duser.timezone=Asia/Seoul', '-Xmx256m', '-jar', str(jar),
-                '--spring.main.banner-mode=off'], env=app_env, stdout=app_log, stderr=subprocess.STDOUT)
-            f3.wait_ready(app, lambda: f3.request(base, '/api/v1/posts/read/99999999')[0] == 404,
-                          'F4 packaged application')
+            app, stub, base, endpoint, attempts, app_offset = start_ready_children(
+                jar, app_env, base_env, owner, bucket, prefix, stub_log, app_log,
+                EVIDENCE / 'f4-s3-stub.log', logs)
+            result['startup_attempts'] = attempts
+            result['confirmed_bind_retries'] = attempts - 1
+            prepare_business_rows()
             normal = create([('one.jpg', 'image/jpeg', b'F4-image'), ('two.mp4', 'video/mp4', b'F4-video')])
             post_id = normal['postId']
             first, second = normal['imageUrls']
@@ -247,9 +337,10 @@ def smoke():
                 if app is not None:
                     result['app_sigterm_exit'] = f3.stop_owned_child(app, 'F4 packaged application')
             finally:
-                result['stub_sigterm_exit'] = f3.stop_owned_child(stub, 'F4 S3 stub')
+                if stub is not None:
+                    result['stub_sigterm_exit'] = f3.stop_owned_child(stub, 'F4 S3 stub')
                 (EVIDENCE / 'f4-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')
-    text = logs.read_text()
+    text = fresh_log(logs, app_offset)
     if text.count('Shutdown completed.') < 2 or 'Graceful shutdown complete' not in text:
         raise AssertionError('F4 pool and HTTP graceful termination evidence is missing')
     if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':

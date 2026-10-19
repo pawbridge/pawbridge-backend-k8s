@@ -176,6 +176,9 @@ jobs:
       - name: Verify packaged POST/GET, synthetic SDK uploads, failures and normal termination
         run: python3 scripts/f3_ci.py smoke
 
+      - name: Verify F4 listener startup with socket and process mocks only
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f4_ci_startup.py
+
       - name: Verify packaged owner deletion, best-effort storage and rollback recovery
         run: python3 scripts/f4_ci.py smoke
 
