@@ -241,6 +241,42 @@ class PawBridgeApplicationTest {
                     assertThat(mutationTransaction.getTransactionManager()).isSameAs(writeManager);
                     assertThat(mutationTransaction.getTimeout()).isEqualTo(15);
                     assertThat(mutationTransaction.isReadOnly()).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteFavoriteMutation.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.SetPrivateNoteFavorite.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteFavoriteController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteFavoriteExceptionHandler.class)).hasSize(1);
+                    var setFavorite = context.getBean(com.pawbridge.backend.community.internal.note.application.SetPrivateNoteFavorite.class);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(setFavorite)).isFalse();
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(setFavorite, "members")).isSameAs(context.getBean(com.pawbridge.backend.user.api.ContactMemberQuery.class));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(setFavorite, "clock")).isSameAs(context.getBean("readClock"));
+                    var favoriteMutation = context.getBean(com.pawbridge.backend.community.internal.note.application.NoteFavoriteMutation.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(setFavorite, "mutation")).isSameAs(favoriteMutation);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(favoriteMutation, "jdbc")).isSameAs(writeJdbc);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(favoriteMutation, "hints")).isSameAs(streams);
+                    var favoriteTransaction = (org.springframework.transaction.support.TransactionTemplate)
+                            org.springframework.test.util.ReflectionTestUtils.getField(favoriteMutation, "transaction");
+                    assertThat(favoriteTransaction).isNotSameAs(sharedWriteTransaction).isNotSameAs(mutationTransaction);
+                    assertThat(favoriteTransaction.getTransactionManager()).isSameAs(writeManager);
+                    assertThat(favoriteTransaction.getTimeout()).isEqualTo(15);
+                    assertThat(favoriteTransaction.isReadOnly()).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteDeletion.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.DeletePrivateNote.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteDeletionController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.web.NoteDeletionExceptionHandler.class)).hasSize(1);
+                    var deleteNote = context.getBean(com.pawbridge.backend.community.internal.note.application.DeletePrivateNote.class);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(deleteNote)).isFalse();
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(deleteNote, "members")).isSameAs(context.getBean(com.pawbridge.backend.user.api.ContactMemberQuery.class));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(deleteNote, "clock")).isSameAs(context.getBean("readClock"));
+                    var deletion = context.getBean(com.pawbridge.backend.community.internal.note.application.NoteDeletion.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(deleteNote, "mutation")).isSameAs(deletion);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(deletion, "jdbc")).isSameAs(writeJdbc);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(deletion, "hints")).isSameAs(streams);
+                    var deletionTransaction = (org.springframework.transaction.support.TransactionTemplate)
+                            org.springframework.test.util.ReflectionTestUtils.getField(deletion, "transaction");
+                    assertThat(deletionTransaction).isNotSameAs(sharedWriteTransaction).isNotSameAs(mutationTransaction).isNotSameAs(favoriteTransaction);
+                    assertThat(deletionTransaction.getTransactionManager()).isSameAs(writeManager);
+                    assertThat(deletionTransaction.getTimeout()).isEqualTo(15);
+                    assertThat(deletionTransaction.isReadOnly()).isFalse();
                     pools.values().forEach(pool -> {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();

@@ -28,6 +28,8 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f24LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f25LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f26LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f27LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f28LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -343,6 +345,10 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F25LegacyNoteBlockCreateMvcTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteReadStreamCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F26LegacyNoteReadStreamMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteFavoriteCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F27LegacyNoteFavoriteMvcTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteDeletionCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F28LegacyNoteDeletionMvcTest'
     }
 }
 
@@ -762,4 +768,69 @@ tasks.register('noteReadStreamCompatibilitySeoulTest', Test) {
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('noteReadStreamCompatibilityTest')
+}
+
+// F27 reuses the immutable F26 raw stream and adds only three compatibility wrappers.
+tasks.register('prepareF27LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF26LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f27_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f27LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f27-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f27_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f27LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f27-oracle-sha256.txt').get().asFile
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF27LegacyOracle') }
+
+tasks.register('noteFavoriteCompatibilityTest', Test) {
+    description = 'Checks F27 favorite under source JpaTM/candidate JdbcTM and measured original MVC once in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'f24.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f24-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f25.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f25-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f26.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f26-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f27.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f27-fixture-write.txt').get().asFile.absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteFavoriteCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F27LegacyNoteFavoriteMvcTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteReadStreamCompatibilitySeoulTest')
+}
+
+// F28 reuses the immutable F26 raw stream and adds only three compatibility wrappers.
+tasks.register('prepareF28LegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF27LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f28_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f28LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f28-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f28_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f28LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f28-oracle-sha256.txt').get().asFile
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF28LegacyOracle') }
+
+tasks.register('noteDeletionCompatibilityTest', Test) {
+    description = 'Checks F28 deletion under source JpaTM/candidate JdbcTM and measured original MVC once in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'f24.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f24-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f25.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f25-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f26.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f26-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f27.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f27-fixture-write.txt').get().asFile.absolutePath
+    systemProperty 'f28.fixture.receipt', rootProject.layout.buildDirectory.file('ci/f28-fixture-write.txt').get().asFile.absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteDeletionCompatibilityTest'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.F28LegacyNoteDeletionMvcTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteFavoriteCompatibilityTest')
 }

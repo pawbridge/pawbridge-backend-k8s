@@ -392,3 +392,38 @@ always owned cleanup·실패 증거 보존·발행/배포 차단·contents read�
 이 첫 실험은 일반 PR의 자동 축소를 활성화하지 않는다. fork·다른 기준·일반 기능/공통 인증/빌드 변경 등은 full로 실행하고, 명시적으로 부적격 pilot을 요청하면 거부한다. 기존 CI 39분18초와 생략 후보 단계 합계 11분04초는 과거 측정이며 실제 절감 시간은 같은 후보의 full/pilot 결과를 읽은 뒤 판단한다. 비교 결과와 일반 적용 여부는 Obsidian의 CI 개선 계획에 기록하며, 앱·운영·비밀값·데이터·복구 자료를 바꾸지 않는다.
 
 F26은 CI 개선 병합 dev `ce5898071c5022c09634c5e68b0c12c9dc66123e`를 인수하며 full 실행 목록에 `jar_f26`을 추가해 총24단계를 감사한다. F25 고정 비교의23/17 기록은 당시 결과다. 새 기준과 기능 변경은 그 pilot 조건에 해당하지 않으므로 F26은 full만 실행한다. 공통 package/XML 분리와45분 check 상한, 기존 F26 검증을 유지한다.
+
+
+## F27·F28 본인 메일함 상태 관리의 CI 연결
+
+즐겨찾기 변경과 메일함 삭제는 한 사용자 결과로 함께 검토하되 각각의 명시적인 타입·SQL·원문 비교·실패 검증을 보존한다. F29 발송은 이 범위에 포함하지 않는다. 선행 F26의 공통 package/선택 정책/동일 JAR 해시·실행 감사·always 소유 정리를 그대로 두고 F27 → F28 순서만 추가한다. `jar_f3`부터 `jar_f28`까지26개가 full 필수이며 마지막 owned cleanup을 합쳐27개 결과를 감사한다. F25 고정 pilot의 ref/base/변경경로/6개 skip 조건은 넓히지 않으므로 이 기능 변경은 full만 실행한다. 일반적인 pilot 선택 가능성을 새 기능으로 확대하지 않는다. 기존 F26의24단계 기록은 해당 기준의 이력이다.
+
+첫 결합 check 상한은55분이다. F26 actual full39분58초와 이전42분20초에 새 두 단계의 비용·정리 여유를 고려한 제한이며, F27·F28 실제 시간이나55분 충분성을 보장하지 않는다. 단위별 검증·full 필수 목록·정리·발행 차단은 유지하고 첫 hosted 결과 뒤 상한을 재평가한다. 아래 원문/MVC·로컬 시험 기록은 기존 private 준비 근거다. 이 연결 사본은 고정 F26 `efe0309e4f340d364241138ab54ca3653be641e8` 입력 위의 준비일 뿐이며 실제 feature branch/base·hosted PG/JAR/CI 결과는 부모 통합 뒤 별도 확인한다.
+
+## F27 본인 쪽지 즐겨찾기 값 변경 준비
+
+기존 `PUT /api/v1/notes/{id}/favorite`를 요청한 boolean 값으로 설정하고 commit 뒤 본인 SSE resync와 기존 단건/목록의 favorite·favorites 필터를 연결한다. INBOX/SENT 모두 허용하며 동일 값 반복도 UPDATE·commit·resync를 수행한다. TX15 → member INSERT/lock → current active → find(clock1) → note lock → find(clock2) → favorite UPDATE → hook 등록/commit 순서를 보존한다. 시각은2회로 읽음의 세 번째 Clock 호출을 복제하지 않는다. read_at·unread·상대 mailbox·created_at은 바꾸지 않으며 counterpart/block 조회0이다. 영향 행수0로 새404를 만들지 않고 두 ownership 조회의 엄격한 만료 경계가 부재를 판단한다.
+
+Community의 명시적인 app policy/좁은 port/JDBC/scoped REST 계약과 Boot의 exact PUT matcher·기존 writeJdbc/writerTM/privateTT15/readClock/NoteChangeHints를 조립한다. 새 User API·pool/TM/Clock·SSE registry·범용 mutate 프레임워크는 없다. 원문에서처럼 hook 안 실제 hint Runtime만 타입명 로그 뒤 성공 처리하고 SQL·등록·commit 오류는 전파한다. 인증은 binder보다 먼저이며 기존 일반 REST의 exp 선택 정책·ADMIN/default deny를 유지한다. primitive boolean body의 생략/null/잘못된 JSON 등은 원문 actual MVC 관측 후 비교 provider를 확정한다.
+
+F26 전체 검증 뒤 `f27_ci.py prepare`가 기존 mailbox writer에 `UPDATE(favorite)` 한 열만 추가한다. reader와 F26 writer SELECT/잠금/read_at·기존 blocks 권한은 유지하고 새 DDL/표/index/schema/sequence는0이다. 권한 회수 복구는 marker-only 선행/current exact receipt로 대상을 확인하고 GRANT 뒤 strict를 실행한다. nickname이 회수된 동안 User ACL을 검사하는 이전 strict를 호출하지 않는다.
+
+고정 f06 원문 full20·raw shared13(기존12+원문 PrivateNoteStream)/F18 adapted advice1을 재사용하고 F27 service/controller/advice wrapper3만 생성한다. 동일 원문 stream FQN을 다시 생성하거나 production JAR에 포함하지 않는다. UTC exact PG/MVC 두 클래스만 새 task로 실행하며 boolean 쓰기를 위해 새 Seoul 전조합을 추가하지 않는다. 원문 대표8입력을 실제 관측한 complete0600 JSON(4845bytes/SHA eff87b02c348c147c1acee6ec02aa905d41333f66724ac4813b961dfc9c582df)에서만 provider8행×15필드를 채웠고 비작성 서브가120값을 독립 대조했다. formal MVC16이 로컬5초/1XML 실패0으로 통과했다. PG8메서드15예상·새Seoul0과 JAR18요청·본인resync6/타인0·favorite변경5는 정적 전수 검수한 정확 기대값이며 실제 hosted PG/JAR 성공이 아니다. 미측정/틀린 XML/count/receipt는 fail-closed다. 준비 사본의 일반1465/112XML·구조71/2XML=1536건과 check/bootJar/compatibility compile37초는 로컬 성공이며 실제 PG·JAR HTTP·future feature head의 CI·운영 증거가 아니다.
+
+합성 JAR probe는 본인/다른 회원의 SSE와 실제 발급기 F27_CALLER/OTHER600초 토큰을 사용해 true·동일값 반복·false·SENT·권한 실패/회복·조회 projection/필터를 검증하도록 준비한다. 승인 delta는 본인 favorite boolean 한 셀이고 read_at/unread는 불변이다. 본인 resync와 타인0,16표/S3·소유 seed/FK 정리, 열린 SSE2의 server EOF·registry 종료·두 pool/conn0를 모두 요구한다. raw token/비밀값/개인 본문은 산출물이나 로그에 남기지 않는다. 실제 실행 전 mock/정적 카운터를 성공으로 세지 않는다.
+
+workflow는 선행 F26의 fixture/원문/UTC+thinSeoul/JAR 완료 뒤 F27 무자원 guard → 최소 GRANT → UTC PG/MVC → exact XML → JAR 순서다. always owned cleanup/실패 증거/contents read/발행 차단은 유지한다. artifact에는 f27-results.json만 추가하고 token 또는 모든 JSON glob을 넣지 않는다. 실제 기능 브랜치는 F26 검수·CI·dev 병합 뒤 fresh base/input bytes를 확인하고 만든다.
+
+## F28 본인 쪽지 메일함 삭제 준비
+
+기존 DELETE `/api/v1/notes/{id}`는 TX15/member INSERT·잠금/current active/find(clock1)/note 잠금/find(clock2) 뒤 본인 mailbox를 지우고, 남은 mailbox가 없을 때만 원본 note를 지운다. 상대 mailbox가 있으면 원본과 상대 row를 보존하고, 마지막 mailbox 삭제 때 원문의 FK로 request.note_id와 자식 note.reply_to가 NULL이 된다. 반복 삭제는404/hint0이며 성공은빈200/no-store/noCookie, afterCommit 실제 hints Runtime만 타입 로그 후 성공을 유지한다. 상대 상태·차단 조회·새Clock/트랜잭션·범용 mutate 추출은 추가하지 않는다.
+
+새 exact DELETE matcher는 원문처럼 `/notes/blocks`·`/notes/notifications`도 인증 뒤 UUID400으로 보낸다. 예약어403 예외를 새로 만들지 않고 옛 negative4곳은 충돌 없는 깊은 미편입403 경로로 인계한다. 기존 ADMIN/REST/JWT·read/favorite/stream과 operation 전용TT15/두pool을 유지한다.
+
+선행 fixture는 requests가 없는16표이므로 F27 전체 검증 뒤 F28 synthetic에서만 고정 V6 requests5열/PK·2FK·rate index1과 V7 partial index2를 원문 LF fragment4에서 qualification만 해 추가한다. 이 표의 앱 reader/writer 권한은0이고 기존 mailbox/note DELETE 두 권한만 추가한다. 운영 Flyway/DDL/ACL은 변경하지 않는다. 단계 이전16표와 이후17표를 구분하며 old strict를 확장 뒤 다시 호출하거나 약화하지 않는다. identity·선행/current exact receipt 확인 뒤 ACL을 복구하고 마지막에만 full strict를 확인한다.
+
+private source에서 Core/Boot9+9경로를 입력 지문과 대조해 통합했고 좁은8초/전체37초 검증이 통과했다. 일반1501/116XML+구조71/2XML=1572건 실패·오류·skip0과 JAR/호환컴파일은 로컬 결과이며 실제 PG/FK/소켓 성공을 뜻하지 않는다. 새 runtime18guard도 모의 제어 시험만 통과했다. 실제 selected 원문 observer4를 complete0600 JSON(SHA 342a22bc5c7578ab814bfa9134ed53d8edde710659deeaadd8d04d8b55b99521)에 보존하고 provider4행×14필드를 채운 formal MVC11/1XML도 로컬 통과했다. observer4는 정식 합계에서 제외한다. PG17은 검수한 provider 기대값이고 실제 PG/FK/JAR는 아직 미실행이다. UTC 실제 PG·전체 guard/실제 JAR 및 동일 head CI는 별도 gate다. 두 변경은 본인 메일함 상태 관리 한 PR로 묶으며, 실제 브랜치는 F26 검수·필수 CI·dev 통합 뒤 fresh base에서 만든다.
+
+JAR 계획은 정상 actual issuer600초 F28_CALLER/OTHER, 직전TTL60·소유0600/기존키 보존, 본인/other SSE두개를 사용한다. A의본인INBOX만삭제하고 otherSENT/원본을보존, B의마지막SENT삭제로 own request.note_id와자식C.reply_to NULL전이, C삭제 뒤 알림empty를 확인하도록 준비한다. 각DELETE권한·User실패/복구·반복404·인증/깊은경로를 포함하는정적18HTTP=DELETE9/GET9이며 아직actual요청수가아니다. 승인delta는mailbox3/note2/requestNULL1/replyNULL1뿐이고 read_at/favorite/다른17표/S3는보존한다. ACK seed외참조는삭제하지않으며응답실패뒤commit재관측/모든stream·child정리와최종17baseline복구를요구한다. 열린SSE2 serverEOF/registry성공1/두pool·연결0/비밀로그0 뒤에만 passed다.
+
+workflow는 F27 전체 → 무자원 F28 guards → 원문 requests1표/index3/DELETE2 atomic stage → UTC 정확2클래스 → XML/source receipt → JAR 순서다. 새Seoul0, 항상소유정리·실패증거·발행차단·특정 f28-results.json만보존한다. 첫 결합 상한55분은 위 실제 부모 시간에 근거한 여유이며 F28 실제 소요시간은 hosted 결과에서 확인한다.
