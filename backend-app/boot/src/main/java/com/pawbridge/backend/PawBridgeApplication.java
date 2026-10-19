@@ -8,6 +8,7 @@ import com.pawbridge.backend.boot.configuration.CommentWriteConfiguration;
 import com.pawbridge.backend.boot.configuration.UserProfileConfiguration;
 import com.pawbridge.backend.boot.configuration.UserNicknameConfiguration;
 import com.pawbridge.backend.boot.configuration.FavoriteStatusConfiguration;
+import com.pawbridge.backend.boot.configuration.HomeVideoReadConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -21,7 +22,7 @@ import org.springframework.context.annotation.Import;
 @EnableAutoConfiguration(exclude = {DataSourceAutoConfiguration.class,
         DataSourceTransactionManagerAutoConfiguration.class, JdbcTemplateAutoConfiguration.class,
         UserDetailsServiceAutoConfiguration.class})
-@Import({ReadConfiguration.class, PostWriteConfiguration.class, CommentWriteConfiguration.class, UserProfileConfiguration.class, UserNicknameConfiguration.class, FavoriteStatusConfiguration.class})
+@Import({ReadConfiguration.class, PostWriteConfiguration.class, CommentWriteConfiguration.class, UserProfileConfiguration.class, UserNicknameConfiguration.class, FavoriteStatusConfiguration.class, HomeVideoReadConfiguration.class})
 public class PawBridgeApplication {
     public static void main(String[] args) {
         // Validate explicit inputs before Spring can open a listener or a database connection.

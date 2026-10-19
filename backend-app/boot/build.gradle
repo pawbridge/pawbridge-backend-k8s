@@ -16,6 +16,7 @@ sourceSets {
         java.srcDir layout.buildDirectory.dir('generated/sources/f12LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java')
         java.srcDir layout.buildDirectory.dir('generated/sources/f14LegacyOracle/java')
+        java.srcDir layout.buildDirectory.dir('generated/sources/f15LegacyOracle/java')
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
@@ -180,8 +181,18 @@ tasks.register('prepareF14LegacyOracle', Exec) {
             rootProject.layout.buildDirectory.file('ci/f14-oracle-sha256.txt').get().asFile
 }
 
+tasks.register('prepareF15LegacyOracle', Exec) {
+    inputs.file(rootProject.file('scripts/prepare_f15_legacy_oracle.py'))
+    outputs.dir(layout.buildDirectory.dir('generated/sources/f15LegacyOracle/java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f15-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f15_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f15LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f15-oracle-sha256.txt').get().asFile
+}
+
 tasks.named('compileCompatibilityTestJava') {
-    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle')
+    dependsOn tasks.named('prepareLegacyOracle'), tasks.named('prepareF3LegacyOracle'), tasks.named('prepareF4LegacyOracle'), tasks.named('prepareF6LegacyOracle'), tasks.named('prepareF7LegacyOracle'), tasks.named('prepareF8LegacyOracle'), tasks.named('prepareF9LegacyOracle'), tasks.named('prepareF11LegacyOracle'), tasks.named('prepareF12LegacyOracle'), tasks.named('prepareF13LegacyOracle'), tasks.named('prepareF14LegacyOracle'), tasks.named('prepareF15LegacyOracle')
 }
 
 ['compatibilityTest': 'UTC', 'compatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
@@ -198,6 +209,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
     }
 }
 
@@ -304,3 +316,21 @@ tasks.register('favoriteStatusCompatibilityTest', Test) {
     }
     shouldRunAfter tasks.named('nicknameCompatibilitySeoulTest')
 }
+
+
+['homeVideoCompatibilityTest': 'UTC', 'homeVideoCompatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = "Checks only F15 original and candidate home video reads in ${zone}."
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        filter {
+            includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
+            failOnNoMatchingTests = true
+        }
+        shouldRunAfter tasks.named('favoriteStatusCompatibilityTest')
+    }
+}
+tasks.named('homeVideoCompatibilitySeoulTest') { shouldRunAfter tasks.named('homeVideoCompatibilityTest') }
