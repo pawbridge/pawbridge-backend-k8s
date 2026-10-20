@@ -776,3 +776,25 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을
 합성 PostgreSQL의 9개 원문 테이블 모양과 고정 데이터에서 별도 원문/후보 EMF를 비교한다. 안전한 정렬·부모 페이지·count·Sort metadata·nullable·구매 snapshot, SQL 부모 페이지/선택 ID graph·SELECT-only 권한·읽기 불변·연결 반환을 보호한다. 최초 전체 graph 방식의 27사례와 이후 보안 회귀 근거는 별도 이력으로 보존하며, 새 2단계 방식의 성공은 해당 수정본의 실제 실행 결과로 판정한다. 기존 Store 전체 migration·결제·실제 운영 검증은 아니다. 원문17 Java는 compileTestJava의 고정 시험 입력이며 main/실행 JAR에 포함하지 않는다. 새 extractor/sourceSet/JAR HTTP 도구는 없다.
 
 `P7_PG_SETTINGS`의 제한된 파일로 전용 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreMemberJpaTest`만 선택한다. SQL resource는 새로 만든 marker 검증 DB에 한 번 적용하는 준비 자료이며 Java 시험은 SELECT만 수행한다. 0사례/skip은 실패이고 일반 CI는 이 owned 태그를 제외한다. 키·접속값·시험 산출물은 Git에 넣지 않는다.
+
+
+## Animal JSON 명령과 현재 회원 권한
+
+`pawbridge.animal-commands.enabled`는 기본 false이며 대소문자를 구분하지 않는 명시 `true`만 허용한다. 이 값이 없거나 `on`인 경우 명령과 보안 경로는 비활성이다. 기존 동물 조회·추천은 각자의 flag를 유지한다.
+
+| 메서드 | 경로 | 결과 |
+| --- | --- | --- |
+| POST | `/api/v1/animals` | 원문 동물 생성, 201 |
+| PATCH | `/api/v1/animals/{id}/status` | 원문 상태 변경, 200 |
+| PATCH | `/api/v1/animals/{id}/description` | 원문 설명 변경, 200 |
+| DELETE | `/api/v1/animals/{id}` | 원문 삭제, 204 |
+
+서명 검증한 JWT의 회원 ID만 사용한다. User 모듈은 같은 writer 트랜잭션에서 현재 회원 행을 잠그고 삭제 대기를 조회한다. Animal은 현재 DB의 `ROLE_ADMIN` 또는 보호소 등록번호가 일치하는 `ROLE_SHELTER`만 허용한다. JWT의 오래된 역할이나 `X-User-*` 헤더로 이 검사를 대체하지 않는다. 기존 조회·ADMIN 경로의 인가는 바꾸지 않는다.
+
+선택한 원문 JPA 모델·저장소·mapper·업무 로직을 infrastructure 안에서 재사용한다. 명시 writer EMF는 Animal/Shelter/OutboxEvent/BaseTimeEntity만 관리하고 전역 스캔·DDL·새 pool을 만들지 않는다. 원문 감사 listener와 서비스의 REQUIRED/default 격리를 유지하며 JpaTM의 기본 제한은 15초다. 조회용 reader와 구분하고, User 조회와 검색 SQL도 같은 writer DataSource에 참여해야 한다. Nori 분석기는 조회·추천·명령 사이에서 하나를 공유하고 context와 함께 닫는다.
+
+생성과 설명 변경은 원문 동물·검색 투영·Outbox를 함께 커밋한다. 상태 변경의 원문 이벤트와 삭제의 FK 동작도 유지하며 삭제 이벤트를 새로 만들지 않는다. 원문 payload eventId와 Outbox event_id는 별도 UUID다. 이 Outbox의 전체 전달기·CDC 교체, APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
+
+새 소유 합성 PostgreSQL 17.11에서 실제 보안→MVC→JPA 흐름 13사례가 통과했다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK/Outbox 실패의 rollback·정상 재시도, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
+
+전용 시험은 `P8_PG_SETTINGS`의 제한된 소유 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalCommandTest`로만 실행한다. SQL resource는 새 DB/marker 확인 후 소유 관리자가 한 번 준비하는 자료다. 실제 계정·키·접속값은 Git에 넣지 않는다. 일반 CI는 owned 태그를 제외하며 이 PG13을 실행했다고 표시하지 않는다. 기존 운영의 DML·행 잠금·감사 및 단일 실행기 소유권을 인계하기 전 flag와 공개 라우팅을 활성화하지 않는다.
