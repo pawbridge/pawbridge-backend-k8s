@@ -7,6 +7,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
+import ci_branch_policy as policy
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / '.github/scripts/ci_branch_policy.py'
@@ -225,6 +228,70 @@ class ChangedPathsSelectionTest(CliAssertions, unittest.TestCase):
         head = self.commit('api-gateway/src/main/example.txt')
         self.assert_selection(self.select('gateway', self.event(head, PUSH_BEFORE_SHA='0'*40)),
                               ['api-gateway'])
+
+    def test_given_each_backend_only_ci_file__when_selecting_pr_or_push__then_skip_legacy_groups(self):
+        for path in ('.github/scripts/backend_contract_profile.py',
+                     '.github/scripts/test_backend_admin_post_reads_profile.py'):
+            before = self.git('rev-parse', 'HEAD')
+            head = self.commit(path)
+            for event in ('pull_request', 'push'):
+                for group in ('gateway', 'store', 'remaining'):
+                    with self.subTest(path=path, event=event, group=group):
+                        variables = self.event(head, name=event, PUSH_BEFORE_SHA=before,
+                                               PULL_REQUEST_BASE_SHA=before)
+                        self.assert_selection(self.select(group, variables), [])
+
+    def test_given_backend_only_ci_and_user_change__when_selecting_pr_or_push__then_select_user_only(self):
+        head = self.commit('.github/scripts/backend_contract_profile.py',
+                           '.github/scripts/test_backend_admin_post_reads_profile.py',
+                           'user-service/src/main/example.txt')
+        for event in ('pull_request', 'push'):
+            with self.subTest(event=event):
+                self.assert_selection(self.select('remaining', self.event(head, name=event)),
+                                      ['user-service'])
+
+    def test_given_backend_only_ci_files__when_reading_pr_or_push_paths__then_preserve_application_inputs(self):
+        paths = ['.github/scripts/backend_contract_profile.py',
+                 '.github/scripts/test_backend_admin_post_reads_profile.py']
+        head = self.commit(*paths)
+        def fixture_git(*arguments):
+            return subprocess.run(['git', *arguments], cwd=self.repository, check=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10).stdout
+        for event in ('pull_request', 'push'):
+            with self.subTest(event=event), patch.object(policy, 'git', side_effect=fixture_git):
+                self.assertEqual(paths, policy.changed_paths(self.event(head, name=event), event))
+
+    def test_given_backend_only_ci_and_common_selector__when_selecting_pr_or_push__then_keep_all_remaining_services(self):
+        head = self.commit('.github/scripts/backend_contract_profile.py',
+                           '.github/scripts/test_backend_admin_post_reads_profile.py',
+                           '.github/scripts/ci_branch_policy.py')
+        for event in ('pull_request', 'push'):
+            with self.subTest(event=event):
+                self.assert_selection(self.select('remaining', self.event(head, name=event)),
+                                      ['animal-service', 'community-service',
+                                       'payment-service', 'user-service'])
+
+    def test_given_backend_app_or_other_shared_inputs__when_selecting__then_preserve_existing_path_boundaries(self):
+        cases = (
+            ('backend-app/boot/src/main/example.txt', []),
+            ('.github/scripts/backend_contract_profile.py.extra',
+             ['animal-service', 'community-service', 'payment-service', 'user-service']),
+            ('.github/scripts/backend_postmerge_proof.py',
+             ['animal-service', 'community-service', 'payment-service', 'user-service']),
+            ('.github/scripts/update-service-image.py',
+             ['animal-service', 'community-service', 'payment-service', 'user-service']),
+            ('.github/workflows/_java-service-image.yml',
+             ['animal-service', 'community-service', 'payment-service', 'user-service']),
+            ('.github/workflows/remaining-services-image-ci.yml',
+             ['animal-service', 'community-service', 'payment-service', 'user-service']),
+            ('.github/migrations/example.py',
+             ['animal-service', 'community-service', 'payment-service', 'user-service']))
+        for path, expected in cases:
+            before = self.git('rev-parse', 'HEAD')
+            head = self.commit(path)
+            with self.subTest(path=path):
+                self.assert_selection(self.select('remaining', self.event(head, PUSH_BEFORE_SHA=before)),
+                                      expected)
 
     def test_given_shared_ci_change__when_selecting__then_validate_all_groups(self):
         head = self.commit('.github/scripts/ci_branch_policy.py')

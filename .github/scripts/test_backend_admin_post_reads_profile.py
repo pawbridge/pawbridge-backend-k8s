@@ -109,8 +109,13 @@ class AdminPostReadsProfileTest(unittest.TestCase):
                 self.assertIs(False, profile.verify_post_reads_inputs(git_reader=git))
 
     def test_given_verified_same_repo_pr_or_dev_push__when_selecting__then_require_new_pg_and_explicitly_skip_unrelated_contracts(self):
+        routing = ['.github/scripts/ci_branch_policy.py', '.github/scripts/test_ci_branch_policy.py']
         for ctx in (context(), context(event_name='push', head_ref='dev')):
             self.assertEqual([profile.POST_READS], profile.select_profiles(ctx, PATHS))
+            for paths in ([routing[0]], [routing[1]], routing + PATHS + [
+                    '.github/scripts/test_backend_admin_post_reads_profile.py']):
+                with self.subTest(event=ctx['event_name'], paths=paths):
+                    self.assertEqual([profile.POST_READS], profile.select_profiles(ctx, paths))
             self.assertEqual([profile.FULL], profile.select_profiles(dict(ctx, requested_profile=profile.FULL), PATHS))
             plan = profile.make_plan(ctx, PATHS, profile.POST_READS, JAR)
             self.assertEqual([], plan['required_smokes'])
@@ -121,7 +126,10 @@ class AdminPostReadsProfileTest(unittest.TestCase):
         for updates, paths in [(dict(post_reads_scope_verified=v), PATHS) for v in (False,None,1,'true')] + [
                 ({'head_repository':'fork/other'},PATHS), ({'repository':'fork/other'},PATHS),
                 ({'event_name':'push','head_ref':'feat/other'},PATHS), ({'event_name':'unknown'},PATHS),
-                ({},[]), ({},['backend-app/user/src/main/java/Unknown.java'])]:
+                ({},[]), ({},['backend-app/user/src/main/java/Unknown.java']),
+                ({},['.github/scripts/ci_branch_policy.py.extra']),
+                ({},['.github/scripts/test_ci_branch_policy.py.extra']),
+                ({},routing + ['.github/scripts/unreviewed.py'])]:
             with self.subTest(updates=updates, paths=paths):
                 ctx=context(**updates)
                 self.assertEqual([profile.FULL],profile.select_profiles(ctx,paths))
@@ -225,6 +233,10 @@ class AdminPostReadsProfileTest(unittest.TestCase):
     def test_given_post_reads_workflow__when_wiring__then_compile_after_f6_and_preserve_only_common_shape_and_exact_pg(self):
         ci=policy_tests.BackendAppCiPolicyTest();workflow=ci.job('check')
         self.assertEqual({'selected':'true','profiles':'["user-community-integration"]'},dict(line.split('=',1) for line in ci.select(PATHS,reads=True,raw=True).splitlines()))
+        for path in ('.github/scripts/backend_contract_profile.py',
+                     '.github/scripts/test_backend_admin_post_reads_profile.py'):
+            with self.subTest(application_input=path):
+                self.assertEqual('selected=true\n', ci.select([path], reads=True))
         parts=re.split(r'(?=^      - name: )',workflow,flags=re.MULTILINE)[1:]
         keyed={m.group(1):part for part in parts if (m:=re.search(r'^        id: (\w+)$',part,re.MULTILINE))}
         order=('fixture_f4_shape','jar_f6','compile_post_reads','pg_post_reads','jar_f7','owned_cleanup')
