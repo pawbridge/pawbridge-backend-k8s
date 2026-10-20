@@ -37,6 +37,62 @@ class ShelterMembershipConfigurationTest {
             assertThat(context.getBeansOfType(javax.sql.DataSource.class)).isEmpty();verify(jdbc).afterPropertiesSet();verifyNoMoreInteractions(jdbc);verifyNoInteractions(manager);
         });
     }
+    @Test void given__module_and_matching_writer__when__assembling__then__wrap_only_module_lookup_without_sql_or_new_transaction(){
+        var writer=mock(javax.sql.DataSource.class);var jdbc=mock(JdbcTemplate.class);when(jdbc.getDataSource()).thenReturn(writer);
+        moduleRunner(jdbc,writer).withPropertyValues("pawbridge.shelter-commands.enabled=true").run(context->{
+            assertThat(context).hasNotFailed();
+            var lookup=context.getBean(ShelterMembership.ShelterLookup.class);
+            Object locked=ReflectionTestUtils.getField(lookup,"shelters");
+            assertThat(locked).isInstanceOf(com.pawbridge.backend.animal.internal.shelter.infrastructure.MembershipLockedAnimalShelterReads.class);
+            assertThat(ReflectionTestUtils.getField(locked,"delegate")).isSameAs(context.getBean("animalModuleReads"));
+            assertThat(ReflectionTestUtils.getField(locked,"jdbc")).isSameAs(jdbc);
+            assertThat(context.getBeansOfType(java.net.http.HttpClient.class)).isEmpty();
+            verify(jdbc,never()).query(anyString(),any(org.springframework.jdbc.core.RowMapper.class),any());
+            verify(jdbc,never()).update(anyString(),any(Object[].class));
+            verifyNoInteractions(writer);
+        });
+    }
+    @Test void given__module_and_different_writer_source__when__assembling__then__fail_closed_before_sql(){
+        var writer=mock(javax.sql.DataSource.class);var jdbc=mock(JdbcTemplate.class);when(jdbc.getDataSource()).thenReturn(mock(javax.sql.DataSource.class));
+        moduleRunner(jdbc,writer).withPropertyValues("pawbridge.shelter-commands.enabled=true").run(context->{
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure()).hasRootCauseMessage("Shelter membership module requires the shared writer data source");
+            verify(jdbc,never()).query(anyString(),any(org.springframework.jdbc.core.RowMapper.class),any());
+            verify(jdbc,never()).update(anyString(),any(Object[].class));
+            verifyNoInteractions(writer);
+        });
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"absent","false","on","yes","1","unknown"})
+    void given__shelter_commands_not_explicitly_true__when__module_membership_assembles__then__retain_original_delegate_without_writer_locking(String flag){
+        var jdbc=mock(JdbcTemplate.class);
+        var selected=runner(jdbc,mock(PlatformTransactionManager.class))
+                .withPropertyValues("pawbridge.shelter-membership.animal-backend=module")
+                .withBean("dataSource",javax.sql.DataSource.class,()->mock(javax.sql.DataSource.class))
+                .withBean("transactionManager",PlatformTransactionManager.class,()->mock(PlatformTransactionManager.class))
+                .withBean(com.fasterxml.jackson.databind.ObjectMapper.class,com.fasterxml.jackson.databind.ObjectMapper::new)
+                .withBean(com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.class,
+                        ()->mock(com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.class));
+        if(!flag.equals("absent"))selected=selected.withPropertyValues("pawbridge.shelter-commands.enabled="+flag);
+        selected.run(context->{
+            assertThat(context).hasNotFailed();
+            Object actual=ReflectionTestUtils.getField(context.getBean(ShelterMembership.ShelterLookup.class),"shelters");
+            assertThat(actual).isSameAs(context.getBean("animalModuleReads"));
+            verify(jdbc,never()).getDataSource();
+            verify(jdbc,never()).query(anyString(),any(org.springframework.jdbc.core.RowMapper.class),any());
+            verify(jdbc,never()).update(anyString(),any(Object[].class));
+        });
+    }
+    private static ApplicationContextRunner moduleRunner(JdbcTemplate jdbc,javax.sql.DataSource writer){
+        return runner(jdbc,mock(PlatformTransactionManager.class))
+                .withPropertyValues("pawbridge.shelter-membership.animal-backend=module")
+                .withBean("writeDataSource",javax.sql.DataSource.class,()->writer)
+                .withBean("dataSource",javax.sql.DataSource.class,()->mock(javax.sql.DataSource.class))
+                .withBean("transactionManager",PlatformTransactionManager.class,()->mock(PlatformTransactionManager.class))
+                .withBean(com.fasterxml.jackson.databind.ObjectMapper.class,com.fasterxml.jackson.databind.ObjectMapper::new)
+                .withBean(com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.class,
+                        ()->mock(com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.class));
+    }
     private static ApplicationContextRunner runner(JdbcTemplate jdbc,PlatformTransactionManager manager){return new ApplicationContextRunner().withUserConfiguration(ShelterMembershipConfiguration.class)
             .withPropertyValues("pawbridge.shelter-membership.enabled=true").withBean("writeJdbc",JdbcTemplate.class,()->jdbc)
             .withBean("writeTransactionManager",PlatformTransactionManager.class,()->manager).withBean("readClock",Clock.class,Clock::systemUTC);}

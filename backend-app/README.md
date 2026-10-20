@@ -880,3 +880,22 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 `pawbridge.animal-travel.enabled=true`와 `pawbridge.animal-query.backend=postgresql`을 함께 지정할 때 `/api/v1/places/regions`, `/api/v1/places`, `/api/v1/places/{contentId}`의 세 GET만 활성화합니다. 기본 비활성이고 기존 reader JDBC·트랜잭션 관리자를 공유합니다. 지역·상세는 읽기 전용, 목록의 count와 page는 원문과 같이 같은 읽기 전용 REPEATABLE_READ 트랜잭션으로 조회합니다. 별도 pool·EMF·DDL은 추가하지 않습니다.
 
 원문 PostgreSQL의 여행 카탈로그 7개 테이블과 응답·가용 상태·이미지 이용 조건을 사용하며, 응답 중 TourAPI·R2·AI 호출을 하지 않습니다. 수집·스케줄러·갱신 API는 이 구성에 포함하지 않습니다. 새 합성 DB 검증은 SELECT 전용 reader와 `P14_PG_SETTINGS`를 사용하는 `OwnedPostgresqlAnimalTravelTest`로 분리합니다. 기존 수집기의 실행 소유권 인계와 실제 운영 활성화는 별도 미완료 항목입니다.
+
+
+### 보호소 관리 쓰기와 회원 승인 직렬화
+
+`pawbridge.shelter-commands.enabled=true`에서 보호소 POST·PUT·DELETE만 추가한다. 기본 off·true 이외 별칭은 거부하며 기존 Animal 쓰기와 같은 named writer/EntityManager/트랜잭션·auditing을 공유한다. 새 pool·DDL·원격 호출은 없다.
+
+서명 검증 사용자 ID 뒤 현재 DB의 가용성·삭제 대기·역할을 다시 확인한다. ADMIN은 등록/전체 수정/삭제, SHELTER는 현재 careRegNo와 일치하는 자기 보호소의 5필드만 수정한다. PUT은 nullable5를 그대로 덮어쓰며 등록번호·이름·주소·기관은 바꾸지 않는다. 연결 동물 또는 역할에 관계없이 careRegNo가 연결된 회원이 한 명이라도 있으면 삭제는 고정409로 차단한다. 실제 삭제는 기존 검색·공개정보 FK cascade만 따르고 관측 이력은 유지한다.
+
+회원 승인과 삭제는 User→Shelter 순서 및 실제 PostgreSQL KEY SHARE/FOR UPDATE로 직렬화한다. 보호소 쓰기는 REQUIRED/READ_COMMITTED이며 기존 RR·RO에 참여하려 하면 거부한다. 신규 보호소 쓰기와 회원 승인이 함께 활성화되면 회원 Animal backend는 module이어야 한다. 쓰기 기능이 꺼진 기존 module 승인은 원래 delegate를 사용하여 추가 잠금·권한 요구를 만들지 않는다.
+
+새 P15 합성 시험만 아래처럼 정확한 클래스를 선택한다. 설정 파일은 별도0700 디렉터리의 소유0600 파일이며 Git에 넣지 않는다. 일반 test에서는 이 태그가 제외된다.
+
+```sh
+PAWBRIDGE_OWNED_SETTINGS_ENV=P15_PG_SETTINGS \
+P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
+./gradlew :boot:ownedPostgresqlTest --tests '*OwnedPostgresqlShelterCommandTest'
+```
+
+시험 전용 fixture는 축소 User 모델과 원문 Animal 8표로 구성되며 실제 운영 migration·권한 변경 근거가 아니다. 실제 API 활성화·기존 수집기/회원 승인 경로의 배타 인계는 별도 미완료 항목이다.
