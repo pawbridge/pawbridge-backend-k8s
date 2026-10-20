@@ -233,15 +233,15 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         selected = {mode: [] for mode in modes}
         wanted_conditions = {
             "${{ matrix.profile == 'full' }}": {backend_contract_profile.FULL},
-            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}":
+            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}":
                 {backend_contract_profile.FULL, backend_contract_profile.PILOT},
-            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}":
+            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}":
                 {backend_contract_profile.FULL, backend_contract_profile.PILOT, backend_contract_profile.MEMBER_MANAGEMENT},
         }
         allowed_conditions = {'Extend the owned fixture with only the comment table and reader columns','Extend the owned fixture with minimal F9 comment INSERT permissions','Extend the owned fixture with exact F10 comment deletion permissions','Extend the owned fixture with exact F11 comment content update permission','Extend the owned fixture with exact F12 profile columns and reader permissions','Extend the owned fixture with pinned User constraints and exact F13 nickname permissions','Extend the owned fixture with exact F14 favorites schema and reader-only columns','Extend the owned fixture with pinned F15 board and videos and reader-only columns','Extend the owned fixture with only pinned F16 daily totals and reader columns','Extend the owned fixture with only F17 pending and block tables and three reader columns','Verify the unchanged F17 fixture for F18 without new schema or grants','Reuse the unchanged F18 and F17 fixture for F19 without schema or grants','Add only the existing block timestamp SELECT after the F19 regressions','Extend the owned fixture with only original notes and mailboxes after F20','Extend only five existing reader columns after the full F21 stage','Reuse the exact F22 fixture for F23 without new DDL or privileges','Extend only the existing member lock and outgoing block writer privileges for F24','Extend only the outgoing block INSERT columns for F25','Extend only the owned note read and lock writer columns after the complete F25 stage','Extend only mailbox favorite UPDATE after the complete F26 stage','Add only the original requests table and two DELETE grants after the complete F27 stage','Add only pinned report context and exact send columns after the complete F28 stage',
                               'Verify administrator post statistics oracle guards without resources',
                               'Compile pinned administrator post statistics source without database tests',
-                              'Compile pinned administrator post management source without database tests',
+                              'Compile pinned User Community cohort source without database tests',
                               'Remove only the owned disposable fixture',
                               'Reject missing, failed or falsely skipped runtime contracts',
                               'Preserve tests and bounded runtime evidence',
@@ -314,17 +314,17 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             prepared = re.search(r'run: python3 scripts/f([0-9]+)_ci.py prepare\n', part)
             if prepared:
                 if 8 <= int(prepared.group(1)) <= 29:
-                    self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}", part)
+                    self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}", part)
                     self.assertEqual(1, part.count('        if:'))
                 else:
                     self.assertNotIn('        if:', part)
         shape = next(part for part in parts if 'id: fixture_f4_shape\n' in part)
-        self.assertIn("if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' || matrix.profile == 'auth-sessions' || matrix.profile == 'admin-post-statistics' || matrix.profile == 'admin-post-management' }}", shape)
+        self.assertIn("if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' || matrix.profile == 'auth-sessions' || matrix.profile == 'admin-post-statistics' || matrix.profile == 'user-community-integration' }}", shape)
         self.assertIn('python3 scripts/f4_ci.py prepare-shape', shape)
         self.assertLess(check.index('id: jar_f3\n'), check.index('id: fixture_f4_shape\n'))
         self.assertLess(check.index('id: fixture_f4_shape\n'), check.index('id: jar_f4\n'))
         pg = next(part for part in parts if 'id: pg_note_expiry\n' in part)
-        self.assertIn("if: ${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}", pg)
+        self.assertIn("if: ${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}", pg)
         self.assertIn(':boot:noteExpiryCompatibilityTest', pg)
         self.assertIn('verify_note_expiry_report', pg)
         self.assertIn('note_expiry_scope_verified', self.job('selection'))
@@ -345,9 +345,9 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 ('pg_member_cleanup', ':boot:memberCleanupCompatibilityTest'),
                 ('jar_f31', 'python3 scripts/f29_ci.py member-cleanup-smoke')):
             step = next(part for part in parts if 'id: ' + key + '\n' in part)
-            condition = ("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}"
+            condition = ("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}"
                          if key == 'fixture_member_cleanup' else
-                         "if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}")
+                         "if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}")
             self.assertIn(condition, step)
             self.assertIn(command, step)
         pg = next(part for part in parts if 'id: pg_member_cleanup\n' in part)
@@ -366,7 +366,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         pg = next(part for part in parts if 'id: pg_signup_statistics\n' in part)
         self.assertLess(check.index('python3 scripts/f19_ci.py prepare'), check.index('id: pg_signup_statistics'))
         self.assertLess(check.index('id: pg_signup_statistics'), check.index('      - name: Add only the existing block timestamp SELECT after the F19 regressions'))
-        self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}", pg)
+        self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}", pg)
         self.assertIn(':boot:signupStatisticsCompatibilityTest :boot:signupStatisticsCompatibilitySeoulTest', pg)
         self.assertIn('test -s build/ci/f19-oracle-sha256.txt', pg)
         self.assertIn('test -s build/ci/f19-signup-statistics-oracle-sha256.txt', pg)
@@ -380,7 +380,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             prepared = re.search(r'run: python3 scripts/f([0-9]+)_ci.py prepare\n', part)
             if prepared:
                 if 8 <= int(prepared.group(1)) <= 29:
-                    self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}", part)
+                    self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}", part)
                     self.assertEqual(1, part.count('        if:'))
                 else:
                     self.assertNotIn('        if:', part)
@@ -402,7 +402,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn(':boot:compileCompatibilityTestJava', compile_step)
         self.assertNotIn(':boot:memberCleanupCompatibilityTest', compile_step)
         member = next(p for p in parts if 'id: fixture_member_cleanup\n' in p)
-        self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}", member)
+        self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}", member)
         fixture = next(p for p in parts if 'id: fixture_admin_update\n' in p)
         self.assertIn('python3 scripts/f29_ci.py admin-update-prepare', fixture)
         pg = next(p for p in parts if 'id: pg_admin_update\n' in p)

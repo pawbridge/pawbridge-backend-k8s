@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 import com.pawbridge.backend.community.api.ContactMemberCleanup;
+import com.pawbridge.backend.community.internal.chat.application.MemberChatHints;
+import com.pawbridge.backend.community.internal.chat.application.MemberChatModels.Signal;
 import com.pawbridge.backend.community.internal.note.application.ContactMemberCleanupStore;
 import com.pawbridge.backend.community.internal.note.web.PrivateNoteStreamRegistry;
 import com.pawbridge.backend.user.api.ContactMemberQuery;
@@ -68,6 +70,30 @@ class MemberCleanupConfigurationTest {
             assertThat(context).hasFailed();
             assertThat(context.getStartupFailure()).hasRootCauseMessage("Member cleanup with chat enabled requires verified Redis withdrawal wiring");
             verify(manager,never()).getTransaction(any());verifyNoInteractions(members);
+        });
+    }
+
+    @Test
+    void given__wired_chat__when__committed_cleanup_callback_runs__then__publish_withdrawal_before_note_close_even_if_redis_hint_fails() {
+        var hints=mock(MemberChatHints.class);
+        runner().withBean(MemberChatHints.class,()->hints).withPropertyValues("pawbridge.chat.enabled=true").run(context->{
+            assertThat(context).hasNotFailed();
+            var store=context.getBean(ContactMemberCleanupStore.class);
+            var callback=(LongConsumer)ReflectionTestUtils.getField(store,"committedCleanup");
+            // Exclude context initialization calls from this injected callback contract.
+            clearInvocations(streams,jdbc,manager,members);
+            callback.accept(8);
+            var ordered=inOrder(hints,streams);
+            ordered.verify(hints).publish(new Signal(8,"WITHDRAWN",null,0));
+            ordered.verify(streams).closeMember(8);ordered.verify(streams).resyncAll();
+            verifyNoMoreInteractions(hints,streams);
+            clearInvocations(hints,streams);
+            doThrow(new IllegalStateException("synthetic private transport failure")).when(hints).publish(any());
+            callback.accept(8);
+            var failedHintOrder=inOrder(hints,streams);
+            failedHintOrder.verify(hints).publish(new Signal(8,"WITHDRAWN",null,0));
+            failedHintOrder.verify(streams).closeMember(8);failedHintOrder.verify(streams).resyncAll();
+            verifyNoInteractions(jdbc,manager,members);
         });
     }
 

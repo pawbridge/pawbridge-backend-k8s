@@ -277,7 +277,7 @@ class AdminPostStatisticsProfileTest(unittest.TestCase):
             self.assertIn(receipt,keyed['compile_post_statistics'])
         for n in range(8,30):
             part=keyed['fixture_post_unrelated_f'+str(n)]
-            self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}",part)
+            self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}",part)
             self.assertIn('python3 scripts/f'+str(n)+'_ci.py prepare',part)
         for key in SKIPPED:
             self.assertTrue("matrix.profile != 'admin-post-statistics'" in keyed[key]
