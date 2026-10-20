@@ -32,6 +32,9 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import javax.crypto.SecretKey;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
@@ -94,6 +97,7 @@ class OwnedPostgresqlAnimalCommandTest {
     private DriverManagerDataSource probe;
     private JdbcTemplate jdbc;
     private Map<String, Fingerprint> baseline;
+    private boolean pendingConcurrentWorkers;
 
     @BeforeAll
     void openOnlyTheVerifiedOwnedWriter() {
@@ -124,6 +128,7 @@ class OwnedPostgresqlAnimalCommandTest {
     @BeforeEach
     void requireTheUnchangedForeignBaseline() {
         observed("unchanged fixture baseline", () -> {
+            check(!pendingConcurrentWorkers, "Preserve the owned fixture while request workers may still be running");
             check(ownedIds.isEmpty() && ownedKeys.isEmpty() && fingerprint().equals(baseline),
                     "Every case must start at the owned fixture baseline");
             released();
@@ -132,11 +137,15 @@ class OwnedPostgresqlAnimalCommandTest {
 
     @AfterEach
     void removeOnlyResponseOwnedRowsAndPreserveEveryForeignRow() {
-        observed("owned row cleanup", this::cleanupOwnedRows);
+        observed("owned row cleanup", () -> {
+            check(!pendingConcurrentWorkers, "Do not clean rows while an owned request worker may still write");
+            cleanupOwnedRows();
+        });
     }
 
     @AfterAll
     void closeOnlyTheOwnedWriterPool() {
+        check(!pendingConcurrentWorkers, "Preserve the owned pool and evidence if worker termination remains uncertain");
         if (pool != null) { pool.close(); check(pool.isClosed(), "The owned writer pool must close"); }
     }
 
@@ -342,6 +351,118 @@ class OwnedPostgresqlAnimalCommandTest {
             cleanupOwnedRows();
             check(fingerprint().equals(baseline), "Exact-key cleanup must restore the foreign baseline after response failure");
         });
+    }
+
+    @Test
+    void givenConcurrentStatusAndDescriptionFromDifferentActors_whenBothWaitOnAnimal_thenPreserveBothCommittedChanges() {
+        http((mvc, context) -> {
+            long id = create(mvc, SHELTER, "OWNED-P8-CONCURRENT-UPDATE", "owned-care-a", "breed").path("id").asLong();
+            List<JsonNode> responses = raceWhileLocked(
+                    "SELECT id FROM pawbridge_animal.animals WHERE id=" + id + " FOR UPDATE",
+                    () -> send(mvc, "PATCH", ROOT + "/" + id + "/status", token(ADMIN), "{\"newStatus\":\"ADOPTED\"}", 200),
+                    () -> send(mvc, "PATCH", ROOT + "/" + id + "/description", token(SHELTER),
+                            "{\"description\":\"concurrent synthetic description\"}", 200));
+            Map<String, Object> persisted = animal(id);
+            check("ADOPTED".equals(persisted.get("status"))
+                    && "concurrent synthetic description".equals(persisted.get("description")),
+                    "Two successful concurrent commands must preserve both committed mutations");
+            check("ADOPTED".equals(responses.get(0).path("status").asText())
+                    && "concurrent synthetic description".equals(responses.get(1).path("description").asText()),
+                    "Each successful response must contain its own mutation");
+            projection(id, 2);
+            var rows = events(id);
+            check(rows.size() == 3 && rows.stream().filter(row -> "animal.status.changed".equals(row.get("topic"))).count() == 1
+                    && rows.stream().filter(row -> "animal.updated".equals(row.get("topic"))).count() == 1,
+                    "Both committed updates must keep exactly one original event each");
+            released();
+        });
+    }
+
+    @Test
+    void givenDeletedMiddleManualNotice_whenCreatingAgain_thenAdvancePastLiveMaximum() {
+        http((mvc, context) -> {
+            JsonNode first = create(mvc, SHELTER, null, "owned-care-a", "breed");
+            JsonNode middle = create(mvc, SHELTER, null, "owned-care-a", "breed");
+            JsonNode last = create(mvc, SHELTER, null, "owned-care-a", "breed");
+            send(mvc, "DELETE", ROOT + "/" + middle.path("id").asLong(), token(SHELTER), null, 204);
+            JsonNode next = create(mvc, SHELTER, null, "owned-care-a", "breed");
+            String latest = last.path("apmsNoticeNo").asText();
+            long suffix = Long.parseLong(latest.substring(latest.length() - 6));
+            String expected = latest.substring(0, latest.length() - 6) + String.format("%06d", suffix + 1);
+            check(expected.equals(next.path("apmsNoticeNo").asText())
+                    && !first.path("apmsNoticeNo").asText().equals(next.path("apmsNoticeNo").asText()),
+                    "Deleting a middle row must not reuse the live maximum manual notice");
+            check(count("SELECT count(*) FROM pawbridge_animal.animals WHERE apms_notice_no=?", expected) == 1,
+                    "The generated notice must identify only its newly owned row in this fixture");
+            released();
+        });
+    }
+
+    @Test
+    void givenConcurrentManualCreatesFromDifferentActors_whenInsertionsOverlap_thenGenerateDistinctLiveNotices() {
+        http((mvc, context) -> {
+            // Register both exact cleanup keys before dispatch; worker threads do not mutate owned-key sets.
+            String firstBody = JSON.writeValueAsString(body(null, "owned-care-a", "breed"));
+            String secondBody = JSON.writeValueAsString(body(null, "owned-care-a", "breed"));
+            List<JsonNode> created = raceWhileLocked("LOCK TABLE pawbridge_animal.animals IN SHARE MODE",
+                    () -> send(mvc, "POST", ROOT, token(ADMIN), firstBody, 201),
+                    () -> send(mvc, "POST", ROOT, token(SHELTER), secondBody, 201));
+            long first = remember(created.get(0)), second = remember(created.get(1));
+            String a = created.get(0).path("apmsNoticeNo").asText(), b = created.get(1).path("apmsNoticeNo").asText();
+            check(first != second && a.matches("MAN-\\d{6}-\\d{6}") && b.matches("MAN-\\d{6}-\\d{6}") && !a.equals(b),
+                    "Concurrent automatic manual notices must be distinct and retain the original format");
+            check(jdbc.queryForObject("SELECT count(*) FROM pawbridge_animal.animals WHERE apms_notice_no IN (?,?)", Long.class, a, b) == 2,
+                    "The two successful creates must persist two differently numbered rows");
+            projection(first, 1); projection(second, 1);
+            assertEvents(first, List.of("animal.created")); assertEvents(second, List.of("animal.created"));
+            released();
+        });
+    }
+
+    private List<JsonNode> raceWhileLocked(String controlledOwnedLockSql, Callable<JsonNode> first, Callable<JsonNode> second) throws Exception {
+        pool.setMaximumPoolSize(2);
+        var workers = Executors.newFixedThreadPool(2);
+        pendingConcurrentWorkers = true;
+        try (Connection holder = probe.getConnection(); var statement = holder.createStatement()) {
+            holder.setAutoCommit(false);
+            statement.execute("SET LOCAL lock_timeout='3s'");
+            int holderPid;
+            try (var pid = statement.executeQuery("SELECT pg_backend_pid()")) { pid.next(); holderPid = pid.getInt(1); }
+            statement.execute(controlledOwnedLockSql);
+            var a = workers.submit(first); var b = workers.submit(second);
+            try {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                int waiting = 0;
+                do {
+                    statement.execute("SELECT pg_stat_clear_snapshot()");
+                    try (var rows = statement.executeQuery("WITH waiters AS (SELECT pid,pg_blocking_pids(pid) AS blockers FROM pg_stat_activity "
+                            + "WHERE datname=current_database() AND usename=current_user AND state='active' AND wait_event_type='Lock') "
+                            + "SELECT count(DISTINCT w.pid) FROM waiters w WHERE " + holderPid + "=ANY(w.blockers) OR EXISTS "
+                            + "(SELECT FROM waiters parent WHERE parent.pid=ANY(w.blockers) AND " + holderPid + "=ANY(parent.blockers))")) {
+                        rows.next(); waiting = rows.getInt(1);
+                    }
+                    if (waiting == 2) break;
+                    Thread.sleep(10);
+                } while (System.nanoTime() < deadline);
+                check(waiting == 2 && pool.getHikariPoolMXBean().getActiveConnections() == 2,
+                        "Two distinct owned writer backends must actually overlap at PostgreSQL locks");
+            } finally { holder.rollback(); }
+            return List.of(a.get(8, TimeUnit.SECONDS), b.get(8, TimeUnit.SECONDS));
+        } finally {
+            workers.shutdown();
+            try {
+                if (!workers.awaitTermination(8, TimeUnit.SECONDS)) {
+                    workers.shutdownNow();
+                    check(workers.awaitTermination(3, TimeUnit.SECONDS), "Both owned request workers must finish before cleanup");
+                }
+                pendingConcurrentWorkers = false;
+                pool.setMaximumPoolSize(1);
+            } catch (InterruptedException interrupted) {
+                workers.shutdownNow();
+                Thread.currentThread().interrupt();
+                throw interrupted;
+            }
+        }
     }
 
     private void cleanupOwnedRows() {

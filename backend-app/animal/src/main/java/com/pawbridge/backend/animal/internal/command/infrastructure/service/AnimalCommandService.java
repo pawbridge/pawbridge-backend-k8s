@@ -28,6 +28,7 @@ import com.pawbridge.backend.animal.api.AnimalCommandActors;
 import com.pawbridge.backend.animal.api.AnimalCommandActors.Actor;
 import java.util.Objects;
 import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Selected original JSON commands; Root supplies one Animal JPA writer and current-account lookup. */
@@ -57,6 +58,7 @@ public final class AnimalCommandService {
         if (writerTransactions.getDataSource() != searchDocuments.dataSource())
             throw new IllegalArgumentException("Animal JPA and search must use the same writer DataSource");
         this.writes = new TransactionTemplate(writerTransactions);
+        this.writes.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
     public AnimalDetailResponse create(Long verifiedUserId, CreateAnimalRequest request) {
@@ -93,7 +95,7 @@ public final class AnimalCommandService {
 
     private Animal ownedAnimal(Long verifiedUserId, Long id) {
         Actor actor = currentActor(verifiedUserId);
-        Animal animal = animalRepository.findById(id)
+        Animal animal = animalRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new EntityNotFoundException("Animal not found: " + id));
         requireShelter(actor, animal.getShelter() == null ? null : animal.getShelter().getCareRegNo());
         return animal;

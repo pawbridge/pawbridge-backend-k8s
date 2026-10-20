@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.stream.Stream;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -28,6 +29,9 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -50,9 +54,20 @@ class AnimalCommandServiceTest {
         DataSource source = mock(DataSource.class);
         when(manager.getDataSource()).thenReturn(source);
         when(search.dataSource()).thenReturn(source);
-        when(manager.getTransaction(any())).thenReturn(transaction);
+        // Metadata-only transaction fixture: repositories and manager remain mocks, with no JDBC resource.
+        when(manager.getTransaction(any())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            TransactionDefinition definition=invocation.getArgument(0);
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            TransactionSynchronizationManager.setCurrentTransactionReadOnly(definition.isReadOnly());
+            TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                    definition.getIsolationLevel()==TransactionDefinition.ISOLATION_DEFAULT ? null : definition.getIsolationLevel());
+            return transaction;
+        });
+        doAnswer(invocation -> { clearMockTransactionMetadata(); return null; }).when(manager).commit(transaction);
+        doAnswer(invocation -> { clearMockTransactionMetadata(); return null; }).when(manager).rollback(transaction);
         when(actors.find(11L)).thenReturn(new Actor(11L, "ROLE_SHELTER", "care-7", true, false));
-        when(animals.findById(42L)).thenReturn(Optional.of(animal));
+        when(animals.findByIdForUpdate(42L)).thenReturn(Optional.of(animal));
         when(shelters.findByCareRegNo("care-7")).thenReturn(Optional.of(shelter));
         when(animals.save(any())).thenAnswer(invocation -> {
             Animal created = invocation.getArgument(0);
@@ -60,6 +75,28 @@ class AnimalCommandServiceTest {
             return created;
         });
         service = service(json);
+    }
+
+    @AfterEach void transaction_metadata_does_not_leak() {
+        try {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isFalse();
+            assertThat(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel()).isNull();
+        } finally {
+            clearMockTransactionMetadata();
+        }
+    }
+
+    void clearMockTransactionMetadata() {
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+    }
+
+    TransactionTemplate transactionWithIsolation(int isolation) {
+        var template=new TransactionTemplate(manager);
+        template.setIsolationLevel(isolation);
+        return template;
     }
 
     AnimalCommandService service(ObjectMapper mapper) {
@@ -97,7 +134,8 @@ class AnimalCommandServiceTest {
         var result=service.create(11L,request);
         assertThat(result.getApiSource()).isEqualTo(ApiSource.APMS_ANIMAL);
         assertThat(result.getApmsNoticeNo()).isEqualTo("APMS-공고");
-        verify(animals,never()).countByApmsNoticeNoStartingWith(any());
+        verify(animals,never()).findMaxManualNoticeSuffix(anyString(),anyString());
+        verify(animals,never()).lockManualNoticePrefix(anyInt(),anyInt());
     }
 
     static Stream<Arguments> nonManualSourcesAndMissingNotices() {
@@ -135,7 +173,7 @@ class AnimalCommandServiceTest {
         var result=service.create(11L,request);
         assertThat(result.getApiSource()).isEqualTo(ApiSource.MANUAL);
         assertThat(result.getApmsNoticeNo()).matches("MAN-\\d{6}-000001");
-        verify(animals).countByApmsNoticeNoStartingWith(anyString());
+        verify(animals).findMaxManualNoticeSuffix(anyString(),anyString());
         verify(manager).commit(transaction);
     }
 
@@ -145,7 +183,8 @@ class AnimalCommandServiceTest {
         var result=service.create(11L,request);
         assertThat(result.getApiSource()).isEqualTo(source);
         assertThat(result.getApmsNoticeNo()).isEqualTo("supplied-notice-7");
-        verify(animals,never()).countByApmsNoticeNoStartingWith(any());
+        verify(animals,never()).findMaxManualNoticeSuffix(anyString(),anyString());
+        verify(animals,never()).lockManualNoticePrefix(anyInt(),anyInt());
         verify(manager).commit(transaction);
     }
 
@@ -248,7 +287,7 @@ class AnimalCommandServiceTest {
 
     @ParameterizedTest @ValueSource(strings={"status","description","delete"})
     void missing_animal_keeps_original_entity_not_found_failure(String command) {
-        when(animals.findById(42L)).thenReturn(Optional.empty());
+        when(animals.findByIdForUpdate(42L)).thenReturn(Optional.empty());
         assertThatThrownBy(()->invoke(command,11L)).isInstanceOf(EntityNotFoundException.class);
         verifyNoInteractions(events);verify(manager).rollback(transaction);
     }
@@ -281,6 +320,66 @@ class AnimalCommandServiceTest {
     @Test void search_and_jpa_using_different_writer_sources_fail_before_work() {
         when(manager.getDataSource()).thenReturn(mock(DataSource.class));
         assertThatThrownBy(()->service(json)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"status","description","delete"})
+    void owned_mutations_take_user_then_animal_write_lock_and_never_read_unlocked(String command) {
+        invoke(command,11L);
+        var order=inOrder(actors,animals);
+        order.verify(actors).find(11L);
+        order.verify(animals).findByIdForUpdate(42L);
+        verify(animals,never()).findById(any());
+        verify(manager).commit(transaction);
+    }
+
+    @Test void notice_uses_live_max_after_middle_gap_and_same_day_advisory_lock_before_max() {
+        when(animals.findMaxManualNoticeSuffix(anyString(),anyString())).thenReturn(3);
+        var number=transactionWithIsolation(TransactionDefinition.ISOLATION_READ_COMMITTED)
+                .execute(status -> new NoticeNumberGenerator(animals).generate());
+        assertThat(number).matches("MAN-\\d{6}-000004");
+        String prefix=number.substring(0,number.length()-6);
+        int day=Integer.parseInt(number.substring(4,10));
+        var order=inOrder(animals);
+        order.verify(animals).lockManualNoticePrefix(0x5042414E,day);
+        order.verify(animals).findMaxManualNoticeSuffix(prefix+"%","^"+prefix+"([0-9]{6})$");
+        verify(animals,never()).save(any());verify(animals,never()).flush();
+        verifyNoInteractions(events);verify(search,never()).animal(anyLong());
+        verify(manager).commit(transaction);
+    }
+
+    @Test void exhausted_six_digit_suffix_fails_without_emitting_a_seven_digit_number() {
+        when(animals.findMaxManualNoticeSuffix(anyString(),anyString())).thenReturn(999999);
+        assertThatThrownBy(() -> transactionWithIsolation(TransactionDefinition.ISOLATION_READ_COMMITTED)
+                .execute(status -> new NoticeNumberGenerator(animals).generate()))
+                .isInstanceOf(IllegalStateException.class).hasMessage("수동 등록 공고번호의 일일 한도를 초과했습니다.");
+        verify(animals,never()).save(any());verify(animals,never()).flush();
+        verifyNoInteractions(events);verify(search,never()).animal(anyLong());
+        verify(manager).rollback(transaction);verify(manager,never()).commit(any());
+    }
+
+    @Test void notice_generation_outside_transaction_fails_before_any_repository_call() {
+        assertThatThrownBy(() -> new NoticeNumberGenerator(animals).generate())
+                .isInstanceOf(IllegalStateException.class).hasMessage("수동 공고번호는 쓰기 트랜잭션 안에서 생성해야 합니다.");
+        verifyNoInteractions(animals,events);verify(search,never()).animal(anyLong());
+    }
+
+    @ParameterizedTest @ValueSource(ints={-1,1,4,8})
+    void notice_generation_without_explicit_read_committed_is_rejected_before_lock_or_max(int isolation) {
+        assertThatThrownBy(() -> transactionWithIsolation(isolation)
+                .execute(status -> new NoticeNumberGenerator(animals).generate()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("수동 공고번호에는 명시적인 READ_COMMITTED 격리 수준이 필요합니다.");
+        verifyNoInteractions(animals,events);verify(search,never()).animal(anyLong());
+        verify(manager).rollback(transaction);verify(manager,never()).commit(any());
+    }
+
+    @Test void notice_generation_in_read_only_transaction_is_rejected_before_lock_or_max() {
+        var template=transactionWithIsolation(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        template.setReadOnly(true);
+        assertThatThrownBy(() -> template.execute(status -> new NoticeNumberGenerator(animals).generate()))
+                .isInstanceOf(IllegalStateException.class).hasMessage("수동 공고번호는 쓰기 트랜잭션 안에서 생성해야 합니다.");
+        verifyNoInteractions(animals,events);verify(search,never()).animal(anyLong());
+        verify(manager).rollback(transaction);verify(manager,never()).commit(any());
     }
 
     void invoke(String command,Long userId) {
