@@ -8,6 +8,7 @@ import com.pawbridge.backend.store.internal.catalog.application.StoreCatalog;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders;
 import com.pawbridge.backend.store.internal.directorder.web.DirectOrderController;
+import com.pawbridge.backend.store.internal.directorder.web.OrderReadController;
 import com.pawbridge.backend.store.internal.directorder.web.DirectOrderExceptionHandler;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -41,7 +42,7 @@ class StoreDirectOrderConfigurationTest {
         if (!flag.equals("absent")) runner = runner.withPropertyValues("pawbridge.store-direct-orders.enabled=" + flag);
         runner.run(context -> assertThat(context).hasNotFailed().doesNotHaveBean(EntityManagerFactory.class)
                 .doesNotHaveBean(DirectOrders.class).doesNotHaveBean(StoreOrderActors.class)
-                .doesNotHaveBean(DirectOrderController.class).doesNotHaveBean(DirectOrderExceptionHandler.class)
+                .doesNotHaveBean(DirectOrderController.class).doesNotHaveBean(OrderReadController.class).doesNotHaveBean(DirectOrderExceptionHandler.class)
                 .doesNotHaveBean(KoreanSearchTerms.class).doesNotHaveBean(AuditingHandler.class)
                 .doesNotHaveBean(StoreMemberReads.class).doesNotHaveBean(StoreCatalog.class));
     }
@@ -65,7 +66,7 @@ class StoreDirectOrderConfigurationTest {
             assertThat(units.get()).hasSize(mode.equals("both") ? 2 : 1);
             assertThat(context.containsBean("animalCommandService")).isEqualTo(!mode.equals("store"));
             if (mode.equals("animal")) {
-                assertThat(context).doesNotHaveBean(DirectOrders.class).doesNotHaveBean(KoreanSearchTerms.class);
+                assertThat(context).doesNotHaveBean(DirectOrders.class).doesNotHaveBean(OrderReadController.class).doesNotHaveBean(KoreanSearchTerms.class);
             } else {
                 var emf = context.getBean("storeDirectOrderEntityManagerFactory", EntityManagerFactory.class);
                 var factory = context.getBean("&storeDirectOrderEntityManagerFactory", LocalContainerEntityManagerFactoryBean.class);
@@ -113,7 +114,8 @@ class StoreDirectOrderConfigurationTest {
                 assertThat(search.getJdbcTemplate().getQueryTimeout()).isEqualTo(5);
                 terms.set(context.getBean(KoreanSearchTerms.class));
                 assertThat(terms.get().document("말티즈")).isNotBlank();
-                assertThat(context).hasSingleBean(DirectOrderController.class).hasSingleBean(DirectOrderExceptionHandler.class);
+                assertThat(context).hasSingleBean(DirectOrderController.class).hasSingleBean(OrderReadController.class)
+                        .hasSingleBean(StoreOrderSupportConfiguration.class).hasSingleBean(DirectOrderExceptionHandler.class);
             }
             if (mode.equals("store")) assertThat(context).doesNotHaveBean(AnimalCommandService.class);
             verifyNoInteractions(writer, reader, readerManager);

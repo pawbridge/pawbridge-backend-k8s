@@ -346,10 +346,10 @@ POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
 POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d57f7606f60d2987'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6f44dc894486c8f0125fe7a1b8a38594cca03a53c4e9',
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a5f0e3d834a50770a7dfeb8af91eabff7ff006235b7bc4b80ac660df14091f16',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '8231ae9c6f40d02d45d5596ba0e48b6d3e8d5abdad43fc0eee638a2ec875d5c6',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'a767109e9a5115aec1547098d1cad1cf8935cda24f0b67d0894937c6e7222a81',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -361,7 +361,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c7430dfd017008c3f65ddc7e92209a6a4a65d07421264a78f50b0407d0e2a6c9',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'b4ce7e19dc4a40ce2df5f7bd4b067e0b8273c872ac780279bc3ca6932f5a3b04',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'fd6c39c71ad4f8b6c1c0acd26d1956d8797bc82da488dcf72800611ec7f54a47',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '487b5c2fbe007bab7e26cfee5f0ccf112cb92e6c5d8438ccf1d68084badc2916',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'dda638d643fc686e44102314be4d0d6d88b36a07e910fd074615950d6a3f21d1',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '7016adb41e6e20e7400999aab42eabef66c18de3739b63878e22bf0cd889dd31',
@@ -681,15 +681,15 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/animalcommand/infrastructure/JdbcAnimalCommandActors.java': '75b6904f33c30e1707bec6e0b3b3400ca43d1e0ca4dbf8498f987c37a7f1e26e',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/animalcommand/infrastructure/JdbcAnimalCommandActorsTest.java': '6983f5c7402bb915fbfe0f9a8de0de088441a9555a3f29f5c52c2f9233394d31',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/JpaAuditingConfiguration.java': 'fc010dea3dfdec2958847d50dcd059e9a7cf9c205c9718bd212e7a8789a44e74',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreDirectOrderConfiguration.java': '6a06e660c8421aae434a90d37c09999981aad02750479254508c2669cc9a6749',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreDirectOrderConfiguration.java': '2d94c0628584e50d42a3b6cf4581a5d681c19060d003525e0909d3fbf2644f97',
  'backend-app/boot/src/test/java/com/pawbridge/backend/DirectOrderDisabledHttpTest.java': '57eca0a8f6b69c9aa6a1f2daa47022ff90e7caec2cd62ee3350665d59de8064b',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlDirectOrderTest.java': '73eb1570bf8885f6f942cf271bcdf48ab7cffdaa6e31dbf0a42464a9d16d4396',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreDirectOrderConfigurationTest.java': 'adbcf06e1188b18d4d49bd2d5b1d9fdfa46d2b0257d4b88244e7162b60fc1744',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreDirectOrderConfigurationTest.java': '7fd9b8965f7f520829e520572e66a0f80618eebd0c857ddd5491d36339fb6e30',
  'backend-app/boot/src/test/resources/owned-postgresql/direct-order-owned-schema.sql': 'f10c5d062a7ba47e328a56c137931121f161f5aca87849cc47d25a76921dfe54',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/api/StoreOrderActors.java': '6521afae6621a612d9be4bebbb6521ad2d25c8891d33235f9f3cdf056fd37d88',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/application/DirectOrders.java': '2749c908928deeafa143fb11caf11068e30f5865fe8d30e8d99aa7796bc4d56b',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/application/OrderActorRejectedException.java': '0fbb677f9dd83c7ec500b529692e9a5b8dff1a7718065a7bcd616bd5fd896caf',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaDirectOrders.java': '1a7ffa27f9eb4f927a099ea32820b86bede6cf583f12083b251f2f5752118957',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaDirectOrders.java': '299ce753debc059dbc7aa92c3426707768fcca2865eae2896aec3dd49a336aa3',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaStockAdjustments.java': '7d13f12429776c9bfff67343030553795ed81c491a3ac91bb3c1ab965260333b',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/PostgresqlRollbackCharsetViolation.java': '34f4c01fbe9899eff9b2de96572c8e686cede900c1b2c39666561e1a05d059e8',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/PostgresqlSearchDocuments.java': '5f486f39504a05e4a3e4b6ddecd478ecb5fe64a4b4c6a5bceb90b4dad2db897b',
@@ -702,12 +702,12 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/jpa/repository/OutboxRepository.java': '882550fbc4a3855e7d2a456e5ebfefaa7183473bb3bec868c1a0e818c12b1d43',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/jpa/repository/ProductRepository.java': '1431ec7befe6614eca93f61b4a065ee1256e5e78bf3141c8af4f2d591779f3dd',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/jpa/repository/ProductSKURepository.java': '82a3926b055ed61f46e234f9d399225ed03f5c7e69a846d19690d61e8c9a07e3',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/DirectOrderController.java': '9790827dab91c3af913ba25373b1c33d7ad8cd05bc3555f4b2fd14ccb54c81b0',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/DirectOrderController.java': '22f0d49425187cfe65c73729761244f6f1ce0afc584ad0b76b382e7323dcee91',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/DirectOrderCreateRequest.java': 'd67860bd6fe374705959e85cb8b34054807d61971e2e4b20c85cc9810bbb1ded',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/DirectOrderExceptionHandler.java': 'c7526d66a51d26102b64a52a2d7f642d5442fe60e0e26a3a217407d7d20a60d2',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/DirectOrderExceptionHandler.java': 'c86df4a46ecd544265cdeb6aa27f6faa4d385454150b0adc02239b692919e24f',
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/infrastructure/DirectOrderFixture.java': '2d1b3741875a24cee9eac3dc07dc5c11f7daa14d11675c256f09e4ce431ae36c',
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaDirectOrdersTest.java': 'b66dbf52770d96d402bf11ede1d2c32196fdaf118c74e5ea60554cb6d9cd7eff',
- 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/DirectOrderControllerTest.java': '35579c15fa49da43f27906444fffef9b59f9d68c9484d65989d218ca1e4c502a',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/DirectOrderControllerTest.java': '27542cf37682143dfcb0f58dc63805e5cabfc2aff0fe58febffe1994d44f18bb',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storeorder/infrastructure/JdbcStoreOrderActors.java': '342928af323fb3e0e28734b0c2bb2741820001680b9a0ce34f1343fc561fa7bb',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storeorder/infrastructure/JdbcStoreOrderActorsTest.java': '35d09a47c71d78895196696bd60e7a0b69cfd8fb051f0fc09e797406de553d70',
  'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/lostsearch/infrastructure/LostSearchRequest.java': '87f81f5e6784011c86ff0af14ede96ab31d4f0b959a1519db406ba3c58e96894',
@@ -723,7 +723,35 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalLostSearchConfigurationTest.java': '0809df20987749a15db02d8b243e3379feeb692fef7c86667f0aeae7b7312a2e',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlAnimalLostSearchTest.java': '2dfdfed66ff39b97effa0bc462aa322d1f2a1d8172042627cc4cbb06b94a6258',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/CombinedAnimalStoreConfigurationTest.java': 'ed90d7f6de3bcaca00fb23668dbed1839fe1ec92b5fa7e328edad16c3929885e',
- 'api-gateway/src/test/java/com/pawbridge/apigateway/filter/LostSearchLimitsTest.java': '5b10904d36809531798a52072011c8496d9f786ba8cfbd4d621759e74596026d'}
+ 'api-gateway/src/test/java/com/pawbridge/apigateway/filter/LostSearchLimitsTest.java': '5b10904d36809531798a52072011c8496d9f786ba8cfbd4d621759e74596026d',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreCartConfiguration.java': '747c2c8af7d7a1e11368136513e49dc1bc2c23affa789e01e49ce1a875e3a4a3',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreJpaWriterConfiguration.java': 'b0eb61ea9408c9977cb622285039e44bdcc533da1cdf8ddc6799008ba01a619c',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreOrderSupportConfiguration.java': '9b4cf920df15a19307f790fcf7371f364dc6e040b3575f641d18edb9c5f832c4',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/StoreCartDisabledHttpTest.java': '5d554e98e3b92457b45cf713e87a3ec5992c38f9406159c1e983fd34aba6442a',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreCartOrderTest.java': '1943ff6e4b7c22d2031f3e5f8f1f543ea0e22566e94beefc015161aee14e92ca',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreCartTest.java': '53c2973a302b47a3a8ed2c9c6d3fe51e7920dda85a48d7346824e75f633e0ed5',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreCartConfigurationTest.java': '38bbe44ab14d08a63b60acb1a3e3889cc8e6d9feadb4589224d5b397e4fca0c3',
+ 'backend-app/boot/src/test/resources/owned-postgresql/cart-order-owned-schema.sql': 'b1a72de7ea05a1dac7514d4fc3c5306057716b8082fd6eff635afe7fa96f7b4f',
+ 'backend-app/boot/src/test/resources/owned-postgresql/cart-owned-schema.sql': '801dda5e91c393e2a9a227bce02ea82b902eb8acbe11db0791394ebacb10b690',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/application/CartActorRejectedException.java': 'f7d9f21251010d404cde22631147fe3df4ee762e202a58135c800095cd4eaea8',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/application/Carts.java': 'f519e9b0d33534017515ec58d44db961e9717f4507c37e503e399f2518602401',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/infrastructure/JpaCarts.java': '50501fde4e7758b0e319726ed9b839777f5e22ad3aa12ee6f3103180f1f11ee2',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/infrastructure/jpa/model/Cart.java': '77d3f3034feba4091f0568812cf85d1b9282ececbef7c881058018681ddcac57',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/infrastructure/jpa/model/CartItem.java': '5dce217a247611b572daefe201a1ab62a98da2b74351d4af3d2b945daf03ce81',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/infrastructure/jpa/projection/CartItemResponse.java': 'c563e630ec28aaa534bc4a5d3b8b2f9b63ff7d9b22c86bc7353300d97bd216d1',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/infrastructure/jpa/repository/CartRepository.java': '3b964bb5c8911c031a19a637f959bc3a4c39491a6bd563900be633ae9088b7b1',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/web/CartAddRequest.java': '609203ecbbcf7c99e6830ae0682ac6d1cfdd1bbfe2b377bb646af5d582503d47',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/web/CartController.java': '7a6e9f02cee36ff2f2a0145266d2ae893857a45e2344a9098cb5d4c20e91c5c1',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/web/CartExceptionHandler.java': '447de5936275dfb14bbf363037d908c612f3bf1b45f022aad73234110e6f665e',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/application/CartOrders.java': '7d6cbcce636fbdd25c2ce5f82a3dd8815a3bd2fb50cf04eadefb147509eb3379',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaCartOrders.java': 'a5b16fbd15aea59f11eeb5d1c44f0b9c5613dcfd3a146d3c7ab2d6aa7b9d7763',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/CartOrderController.java': '1bff80cb246f3a5b1daaec5ebc835aa14c76239ecf6a9e7fc1e641f3d50b57b9',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/CartOrderCreateRequest.java': 'bee9d607e30758de42c217cf194d8e3db882ba540023eaf301eaebac3d6e9bbe',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/web/OrderReadController.java': 'c08e77db5bef0f36796c132f96375dc9e70effe0e0390b615a70c1df46dceb57',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/cart/infrastructure/JpaCartsTest.java': '0777f816f04d0dc46a99c21cf218692094ca7e2d71b78dcfc63744a986707aea',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/cart/web/CartControllerTest.java': '3ec1a6db8bd2ffbe6399e38f11b62b42a639228c3b33734ba76d5733ac5a0a43',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaCartOrdersTest.java': 'ad28384cd03aa638a582027d5aec5f5a9117e501fb454717439353607ff0d064',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/CartOrderControllerTest.java': 'd0a5f3b6fae909c1222c9594ea7d36d39f56620194a6345967424b73718e6db7'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39460539409
@@ -1073,7 +1101,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 378
+                or len(POST_READS_APP_HASHES) != 406
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
