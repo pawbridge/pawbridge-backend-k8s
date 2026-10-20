@@ -179,6 +179,23 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('        if: always()', cleanup)
         self.assertNotRegex(check, r'--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)')
 
+    def test_given_fixed_original_test_sources__when_packaging__then_sparse_checkout_contains_every_declared_input(self):
+        build = (ROOT / 'backend-app/boot/build.gradle').read_text()
+        block = build.split("tasks.named('compileTestJava', JavaCompile) {", 1)[1].split('\n}', 1)[0]
+        fixed = re.findall(r"rootProject\.file\('\.\./([^']+)'\)", block)
+        self.assertEqual(17, len(fixed))
+        self.assertEqual(len(fixed), len(set(fixed)))
+        package = self.job('package')
+        sparse = re.search(r'sparse-checkout: \|\n(.*?)\n\s+sparse-checkout-cone-mode:', package, re.DOTALL).group(1)
+        checked_out = {line.strip() for line in sparse.splitlines() if line.strip()}
+        self.assertEqual(set(fixed), {path for path in checked_out if path.startswith('store-service')})
+        for path in fixed:
+            with self.subTest(path=path):
+                self.assertTrue(path.startswith('store-service/src/main/java/') and path.endswith('.java'))
+                self.assertIn(path, checked_out)
+        self.assertIn('bash ./gradlew projects check :boot:bootJar', package)
+        self.assertNotRegex(self.job('check'), r'./gradlew[^\n]*(?:\bcheck\b|:boot:test\b|:boot:ownedPostgresqlTest\b|:boot:compileTestJava\b)')
+
     def test_given_verification_workflow__when_running__then_do_not_inject_publication_credentials(self):
         text = WORKFLOW.read_text()
         self.assertIn('permissions:\n  contents: read', text)

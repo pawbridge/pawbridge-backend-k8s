@@ -151,6 +151,23 @@ jobs:
           sparse-checkout: |
             backend-app
             .github/workflows/backend-app-check.yml
+            store-service/src/main/java/com/pawbridge/storeservice/common/entity/BaseEntity.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/order/entity/DeliveryStatus.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/order/entity/Order.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/order/entity/OrderItem.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/order/entity/OrderStatus.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/Category.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/OptionGroup.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/OptionValue.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/Product.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/ProductSKU.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/ProductStatus.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/SKUValue.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/product/entity/Wishlist.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/mypage/repository/MyWishlistRepository.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/mypage/repository/MyOrderRepository.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/mypage/dto/WishlistResponse.java
+            store-service/src/main/java/com/pawbridge/storeservice/domain/mypage/dto/OrderResponse.java
           sparse-checkout-cone-mode: false
 
       - name: Isolate Gradle state on the hosted runner
