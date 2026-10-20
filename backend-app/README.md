@@ -448,7 +448,9 @@ workflow는 F27 전체 → 무자원 F28 guards → 원문 requests1표/index3/D
 
 `pawbridge.jobs.cleanup-enabled=true`에서만 기존 writer/TM/Clock으로 쪽지 만료 정리를 등록한다.
 기본값과 false는 off이며 기존 Community의 공통 정리 설정을 끄거나 운영 실행 소유권을 이전하지 않는다.
-최초 지연과 이전 완료 후 지연은 각각 5분이다. 원문대로 각 SQL은 최대 300건만 처리한다.
+최초 지연과 이전 완료 후 지연은 각각 5분이다. 각 SQL의 삭제 키를 `MATERIALIZED` CTE로 한 번만 선택해 최대300건을 처리한다.
+실제 원문 PG 비교에서301개 쪽지가 삭제된 결함을 확인했으므로, 원문 SQL 자체의 동등성 대신 의도한300건 상한을 보완한 차이다.
+원문 pin/SQL은 비교용으로 보존하고 그 사례의 관측을 상한 검증 성공으로 세지 않는다. 후보는 정확한 oldest300·잔류1·18표 전체 변경 범위를 별도로 검증한다.
 조건부 ordinary scheduler는 새 예약을 막고 기존 phase 10초 대기 뒤 destroy의 지역 대기 5초를 사용한다.
 이는 전체 15초 종료나 JDBC interrupt 보장이 아니다. TX 잔여 timeout은 JDBC query timeout보다 우선할 수 있다.
 CI는 기존 F29 원문/JpaTM·18표 소유 fixture를 재사용하여 UTC expiry tag 6사례를 별도 선택한다.

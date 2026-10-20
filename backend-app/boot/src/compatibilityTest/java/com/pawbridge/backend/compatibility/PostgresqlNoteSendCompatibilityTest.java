@@ -305,7 +305,7 @@ class PostgresqlNoteSendCompatibilityTest {
  }
 
  @Test @Tag("note-expiry")
- void givenThreeHundredAndOneOwnedCandidatesPerTable__whenBothExpireOneBatch__thenDeleteExactlyTheOldestThreeHundredPerSqlWithoutDraining()throws Exception{
+ void givenThreeHundredAndOneOwnedCandidatesPerTable__whenOriginalAndCandidateExpireOneBatch__thenCharacterizeOriginalAndRequireCandidateOldestThreeHundred()throws Exception{
   beginExpiry();
   try(var privileges=expiryPrivileges()){
    for(boolean source:new boolean[]{true,false}){
@@ -316,7 +316,22 @@ class PostgresqlNoteSendCompatibilityTest {
       ns.add(new ExpiryNote(note,expiryNow.minusSeconds(301-i),null,false));rs.add(new ExpiryRequest(request,null,expiryNow.minusSeconds(172800+301-i)));
       if(i<300){removedNotes.add(note);removedRequests.add(request);}
      }
-     seedExpiry(ns,rs);String before=snapshot();expireOwned(source,300);assertExpiryDelta(before,removedNotes,removedRequests);
+     seedExpiry(ns,rs);String before=snapshot();expireOwned(source,300);
+     UUID tailNote=ns.get(300).id(),tailRequest=rs.get(300).id();
+     long remainingNote=scalar("SELECT count(*) FROM pawbridge_community.private_notes WHERE note_id='"+tailNote+"'");
+     long remainingRequest=scalar("SELECT count(*) FROM pawbridge_community.private_note_requests WHERE sender_id="+CALLER+" AND request_id='"+tailRequest+"'");
+     if(source){
+      // Legacy locking subselects can delete the reserved tail too; this is characterization, not batch-limit equivalence.
+      assertThat(remainingNote).isBetween(0L,1L);assertThat(remainingRequest).isBetween(0L,1L);
+      if(remainingNote==0)removedNotes.add(tailNote);
+      if(remainingRequest==0)removedRequests.add(tailRequest);
+     }else{
+      assertThat(remainingNote).as("Candidate must retain the newest owned note after exactly the oldest 300").isOne();
+      assertThat(remainingRequest).as("Candidate must retain the newest owned orphan request after exactly the oldest 300").isOne();
+     }
+     // The oldest 300 are mandatory in both paths; only the two exact legacy tail keys may additionally disappear.
+     assertExpiryDelta(before,removedNotes,removedRequests);
+     if(source)System.out.printf(Locale.ROOT,"F30 original characterization: notesDeleted=%d requestsDeleted=%d%n",removedNotes.size(),removedRequests.size());
     }finally{finishExpiryRound();}
    }
   }

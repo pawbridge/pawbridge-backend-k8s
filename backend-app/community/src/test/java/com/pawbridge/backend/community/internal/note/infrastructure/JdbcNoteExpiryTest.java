@@ -21,8 +21,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 class JdbcNoteExpiryTest {
     private static final Instant NOW = Instant.parse("2031-01-01T00:00:00.123456789Z");
-    private static final String NOTES_SQL = "DELETE FROM pawbridge_community.private_notes WHERE note_id IN ( SELECT note_id FROM pawbridge_community.private_notes WHERE expires_at <= ? ORDER BY expires_at LIMIT 300 FOR UPDATE SKIP LOCKED )";
-    private static final String REQUESTS_SQL = "DELETE FROM pawbridge_community.private_note_requests WHERE (sender_id, request_id) IN ( SELECT sender_id, request_id FROM pawbridge_community.private_note_requests WHERE note_id IS NULL AND created_at < ? ORDER BY created_at LIMIT 300 FOR UPDATE SKIP LOCKED )";
+    private static final String NOTES_SQL = "WITH expired_notes AS MATERIALIZED ( SELECT note_id FROM pawbridge_community.private_notes WHERE expires_at <= ? ORDER BY expires_at LIMIT 300 FOR UPDATE SKIP LOCKED ) DELETE FROM pawbridge_community.private_notes WHERE note_id IN (SELECT note_id FROM expired_notes)";
+    private static final String REQUESTS_SQL = "WITH expired_requests AS MATERIALIZED ( SELECT sender_id, request_id FROM pawbridge_community.private_note_requests WHERE note_id IS NULL AND created_at < ? ORDER BY created_at LIMIT 300 FOR UPDATE SKIP LOCKED ) DELETE FROM pawbridge_community.private_note_requests WHERE (sender_id, request_id) IN (SELECT sender_id, request_id FROM expired_requests)";
 
     @ParameterizedTest
     @ValueSource(ints = {0, 17})
