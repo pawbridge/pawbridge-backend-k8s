@@ -72,8 +72,10 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/visits/today", "POST"));
         var visitPeriod = new AndRequestMatcher(visitCollectionEnabled,
                 new AntPathRequestMatcher("/api/v1/admin/visits/stats/period", "GET"));
-        var adminRoutes = new OrRequestMatcher(totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var postStatsToday = new AntPathRequestMatcher("/api/v1/admin/posts/stats/today", "GET");
+        var postStatsPeriod = new AntPathRequestMatcher("/api/v1/admin/posts/stats/period", "GET");
+        var adminRoutes = new OrRequestMatcher(postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)

@@ -323,6 +323,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminUserUpdateCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminPostStatisticsCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
@@ -1123,3 +1124,41 @@ tasks.register('authSessionCompatibilitySeoulTest', Test) {
     }
     outputs.upToDateWhen { false }
 }
+
+
+// Reuse F2/F6 raw mappings/repository and the same source set; no new fixture/ACL/JAR stage.
+tasks.register('prepareF6AdminPostStatisticsOracle', Exec) {
+    dependsOn tasks.named('prepareF6LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f6_legacy_oracle.py'))
+    outputs.files(
+            layout.buildDirectory.file('generated/sources/f6LegacyOracle/java/com/pawbridge/communityservice/service/AdminPostStatsService.java'),
+            layout.buildDirectory.file('generated/sources/f6LegacyOracle/java/com/pawbridge/communityservice/dto/response/PostPeriodStatsResponse.java'),
+            layout.buildDirectory.file('generated/sources/f6LegacyOracle/java/com/pawbridge/communityservice/service/F6LegacyAdminPostTodayService.java'),
+            rootProject.file('build/ci/f6-admin-post-statistics-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f6_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f6LegacyOracle/java').get().asFile,
+            rootProject.file('build/ci/f6-admin-post-statistics-oracle-sha256.txt'), '--admin-statistics'
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF6AdminPostStatisticsOracle') }
+
+['adminPostStatisticsCompatibilityTest': 'UTC', 'adminPostStatisticsCompatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = 'Compares administrator post aggregates with original JPQL and actual read-only JpaTM/RR.'
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        useJUnitPlatform()
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        systemProperty 'admin.post.statistics.oracle.receipt', rootProject.file('build/ci/f6-admin-post-statistics-oracle-sha256.txt').absolutePath
+        filter {
+            includeTestsMatching(zone == 'UTC'
+                    ? 'com.pawbridge.backend.compatibility.PostgresqlAdminPostStatisticsCompatibilityTest'
+                    : 'com.pawbridge.backend.compatibility.PostgresqlAdminPostStatisticsCompatibilityTest.givenSparseLeapDaysMicrosecondsAndTheJvmToday__whenReadingInEitherZone__thenMatchActualJpaGroupingBoundsAndSoftDeleteWithoutFillingGaps')
+            failOnNoMatchingTests = true
+        }
+        outputs.upToDateWhen { false }
+    }
+}
+tasks.named('adminPostStatisticsCompatibilitySeoulTest') { shouldRunAfter tasks.named('adminPostStatisticsCompatibilityTest') }
