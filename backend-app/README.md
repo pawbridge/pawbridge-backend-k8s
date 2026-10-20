@@ -776,3 +776,36 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을
 합성 PostgreSQL의 9개 원문 테이블 모양과 고정 데이터에서 별도 원문/후보 EMF를 비교한다. 안전한 정렬·부모 페이지·count·Sort metadata·nullable·구매 snapshot, SQL 부모 페이지/선택 ID graph·SELECT-only 권한·읽기 불변·연결 반환을 보호한다. 최초 전체 graph 방식의 27사례와 이후 보안 회귀 근거는 별도 이력으로 보존하며, 새 2단계 방식의 성공은 해당 수정본의 실제 실행 결과로 판정한다. 기존 Store 전체 migration·결제·실제 운영 검증은 아니다. 원문17 Java는 compileTestJava의 고정 시험 입력이며 main/실행 JAR에 포함하지 않는다. 새 extractor/sourceSet/JAR HTTP 도구는 없다.
 
 `P7_PG_SETTINGS`의 제한된 파일로 전용 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreMemberJpaTest`만 선택한다. SQL resource는 새로 만든 marker 검증 DB에 한 번 적용하는 준비 자료이며 Java 시험은 SELECT만 수행한다. 0사례/skip은 실패이고 일반 CI는 이 owned 태그를 제외한다. 키·접속값·시험 산출물은 Git에 넣지 않는다.
+
+
+## Animal JSON 명령과 현재 회원 권한
+
+`pawbridge.animal-commands.enabled`는 기본 false이며 대소문자를 구분하지 않는 명시 `true`만 허용한다. 이 값이 없거나 `on`인 경우 명령과 보안 경로는 비활성이다. 기존 동물 조회·추천은 각자의 flag를 유지한다.
+
+| 메서드 | 경로 | 결과 |
+| --- | --- | --- |
+| POST | `/api/v1/animals` | 원문 동물 생성, 201 |
+| PATCH | `/api/v1/animals/{id}/status` | 원문 상태 변경, 200 |
+| PATCH | `/api/v1/animals/{id}/description` | 원문 설명 변경, 200 |
+| DELETE | `/api/v1/animals/{id}` | 원문 삭제, 204 |
+
+서명 검증한 JWT의 회원 ID만 사용한다. User 모듈은 같은 writer 트랜잭션에서 현재 회원 행을 잠그고 삭제 대기를 조회한다. Animal은 현재 DB의 `ROLE_ADMIN` 또는 보호소 등록번호가 일치하는 `ROLE_SHELTER`만 허용한다. JWT의 오래된 역할이나 `X-User-*` 헤더로 이 검사를 대체하지 않는다. 기존 조회·ADMIN 경로의 인가는 바꾸지 않는다.
+
+선택한 원문 JPA 모델·저장소·mapper·업무 로직을 infrastructure 안에서 재사용한다. 명시 writer EMF는 Animal/Shelter/OutboxEvent/BaseTimeEntity만 관리하고 전역 스캔·DDL·새 pool을 만들지 않는다. 원문 감사 listener와 서비스의 REQUIRED 경계를 유지하고 writer 격리는 READ_COMMITTED로 명시한다. JpaTM의 기본 제한은 15초다. 조회용 reader와 구분하고, User 조회와 검색 SQL도 같은 writer DataSource에 참여해야 한다. Nori 분석기는 조회·추천·명령 사이에서 하나를 공유하고 context와 함께 닫는다.
+
+생성과 설명 변경은 원문 동물·검색 투영·Outbox를 함께 커밋한다. 비MANUAL 출처의 공고번호가 null/빈 값이면 쓰기 전에 고정 400으로 거부하며, MANUAL의 기본값·번호 생성과 정상 외부 번호는 유지한다. 상태 변경은 Outbox 저장 후 flush한 감사 시각으로 응답을 만든다. 상태 변경의 원문 이벤트와 삭제의 FK 동작도 유지하며 삭제 이벤트를 새로 만들지 않는다. 원문 payload eventId와 Outbox event_id는 별도 UUID다. 이 Outbox의 전체 전달기·CDC 교체, APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
+
+초기 보완에서는 소유 합성 PostgreSQL 17.11의 실제 보안→MVC→JPA 16계약과 당시 코어 단위 48사례를 확인했다. 이후 동시성 보완의 현재 검증은 아래에서 구분한다. PG는 최초 실행의 15성공과 UTC Calendar로 비교를 교정한 상태 응답 1사례의 수정 전 RED·수정 후 GREEN으로 검증했으며, 비교 방식 교정 뒤 성공한 나머지를 반복하지 않았다. 서버의 시간대·값·허용 오차는 변경하지 않았고 응답/DB 감사 시각 차이는 1µs 미만이어야 한다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK/Outbox 실패의 rollback·정상 재시도, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
+
+전용 시험은 `P8_PG_SETTINGS`의 제한된 소유 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalCommandTest`로만 실행한다. SQL resource는 새 DB/marker 확인 후 소유 관리자가 한 번 준비하는 자료다. 실제 계정·키·접속값은 Git에 넣지 않는다. 일반 CI는 owned 태그를 제외하며 이 PG 시험을 실행했다고 표시하지 않는다. 기존 운영의 DML·행 잠금·감사 및 단일 실행기 소유권을 인계하기 전 flag와 공개 라우팅을 활성화하지 않는다.
+
+
+### 동시 Animal 명령과 자동 공고번호
+
+현재 회원 행을 먼저 잠근 다음 같은 writer TX에서 Animal을 PESSIMISTIC_WRITE로 조회해 상태·설명 수정과 삭제를 직렬화한다. 두 사용자의 동시 수정이 서로의 필드를 덮어쓰지 않으며 기존 소유권 검사·Outbox·검색 투영의 원자성은 유지한다.
+
+자동 MAN 번호는 실제 쓰기 TX와 명시 READ_COMMITTED 메타데이터가 있을 때만 생성한다. 날짜를 한 번 캡처하고 날짜별 PostgreSQL transaction advisory lock SQL을 실행한 다음 별도 statement로 정확한 6자리 suffix MAX를 읽는다. 중간 행 삭제 후 현존 최대값을 재사용하지 않고 999999를 초과하는 번호는 거부한다. 잠금과 MAX를 한 SQL/CTE로 합치지 않는다. 명시 제공 공고번호는 원문상 고유 식별자가 아니므로 기존 허용을 유지한다. 모든 번호의 전역 UNIQUE, 비협력 writer·임의 제공번호와의 경합, 삭제된 최고번호의 영구 재사용 금지를 보장하는 계약은 아니다.
+
+이번 수정의 단일 오프라인 호출 10초에서 코어 단위 59사례와 신규 동시성 PG3·영향 기존 PG2가 모두 통과했다. 서로 다른 ADMIN/SHELTER와 실제 두 PG PID의 잠금 대기를 관찰해 동시 상태·설명 보존과 동시 자동번호의 분리를 검증했고 중간 번호 삭제도 재현 후 회복했다. 3개 신규 계약은 기존 코드에서 먼저 RED였다. 다른 성공 PG/JAR와 전체19사례를 반복 실행한 결과가 아니다. 시험은 pool 한도를 임시2로 늘린 뒤 worker 종료가 확인됐을 때만1로 복귀하고 정확한 소유 행을 정리한다. worker 종료가 불확실하면 후속 시험·행 삭제·pool close를 거부해 근거를 보존하며 실패 경로의 전체 자원 정상 종료까지 주장하지 않는다. 이 시험과 mock TX metadata 단위 검증은 운영 또는 실제 AI 검증이 아니다.
+
+READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수준 기대값 한 곳을 같은 RC 계약으로 맞췄다. REQUIRED·기본 timeout·writer 연결·readOnly 단언은 유지했다. 해당 구성 클래스12사례를 별도7초 호출로 통과했고 PG·업무 단위·JAR를 반복하지 않았다. 고정 CI 입력은 이 구성 시험까지 실제 source hash로 결속한다.

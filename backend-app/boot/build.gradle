@@ -59,6 +59,7 @@ dependencies {
     testAnnotationProcessor platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     testAnnotationProcessor 'org.projectlombok:lombok'
     runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'org.springframework:spring-aspects'
     implementation project(':user')
     implementation project(':community')
     implementation project(':animal')
@@ -1231,7 +1232,7 @@ tasks.register('ownedPostgresqlTest', Test) {
     filter { failOnNoMatchingTests = true }
     doFirst {
         if (System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') != 'owned-fixture-only'
-                && !System.getenv('P6_PG_SETTINGS') && !System.getenv('P7_PG_SETTINGS')) {
+                && !System.getenv('P6_PG_SETTINGS') && !System.getenv('P7_PG_SETTINGS') && !System.getenv('P8_PG_SETTINGS')) {
             throw new GradleException('An explicit owned PostgreSQL fixture is required')
         }
     }

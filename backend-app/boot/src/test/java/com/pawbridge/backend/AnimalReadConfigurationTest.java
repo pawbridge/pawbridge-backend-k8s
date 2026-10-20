@@ -35,11 +35,11 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class AnimalReadConfigurationTest {
-    @ParameterizedTest @ValueSource(strings = {"absent", "false"})
+    @ParameterizedTest @ValueSource(strings = {"absent", "false", "yes", "on", "1"})
     void given__features_not_enabled_and_no_ai_or_database_inputs__when__assembling__then__create_no_animal_beans(String flag) {
         var runner = new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class))
                 .withUserConfiguration(AnimalDiscoveryConfiguration.class, AnimalRecommendationsConfiguration.class);
-        if (flag.equals("false")) runner = runner.withPropertyValues("pawbridge.animal-discovery.enabled=false", "pawbridge.animal-recommendations.enabled=false");
+        if (!flag.equals("absent")) runner = runner.withPropertyValues("pawbridge.animal-discovery.enabled=" + flag, "pawbridge.animal-recommendations.enabled=" + flag);
         runner.run(context -> assertThat(context).hasNotFailed()
                 .doesNotHaveBean(AnimalDiscovery.class).doesNotHaveBean(KoreanSearchAnalyzer.class)
                 .doesNotHaveBean(AnimalDiscoveryController.class).doesNotHaveBean(AnimalDiscoveryExceptionHandler.class)
