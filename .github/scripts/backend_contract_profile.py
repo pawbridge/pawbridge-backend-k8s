@@ -402,7 +402,8 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '845b1e532c14ec902fa1a
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/ReadAdminPostsTest.java': 'fab415c6b47b2a8458d3f52d97e3a3e92ad10a14efc7fec8b311517a839cadb5',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/UpdatePostTest.java': 'e0841d5708df3d033cf4c5d909859d6210bff1aa4c3591fc17d73f95e0ddd001',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/infrastructure/JdbcAdminPostPageReaderTest.java': '9e7d26b505d8f7af1286b588938b4126230771b94060c180a66563bd01e7d1b3',
- 'backend-app/scripts/test_f14_ci_guards.py': 'aba0d5b772835abaa770e3bed93a4290e74609200e5a67d290e7c90a5e6d04bd'}
+ 'backend-app/scripts/test_f14_ci_guards.py': 'aba0d5b772835abaa770e3bed93a4290e74609200e5a67d290e7c90a5e6d04bd',
+ 'backend-app/scripts/test_f9_ci_guards.py': '15db839b34000161ac7928ad858fec845d7b2c71629bc98dc6e91cd6af886d98'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
@@ -730,7 +731,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 58):
+                or len(POST_READS_APP_HASHES) != 59):
             return False
         raw = git('diff', '--name-only', '--no-renames', '-z', POST_READS_BASE, 'HEAD', '--', 'backend-app')
         if not isinstance(raw, bytes):

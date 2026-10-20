@@ -231,7 +231,7 @@ class F9GuardTest(unittest.TestCase):
         self.assertLess(workflow.index('python3 scripts/f8_ci.py smoke'), workflow.index('python3 scripts/f9_ci.py smoke'))
         for required in ('scripts/test_f9_ci_guards.py', 'build/ci/f9-helper-refusal.txt',
                          'build/ci/f9-oracle-sha256.txt', 'f[23456789]_fixture', 'f[23456789]LegacyOracle',
-                         "grep -Ev '^BOOT-INF/lib/hibernate-validator-[0-9][^/]*\\.jar$'"):
+                         "grep -Ev '^BOOT-INF/lib/(hibernate-validator-[0-9][^/]*|spring-data-redis-3[.]4[.]11)\\.jar$'"):
             self.assertIn(required, workflow)
 
     def test_given_actual_jar_filter__when_allowing_validator__then_orm_legacy_and_test_artifacts_still_fail(self):
