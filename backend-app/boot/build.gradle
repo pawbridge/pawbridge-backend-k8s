@@ -1231,9 +1231,31 @@ tasks.register('ownedPostgresqlTest', Test) {
     systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     filter { failOnNoMatchingTests = true }
     doFirst {
-        if (System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') != 'owned-fixture-only'
-                && !System.getenv('P6_PG_SETTINGS') && !System.getenv('P7_PG_SETTINGS') && !System.getenv('P8_PG_SETTINGS') && !System.getenv('P9_PG_SETTINGS') && !System.getenv('P10_PG_SETTINGS') && !System.getenv('P11_PG_SETTINGS') && !System.getenv('P12_PG_SETTINGS') && !System.getenv('P13_PG_SETTINGS') && !System.getenv('P14_PG_SETTINGS')) {
-            throw new GradleException('An explicit owned PostgreSQL fixture is required')
+        // Gradle 8.14.3 stores --tests separately from configured includes; both filters intersect.
+        def legacyClass = 'com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest'
+        def commandLineIncludes = filter.getCommandLineIncludePatterns()
+        def legacySelection = commandLineIncludes.size() == 1 && filter.includePatterns.isEmpty() &&
+                filter.excludePatterns.isEmpty() && commandLineIncludes.every { name ->
+                    name == legacyClass || (name.startsWith(legacyClass + '.') &&
+                            name.substring(legacyClass.length() + 1) ==~ /[A-Za-z_$][A-Za-z0-9_$]*/)
+                }
+        def legacyFixture = System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') == 'owned-fixture-only' && legacySelection
+        if (!legacyFixture) {
+            def settingsEnvironment = System.getenv('PAWBRIDGE_OWNED_SETTINGS_ENV')
+            def settingsPath = settingsEnvironment ==~ /P[1-9][0-9]*_PG_SETTINGS/ ? System.getenv(settingsEnvironment) : null
+            def validPath = false
+            if (settingsPath != null && !settingsPath.isBlank()) {
+                try {
+                    def selected = java.nio.file.Path.of(settingsPath)
+                    validPath = selected.isAbsolute() && selected.normalize() == selected &&
+                            java.nio.file.Files.isRegularFile(selected, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                } catch (Exception ignored) {
+                    // Do not include a private path or cause in Gradle diagnostics.
+                }
+            }
+            if (!validPath) {
+                throw new GradleException('An explicit owned PostgreSQL settings file is required')
+            }
         }
     }
     afterSuite { descriptor, result ->

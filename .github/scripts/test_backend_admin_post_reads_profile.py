@@ -142,7 +142,7 @@ class AdminPostReadsProfileTest(unittest.TestCase):
     def test_given_frozen_cohort_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.POST_READS_BASE)
         self.assertEqual(437, len(profile.POST_READS_APP_HASHES))
-        self.assertEqual('9e1b841b06776fe7d1f764d154b9285d1090fefe7e0df41d23114083b1720406', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual('6545f1d918fd811bc68232e61486d9b253fe5d08402ba63862b3a43e611d3d56', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.POST_READS_APP_HASHES) | {'backend-app/README.md'}, profile.POST_READS_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.POST_READS_APP_HASHES)
         self.assertEqual(profile.POST_READS_WORKFLOW_SHA256, hashlib.sha256(
