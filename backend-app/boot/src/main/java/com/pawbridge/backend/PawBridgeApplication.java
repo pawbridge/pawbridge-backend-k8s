@@ -48,7 +48,8 @@ import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServic
 import org.springframework.context.annotation.Import;
 
 @SpringBootConfiguration
-@EnableAutoConfiguration(exclude = {DataSourceAutoConfiguration.class,
+@EnableAutoConfiguration(excludeName = {"org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
+        "org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration"}, exclude = {DataSourceAutoConfiguration.class,
         DataSourceTransactionManagerAutoConfiguration.class, JdbcTemplateAutoConfiguration.class,
         UserDetailsServiceAutoConfiguration.class,
         org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration.class,

@@ -1,0 +1,37 @@
+package com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model;
+
+import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.BaseEntity;
+import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Getter
+@Table(name = "option_values")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class OptionValue extends BaseEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "option_group_id", nullable = false)
+    private OptionGroup optionGroup;
+
+    @Column(nullable = false, length = 50)
+    private String name; // e.g., Red, L
+
+    @Builder
+    public OptionValue(OptionGroup optionGroup, String name) {
+        this.optionGroup = optionGroup;
+        this.name = name;
+    }
+
+    public void updateName(String name) {
+        this.name = name;
+    }
+}
+

@@ -5,10 +5,8 @@ import com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage;
 import com.pawbridge.backend.user.internal.storemypage.infrastructure.HttpStoreMyPage;
 import com.pawbridge.backend.user.internal.storemypage.infrastructure.ModuleStoreMyPage;
 import com.pawbridge.backend.store.api.StoreMemberReads;
-import com.pawbridge.backend.store.internal.memberread.infrastructure.JdbcStoreMemberReads;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import com.pawbridge.backend.user.internal.storemypage.web.StoreMyPageController;
@@ -27,6 +25,7 @@ import org.springframework.web.client.RestClient;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "pawbridge.user-store-mypage", name = "enabled", havingValue = "true", matchIfMissing = false)
+@org.springframework.context.annotation.Import(StoreMemberJpaConfiguration.class)
 public class UserStoreMyPageConfiguration {
     public UserStoreMyPageConfiguration(@Value("${pawbridge.user-store-mypage.backend:http}") String backend) {
         if (!backend.equals("http") && !backend.equals("module")) {
@@ -80,13 +79,6 @@ public class UserStoreMyPageConfiguration {
         reads.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         reads.setTimeout(5);
         return reads;
-    }
-
-    @Bean
-    @ConditionalOnProperty(prefix = "pawbridge.user-store-mypage", name = "backend", havingValue = "module")
-    StoreMemberReads storeMemberReads(@Qualifier("userStoreModuleJdbc") JdbcTemplate jdbc,
-            @Qualifier("userStoreModuleReadTransaction") TransactionTemplate reads) {
-        return new JdbcStoreMemberReads(new NamedParameterJdbcTemplate(jdbc), reads);
     }
 
     @Bean
