@@ -86,6 +86,8 @@ class PawBridgeApplicationTest {
                 .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.application.AnimalReports.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.web.AnimalReportController.class)).isEmpty();
