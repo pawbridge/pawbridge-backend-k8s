@@ -55,11 +55,13 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
         assertTask(result, ":verifyBusinessPackages", SUCCESS);
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
+        assertTask(result, ":animal:compileJava", SUCCESS);
         assertCheckCompleted(result, task.equals("check") ? ":check" : task);
         assertCompiled("user", "internal.domain.UserStatus");
         assertCompiled("user", "internal.profile.domain.UserProfile");
         assertCompiled("user", "internal.profile.application.ProfileReader");
         assertCompiled("community", "internal.application.PostReader");
+        assertCompiled("animal", "internal.application.AnimalReader");
     }
 
     @Test
@@ -214,7 +216,9 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
             "user, javax.sql.DataSource",
             "user, java.net.http.HttpClient",
             "user, com.pawbridge.backend.user.api.UserLookup",
-            "community, com.pawbridge.backend.user.api.UserLookup"
+            "community, com.pawbridge.backend.user.api.UserLookup",
+            "animal, java.sql.Connection",
+            "animal, com.pawbridge.backend.animal.api.AnimalLookup"
     })
     void givenDomainReferencesTechnologyOrApi_whenCheck_thenRejectsDomainRule(String module, String target)
             throws IOException {
@@ -283,5 +287,35 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
 
         assertPackageRejected(result, "BUSINESS_PACKAGE", "com.pawbridge.backend.user.legacy.LegacyUser");
         assertCompiled("user", "legacy.LegacyUser");
+    }
+
+    @Test
+    void givenAnimalApiLeaksOwnInternalType_whenAnimalCheck_thenRejectsApiSignatureRule() throws IOException {
+        javaSource("animal", "api.LeakyContract", """
+                public interface LeakyContract {
+                    com.pawbridge.backend.animal.internal.domain.AnimalName name();
+                }
+                """);
+
+        BuildResult result = runner(":animal:check").buildAndFail();
+
+        assertPackageRejected(result, "API_SIGNATURE", "com.pawbridge.backend.animal.internal.domain.AnimalName");
+        assertCompiled("animal", "api.LeakyContract");
+    }
+
+    @Test
+    void givenAnimalApplicationReferencesInfrastructure_whenAnimalCheck_thenRejectsApplicationRule() throws IOException {
+        javaSource("animal", "internal.infrastructure.AnimalStore", "public class AnimalStore {}");
+        javaSource("animal", "internal.application.TechnicalApplication", """
+                public class TechnicalApplication {
+                    com.pawbridge.backend.animal.internal.infrastructure.AnimalStore dependency;
+                }
+                """);
+
+        BuildResult result = runner(":animal:check").buildAndFail();
+
+        assertPackageRejected(result, "APPLICATION_DEPENDENCY",
+                "com.pawbridge.backend.animal.internal.infrastructure.AnimalStore");
+        assertCompiled("animal", "internal.application.TechnicalApplication");
     }
 }

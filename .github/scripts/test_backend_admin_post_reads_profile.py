@@ -1,5 +1,6 @@
 """Fixed User Community cohort contracts using fake Git, raw step dictionaries and owned temporary XML only."""
 import copy
+from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
@@ -63,29 +64,94 @@ class AdminPostReadsProfileTest(unittest.TestCase):
                 self.assertEqual(2, runtime.call_count)
 
 
-    def synthetic_git(self, diff=None, changed=False):
+    def synthetic_git(self, diff=None, changed=False, workflow=None):
         blobs = {path: ('fixed post reads input ' + str(i)).encode() for i, path in enumerate(profile.POST_READS_APP_HASHES)}
         hashes = {path: hashlib.sha256(raw).hexdigest() for path, raw in blobs.items()}
+        if workflow is None:
+            workflow = (Path(__file__).resolve().parents[1] / 'workflows/backend-app-check.yml').read_bytes()
         if changed:
             blobs[next(iter(blobs))] += b'changed'
         def read(*args):
             if args == ('diff', '--name-only', '--no-renames', '-z', SYNTHETIC_BASE, 'HEAD', '--', 'backend-app'):
                 return b'\0'.join(path.encode() for path in (*blobs, 'backend-app/README.md')) + b'\0' if diff is None else diff
             if len(args) == 2 and args[0] == 'show':
+                if args[1] == 'HEAD:.github/workflows/backend-app-check.yml':
+                    if isinstance(workflow, Exception):
+                        raise workflow
+                    return workflow
                 return blobs[args[1].removeprefix('HEAD:')]
             raise AssertionError('Unexpected synthetic Git operation')
         return Mock(side_effect=read), hashes
 
+    def test_given_reviewed_or_unknown_workflow_bytes__when_loading_context_and_running_main__then_scope_only_known_bytes_and_keep_full_fallback(self):
+        workflow = (Path(__file__).resolve().parents[1] / 'workflows/backend-app-check.yml').read_bytes()
+        ctx = context()
+        payload = {'pull_request': {'base': {'sha': ctx['base_sha']}, 'head': {
+            'repo': {'full_name': profile.REPOSITORY}, 'ref': ctx['head_ref'], 'sha': ctx['head_sha']}}}
+        env = dict(GITHUB_EVENT_PATH='/unused/event.json', GITHUB_REPOSITORY=profile.REPOSITORY,
+                   GITHUB_SHA=ctx['source_sha'], GITHUB_RUN_ID=ctx['run_id'], GITHUB_RUN_ATTEMPT='1',
+                   PULL_REQUEST_BASE_SHA=ctx['base_sha'])
+        for defect in ('known', 'changed', 'changed-full', 'missing', 'wrong-type', 'other-ci', 'explicit-full'):
+            raw = workflow
+            if defect == 'changed': raw += b'\n# unreviewed workflow bytes\n'
+            elif defect == 'changed-full':
+                raw = workflow.replace(b"matrix.profile == 'full'", b"matrix.profile != 'full'", 1)
+                self.assertNotEqual(workflow, raw)
+            elif defect == 'missing': raw = subprocess.CalledProcessError(1, ['synthetic-git'])
+            elif defect == 'wrong-type': raw = 'not Git object bytes'
+            known = defect in ('known', 'other-ci', 'explicit-full')
+            paths = ['.github/workflows/other-service.yml'] if defect == 'other-ci' else ['.github/workflows/backend-app-check.yml']
+            git, hashes = self.synthetic_git(workflow=raw)
+            common = types.SimpleNamespace(validate_event=Mock(return_value='pull_request'),
+                    changed_paths=Mock(return_value=paths), git=Mock(return_value=(ctx['tree_sha']+'\n').encode()))
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+                root = Path(directory).resolve()
+                jar = root / 'synthetic.jar'; jar.write_bytes(b'never executed')
+                plan = root / 'contract-plan.txt'
+                stack.enter_context(patch.dict('sys.modules', {'ci_branch_policy': common}))
+                stack.enter_context(patch.dict(profile.os.environ, env, clear=True))
+                stack.enter_context(patch.object(profile.Path, 'read_text', return_value=json.dumps(payload)))
+                stack.enter_context(patch.object(profile, 'POST_READS_APP_HASHES', hashes))
+                stack.enter_context(patch.object(profile, 'POST_READS_BASE', SYNTHETIC_BASE))
+                stack.enter_context(patch.object(profile.subprocess, 'run', side_effect=lambda command, **kw:
+                    types.SimpleNamespace(stdout=git(*command[1:]))))
+                for name in ('verify_note_expiry_inputs', 'verify_member_management_inputs', 'verify_signup_statistics_inputs',
+                             'verify_admin_member_update_inputs', 'verify_visit_collection_inputs', 'verify_auth_sessions_inputs',
+                             'verify_post_statistics_inputs'):
+                    stack.enter_context(patch.object(profile, name, return_value=False))
+                actual, actual_paths = profile.runtime_context()
+                self.assertIs(known, actual['post_reads_scope_verified'])
+                selection = dict(actual, requested_profile=profile.FULL) if defect == 'explicit-full' else actual
+                wanted = profile.POST_READS if defect == 'known' else profile.FULL
+                self.assertEqual([wanted], profile.select_profiles(selection, actual_paths))
+                args = ['--mode', 'plan', '--jar', str(jar), '--plan', str(plan)]
+                self.assertEqual(0, profile.main([*args, '--profile', wanted]))
+                result = json.loads(plan.read_bytes())
+                self.assertEqual(wanted, result['profile'])
+                self.assertEqual(list(profile.ALL_SMOKES) if wanted == profile.FULL else [], result['required_smokes'])
+                if wanted == profile.POST_READS:
+                    self.assertEqual(list(CONTRACTS), result['required_contracts'])
+                    self.assertEqual(list(SKIPPED), result['skipped_contracts'])
+                if wanted == profile.FULL and defect != 'explicit-full':
+                    blocked = root / 'blocked'; blocked.mkdir()
+                    with patch('sys.stderr'):
+                        self.assertEqual(1, profile.main(['--mode', 'plan', '--profile', profile.POST_READS,
+                            '--jar', str(jar), '--plan', str(blocked / 'contract-plan.txt')]))
+                        self.assertFalse((blocked / 'contract-plan.txt').exists())
+
     def test_given_frozen_cohort_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.POST_READS_BASE)
-        self.assertEqual(147, len(profile.POST_READS_APP_HASHES))
-        self.assertEqual('f60020b4165d6cc287142cb7f2615d19601f948e1187cb79f6c000ba36425c15', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual(184, len(profile.POST_READS_APP_HASHES))
+        self.assertEqual('1fcb51db8565a2dcf599a69b4fb7d84a82a9c38d10f21335f6d707ec4dd5c955', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.POST_READS_APP_HASHES) | {'backend-app/README.md'}, profile.POST_READS_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.POST_READS_APP_HASHES)
+        self.assertEqual(profile.POST_READS_WORKFLOW_SHA256, hashlib.sha256(
+            (Path(__file__).resolve().parents[1] / 'workflows/backend-app-check.yml').read_bytes()).hexdigest())
         git, hashes = self.synthetic_git()
         with patch.object(profile, 'POST_READS_APP_HASHES', hashes), patch.object(profile,'POST_READS_BASE',SYNTHETIC_BASE):
             self.assertIs(True, profile.verify_post_reads_inputs(git_reader=git))
-        self.assertEqual(len(profile.POST_READS_APP_HASHES) + 1, git.call_count)
+        self.assertEqual(len(profile.POST_READS_APP_HASHES) + 2, git.call_count)
+        git.assert_any_call('show', 'HEAD:.github/workflows/backend-app-check.yml')
         for path in hashes:
             git.assert_any_call('show', 'HEAD:' + path)
 

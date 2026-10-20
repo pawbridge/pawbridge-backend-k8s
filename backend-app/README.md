@@ -665,3 +665,16 @@ Store의 non-2xx 응답은 본문 변환 전에 세 조회에서 모두 거부�
 명시 활성화된 작업만 단일 소유 스케줄러를 사용합니다. 단위·조립 시험에서는 SQL 바인딩, 조건 분기와 실패 전파를 검증했고 실제 PG 잠금·rollback·삭제 권한·예약 실행·종료 대기는 검증하지 않았습니다. 기존 스케줄러 소유권, 대상 표·열과 행 잠금/UPSERT/DELETE 권한을 확인하기 전 활성화하거나 구 실행기를 종료하지 않습니다. 새 Kafka/ES 런타임·DDL·GRANT·운영 변경은 없습니다.
 
 고정 입력 코호트는 기존140개에서147개로 확장했습니다. 새 파일6개와 기존 writer1개를 새로 고정하고 App·기본 조립 시험2개의 지문을 갱신했습니다. 기존138개 지문과 선택 검증/전체 회귀 구분, 기존 관리자 페이지 PG11 및 소유 정리를 유지합니다. 이 PG11은 이번 재구축·정리의 실제 DB 검증이 아닙니다.
+
+
+### Animal 목록·상세·추천 조회 편입
+
+Animal 업무 모듈은 목록/필터 검색·상세와 비슷한 동물 추천을 소유합니다. `pawbridge.animal-discovery.enabled`와 `pawbridge.animal-recommendations.enabled`는 각각 기본 false입니다. 명시 활성화된 기능의 정확한 GET 목록·숫자 ID 상세·숫자 ID 추천만 공개하고, 임의 nested·쓰기·기존 Gateway alias는 등록하지 않습니다. 실제 라우팅/프로젝터/worker 소유권 인계는 포함하지 않습니다.
+
+기존 PG/Nori 검색의 필터·정렬·준비 상태 오류와 Page/DTO를 재사용합니다. 검색은 TX 진입 뒤 검증하고 count/content를 같은 읽기 REPEATABLE_READ/query5·TX5에서 처리합니다. 추천은 원본 조회가 끝난 뒤 Python을 TX 밖에서 호출하고, 다시 짧은 읽기 TX에서 후보를 검증합니다. 원격 순서/최대6 ID/자신·중복·없는 데이터·다른 종·상태 필터와 실패503을 유지합니다.
+
+Boot는 기존 selected reader/TM과 단일 Nori 수명을 공유합니다. 추천 활성화 시 기존 `lost-search.python-url` → `python-ai-service.url` 우선순위를 따르고 둘 다 없으면 구성 실패입니다. 키는 런타임 인자로만 받습니다. URL이 있고 키가 없으면 ETC는 빈 결과, DOG/CAT는 요청503입니다. Feign core13.5의 연결3초/읽기45초·redirect 금지·애플리케이션 재시도 없음 계약을 재사용하며 새 Spring Cloud/legacy Animal 런타임을 넣지 않습니다.
+
+source20·추천30·정책5·새 Boot11은 각 독립 합성 검증 결과이며 한 번의 전체 실행 합계로 표현하지 않습니다. TX 순서 지적의 신규 반례1은 RED→관련3 GREEN으로 닫았습니다. 새 조립은 실제 business525 검사와 일반 독립 검수를 통과했습니다. 실제 PG SQL/최소권한·락/격리·Python/TLS/AI·실행 JAR은 아직 미검증이며 기존 관리자 페이지 PG11을 Animal 검증으로 확대하지 않습니다.
+
+CI는 검수한 Animal40경로와 변경 F9 guard를 포함한 고정184입력 및 알려진 workflow 지문을 확인합니다. JAR 허용 예외는 정확한 feign-core13.5 하나뿐입니다. 알 수 없는 workflow/입력은 선택 회귀를 거부하고 전체 회귀 경로를 유지합니다. 공통 selector를 바꾸지 않아 이번 workflow 변경의 기존 서비스3 검증은 그대로 수행합니다. 실제 이 단계의 CI 시간 절감을 보장하지 않습니다.

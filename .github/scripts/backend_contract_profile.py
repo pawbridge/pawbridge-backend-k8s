@@ -345,10 +345,11 @@ POST_STATISTICS_SEOUL_METHOD = POST_STATISTICS_SINGLE_METHODS[0]
 POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c9b5cd946e219e09f9cd69f5669dc7d6d97e79275341',
+POST_READS_WORKFLOW_SHA256 = 'ed72d491f3bb7457c9d47d09104340909725d0dd3604edb7c368997f02daf349'
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '08d32ff6d7ac811f774df0dd06c8a0e1d55d6586e856567200353bd01f469f3a',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'de5f9f662fdb7cbeb27ac3c2445fc0ab0a7e70b3994031b28c64abd588e541a0',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '2d286bfc09b9b83c6e9c31aa56c9008c152b84a922aa9af17b0bcf043ba7bc79',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -360,7 +361,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c7430dfd017008c3f65ddc7e92209a6a4a65d07421264a78f50b0407d0e2a6c9',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'bc687b513b62a7ed76bbabd4d463092b16c768cdd6c5653905fb2e7c585f261d',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'ab75d1bdfd4c0c8a3b01e70fe53c695e44245b7b9956779b8b69d4bffc13290a',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': 'c492af8ec9be6af0ced820f124d176eee696992ee45b6ed63bfd8b3416db0fb8',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': '3b8fd66dc4f308940fdf6e0028a721f5e7daa56b45d2508eae9f7c8fdca7b427',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '1b430c256a0045fa45e45751721855bdfbd9f81420213769d709b4903a1d4555',
@@ -442,7 +443,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/report/infrastructure/JdbcAnimalReportsTest.java': '604609e895dbe7bbb38751f19e2856a921dec9c660c32739bdba9bf2dbb9e40a',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/report/infrastructure/S3AnimalReportMediaUploaderTest.java': '82d782b119f53b4800f22fa4ebf6dee3e77947b890748e8c8f789804236d7deb',
  'backend-app/scripts/test_f14_ci_guards.py': 'aba0d5b772835abaa770e3bed93a4290e74609200e5a67d290e7c90a5e6d04bd',
- 'backend-app/scripts/test_f9_ci_guards.py': '15db839b34000161ac7928ad858fec845d7b2c71629bc98dc6e91cd6af886d98',
+ 'backend-app/scripts/test_f9_ci_guards.py': '78f3029a1cfb47b1e00e5460dca30108711a465b0982a7b0299a42262a9ec6da',
  'backend-app/user/build.gradle': '85ed8900d91629caf1683e5e33ac8e4d878e34cffe428461eb15de50c98ab5a1',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/animalactivity/application/FavoriteActivityRejectedException.java': 'a4aabe74ab6720eaf0e2f83c57390a0018b5b7a936af5e59af2608e9ad7edc8b',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/animalactivity/application/UserAnimalActivities.java': '1aed0c2ecc8d25bb0c58d73f2c028c5d6d7a5d151d290120d0093e8f14f28947',
@@ -491,7 +492,44 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/infrastructure/JdbcPostSearchRebuildTest.java': 'a20c3eff100843879e0dac55a902bafe02a5fb3edaa208f7f4b924ff4b529cdc',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/maintenance/infrastructure/JdbcCommunityEventRetentionTest.java': 'eda7ea8ce4d9cfb3d02cc3dd91dd33d4a29982f42957d3a8b2f5c93b390bd488',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/CommunityMaintenanceConfiguration.java': '52f43e0fdab58578e1041f4239d2c7b18217c721db7b30f81c033b047b7d9421',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/CommunityMaintenanceConfigurationTest.java': '619a039f36af66ffd14c8e7fc6bedd6748b3bf21ba2cdb339dcc2556290638f0'}
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/CommunityMaintenanceConfigurationTest.java': '619a039f36af66ffd14c8e7fc6bedd6748b3bf21ba2cdb339dcc2556290638f0',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/application/AnimalDiscovery.java': '18229f545f62410b2857e115bf0aa7c7acfbad53ad208cf450ce03d53e90eb4e',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/application/AnimalNotFoundException.java': '3338d8f9d4196c99f4d0e780e179be044a4fca0361d3ec5258ac29c3a2641350',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/application/IntakeDateRange.java': '09a24657b4438aa5eb3334cf11591efcb5f735a4d4cb177c265af22909744865',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/application/SearchProjectionPendingException.java': '0107ad697dc60f2a8ebe120a4191a5a8b0cede264ae8d972c79a115d3785c3c4',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/infrastructure/JdbcAnimalDiscovery.java': '5c57b122dd85b2bf1d538e2bdff131350179fad6e77bcc7839cee75ec9c2f618',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/infrastructure/KoreanSearchAnalyzer.java': 'edff2e8ee97c73c63b79ce6aa561089edc9ef765beaa1fabc8d9a35022da57be',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/web/AnimalDetails.java': 'a95c517c6846f4ac9ad4555a8eb3581b0dc7effc55414e9d035131213ad50761',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/web/AnimalDiscoveryController.java': 'e7f9483613d26f8c2c29bc9d1c4a1e43fec75f4afd88e652a6a84af44b0d19a8',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/web/AnimalDiscoveryExceptionHandler.java': 'e884bd4b47d7c344833b52a2251d63b86ad34a143054a598e8aa27f0e196c299',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/web/AnimalSearchParameters.java': '72b2153fa776775d5de822201a66b80f0c4ab4d179a978db959b97f3ec7f1edc',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/discovery/web/AnimalSummary.java': 'ded4c98569700fb4a1f7d746ee17511eeee1a8e65a4a5eace8340258faf421cc',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/recommendation/application/AnimalRecommendations.java': '6e41cb750b5ffeac0f089bdc05f04ef60090864e368c3afbc4f33edb142a7284',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/recommendation/application/RecommendationUnavailableException.java': 'b9e3d6f588ed8bb73df51b68421fb3ec01eb665a809d648c47c1aab91de146f9',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/recommendation/infrastructure/JdbcAnimalRecommendations.java': 'fe1289db0b4c08f08d5f58362f1fa2bf1b5ce0b087de340987b1ec3efa4195ec',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/recommendation/infrastructure/PythonAnimalRecommendations.java': '4f064741cf3f7f38797892ec6ec50f330989945fd6a1d904cf036354c36131ac',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/recommendation/web/AnimalRecommendationController.java': 'b9ce2b1104993d69228aa318cc1655f80d37d8bf8bbce5ef1c39898ae32299f2',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/recommendation/web/AnimalRecommendationExceptionHandler.java': '891dfe346ce2f837f821e3efdbf84826f6c3082ac5eede0d82691a671085daae',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/recommendation/web/AnimalRecommendationResponse.java': 'c4b8f33e660c4c747e707f22bc4d8c6a6d481f4cf86e4ef16029508de635e1cb',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/discovery/application/IntakeDateRangeTest.java': 'd40955e673a843e6106b0fa90356587bb327911f67b4f60ab0afcd067ca30905',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/discovery/infrastructure/JdbcAnimalDiscoveryMappingTest.java': '8f70fed97f7c635d0e73549097a38b22a99b9d81141755ce92e51bccf2d77e5d',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/discovery/infrastructure/JdbcAnimalDiscoverySqlTest.java': 'ae73fbab0360f84b8e2942e07bdfa0de7644ae123e9f0b2429897b7ead38f223',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/discovery/infrastructure/JdbcAnimalDiscoveryValidationTest.java': '39f9d70a8a7d93386fc0b07f55e8cd96775cb766056b1d625e019883a9f184a7',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/discovery/web/AnimalDiscoveryControllerTest.java': 'c7bc29ca8238f6be12606408f6eb766ee0dfb2360330134f4e27eb3ab49b31b8',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/recommendation/infrastructure/JdbcAnimalRecommendationsTest.java': '52f9c6246ef36cae8ac0da814661783fe39c556a693ad6a50057c8799ff7feaa',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/recommendation/infrastructure/PythonAnimalRecommendationsTest.java': '58cf9acee4eabefe78b0443c9fbcbd3f959d9282a1ea4e36e81dbf4b90c2dec9',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/recommendation/web/AnimalRecommendationControllerTest.java': '4902a59b66e155d03e6bb5179eb37fa68b5d58f6d82909401218fb02a37c1c7e',
+ 'backend-app/gradle/architecture.gradle': 'b4f3ae676781c2f035b74e56d81618a609ff4430454636ecc14f41e911c487df',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessBuildFixture.java': 'eadf16ec64a4e852922311883bd7d8c42cd0a349e8e01bf1e903875b696c1f05',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '1be2282df5409d66e80daacd08920f0c4e08a8748be395c33905c23468b7adc1',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessPackageArchitectureTest.java': '9101369176991bf28318ebf6a301275270db803cc4fad6fa41ea29e57a5d310b',
+ 'backend-app/settings.gradle': '4861d1d3c0935f87a1fc814fe88d328c618e2eaf6b8ae7324cf887c6348a84d6',
+ 'backend-app/animal/build.gradle': 'cbad5484ac00dc3e06ad31bd8e39666d56b6e4b6a85e41a506547bdbffd02653',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalDiscoveryConfiguration.java': '77e164093e6f0206d35acc760a6f6bbaa6be6dc8342e65e97c54e25ed1821513',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalRecommendationsConfiguration.java': '545aa79195b7608755f84bf0ee98b81e57b29b1d15080421a7e8264b4ba07f13',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalReadConfigurationTest.java': '74a1341f5e8f896b77c538cb4dcb44dcc1479f4de2290cd593d2ab55788e3e2a',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalReadHttpTest.java': '9a77b62fa1ecc1d31fc86e71cdda39b50c908fda5a04a5ccd0ad870dcdcce2cd',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalReadDisabledHttpTest.java': '1a6382f67ef7890007c161fb3813059fd933dae74fe3f131fff9ac0d4343663a'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
@@ -821,7 +859,11 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 147):
+                or len(POST_READS_APP_HASHES) != 184
+                or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
+            return False
+        workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
+        if not isinstance(workflow, bytes) or hashlib.sha256(workflow).hexdigest() != POST_READS_WORKFLOW_SHA256:
             return False
         raw = git('diff', '--name-only', '--no-renames', '-z', POST_READS_BASE, 'HEAD', '--', 'backend-app')
         if not isinstance(raw, bytes):

@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 abstract class BusinessBuildFixture {
-    static final List<String> MODULES = List.of("boot", "user", "community");
+    static final List<String> MODULES = List.of("boot", "user", "community", "animal");
 
     @TempDir
     static Path testKitDirectory;
@@ -40,7 +40,7 @@ abstract class BusinessBuildFixture {
         fixture = Files.createDirectory(temporaryDirectory.resolve("backend-app"));
         write("settings.gradle", """
                 rootProject.name = 'pawbridge-backend-app'
-                include 'boot', 'user', 'community'
+                include 'boot', 'user', 'community', 'animal'
                 """);
         write("gradle.properties", """
                 org.gradle.jvmargs=-Xmx192m -Dfile.encoding=UTF-8
@@ -74,6 +74,7 @@ abstract class BusinessBuildFixture {
                 dependencies {
                     implementation project(':user')
                     implementation project(':community')
+                    implementation project(':animal')
                 }
                 """);
 
@@ -84,7 +85,7 @@ abstract class BusinessBuildFixture {
         Files.copy(guard, fixture.resolve("gradle/architecture.gradle"));
         // Apply the actual business module scripts and production guard entry. The
         // boot fixture is a plain Java consumer so it cannot recursively run TestKit.
-        for (String module : List.of("user", "community")) {
+        for (String module : List.of("user", "community", "animal")) {
             Files.createDirectories(fixture.resolve(module));
             Files.copy(productionBuild.resolve(module + "/build.gradle"),
                     fixture.resolve(module + "/build.gradle"));
@@ -114,6 +115,19 @@ abstract class BusinessBuildFixture {
                     private final com.pawbridge.backend.user.api.UserLookup users;
                     public PostReader(com.pawbridge.backend.user.api.UserLookup users) { this.users = users; }
                     public String authorName(String id) { return users.displayName(id); }
+                }
+                """);
+        javaSource("animal", "api.AnimalLookup", """
+                public interface AnimalLookup { String breed(long animalId); }
+                """);
+        javaSource("animal", "internal.domain.AnimalName", """
+                public record AnimalName(String value) {}
+                """);
+        javaSource("animal", "internal.application.AnimalReader", """
+                public class AnimalReader {
+                    private final com.pawbridge.backend.animal.internal.domain.AnimalName name =
+                        new com.pawbridge.backend.animal.internal.domain.AnimalName("PawBridge");
+                    public String breed() { return name.value(); }
                 }
                 """);
     }
@@ -223,6 +237,7 @@ abstract class BusinessBuildFixture {
         assertTask(result, ":verifyArchitecture", SUCCESS);
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
+        assertTask(result, ":animal:compileJava", SUCCESS);
         assertTask(result, ":verifyBusinessPackages", FAILED);
         String violationPrefix = "Business package violation: [" + rule + "] ";
         assertTrue(result.getOutput().lines().anyMatch(line -> {
