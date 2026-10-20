@@ -20,7 +20,7 @@ import org.gradle.language.jvm.tasks.ProcessResources
 // Business dependencies are a DAG. Boot is the sole composition/packaging root.
 def allowedDependencies = [
     ':boot'     : [':user', ':community', ':animal', ':store'] as Set,
-    ':user'     : [':store'] as Set,
+    ':user'     : [':store', ':animal'] as Set,
     ':community': [':user'] as Set,
     ':animal'   : [] as Set,
     ':store'    : [] as Set

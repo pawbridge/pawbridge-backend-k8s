@@ -20,9 +20,15 @@ import org.springframework.web.client.RestClient;
 
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.shelter-membership",name="enabled",havingValue="true",matchIfMissing=false)
+@Import(ShelterMembershipModuleConfiguration.class)
 public class ShelterMembershipConfiguration {
-    @Bean(destroyMethod="close") HttpClient shelterAnimalHttpClient(){return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
-    @Bean ShelterMembership.ShelterLookup shelterAnimalLookup(@Qualifier("shelterAnimalHttpClient") HttpClient shelterAnimalHttpClient,
+    public ShelterMembershipConfiguration(@Value("${pawbridge.shelter-membership.animal-backend:http}") String backend) {
+        if (!backend.equals("http") && !backend.equals("module")) throw new IllegalArgumentException("Unknown User Animal backend");
+    }
+    @Bean(destroyMethod="close") @ConditionalOnProperty(prefix="pawbridge.shelter-membership",name="animal-backend",havingValue="http",matchIfMissing=true)
+    HttpClient shelterAnimalHttpClient(){return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
+    @Bean @ConditionalOnProperty(prefix="pawbridge.shelter-membership",name="animal-backend",havingValue="http",matchIfMissing=true)
+    ShelterMembership.ShelterLookup shelterAnimalLookup(@Qualifier("shelterAnimalHttpClient") HttpClient shelterAnimalHttpClient,
             @Value("${pawbridge.shelter-membership.animal-base-url:}") String address){
         URI uri=URI.create(address);
         if(!uri.isAbsolute()||!("http".equals(uri.getScheme())||"https".equals(uri.getScheme()))||uri.getHost()==null||uri.getUserInfo()!=null||uri.getQuery()!=null||uri.getFragment()!=null||(!uri.getPath().isEmpty()&&!uri.getPath().equals("/")))
@@ -41,4 +47,15 @@ public class ShelterMembershipConfiguration {
     @Bean AdminShelterApplicationController adminShelterApplicationController(ShelterMembership memberships){return new AdminShelterApplicationController(memberships);}
     @Bean AdminShelterMemberController adminShelterMemberController(ShelterMembership memberships){return new AdminShelterMemberController(memberships);}
     @Bean ShelterMembershipExceptionHandler shelterMembershipExceptionHandler(){return new ShelterMembershipExceptionHandler();}
+}
+
+// Top-level and imported only through the enabled feature; no nested auto-registration.
+@Configuration(proxyBeanMethods=false)
+@ConditionalOnProperty(prefix="pawbridge.shelter-membership",name="animal-backend",havingValue="module")
+@Import(AnimalModuleReadConfiguration.class)
+class ShelterMembershipModuleConfiguration {
+    @Bean ShelterMembership.ShelterLookup moduleShelterLookup(
+            @Qualifier("animalModuleReads") com.pawbridge.backend.animal.api.AnimalShelterReads animals) {
+        return new ModuleShelterLookup(animals);
+    }
 }

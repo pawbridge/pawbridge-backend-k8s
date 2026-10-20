@@ -4,6 +4,7 @@ plugins {
 
 dependencies {
     implementation project(':store')
+    implementation project(':animal')
     implementation 'org.springframework.security:spring-security-oauth2-client'
     implementation 'org.springframework.security:spring-security-web'
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
