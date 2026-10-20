@@ -32,6 +32,7 @@ import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class JdbcGoogleLoginTest {
     private static final LocalDateTime NOW=LocalDateTime.parse("2030-01-01T12:34:56.123456");
@@ -72,11 +73,23 @@ class JdbcGoogleLoginTest {
     }
 
     @Test
-    void given__integrity_failure_on_both_source_attempts__when__creating__then__try_only_one_further_nickname_in_the_same_transaction_and_propagate() {
+    void given__integrity_failure_on_both_attempts__when__creating__then__rollback_and_cleanup_each_transaction_and_propagate_without_a_third_attempt() {
         var f=new Fixture();var failure=new DataIntegrityViolationException("synthetic unique");f.jdbc.userFailure=failure;
         assertSame(failure,assertThrows(RuntimeException.class,()->f.login.load("google",ATTRIBUTES)));
-        assertEquals(2,f.nicknames);assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","nickname","insert-user","rollback","cleanup"),f.events);verifyNoInteractions(f.tokens);
-        // This controls the source catch path only, not successful PostgreSQL recovery after SQLSTATE 23505.
+        assertEquals(2,f.nicknames);assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup",
+                "begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup"),f.events);verifyNoInteractions(f.tokens);
+    }
+
+    @ParameterizedTest @ValueSource(booleans={false,true})
+    void given__first_integrity_failure__when__retrying__then__finish_rollback_before_reloading_and_reuse_a_raced_account_or_generate_one_more_nickname(boolean racedAccount) {
+        var f=new Fixture();f.jdbc.userFailure=new DataIntegrityViolationException("synthetic unique");f.jdbc.userFailuresRemaining=1;
+        if(racedAccount)f.jdbc.googleAfterFailure=EXISTING;
+        var result=f.login.load("google",ATTRIBUTES);
+        assertEquals(racedAccount?EXISTING:new GoogleUser(19,"social@example.test","Social","ROLE_USER",null,"GOOGLE"),result);
+        var expected=new ArrayList<>(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup","begin","user:GOOGLE"));
+        if(!racedAccount)expected.addAll(List.of("user:LOCAL","nickname","insert-user"));
+        expected.addAll(List.of("commit","cleanup"));assertEquals(expected,f.events);
+        assertEquals(racedAccount?1:2,f.nicknames);assertEquals(racedAccount?1:2,f.jdbc.writes);verifyNoInteractions(f.tokens);
     }
 
     @ParameterizedTest @ValueSource(booleans={false,true})
@@ -85,7 +98,7 @@ class JdbcGoogleLoginTest {
         var result=f.login.complete(EXISTING);
         assertEquals("safe-access",result.accessToken());assertEquals("safe-refresh",result.refreshToken());
         verify(f.tokens).access(new JwtSessionTokens.UserClaims(7,"social@example.test","Stored","ROLE_ADMIN","care"));
-        assertEquals(List.of("access","refresh","refresh-expiration","refresh-query","begin",existing?"update-refresh":"insert-refresh","commit","cleanup"),f.events);
+        assertEquals(List.of("access","refresh","refresh-expiration","begin","lock-user","refresh-query",existing?"update-refresh":"insert-refresh","commit","cleanup"),f.events);
         Map<Integer,Object> values=f.jdbc.bindings.getFirst();assertEquals("safe-refresh",values.get(1));
         if(existing){assertEquals(Timestamp.valueOf(NOW.plusSeconds(600)),values.get(2));assertEquals(31L,values.get(3));}
         else{assertEquals(7L,values.get(2));assertEquals(Timestamp.valueOf(NOW.plusSeconds(600)),values.get(3));assertEquals(Timestamp.valueOf(NOW),values.get(4));}
@@ -97,8 +110,16 @@ class JdbcGoogleLoginTest {
         var f=new Fixture();RuntimeException failure=commit?new TransactionSystemException("synthetic commit"):new DataAccessResourceFailureException("synthetic refresh");
         if(commit)f.manager.failure=failure;else f.jdbc.refreshFailure=failure;
         assertSame(failure,assertThrows(RuntimeException.class,()->f.login.complete(EXISTING)));
-        assertEquals(List.of("access","refresh","refresh-expiration","refresh-query","begin","insert-refresh",commit?"commit":"rollback","cleanup"),f.events);
+        assertEquals(List.of("access","refresh","refresh-expiration","begin","lock-user","refresh-query","insert-refresh",commit?"commit":"rollback","cleanup"),f.events);
         assertEquals(1,f.jdbc.writes);
+    }
+
+    @Test
+    void given__user_disappeared_before_refresh_completion__when__locking__then__fail_without_refresh_lookup_or_writes() {
+        var f=new Fixture();f.jdbc.userPresent=false;
+        assertThrows(IncorrectResultSizeDataAccessException.class,()->f.login.complete(EXISTING));
+        assertEquals(List.of("access","refresh","refresh-expiration","begin","lock-user","rollback","cleanup"),f.events);
+        assertEquals(0,f.jdbc.writes);
     }
 
     @ParameterizedTest @ValueSource(booleans={false,true})
@@ -122,18 +143,22 @@ class JdbcGoogleLoginTest {
     private static final class RecordingJdbc extends JdbcTemplate {
         final List<String> events;List<GoogleUser> google=List.of(),local=List.of();List<Long> refreshIds=List.of();
         final List<Map<Integer,Object>> bindings=new ArrayList<>();final List<String> calendarZones=new ArrayList<>();
-        RuntimeException userFailure,refreshFailure;int writes;
+        RuntimeException userFailure,refreshFailure;int writes,userFailuresRemaining=Integer.MAX_VALUE;GoogleUser googleAfterFailure;boolean userPresent=true;
         RecordingJdbc(List<String> events){this.events=events;}
         @Override public <T> List<T> query(String sql,RowMapper<T> mapper,Object... args) {
             var result=new ArrayList<T>();
             try {
-                if(sql.startsWith("SELECT user_id")){
+                if(sql.equals("SELECT user_id FROM pawbridge_user.users WHERE user_id = ? FOR UPDATE")){
+                    assertTrue(TransactionSynchronizationManager.isActualTransactionActive());events.add("lock-user");assertArrayEquals(new Object[]{7L},args);
+                    if(userPresent){var row=mock(ResultSet.class);when(row.getLong("user_id")).thenReturn(7L);result.add(mapper.mapRow(row,0));}
+                }else if(sql.startsWith("SELECT user_id")){
                     events.add("user:"+args[1]);
                     for(var user:args[1].equals("GOOGLE")?google:local){
                         var row=mock(ResultSet.class);when(row.getLong("user_id")).thenReturn(user.userId());when(row.getString("email")).thenReturn(user.email());
                         when(row.getString("name")).thenReturn(user.name());when(row.getString("role")).thenReturn(user.role());when(row.getString("care_reg_no")).thenReturn(user.careRegNo());when(row.getString("provider")).thenReturn(user.provider());result.add(mapper.mapRow(row,0));
                     }
                 }else{
+                    assertTrue(TransactionSynchronizationManager.isActualTransactionActive());assertEquals("lock-user",events.getLast());
                     events.add("refresh-query");assertTrue(sql.contains("FROM pawbridge_user.refresh_tokens WHERE user_id = ?"));assertArrayEquals(new Object[]{7L},args);
                     for(long id:refreshIds){var row=mock(ResultSet.class);when(row.getLong("refresh_token_id")).thenReturn(id);result.add(mapper.mapRow(row,0));}
                 }
@@ -141,7 +166,7 @@ class JdbcGoogleLoginTest {
             }catch(SQLException failure){throw new IllegalStateException(failure);}
         }
         @Override public int update(PreparedStatementCreator creator,KeyHolder keys){
-            writes++;events.add("insert-user");if(userFailure!=null)throw userFailure;
+            writes++;events.add("insert-user");if(userFailure!=null && userFailuresRemaining-->0){if(googleAfterFailure!=null)google=List.of(googleAfterFailure);throw userFailure;}
             bind(creator);keys.getKeyList().add(Map.of("user_id",19L));return 1;
         }
         @Override public int update(PreparedStatementCreator creator){

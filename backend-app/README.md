@@ -576,7 +576,7 @@ ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`�
 
 `pawbridge.auth.google-enabled`는 기본 false다. true에서는 기존 AuthSessions·JwtSessionTokens와 명시 Google client/secret/callback·frontend 설정을 요구한다. 정확한 Google authorization/callback 두 경로만 별도 보안 체인으로 조립하며 REST의 STATELESS JWT 경계를 유지한다. OAuth 요청 state는 기존 Spring의 임시 HttpSession 저장 방식을 사용한다. Google 네트워크 호출·자격증명·운영 설정을 이 구현 과정에서 실행하거나 변경하지 않았다.
 
-Google의 이메일/공급자로 기존 회원을 우선 찾고 LOCAL 충돌은 자동 연결하지 않는다. 신규 회원의 기존 닉네임·ROLE_USER·provider ID와 감사시각을 보존한다. 기존 User nickname 저장소를 재사용하며 Google 외부 I/O 후 회원 생성 TX와 refresh 저장 TX를 분리한다. 새로운 계정 연결·LOCAL 폐지·Naver·재시도 정책을 추가하지 않는다. 실제 JPA flush/23505·동시 가입·DB 감사시각의 동등성은 아직 PostgreSQL 비교로 입증하지 않았다.
+Google의 이메일/공급자로 기존 회원을 우선 찾고 LOCAL 충돌은 자동 연결하지 않는다. 신규 회원의 기존 닉네임·ROLE_USER·provider ID와 감사시각을 보존한다. 기존 User nickname 저장소를 재사용하며 Google 외부 I/O 후 회원 생성 TX와 refresh 저장 TX를 분리한다. 계정 연결·LOCAL 폐지·Naver는 추가하지 않는다. unique 충돌의 원래1회 추가시도는 실패 TX 종료 뒤 별도 TX로 이동하며, 최초 refresh 저장은 같은 회원 행 잠금 뒤 재조회한다. 실제 JPA flush/23505·동시 가입·DB 감사시각의 동등성은 아직 PostgreSQL 비교로 입증하지 않았다.
 
 성공 redirect는 원문처럼 access/refresh query를 유지한다. 임의 예외/원격 응답을 실패 주소에 복사하지 않고 정해진 문구만 허용한다. redirect URL 전체를 DEBUG로 기록하던 framework 경로는 같은 응답의 servlet redirect로 제한했고, 재현 RED→수정 GREEN으로 토큰 미기록을 확인했다. 이는 실제 HTTP framework TRACE 전체 로그의 검증이 아니며 query 토큰 자체의 전달 방식 개선은 후속 P8 계약이다.
 
@@ -605,8 +605,10 @@ Kafka 보상 소비/manualACK·재시도·processed 저장·정리 예약의 소
 선택 CI는 고정108 입력과 공통 빌드·단위/HTTP/구조, 기존 관리자 페이지 PG11·소유 정리를 요구한다.39계약·28JAR의 미실행과 새로운 User SQL/외부 연동의 미실증은 명시적으로 남기며 full 또는 운영 인계 성공으로 확대하지 않는다.
 
 
-### Google 활성화 전 해결할 기존 DB 결함
+### Google 실패·경합 보완과 남은 실제 연동 검증
 
-자동 리뷰에서 고정 원문에도 있던 두 문제를 확인했다. 닉네임 unique 충돌 후 같은 TX에서 다시 INSERT하는 재시도는 PostgreSQL aborted TX를 회복하지 못한다. 또한 최초 동시 로그인 두 요청이 refresh 행을 TX 밖에서 조회한 뒤 각각 INSERT하면 user_id UNIQUE가 없는 구조에서 두 행이 생길 수 있다. 기존 구현과 같다는 사실은 결함이 없다는 뜻이 아니다. 두 문제의 수정 정책과 실제 PostgreSQL 경합 회귀를 확정하기 전에는 Google을 활성화하지 않는다. 이 PR은 그 정책·DDL·실제 데이터를 변경하거나 문제를 해결한 것으로 기록하지 않는다.
+자동 리뷰에서 원문에도 있던 같은 TX의23505 뒤 재시도와 최초 refresh 선조회/저장 경합을 찾았다. 회원 생성은 첫 TX의 rollback·cleanup이 끝난 뒤 새 TX에서 Google/LOCAL을 재조회하고 원래 한도인 추가1회만 시도한다. 동시 요청이 이미 만든 Google 계정은 재사용한다. refresh는 발급 순서를 보존한 뒤 같은 기존 writer TX에서 회원 PK를 FOR UPDATE로 잠그고 refresh를 재조회·저장한다. 사라진 회원·복수 refresh 행은 임의 보정하지 않고 실패한다. 이는 기존 실패/경합 동작의 의도적 보완이며 source byte 동일성으로 표현하지 않는다. 새 DDL/UNIQUE/데이터 보정은 없다.
 
-별도로 오류 redirect에 기존 query가 있으면 두 번째 물음표가 붙는 결함은 URI builder로 보완했다. 새2 RED 실패 후 기존 포함7 GREEN을 확인했으며, 기존 오류 문구·query 없는 응답·토큰 미기록을 유지했다. fragment 시험은 handler 경계이며 Boot의 fragment 거부 정책을 바꾸지 않는다.
+Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/유한 시도/잠금 전 조회 금지와 실패 전파를 보호한다. 실제 PostgreSQL23505 복구·동시 row lock·선택 writer의 SELECT/행잠금/DML 권한은 아직 검증하지 않았다. 현재 OAuth 웹 호출에는 outer TX가 없으며, 다른 refresh writer까지 직렬화되거나 모든 isolation에서 동일하다고 주장하지 않는다. Google 활성화 전 실제 DB/격리수준·브라우저 흐름을 확인해야 한다.
+
+오류 redirect에 기존 query가 있으면 두 번째 물음표가 붙는 결함도 URI builder로 보완했다. 새2 RED 실패→기존 포함7 GREEN, 기존 오류 문구·query 없는 응답·토큰 미기록을 유지했다. fragment 시험은 handler 경계이며 Boot의 fragment 거부 정책은 그대로다.

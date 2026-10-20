@@ -25,6 +25,7 @@ import org.springframework.transaction.support.TransactionOperations;
 public final class JdbcGoogleLogin implements GoogleLogin {
     private static final String FIND_USER="SELECT user_id,email,name,role,care_reg_no,provider FROM pawbridge_user.users WHERE lower(email)=lower(?) AND lower(provider)=lower(?)";
     private static final String INSERT_USER="INSERT INTO pawbridge_user.users(email,name,nickname,password,role,care_reg_no,provider,provider_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)";
+    private static final String LOCK_USER="SELECT user_id FROM pawbridge_user.users WHERE user_id = ? FOR UPDATE";
     private static final String FIND_REFRESH="SELECT refresh_token_id FROM pawbridge_user.refresh_tokens WHERE user_id = ?";
     private static final String UPDATE_REFRESH="UPDATE pawbridge_user.refresh_tokens SET token = ?, expires_at = ? WHERE refresh_token_id = ?";
     private static final String INSERT_REFRESH="INSERT INTO pawbridge_user.refresh_tokens(token,user_id,expires_at,created_at) VALUES (?,?,?,?)";
@@ -49,18 +50,21 @@ public final class JdbcGoogleLogin implements GoogleLogin {
         if(email==null || email.isEmpty())throw new GoogleLoginRejectedException("이메일 정보를 가져올 수 없습니다");
         String name=(String)attributes.get("name");
         String providerId=(String)attributes.get("sub");
+        try {return loadAccount(email,name,providerId);}
+        catch(DataIntegrityViolationException duplicate) {
+            // The failed attempt must finish rollback and cleanup before the single permitted retry.
+            return loadAccount(email,name,providerId);
+        }
+    }
+
+    private GoogleUser loadAccount(String email,String name,String providerId) {
         return transactions.execute(status->{
             List<GoogleUser> existing=findUser(email,"GOOGLE");
             if(!existing.isEmpty())return existing.getFirst();
             if(!findUser(email,"LOCAL").isEmpty())
                 throw new GoogleLoginRejectedException("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.");
             String nickname=nicknames.get();
-            try {return insertUser(email,name,providerId,nickname);}
-            catch(DataIntegrityViolationException duplicate) {
-                // Preserve the source's one further attempt; do not invent savepoints or a new transaction.
-                // Actual PostgreSQL abort/JPA flush behavior is a separate, currently unverified boundary.
-                return insertUser(email,name,providerId,nicknames.get());
-            }
+            return insertUser(email,name,providerId,nickname);
         });
     }
 
@@ -92,9 +96,11 @@ public final class JdbcGoogleLogin implements GoogleLogin {
         String access=tokens.access(new JwtSessionTokens.UserClaims(user.userId(),user.email(),user.name(),user.role(),user.careRegNo()));
         String refresh=tokens.refresh();
         LocalDateTime expires=now.get().plusSeconds(TimeUnit.MILLISECONDS.toSeconds(tokens.refreshExpiration()));
-        List<Long> found=jdbc.query(FIND_REFRESH,(row,n)->row.getLong("refresh_token_id"),user.userId());
-        if(found.size()>1)throw new IncorrectResultSizeDataAccessException(1,found.size());
         transactions.executeWithoutResult(status->{
+            List<Long> locked=jdbc.query(LOCK_USER,(row,n)->row.getLong("user_id"),user.userId());
+            if(locked.size()!=1)throw new IncorrectResultSizeDataAccessException(1,locked.size());
+            List<Long> found=jdbc.query(FIND_REFRESH,(row,n)->row.getLong("refresh_token_id"),user.userId());
+            if(found.size()>1)throw new IncorrectResultSizeDataAccessException(1,found.size());
             if(found.isEmpty())insertRefresh(user.userId(),refresh,expires);
             else updateRefresh(found.getFirst(),refresh,expires);
         });
