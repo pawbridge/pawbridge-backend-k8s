@@ -30,18 +30,21 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         assertTask(result, ":verifyBusinessPackages", SUCCESS);
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
+        assertTask(result, ":animal:compileJava", SUCCESS);
         for (String module : MODULES) {
             assertCheckCompleted(result, ":" + module + ":check");
         }
         assertCheckCompleted(result, ":check");
         assertCompiled("user", "internal.domain.UserName");
         assertCompiled("community", "internal.application.PostReader");
+        assertCompiled("animal", "internal.application.AnimalReader");
         assertEquals("fixture.enabled=true\n",
                 Files.readString(fixture.resolve("boot/build/resources/main/fixture.properties")));
     }
 
     @ParameterizedTest
-    @CsvSource({"user, community", "user, boot", "community, boot"})
+    @CsvSource({"user, community", "user, boot", "community, boot", "user, animal", "community, animal",
+            "animal, user", "animal, community", "animal, boot"})
     void givenForbiddenBusinessEdge_whenCheck_thenRejectsGraph(String source, String target) throws IOException {
         appendModuleBuild(source, "dependencies { implementation project(':" + target + "') }");
 
@@ -58,7 +61,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"user", "community"})
+    @ValueSource(strings = {"user", "community", "animal"})
     void givenBusinessBootPlugin_whenCheck_thenRejectsExecutableBusinessModule(String module) throws IOException {
         appendModuleBuild(module, "apply plugin: 'org.springframework.boot'");
 
@@ -67,7 +70,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"user", "community"})
+    @ValueSource(strings = {"user", "community", "animal"})
     void givenBusinessUsesPlainJavaPlugin_whenCheck_thenRejectsMissingLibraryContract(String module) throws IOException {
         write(module + "/build.gradle", "plugins { id 'java' }\n"
                 + (module.equals("community") ? "dependencies { implementation project(':user') }\n" : ""));
@@ -82,6 +85,49 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
         assertGraphRejected(runner(":user:check").buildAndFail(),
                 "forbidden project dependency :user -> :community");
+    }
+
+    @Test
+    void givenAnimalBusinessModule_whenAnimalCheck_thenCompilesClassesAndRunsSharedGuards() throws IOException {
+        javaSource("boot", "AnimalAssembly", """
+                public class AnimalAssembly {
+                    private final com.pawbridge.backend.animal.internal.application.AnimalReader animals =
+                        new com.pawbridge.backend.animal.internal.application.AnimalReader();
+                    public String breed() { return animals.breed(); }
+                }
+                """);
+
+        BuildResult result = runner(":animal:check").build();
+
+        assertTask(result, ":verifyArchitecture", SUCCESS);
+        assertTask(result, ":verifyBusinessPackages", SUCCESS);
+        for (String module : MODULES) assertTask(result, ":" + module + ":compileJava", SUCCESS);
+        assertCheckCompleted(result, ":animal:check");
+        assertCompiled("animal", "api.AnimalLookup");
+        assertCompiled("animal", "internal.domain.AnimalName");
+        assertCompiled("animal", "internal.application.AnimalReader");
+        assertCompiled("boot", "AnimalAssembly");
+    }
+
+    @Test
+    void givenAnimalReferencesUserOutputAsFiles_whenAnimalCheck_thenRejectsOwner() throws IOException {
+        appendModuleBuild("animal", """
+                evaluationDependsOn(':user')
+                dependencies { implementation files(project(':user').sourceSets.main.output) }
+                """);
+
+        assertGraphRejected(runner(":animal:check").buildAndFail(),
+                "forbidden project dependency :animal -> :user through files");
+    }
+
+    @Test
+    void givenAnimalSiblingServiceFileClasspath_whenAnimalCheck_thenRejects() throws IOException {
+        appendModuleBuild("boot", "configurations.implementation.dependencies.clear()");
+        createEmptyJar("../store-service/build/libs/store-service.jar");
+        appendModuleBuild("animal", "dependencies { runtimeOnly files(rootProject.file('../store-service/build/libs/store-service.jar')) }");
+
+        assertGraphRejected(runner(":animal:check").buildAndFail(),
+                ":animal production classpath references a sibling service");
     }
 
     @Test
@@ -223,7 +269,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         append("settings.gradle", "include 'legacy'");
         write("legacy/build.gradle", "plugins { id 'java-library' }");
 
-        assertGraphRejected(runner("check").buildAndFail(), "only boot, user and community projects are allowed");
+        assertGraphRejected(runner("check").buildAndFail(), "only boot, user, community and animal projects are allowed");
     }
 
     @Test

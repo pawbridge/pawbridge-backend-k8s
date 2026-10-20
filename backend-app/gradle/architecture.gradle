@@ -19,11 +19,12 @@ import org.gradle.language.jvm.tasks.ProcessResources
 
 // Business dependencies are a DAG. Boot is the sole composition/packaging root.
 def allowedDependencies = [
-    ':boot'     : [':user', ':community'] as Set,
+    ':boot'     : [':user', ':community', ':animal'] as Set,
     ':user'     : [] as Set,
-    ':community': [':user'] as Set
+    ':community': [':user'] as Set,
+    ':animal'   : [] as Set
 ]
-def businessModules = [':user', ':community'] as Set
+def businessModules = [':user', ':community', ':animal'] as Set
 
 def rejectArchitecture = { String detail ->
     throw new GradleException("Architecture violation: ${detail}")
@@ -38,7 +39,7 @@ def verifyDeclaredGraph = {
     }
     def expectedProjects = allowedDependencies.keySet()
     if (rootProject.subprojects.collect { it.path }.toSet() != expectedProjects) {
-        rejectArchitecture('only boot, user and community projects are allowed')
+        rejectArchitecture('only boot, user, community and animal projects are allowed')
     }
     if (!gradle.includedBuilds.empty) {
         rejectArchitecture('included builds are not allowed in this isolated application')
@@ -70,7 +71,7 @@ def verifyDeclaredGraph = {
 
 def verifyArchitecture = tasks.register('verifyArchitecture') {
     group = 'verification'
-    description = 'Checks the boot/user/community production Gradle dependency graph and input isolation.'
+    description = 'Checks the boot/user/community/animal production Gradle dependency graph and input isolation.'
 
     doLast {
         verifyDeclaredGraph()
@@ -190,7 +191,7 @@ def describeBusinessType = { String name ->
     while (normalized.endsWith('[]')) {
         normalized = normalized.substring(0, normalized.length() - 2)
     }
-    def moduleName = ['user', 'community'].find { normalized.startsWith("${businessPrefix}${it}.") }
+    def moduleName = ['user', 'community', 'animal'].find { normalized.startsWith("${businessPrefix}${it}.") }
     if (moduleName == null) {
         return null
     }
