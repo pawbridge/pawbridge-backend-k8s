@@ -60,6 +60,7 @@ class PawBridgeApplicationTest {
                 .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.web.AdminUserDetailController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
@@ -296,6 +297,29 @@ class PawBridgeApplicationTest {
                     assertThat(sendTransaction.getTransactionManager()).isSameAs(writeManager);
                     assertThat(sendTransaction.getTimeout()).isEqualTo(15);
                     assertThat(sendTransaction.isReadOnly()).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.api.ContactMemberCleanup.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.ContactMemberCleanupStore.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.deletion.application.UserDeletion.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionExceptionHandler.class)).hasSize(1);
+                    var cleanup = context.getBean(com.pawbridge.backend.community.api.ContactMemberCleanup.class);
+                    var cleanupStore = context.getBean(com.pawbridge.backend.community.internal.note.application.ContactMemberCleanupStore.class);
+                    var userDeletion = context.getBean(com.pawbridge.backend.user.internal.deletion.application.UserDeletion.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(cleanup, "members")).isSameAs(context.getBean(com.pawbridge.backend.user.api.ContactMemberQuery.class));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(cleanup, "store")).isSameAs(cleanupStore);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(cleanupStore, "jdbc")).isSameAs(writeJdbc);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(userDeletion, "jdbc")).isSameAs(writeJdbc);
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(cleanup)).isFalse();
+                    assertThat(org.springframework.aop.support.AopUtils.isAopProxy(userDeletion)).isFalse();
+                    var cleanupTransaction = (org.springframework.transaction.support.TransactionTemplate) org.springframework.test.util.ReflectionTestUtils.getField(cleanupStore, "transaction");
+                    var userDeletionTransaction = (org.springframework.transaction.support.TransactionTemplate) org.springframework.test.util.ReflectionTestUtils.getField(userDeletion, "transactions");
+                    assertThat(cleanupTransaction).isNotSameAs(sharedWriteTransaction).isNotSameAs(userDeletionTransaction);
+                    assertThat(userDeletionTransaction).isNotSameAs(sharedWriteTransaction);
+                    for (var operationTransaction : java.util.List.of(cleanupTransaction,userDeletionTransaction)) {
+                        assertThat(operationTransaction.getTransactionManager()).isSameAs(writeManager);
+                        assertThat(operationTransaction.getTimeout()).isEqualTo(15);
+                        assertThat(operationTransaction.isReadOnly()).isFalse();
+                    }
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteExpiry.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.boot.configuration.NoteExpiryConfiguration.NoteExpiryJob.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class)).isEmpty();

@@ -480,3 +480,35 @@ PR에서는 package와 선택된 계약 검증을 실행한다. 미분류 변경
 전체 일반 단위·구조 검사와 실행 JAR 빌드는 유지한다. 기존 schema/소유권/최소 ACL/원문 지문 준비를 같은 순서로 수행하고 F4의 두 FK 보조표만 원래 위치에서 준비한다. 과거 JAR27 및 관계없는 PG 여정은 명시적으로 미실행이다. 새 소유 fixture에서 F30의 정확한 PG6과 실제 활성 scheduler의 트랜잭션·정상 종료 계약을 다시 검증하고 항상 소유 정리를 실행한다. 준비된 과거 업무 행 이력이 full과 같다는 주장은 하지 않는다.
 
 `contract-plan.txt`와 `contract-execution.txt`는 `profile=note-expiry`, 미실행 JAR27, 필수 F4 shape/PG/cleanup의 실제 결과를 기록한다. PG XML은 정확한 클래스·6메서드·실행 개수와 숨은 실패/오류/skip/disabled까지 검사한다. 이 scoped 성공은 full 성공이나 full 증거 재사용으로 승격하지 않는다. dev 병합 뒤에도 scoped 경로는 새로 실행한다. 소요 시간은 실제 hosted 실행 후에만 보고한다.
+
+
+## 관리자 회원 삭제와 Community 정리
+
+기존 ADMIN DELETE `/api/v1/admin/users/{userId}`를 User의 pending 커밋 → TX 밖 Community 공개 호출 → User의 별도 최종 TX로 연결한다. Boot가 콜백을 주입하며 User에서 Community 모듈을 역참조하지 않는다. 기존 두 pool과 writer TM을 재사용하고 각 작업의 TT15 및 기존 관리자 JWT 인가를 유지한다.
+
+Community 정리는 쪽지 member 잠금과 pending 재검증 뒤 본인 mailbox·차단·발신 요청의 FK 효과, 원본 context/요청 hash 익명화, 영향받은 고아 note 삭제를 수행한다. 설치된 채팅 표의 membership·발신 요청 삭제와 메시지/room 회원 ID 익명화도 같은 TX에서 처리한다. 실패하면 이 Community TX 전체를 원복한다. 커밋 후에만 같은 쪽지 registry의 본인 연결을 닫고 나머지 연결에 resync한다.
+
+첫 인계는 명시적 `pawbridge.chat.enabled=false` 모드다. 미지정 시 기존 `MEMBER_CHAT_ENABLED` 별칭과 false 기본값을 따르며 canonical 속성이 우선한다. false라도 설치된 채팅 데이터 정리는 생략하지 않는다. true에 필요한 Redis WITHDRAWN 생산·기존 소비자와 연결 종료 배선은 아직 인수하지 않았으므로 true 설정은 조립 단계에서 실패한다. 전체 채팅 또는 운영의 삭제 경로 인계 완료를 뜻하지 않는다.
+
+Community 실패는 pending을 보존하고503을 반환한다. Community가 커밋된 뒤 User 최종 TX가 실패하면500이며 pending 상태에서 권한 있는 재시도로 마무리한다. 최종 User 조회 시 이미 부재하면 원문 deleteById처럼 성공하고, 조회 후 동시 삭제로 DELETE가0행이면 optimistic 실패로 최종 TX를 원복한다. 모든 단계를 감싸는 새 outer TX나 추가 행 잠금은 없다.
+
+실제 원문 JpaTM/후보 JdbcTM 비교는 기존 F29/F30가 완료된 뒤에만 원문 User2표·설치된 chat4표와 필요한 열 권한을 합성 fixture에 더한다. 원래18표 단계의 strict를24표 단계에 다시 적용하거나 완화하지 않는다. 고정 원문40/shared22/generated6의 별도 receipt를 DDL 전에 확인하며, 원래 F29 원문22/generated3 receipt와 발송 여정은 보존한다.
+
+후기 `memberCleanupCompatibilityTest`는 업무 비교11사례와 마지막 실제 issuer 토큰 준비1사례의 정확한 XML12를 요구한다. 이어 같은 실행 JAR의 `member-cleanup-smoke`가 관리자 삭제의 Community rollback503 → User rollback500 → 권한 있는 retry200, 본인 SSE 종료·생존자 resync와 원본 본문 보존을 확인한다. JWT 없는401·위조 ADMIN 거부403·pending의 정상 JWT 재연결403도 구분한다. 실제 소켓·PG 성공은 해당 hosted 결과로만 판정한다.
+
+새 필수 `jar_f31`은 기존 `jar_f3..jar_f29`27개와 별개로 계약 plan/audit에 포함한다. 항상 실행하는 자기 fixture cleanup까지 성공해야 하며, 원문 백업·운영·Windows·R2에 접근하지 않는다. 이 문단은 실제 CI나 운영 성공을 선언하는 기록이 아니다.
+
+후기 회원 삭제의 원시 자식 로그는 처음부터 소유 RUNNER_TEMP/0700 폴더와0600 파일에만 기록한다. 모든 종료 경로에서 제한 크기·비밀값을 검사하며, 두 자식의 정상 정지와 검사 성공이 확인될 때만 업로드 경로에 사본을 만든다. 실패·정지 미확인·민감값 감지 시 원시 로그 사본은0이고 incomplete 결과만 보존한다.
+
+
+## 관리자 회원 상세 조회
+
+ADMIN GET `/api/v1/admin/users/{userId}`는 기존 `UserProfileQuery`와 같은 read-only 조회 bean을 소비한다. 기존 회원7필드와 성공200/부재400/예외500 응답을 재사용하고 새 SQL·열 권한·pool·TM·schema를 추가하지 않는다. pending 행을 임의로 제외하거나 비밀번호 등 다른 필드를 반환하지 않는다.
+
+서명된 ADMIN 권한을 경로 바인딩/조회보다 먼저 확인하며 X-User 헤더나 query의 userId로 대상을 바꾸지 않는다. 아직 편입하지 않은 `/users/search`는 이 단건 matcher에서 제외하고 목록·검색·통계·PUT의 기본 거부를 유지한다. 기존 관리자 DELETE는 그대로다.
+
+이 변화의 가장 가까운 보호는 실제 MVC의 JWT·대상 바인딩·7필드/오류·인접 경로와 명시 조립 시험이다. 기존 F12의 변경 없는7열 SQL/실제 PG 근거를 재사용하고 API마다 별도 PG fixture·JAR 여정을 복제하지 않는다. 새 기능의 실제 Git 기준/hosted CI/병합은 해당 PR 실행 근거와 구분한다.
+
+### 회원 관리 계약 선택 검증
+
+`member-management`는 검수한 회원관리 앱·시험·준비 코드의 고정 SHA가 일치하는 같은 저장소 PR/dev push에만 선택한다. 공통 모듈 빌드·단위/구조 검사와 동일 JAR을 유지하고, F4 보조표 준비 → 기존 쪽지 만료 PG6 → 회원 fixture → 회원 PG12 → 관리자 삭제 HTTP9/SSE/실패 후 재시도 → 소유 정리를 실행한다. 관계없는 과거 JAR27과 PG 회귀는 `skipped`로 남기며 이 결과를 전체 회귀나 full 재사용 증거로 승격하지 않는다. 고정 범위를 벗어나면 기존 full 경로로 돌아간다.

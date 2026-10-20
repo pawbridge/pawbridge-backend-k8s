@@ -24,6 +24,7 @@ import com.pawbridge.backend.boot.configuration.NoteFavoriteConfiguration;
 import com.pawbridge.backend.boot.configuration.NoteDeletionConfiguration;
 import com.pawbridge.backend.boot.configuration.NoteSendConfiguration;
 import com.pawbridge.backend.boot.configuration.NoteExpiryConfiguration;
+import com.pawbridge.backend.boot.configuration.MemberCleanupConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -37,7 +38,7 @@ import org.springframework.context.annotation.Import;
 @EnableAutoConfiguration(exclude = {DataSourceAutoConfiguration.class,
         DataSourceTransactionManagerAutoConfiguration.class, JdbcTemplateAutoConfiguration.class,
         UserDetailsServiceAutoConfiguration.class})
-@Import({ReadConfiguration.class, PostWriteConfiguration.class, CommentWriteConfiguration.class, UserProfileConfiguration.class, UserNicknameConfiguration.class, FavoriteStatusConfiguration.class, HomeVideoReadConfiguration.class, VisitReadConfiguration.class, NoteRecipientReadConfiguration.class, NoteBlockStatusReadConfiguration.class, TotalUserCountReadConfiguration.class, NoteBlockListReadConfiguration.class, NoteNotificationsReadConfiguration.class, PrivateNoteReadConfiguration.class, PrivateNoteListConfiguration.class, NoteBlockRemoveConfiguration.class, NoteBlockCreateConfiguration.class, NoteReadStreamConfiguration.class, NoteFavoriteConfiguration.class, NoteDeletionConfiguration.class, NoteSendConfiguration.class, NoteExpiryConfiguration.class})
+@Import({ReadConfiguration.class, PostWriteConfiguration.class, CommentWriteConfiguration.class, UserProfileConfiguration.class, UserNicknameConfiguration.class, FavoriteStatusConfiguration.class, HomeVideoReadConfiguration.class, VisitReadConfiguration.class, NoteRecipientReadConfiguration.class, NoteBlockStatusReadConfiguration.class, TotalUserCountReadConfiguration.class, NoteBlockListReadConfiguration.class, NoteNotificationsReadConfiguration.class, PrivateNoteReadConfiguration.class, PrivateNoteListConfiguration.class, NoteBlockRemoveConfiguration.class, NoteBlockCreateConfiguration.class, NoteReadStreamConfiguration.class, NoteFavoriteConfiguration.class, NoteDeletionConfiguration.class, NoteSendConfiguration.class, NoteExpiryConfiguration.class, MemberCleanupConfiguration.class})
 public class PawBridgeApplication {
     public static void main(String[] args) {
         // Validate explicit inputs before Spring can open a listener or a database connection.

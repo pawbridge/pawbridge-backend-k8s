@@ -418,3 +418,453 @@ def run(ci):
     finally:
         receipt.write_text(json.dumps(result, indent=2) + '\n')
     print('Hosted F29 send/recipient-note/replay/REST and owned shutdown journey passed')
+
+
+# Late member-cleanup journey only. The original F29 send run() above is unchanged.
+MEMBER_ADMIN = 9973001
+MEMBER_IDS = (CALLER, OTHER)
+MEMBER_NOTE_A, MEMBER_NOTE_B, MEMBER_ROOM, MEMBER_REQUEST_A, MEMBER_REQUEST_B, MEMBER_CHAT_REQUEST = (
+    'f39a0000-0000-4000-8000-' + f'{n:012d}' for n in range(1, 7))
+MEMBER_FIRST = '2032-02-29T15:00:00.123456Z'
+MEMBER_EXPIRY = '2033-02-28T15:00:00.123456Z'
+MEMBER_BODY = 'Member cleanup owned private note'
+MEMBER_CHAT_BODY = 'Member cleanup owned private chat'
+MEMBER_NAMES = {i: 'Cleanupjar' + str(i) for i in MEMBER_IDS}
+MEMBER_COUNTERS = ('request_checks', 'delete_checks', 'successful_delete_checks', 'rejected_delete_checks',
+                   'get_checks', 'stream_open_checks', 'stream_ready_checks', 'community_rollback_checks',
+                   'user_rollback_checks', 'retry_checks', 'pending_reconnect_checks', 'authentication_checks',
+                   'authorization_checks', 'surviving_detail_checks', 'approved_database_write_checks')
+# Static journey: SSE2 + admin DELETE5 + pending reconnect1 + surviving detail1.
+MEMBER_EXPECTED_COUNTS = dict(zip(MEMBER_COUNTERS, (9, 5, 1, 4, 4, 2, 2, 1, 1, 1, 1, 1, 1, 1, 3)))
+
+
+def member_load_tokens(ci):
+    """Only these three actual-issuer tokens, including the existing DB-absent ADMIN."""
+    import base64
+    import hmac
+    import math
+    owner = ci.f2.require_hosted()
+    path = Path(os.environ['F3_TEST_TOKENS_PATH'])
+    wanted = Path(os.environ['RUNNER_TEMP']).resolve() / ('f3-tokens-' + owner + '.json')
+    try:
+        mode = path.lstat().st_mode
+        if path.is_symlink() or path.resolve() != wanted or not stat.S_ISREG(mode) or stat.S_IMODE(mode) != 0o600:
+            raise ValueError()
+        values = json.loads(path.read_text())
+        secret = os.environ['F3_TEST_JWT_SECRET']
+        if len(secret.encode()) < 32: raise ValueError()
+        tokens = {}
+        decode = lambda s: base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
+        for name, identity, role in (('F19_ADMIN', MEMBER_ADMIN, 'ROLE_ADMIN'),
+                                     ('F29_CALLER', CALLER, 'ROLE_USER'), ('F29_OTHER', OTHER, 'ROLE_USER')):
+            token = values[name]; parts = token.split('.')
+            if len(parts) != 3 or not all(parts): raise ValueError()
+            header, claims = json.loads(decode(parts[0])), json.loads(decode(parts[1]))
+            digest = {'HS256': hashlib.sha256, 'HS384': hashlib.sha384, 'HS512': hashlib.sha512}[header['alg']]
+            signature = hmac.new(secret.encode(), (parts[0] + '.' + parts[1]).encode('ascii'), digest).digest()
+            if (not hmac.compare_digest(signature, decode(parts[2])) or type(claims['userId']) is not int
+                    or claims['userId'] != identity or claims['role'] != role
+                    or type(claims['exp']) not in (int, float) or not math.isfinite(claims['exp'])
+                    or claims['exp'] < time.time() + 60): raise ValueError()
+            tokens[name] = token
+    except (OSError, KeyError, TypeError, ValueError, UnicodeError, AttributeError):
+        raise SystemExit('Member cleanup requires three fresh actual-issuer tokens in the owned regular 0600 file') from None
+    return tokens
+
+
+def member_seed_rows():
+    """Known private inputs/full source columns, independent of a runtime response."""
+    rows = {k: [] for k in ('users', 'favorites', 'refresh_tokens', 'shelter_applications', 'private_note_members',
+                            'private_notes', 'private_note_mailboxes', 'private_note_requests', 'private_note_blocks',
+                            'chat_rooms', 'chat_members', 'chat_messages', 'chat_requests')}
+    for identity in MEMBER_IDS:
+        rows['users'].append(dict(user_id=identity, care_reg_no=None, created_at=None,
+            email='cleanupjar-' + str(identity) + '@fixture.invalid', name='Cleanup synthetic',
+            nickname=MEMBER_NAMES[identity], password=None, provider='GOOGLE', provider_id=None,
+            role='ROLE_USER', updated_at=None))
+        rows['private_note_members'].append(dict(member_id=identity))
+    plain = MEMBER_FIRST[:-1]
+    rows['favorites'] = [dict(favorite_id=CALLER, animal_id=1, created_at=plain, user_id=CALLER)]
+    rows['refresh_tokens'] = [dict(refresh_token_id=CALLER, created_at=plain, expires_at=MEMBER_EXPIRY[:-1],
+                                   token='cleanupjar-refresh-' + str(CALLER), user_id=CALLER)]
+    rows['shelter_applications'] = [dict(id=CALLER, user_id=CALLER, shelter_name='Synthetic cleanup', status='PENDING',
+        requested_at=plain, reviewed_by=None, reviewed_at=None, review_note=None, care_reg_no=None)]
+    for identity, sender, recipient in ((MEMBER_NOTE_A, CALLER, OTHER), (MEMBER_NOTE_B, OTHER, CALLER)):
+        rows['private_notes'].append(dict(note_id=identity, sender_id=sender, recipient_id=recipient,
+            body=MEMBER_BODY, reply_to=None, context_type='POST', context_id=123,
+            created_at=MEMBER_FIRST, expires_at=MEMBER_EXPIRY))
+    for member, identity, direction in ((CALLER, MEMBER_NOTE_A, 'SENT'), (OTHER, MEMBER_NOTE_A, 'INBOX'),
+                                         (CALLER, MEMBER_NOTE_B, 'INBOX')):
+        rows['private_note_mailboxes'].append(dict(member_id=member, note_id=identity, direction=direction,
+            read_at=MEMBER_FIRST if direction == 'SENT' else None, favorite=False, created_at=MEMBER_FIRST))
+    for member, request in ((OTHER, MEMBER_REQUEST_A), (CALLER, MEMBER_REQUEST_B)):
+        rows['private_note_requests'].append(dict(sender_id=member, request_id=request, request_hash='a' * 64,
+                                                note_id=MEMBER_NOTE_A, created_at=MEMBER_FIRST))
+    rows['private_note_blocks'] = [dict(member_id=CALLER, blocked_id=OTHER, created_at=MEMBER_FIRST)]
+    rows['chat_rooms'] = [dict(room_id=MEMBER_ROOM, first_member_id=CALLER, second_member_id=OTHER, latest_sequence=1)]
+    rows['chat_members'] = [dict(room_id=MEMBER_ROOM, member_id=i, read_through=0, hidden_through=-1) for i in MEMBER_IDS]
+    rows['chat_messages'] = [dict(room_id=MEMBER_ROOM, sequence=1, sender_id=CALLER, body=MEMBER_CHAT_BODY,
+        context_type=None, context_id=None, created_at=MEMBER_FIRST, expires_at=MEMBER_EXPIRY)]
+    rows['chat_requests'] = [dict(sender_id=CALLER, request_id=MEMBER_CHAT_REQUEST, request_hash='b' * 64,
+                                 room_id=MEMBER_ROOM, sequence=1, created_at=MEMBER_FIRST)]
+    return rows
+
+
+def member_ordered(ci, state):
+    result = copy.deepcopy(state)
+    for name, _, order in ci.SNAPSHOT_TABLES + ci.MEMBER_TABLES:
+        result[name].sort(key=lambda row: tuple(row[k] for k in order.split(',')))
+    return result
+
+
+def member_expected(ci, owned, phase):
+    expected = copy.deepcopy(owned['baseline'])
+    for name, rows in owned['seed_rows'].items(): expected[name].extend(copy.deepcopy(rows))
+    if phase != 'seed': expected['contact_deletions'].append(copy.deepcopy(owned['pending']))
+    if phase in ('community', 'final'):
+        expected['private_note_members'] = [r for r in expected['private_note_members'] if r['member_id'] != CALLER]
+        expected['private_note_mailboxes'] = [r for r in expected['private_note_mailboxes'] if r['member_id'] != CALLER]
+        expected['private_note_requests'] = [r for r in expected['private_note_requests'] if r['sender_id'] != CALLER]
+        expected['private_note_blocks'] = [r for r in expected['private_note_blocks'] if r['member_id'] != CALLER and r['blocked_id'] != CALLER]
+        for r in expected['private_note_requests']:
+            if r['note_id'] in (MEMBER_NOTE_A, MEMBER_NOTE_B): r['request_hash'] = None
+        expected['private_notes'] = [r for r in expected['private_notes'] if r['note_id'] != MEMBER_NOTE_B]
+        for r in expected['private_notes']:
+            if r['note_id'] == MEMBER_NOTE_A: r.update(sender_id=None, context_type=None, context_id=None)
+        expected['chat_members'] = [r for r in expected['chat_members'] if r['member_id'] != CALLER]
+        expected['chat_requests'] = [r for r in expected['chat_requests'] if r['sender_id'] != CALLER]
+        for r in expected['chat_messages']:
+            if r['room_id'] == MEMBER_ROOM: r['sender_id'] = None
+        for r in expected['chat_rooms']:
+            if r['room_id'] == MEMBER_ROOM: r['first_member_id'] = None
+    if phase == 'final':
+        for name in ('users', 'favorites', 'refresh_tokens', 'shelter_applications', 'contact_deletions'):
+            expected[name] = [r for r in expected[name] if r['user_id'] != CALLER]
+    return member_ordered(ci, expected)
+
+
+def member_assert_state(ci, owned, state, phase):
+    if state != member_expected(ci, owned, phase):
+        raise AssertionError('Member cleanup changed a protected row, column or unexpected reference')
+
+
+def member_reserved_free(state):
+    uuids = {MEMBER_NOTE_A, MEMBER_NOTE_B, MEMBER_ROOM, MEMBER_REQUEST_A, MEMBER_REQUEST_B, MEMBER_CHAT_REQUEST}
+    # Reserve all relevant identifiers before any insert; never infer ownership from NULL participants later.
+    fields = {'users': ('user_id',), 'favorites': ('favorite_id', 'user_id'), 'refresh_tokens': ('refresh_token_id', 'user_id'),
+        'shelter_applications': ('id', 'user_id', 'reviewed_by'), 'contact_deletions': ('user_id',),
+        'private_note_members': ('member_id',), 'private_note_blocks': ('member_id', 'blocked_id'),
+        'private_notes': ('note_id', 'sender_id', 'recipient_id', 'reply_to'),
+        'private_note_mailboxes': ('member_id', 'note_id'), 'private_note_requests': ('sender_id', 'request_id', 'note_id'),
+        'chat_rooms': ('room_id', 'first_member_id', 'second_member_id'), 'chat_members': ('room_id', 'member_id'),
+        'chat_messages': ('room_id', 'sender_id'), 'chat_requests': ('sender_id', 'room_id', 'request_id')}
+    for table, columns in fields.items():
+        if any(row.get(k) in (*MEMBER_IDS, *uuids) for row in state[table] for k in columns):
+            raise SystemExit('Member cleanup refuses occupied or externally referenced seed identifiers')
+    if any(r['user_id'] == MEMBER_ADMIN for r in state['users']):
+        raise SystemExit('Member cleanup requires its ADMIN principal to remain absent from the database')
+
+
+def member_seed(ci, owned):
+    ci.member_require_fixture()
+    if ci.member_database_snapshot() != owned['baseline']: raise SystemExit('Member cleanup baseline changed before seed')
+    member_reserved_free(owned['baseline'])
+    relations = {k: relation for k, relation, _ in ci.SNAPSHOT_TABLES + ci.MEMBER_TABLES}
+    sql = ['BEGIN;']
+    for name, rows in owned['seed_rows'].items():
+        for row in rows:
+            def value(v):
+                return 'NULL' if v is None else str(v).lower() if type(v) is bool else str(v) if type(v) is int else literal(v)
+            sql.append('INSERT INTO ' + relations[name] + '(' + ','.join(row) + ') VALUES('
+                       + ','.join(value(v) for v in row.values()) + ');')
+    sql.append('COMMIT;')
+    owned['reserved'] = True  # Only the already-empty exact namespace; lost COMMIT ACK is re-observed below.
+    ci.owned_sql(input_text='\n'.join(sql))
+    if not member_observe_seed(ci, owned):
+        raise AssertionError('Member cleanup seed acknowledgement contains no inserted rows')
+
+
+def member_observe_seed(ci, owned):
+    state = ci.member_database_snapshot()
+    if state == owned['baseline']: return False
+    # PostgreSQL renders equivalent TIMESTAMPTZ offsets. Accept representation only on known newly inserted cells.
+    for table, rows in owned['seed_rows'].items():
+        keys = next(order.split(',') for key, _, order in ci.SNAPSHOT_TABLES + ci.MEMBER_TABLES if key == table)
+        for row in rows:
+            matches = [r for r in state[table] if all(r[k] == row[k] for k in keys)]
+            if len(matches) != 1: raise AssertionError('Member cleanup seed acknowledgement is incomplete')
+            actual = matches[0]
+            for key, value in list(row.items()):
+                if isinstance(value, str) and value.endswith('Z') and key in ('created_at', 'expires_at', 'read_at'):
+                    if instant_ns(actual[key]) != instant_ns(value): raise AssertionError('Member cleanup seed time differs')
+                    row[key] = actual[key]
+    member_assert_state(ci, owned, state, 'seed')
+    owned['ack'] = True
+    return True
+
+
+def member_observe_pending(owned, state, started, finished):
+    rows = [r for r in state['contact_deletions'] if r['user_id'] == CALLER]
+    if len(rows) != 1 or set(rows[0]) != {'user_id', 'started_at'}:
+        raise AssertionError('Member cleanup pending commit is missing or has unexpected columns')
+    value = rows[0]
+    if owned.get('pending') is None:
+        if not started - 1_000_000_000 <= instant_ns(value['started_at']) <= finished + 1_000_000_000:
+            raise AssertionError('Member cleanup pending time is outside the observed request')
+        owned['pending'] = copy.deepcopy(value)
+    elif value != owned['pending']:
+        raise AssertionError('Member cleanup retry replaced the original pending marker')
+
+
+def member_cleanup_owned(ci, owned):
+    if not owned.get('reserved'): return
+    ci.member_require_identity()
+    state = ci.member_database_snapshot()
+    if state == owned['baseline']: return
+    if not owned.get('ack'):
+        member_observe_seed(ci, owned)  # Only an atomic, exact seed can survive a lost seed COMMIT acknowledgement.
+        state = ci.member_database_snapshot()
+    pending = [r for r in state['contact_deletions'] if r['user_id'] == CALLER]
+    if pending and owned.get('pending') is None:
+        member_observe_pending(owned, state, owned['started_ns'], time.time_ns())
+    phases = ['seed'] + (['pending', 'community', 'final'] if owned.get('pending') is not None else [])
+    if not any(state == member_expected(ci, owned, p) for p in phases):
+        raise SystemExit('Member cleanup refuses changed, unknown or externally referenced owned rows')
+    users = ','.join(map(str, MEMBER_IDS)); notes = ','.join(literal(n) + '::uuid' for n in (MEMBER_NOTE_A, MEMBER_NOTE_B))
+    requests = ','.join(literal(n) + '::uuid' for n in (MEMBER_REQUEST_A, MEMBER_REQUEST_B))
+    # Exact reserved keys, FK order, including identifiers retained after source SET NULL effects.
+    sql = ('BEGIN; DELETE FROM pawbridge_community.member_chat_requests WHERE sender_id=' + str(CALLER)
+        + ' AND request_id=' + literal(MEMBER_CHAT_REQUEST) + '::uuid; DELETE FROM pawbridge_community.member_chat_room_members WHERE room_id='
+        + literal(MEMBER_ROOM) + '::uuid AND member_id IN (' + users + '); DELETE FROM pawbridge_community.member_chat_messages WHERE room_id='
+        + literal(MEMBER_ROOM) + '::uuid AND sequence=1; DELETE FROM pawbridge_community.member_chat_rooms WHERE room_id=' + literal(MEMBER_ROOM)
+        + '::uuid; DELETE FROM ' + ci.REQUESTS + ' WHERE sender_id IN (' + users + ') AND request_id IN (' + requests + '); DELETE FROM '
+        + ci.MAILBOXES + ' WHERE member_id IN (' + users + ') AND note_id IN (' + notes + '); DELETE FROM ' + ci.NOTES + ' WHERE note_id IN ('
+        + notes + '); DELETE FROM pawbridge_community.private_note_blocks WHERE member_id=' + str(CALLER) + ' AND blocked_id=' + str(OTHER)
+        + '; DELETE FROM pawbridge_community.private_note_members WHERE member_id IN (' + users + '); DELETE FROM pawbridge_user.contact_deletions WHERE user_id='
+        + str(CALLER) + '; DELETE FROM pawbridge_user.favorites WHERE favorite_id=' + str(CALLER) + ' AND user_id=' + str(CALLER)
+        + '; DELETE FROM pawbridge_user.refresh_tokens WHERE refresh_token_id=' + str(CALLER) + ' AND user_id=' + str(CALLER)
+        + '; DELETE FROM pawbridge_user.shelter_applications WHERE id=' + str(CALLER) + ' AND user_id=' + str(CALLER)
+        + '; DELETE FROM pawbridge_user.users WHERE (user_id,email,nickname) IN ('
+        + ','.join('(' + str(i) + ',' + literal('cleanupjar-' + str(i) + '@fixture.invalid') + ',' + literal(MEMBER_NAMES[i]) + ')' for i in MEMBER_IDS)
+        + '); COMMIT;')
+    ci.member_require_identity(); ci.owned_sql(input_text=sql)
+    if ci.member_database_snapshot() != owned['baseline']: raise AssertionError('Member cleanup did not restore its full twenty-four-table baseline')
+
+
+def member_verify_detail(value):
+    wanted = dict(noteId=MEMBER_NOTE_A, body=MEMBER_BODY, direction='INBOX', createdAt=MEMBER_FIRST,
+        readAt=None, favorite=False, counterpartId=None, counterpartNickname='탈퇴한 회원', canReply=False, contextHref=None)
+    try:
+        actual = copy.deepcopy(value)
+        if instant_ns(actual['data']['createdAt'], wire=True) != instant_ns(MEMBER_FIRST): raise ValueError()
+        actual['data']['createdAt'] = MEMBER_FIRST
+        if type(actual['code']) is not int or actual != dict(code=200, message=SUCCESS, data=wanted): raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise AssertionError('Member cleanup surviving note body or withdrawn projection differs') from None
+
+
+
+def member_private_log_inputs(tokens):
+    # Exact private inputs only; no redaction or untrusted exception text is published.
+    return (os.environ.get('F2_TEST_DB_PASSWORD', ''), os.environ.get('F3_TEST_WRITER_PASSWORD', ''),
+        os.environ.get('F3_TEST_JWT_SECRET', ''), MEMBER_BODY, MEMBER_CHAT_BODY, 'Cleanup synthetic',
+        'Synthetic cleanup', 'cleanupjar-refresh-' + str(CALLER), 'a' * 64, 'b' * 64,
+        *tokens, *MEMBER_NAMES.values(), *(str(i) for i in (*MEMBER_IDS, MEMBER_ADMIN)),
+        MEMBER_NOTE_A, MEMBER_NOTE_B, MEMBER_ROOM, MEMBER_REQUEST_A, MEMBER_REQUEST_B, MEMBER_CHAT_REQUEST,
+        *('cleanupjar-' + str(i) + '@fixture.invalid' for i in MEMBER_IDS))
+
+
+def member_publish_safe_logs(ci, raw_paths, tokens, stopped, failed):
+    """Raw child FDs always stay outside artifacts, including failed/unknown termination.
+
+    Only bounded, quiescent, exact-input-free bytes can become artifact logs. This is
+    a late-journey ownership rule, not a redaction/quarantine framework.
+    """
+    if not raw_paths: return 'not-created'
+    quiescent = all(stopped.values())
+    issue = 'unconfirmed-stop' if not quiescent else None
+    copies = []
+    for raw, filename in zip(raw_paths, ('member-cleanup-packaged-startup.log', 'member-cleanup-s3-stub.log')):
+        try:
+            mode = raw.lstat().st_mode
+            if raw.is_symlink() or raw.resolve() != raw or not stat.S_ISREG(mode) or stat.S_IMODE(mode) != 0o600:
+                raise ValueError()
+            with raw.open('rb') as source: data = source.read(1024 * 1024 + 1)
+            if len(data) > 1024 * 1024: raise ValueError()
+            text = data.decode('utf-8')
+            if any(value and value in text for value in member_private_log_inputs(tokens)):
+                issue = 'private-input-refused'
+                continue
+            copies.append((filename, data))
+        except (OSError, UnicodeError, ValueError):
+            issue = 'inspection-or-publication-failed'
+    if issue: return issue
+    if failed: return 'failure-private-only'  # Never publish unknown failure log content, even after a clean stop.
+    try:
+        for filename, data in copies:
+            # No child was ever given this FD; a still-writing child cannot append to this artifact.
+            with (ci.EVIDENCE / filename).open('xb') as output: output.write(data)
+    except OSError:
+        return 'inspection-or-publication-failed'
+    return 'safe-copied'
+
+
+def run_member_cleanup(ci):
+    owner = ci.member_require_fixture()
+    result = dict.fromkeys(MEMBER_COUNTERS, 0)
+    result.update(status='incomplete', owner=owner, source_sha=ci.SOURCE, runtime_sha=os.environ.get('GITHUB_SHA'),
+        timezone='Asia/Seoul', chat_mode=False, protected_database_changes=0, s3_requests=0)
+    ci.EVIDENCE.mkdir(parents=True, exist_ok=True)
+    receipt = ci.EVIDENCE / 'member-cleanup-packaged-result.txt'
+    app = stub = None; streams = []; tokens = {}; used_tokens = set(); owned = None; offset = 0
+    raw_paths = (); stopped = {'app': False, 'stub': False}
+    baseline = ci.member_database_snapshot()
+    try:
+        ci.member_require_runtime_results()  # Exact tag PG12 including last real-issuer refresh; not ordinary F29 results.
+        if not re.fullmatch('[0-9a-f]{40}', result['runtime_sha'] or ''):
+            raise SystemExit('Member cleanup packaged source commit is missing')
+        jar = ci.ROOT / 'boot/build/libs/pawbridge-backend-app.jar'
+        if not jar.is_file(): raise SystemExit('Member cleanup packaged JAR is missing')
+        tokens = member_load_tokens(ci)  # Initial private log mask only; every authenticated use reloads after snapshot.
+        used_tokens.update(tokens.values())
+        temporary = Path(os.environ['RUNNER_TEMP']).resolve()
+        workspace = ci.ROOT.resolve().parent
+        if not temporary.is_dir() or workspace == temporary or workspace in temporary.parents:
+            raise SystemExit('Member cleanup raw log directory must be outside the artifact workspace')
+        raw_directory = temporary / ('member-cleanup-' + owner)
+        try:
+            raw_directory.mkdir(mode=0o700)  # Refuse reuse/symlinks; only this owner-attempt creates it.
+        except OSError:
+            raise SystemExit('Member cleanup private log directory is unavailable') from None
+        raw_paths = (raw_directory / 'application.log', raw_directory / 'storage.log')
+        app_path, stub_path = raw_paths
+        bucket = prefix = 'f3-' + owner
+        base_env, app_env = transport._app_environment(ci, bucket, prefix + '/')
+        app_env.update(MEMBER_CHAT_ENABLED='false', PAWBRIDGE_CHAT_ENABLED='false')
+        deadline = time.monotonic() + JOURNEY_BUDGET
+        base = endpoint = ''
+        def snapshot():
+            if time.monotonic() > deadline: raise AssertionError('Member cleanup journey exceeded its bounded budget')
+            storage = ci.f3.expect(endpoint, '/__f3__/state', 200, headers={'X-F3-Owner': owner})
+            return ci.member_database_snapshot(), storage['counts'], storage['objects'], storage['requests']
+        def returned():
+            if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
+                raise AssertionError('Member cleanup completed request or stream retained a transaction')
+        def stream_counts(own, other, own_eof=False):
+            victim.assert_resync(own); survivor.assert_resync(other)
+            if own_eof: victim.wait_eof()
+            else:
+                with victim.condition:
+                    if victim.eof or victim.failed: raise AssertionError('Member cleanup rollback prematurely closed the victim stream')
+        def check(path, *, method='DELETE', token='F19_ADMIN', status=200, phase=None,
+                  message=None, security=False, detail=False, spoof=False, kind=None):
+            before = snapshot()
+            headers = {'Accept': '*/*', 'X-User-Id': str(MEMBER_ADMIN if spoof else OTHER), 'X-User-Role': 'ROLE_ADMIN'}
+            if token is not None:
+                current = member_load_tokens(ci); used_tokens.update(current.values())
+                headers['Authorization'] = 'Bearer ' + current[token]
+            # The token freshness check is the last external-input operation before HTTP, after both snapshots.
+            started = time.time_ns()
+            actual, raw, received = ci.f3.request(base, path, method=method, headers=headers)
+            finished = time.time_ns(); after = snapshot()
+            if after[1:] != before[1:]: raise AssertionError('Member cleanup request contacted or changed S3')
+            if phase:
+                if phase != 'final': member_observe_pending(owned, after[0], started, finished)
+                member_assert_state(ci, owned, after[0], phase)
+                result['approved_database_write_checks'] += 1
+            elif after[0] != before[0]: raise AssertionError('Member cleanup read/auth request changed protected rows')
+            if actual != status or received.get('Set-Cookie') or received.get('Cache-Control') != (prior.SECURITY_CACHE if security else 'no-store'):
+                raise AssertionError('Member cleanup HTTP status/cache/cookie differs')
+            try: value = json.loads(raw)
+            except (ValueError, TypeError): raise AssertionError('Member cleanup HTTP response is not the expected JSON') from None
+            if detail: member_verify_detail(value)
+            else:
+                expected = dict(code=status, message=message, data=None) if security else {'message': message}
+                if value != expected: raise AssertionError('Member cleanup exact response envelope differs')
+            returned(); result['request_checks'] += 1; result['delete_checks' if method == 'DELETE' else 'get_checks'] += 1
+            if method == 'DELETE': result['successful_delete_checks' if status == 200 else 'rejected_delete_checks'] += 1
+            if kind: result[kind + '_checks'] += 1
+        def opening(name):
+            before = snapshot()
+            current = member_load_tokens(ci); used_tokens.update(current.values())
+            headers = {'Authorization': 'Bearer ' + current[name]}
+            stream = transport.Stream(base, headers); streams.append(stream); stream.wait('ready')
+            if snapshot() != before: raise AssertionError('Member cleanup stream opening changed rows or S3')
+            returned(); result['request_checks'] += 1; result['get_checks'] += 1
+            result['stream_open_checks'] += 1; result['stream_ready_checks'] += 1
+            return stream
+        with os.fdopen(os.open(app_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as app_log, \
+             os.fdopen(os.open(stub_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stub_log:
+            try:
+                app, stub, base, endpoint, attempts, offset = ci.f4.start_ready_children(jar, app_env, base_env, owner,
+                    bucket, prefix + '/', stub_log, app_log, stub_path, app_path)
+                result['startup_attempts'] = attempts
+                start = snapshot()
+                if start[0] != baseline or any(start[1].values()) or start[2] or start[3]:
+                    raise AssertionError('Member cleanup startup changed protected rows or contacted S3')
+                owned = dict(baseline=copy.deepcopy(baseline), seed_rows=member_seed_rows(), reserved=False,
+                             ack=False, pending=None, started_ns=time.time_ns())
+                member_seed(ci, owned)
+                victim, survivor = opening('F29_CALLER'), opening('F29_OTHER')
+                path = '/api/v1/admin/users/' + str(CALLER)
+                check(path, token=None, status=401, message='인증 토큰이 필요합니다.', security=True, kind='authentication')
+                check(path, token='F29_OTHER', status=403, message='관리자 권한이 필요합니다.', security=True, spoof=True, kind='authorization')
+                stream_counts(0, 0)
+                with ci.member_denied_privilege('chat-update'):
+                    check(path, status=503, phase='pending', security=True,
+                          message='쪽지 정리가 완료되지 않았습니다. 회원 삭제를 다시 시도해 주세요.', kind='community_rollback')
+                    stream_counts(0, 0)  # Heartbeat checks expiry/closing only, never User pending/active.
+                with ci.member_denied_privilege('user-delete'):
+                    check(path, status=500, phase='community', message='서버 에러!', security=True, kind='user_rollback')
+                    victim.wait_eof(); survivor.wait('resync', 1); stream_counts(0, 1, own_eof=True)
+                # Still-pending User row: verified normal JWT is valid, current-member policy rejects INACTIVE403.
+                check('/api/v1/notes/stream', method='GET', token='F29_CALLER', status=403,
+                      message='이용할 수 없는 회원입니다.', kind='pending_reconnect')
+                stream_counts(0, 1, own_eof=True)
+                check(path, phase='final', message='회원이 삭제되었습니다.', security=True, kind='retry')
+                survivor.wait('resync', 2); stream_counts(0, 2, own_eof=True)
+                check('/api/v1/notes/' + MEMBER_NOTE_A, method='GET', token='F29_OTHER', detail=True, kind='surviving_detail')
+                stream_counts(0, 2, own_eof=True)
+                ci.member_require_fixture()
+                result['app_sigterm_exit'] = ci.f3.stop_owned_child(app, 'Member cleanup packaged application'); stopped['app'] = True; app = None
+                survivor.wait_eof(); stream_counts(0, 2, own_eof=True)
+                result.update(member_commit_closed_streams=1, server_closed_open_streams=1, survivor_resync_checks=2)
+                end = snapshot()
+                if any(end[1].values()) or end[2] or end[3]: raise AssertionError('Member cleanup shutdown contacted S3')
+            finally:
+                try:
+                    if app is not None:
+                        result['app_sigterm_exit'] = ci.f3.stop_owned_child(app, 'Member cleanup packaged application'); stopped['app'] = True
+                finally:
+                    try: transport.close_streams(streams)
+                    finally:
+                        try:
+                            if stub is not None:
+                                result['stub_sigterm_exit'] = ci.f3.stop_owned_child(stub, 'Member cleanup S3 stub'); stopped['stub'] = True
+                        finally:
+                            if owned is not None: member_cleanup_owned(ci, owned)
+        if ci.member_database_snapshot() != baseline: raise AssertionError('Member cleanup did not restore its full twenty-four-table baseline')
+        ci.member_require_fixture()
+        if app_path.stat().st_size > 1024 * 1024 or stub_path.stat().st_size > 1024 * 1024:
+            raise AssertionError('Member cleanup child log budget exceeded')
+        text = ci.f4.fresh_log(app_path, offset); stub_text = stub_path.read_text()
+        if (text.count('Start completed.') != 2 or text.count('Shutdown completed.') != 2 or 'Graceful shutdown complete' not in text
+                or text.count('Private note stream resources stopped') != 1 or 'Private note stream resources did not stop within budget' in text):
+            raise AssertionError('Member cleanup stream/two-pool shutdown evidence is incomplete')
+        if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+            raise AssertionError('Member cleanup application connections remain after shutdown')
+        if {k: result[k] for k in MEMBER_COUNTERS} != MEMBER_EXPECTED_COUNTS:
+            raise AssertionError('Member cleanup exact late journey counts differ')
+        result.update(status='passed', owned_cleanup_restored=True, stream_resources_stopped=True,
+                      shutdown_pools=2, remaining_application_connections=0)
+    finally:
+        import sys
+        failed = sys.exc_info()[0] is not None
+        log_status = member_publish_safe_logs(ci, raw_paths, used_tokens, stopped, failed)
+        result['child_log_evidence'] = log_status
+        refused = log_status not in ('not-created', 'safe-copied', 'failure-private-only')
+        if failed or refused: result['status'] = 'incomplete'
+        receipt.write_text(json.dumps(result, indent=2) + '\n')
+        if refused and not failed:
+            raise AssertionError('Member cleanup private or unconfirmed child logs were not published') from None
+    print('Hosted false-chat member cleanup/pending/retry and owned resource journey passed')

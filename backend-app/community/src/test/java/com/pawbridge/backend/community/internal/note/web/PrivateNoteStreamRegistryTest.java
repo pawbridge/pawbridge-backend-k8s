@@ -31,6 +31,45 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /** Manual executors/emitters verify registry policy; they do not model real sockets or servlet shutdown. */
 class PrivateNoteStreamRegistryTest {
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void givenWithdrawnMemberTabsOrNoMemberTabsAndAnotherMember__whenClosingOnlyThatMemberThenResyncingAll__thenCompleteOnlyOwnedTabsAndKeepTheRegistryRunning(boolean hasOwner) throws Exception {
+        try (var f = new Fixture()) {
+            if (hasOwner) { f.streams.open(7, f.expiry()); f.streams.open(7, f.expiry()); }
+            f.streams.open(8, f.expiry());
+            int other = hasOwner ? 2 : 0;
+            f.streams.closeMember(7); f.streams.resyncAll();
+            f.writes.runAll(); f.completions.runAll();
+            for (int i = 0; i < other; i++) {
+                assertThat(f.emitters.get(i).completed).hasValue(1);
+                assertThat(f.emitters.get(i).sends).hasValue(1);
+            }
+            assertThat(f.emitters.get(other).completed).hasValue(0);
+            assertThat(f.emitters.get(other).frames).hasSize(2);
+            assertThat(f.emitters.get(other).frames.getLast().stream().filter(String.class::isInstance).map(Object::toString).toList())
+                    .anySatisfy(part -> assertThat(part).contains("event:resync\n"));
+            assertThat(f.streams.isRunning()).isTrue();
+            f.streams.open(9, f.expiry());
+            f.streams.resync(8); f.writes.runAll();
+            assertThat(f.emitters.get(other).sends).hasValue(3);
+        }
+    }
+
+    @Test
+    void givenFullCompletionQueueDuringMemberRemoval__whenTheExistingHeartbeatRetries__thenKeepTheClosingTabCountedAndEventuallyCloseItWithoutSendingItHints() throws Exception {
+        try (var f = new Fixture()) {
+            f.completions.capacity = 1;
+            f.streams.open(7, f.expiry()); f.streams.open(7, f.expiry()); f.streams.open(8, f.expiry());
+            f.streams.closeMember(7); f.streams.resyncAll(); f.writes.runAll();
+            assertThat(f.emitters.get(0).sends).hasValue(1);
+            assertThat(f.emitters.get(1).sends).hasValue(1);
+            f.completions.runAll(); f.streams.heartbeat(); f.completions.runAll();
+            assertThat(f.emitters.get(0).completed).hasValue(1);
+            assertThat(f.emitters.get(1).completed).hasValue(1);
+            assertThat(f.emitters.get(2).completed).hasValue(0);
+            assertThat(f.streams.isRunning()).isTrue();
+        }
+    }
+
     @Test
     void givenRecipientTabsAndAnotherMember__whenPublishingCommittedNote__thenUseOnlyTheSameBoundedRecipientRegistryAndExactPayload() throws Exception {
         try (var f = new Fixture()) {

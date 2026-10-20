@@ -110,7 +110,7 @@ class NoteExpiryProfileTest(unittest.TestCase):
                 plan = profile.make_plan(ctx, PATHS, profile.NOTE_EXPIRY, JAR)
                 self.assertEqual([], plan['required_smokes'])
                 self.assertEqual(list(profile.ALL_SMOKES), plan['skipped_smokes'])
-                self.assertEqual(27, len(plan['skipped_smokes']))
+                self.assertEqual(len(profile.ALL_SMOKES), len(plan['skipped_smokes']))
                 self.assertEqual(CONTRACTS, plan['required_contracts'])
 
     def test_given_unverified_fork_nondev_or_shared_change__when_selecting__then_stay_full_and_refuse_explicit_scope(self):
@@ -177,7 +177,8 @@ class NoteExpiryProfileTest(unittest.TestCase):
                     patch.dict('sys.modules', {'ci_branch_policy': common}), \
                     patch.dict(profile.os.environ, env, clear=True), \
                     patch.object(profile.Path, 'read_text', return_value=json.dumps(payload)), \
-                    patch.object(profile, 'verify_note_expiry_inputs', return_value=verified) as verify:
+                    patch.object(profile, 'verify_note_expiry_inputs', return_value=verified) as verify, \
+                    patch.object(profile, 'verify_member_management_inputs', return_value=False):
                 actual, paths = profile.runtime_context()
             verify.assert_called_once_with()
             self.assertIs(verified, actual['note_expiry_scope_verified'])
