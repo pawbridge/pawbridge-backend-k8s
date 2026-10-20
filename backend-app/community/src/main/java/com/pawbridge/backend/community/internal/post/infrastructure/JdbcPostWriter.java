@@ -108,9 +108,7 @@ public final class JdbcPostWriter implements PostWriter, PostModification, AutoC
         jdbc.update(connection -> prepare(connection, INSERT_OUTBOX,
                 UUID.randomUUID().toString(), "Post", Long.toString(postId), "POST_CREATED", payload,
                 LocalDateTime.now(clock)));
-        jdbc.update(connection -> prepare(connection, INSERT_SEARCH_DOCUMENT,
-                postId, post.title(), post.content(), KoreanSearchTerms.VERSION,
-                terms.document(post.title()), terms.document(post.content())));
+        writeSearchDocument(postId, post.title(), post.content());
         return new PostSnapshot(postId, post.authorId(), post.title(), post.content(), post.boardType().name(),
                 post.imageUrls(), now, now);
     }
@@ -153,8 +151,7 @@ public final class JdbcPostWriter implements PostWriter, PostModification, AutoC
         // Even an unchanged legacy PUT emits POST_UPDATED and refreshes its search projection.
         jdbc.update(connection -> prepare(connection, INSERT_OUTBOX, UUID.randomUUID().toString(),
                 "Post", Long.toString(postId), "POST_UPDATED", payload, LocalDateTime.now(clock)));
-        jdbc.update(connection -> prepare(connection, INSERT_SEARCH_DOCUMENT, postId, nextTitle, nextContent,
-                KoreanSearchTerms.VERSION, terms.document(nextTitle), terms.document(nextContent)));
+        writeSearchDocument(postId, nextTitle, nextContent);
         // The legacy immutable response is built before JPA dirty flush updates updatedAt at commit.
         return new PostSnapshot(postId, authorId, nextTitle, nextContent, current.boardType(), nextImages,
                 current.createdAt(), current.updatedAt());
@@ -164,6 +161,12 @@ public final class JdbcPostWriter implements PostWriter, PostModification, AutoC
         if (value == null || value.isEmpty()) return List.of();
         try { return objectMapper.readValue(value, IMAGE_URLS_TYPE); }
         catch (JsonProcessingException failure) { throw new IllegalStateException("Failed to read post image URLs", failure); }
+    }
+
+    // Search recovery shares this writer's exact upsert and analyzer; it owns no second analyzer lifecycle.
+    void writeSearchDocument(long postId, String title, String content) {
+        jdbc.update(connection -> prepare(connection, INSERT_SEARCH_DOCUMENT, postId, title, content,
+                KoreanSearchTerms.VERSION, terms.document(title), terms.document(content)));
     }
 
     private PreparedStatement prepare(Connection connection, String sql, Object... values) throws SQLException {

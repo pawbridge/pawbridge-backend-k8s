@@ -654,3 +654,14 @@ Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/
 후보 HTTP는 연결10초·읽기60초·redirect 금지입니다. 기존 읽기 TX의3초는 JDBC 예산이며 HTTP3초 제한이 아닙니다. 실제 Store 응답/Feign 전체 변형·reader 권한·DB 연결 수명·부하/고장 복구는 별도 활성화 전 검증이 필요합니다. 합성 loopback/단위·JWT/MVC·조립/구조 검증을 실제 Store·PG 검증으로 표현하지 않습니다. 이 PR로 원래 User/Store 실행기나 Kafka/CDC를 종료하지 않습니다.
 
 Store의 non-2xx 응답은 본문 변환 전에 세 조회에서 모두 거부합니다. 리다이렉트를 정상 Page나 없는 장바구니204로 받아들이지 않으며 Location도 따라가지 않습니다. 정상200/204와 기존4xx/5xx 실패는 유지합니다.
+
+
+### Community 검색 재구축·이벤트 보존
+
+`pawbridge.community-maintenance.enabled`는 기본 false입니다. 전체 기능과 `pawbridge.search.rebuild-enabled` 또는 `pawbridge.jobs.cleanup-enabled`를 각각 명시 true로 지정해야 해당 작업을 조립합니다. 두 하위 기능이 꺼져 있으면 스케줄러도 만들지 않습니다. 원문의 cleanup 기본 true와 다른 의도적인 활성화 경계입니다.
+
+검색 재구축은 기존 writer의 Nori·해시·upsert를 재사용합니다. 같은 writer TX에서 최대100개의 누락·불일치 문서를 PK 순서로 잠그고 갱신하며 주기 기본값은5초입니다. 이벤트 보존은 별도 기본 TX에서 JVM 현지 시각의7일·30일 전보다 오래된 Outbox·Processed 행을 삭제하는 원문 정책을 유지합니다. 이 시간 기준이 CDC 전달 완료를 보증하지는 않습니다.
+
+명시 활성화된 작업만 단일 소유 스케줄러를 사용합니다. 단위·조립 시험에서는 SQL 바인딩, 조건 분기와 실패 전파를 검증했고 실제 PG 잠금·rollback·삭제 권한·예약 실행·종료 대기는 검증하지 않았습니다. 기존 스케줄러 소유권, 대상 표·열과 행 잠금/UPSERT/DELETE 권한을 확인하기 전 활성화하거나 구 실행기를 종료하지 않습니다. 새 Kafka/ES 런타임·DDL·GRANT·운영 변경은 없습니다.
+
+고정 입력 코호트는 기존140개에서147개로 확장했습니다. 새 파일6개와 기존 writer1개를 새로 고정하고 App·기본 조립 시험2개의 지문을 갱신했습니다. 기존138개 지문과 선택 검증/전체 회귀 구분, 기존 관리자 페이지 PG11 및 소유 정리를 유지합니다. 이 PG11은 이번 재구축·정리의 실제 DB 검증이 아닙니다.
