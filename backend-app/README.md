@@ -442,3 +442,18 @@ workflow는 F27 전체 → 무자원 F28 guards → 원문 requests1표/index3/D
 원문 observer6과 formal MVC12, fixture24/runtime13 순수 모의37의 기존 로컬 성공은 재사용하는 근거다. PG26·Seoul 지정1은 소스/provider 기대값이며 실제 PG 성공이 아니고 JAR15HTTP=POST9/GET6·수신 note3/송신 note와 resync0·신규 note3/mailbox6/request3은 검산한 계획이다. 초기 private prefix의 REPORTS/SEOUL_METHOD=None은 준비 이력이다. 현재는 root가 source/provider를 검산해 UTC PG26(소스 기대)/MVC12(기존 로컬 실측), Seoul PG1(소스 기대)과 정확한 시각 메서드를 고정했다. 관련 측정 gate 모의4건은 root 인계상0.170초 통과했으며 실제 PG/JAR 성공은 아니다. results는 이후 실제 생성된 exact XML을 이 기대값·원문 receipt와 대조해야 하고, smoke도 실제 전달·상태·자원 종료를 별도로 증명해야 한다. 동적 UUID는 응답/DB/SSE 일치 후에만 ACK하고 응답 유실 commit은 exact request 소유 행으로만 정리하며, raw Instant와 DBµs는 문자열 동일 대신 최대1µs 정밀도 의미를 비교한다. 실제 PG/JAR/socket·CI 성공으로 확대하지 않는다.
 
 실제 F29 기준은 F26 post-CI와 결합 F27/F28의 검수·필수 CI/dev 통합 뒤 fresh base로 확인한다. 이 private 연결은 미래 branch/base나 게시를 확정하지 않는다. artifact에는 기존 txt/log와 특정 `f29-results.json`만 추가하며 토큰·전체 환경·전체 step outputs는 보존하지 않는다.
+
+
+## 병합 후 동일 코드의 전체 검증 인수
+
+PR에서는 기존 package와 full 검증을 실행한다. dev push의 `proof` job은 새 package보다 먼저, 방금 병합한 같은 저장소 PR의 **검사된 전체 Git tree**와 현재 dev가 같은지 판정한다. 첫 범위는 push 직전 base와 head를 두 부모로 가진 단일 merge commit이며 squash/rebase·여러 PR·다른 tree는 기존 full을 실행한다. 브랜치명이나 PR head SHA만 같다고 재사용하지 않는다.
+
+`backend_postmerge_proof.py`는 실제 완료된 원본 backend-app run/attempt의 package·full·최종 결과, 현재 workflow에 대응하는 실제 성공 단계, 원본 full plan/실행/cleanup 증거, producer와 consumer의 JAR SHA·source/tree·workflow 정체성을 연결한다. 27개 JAR receipt만으로 전체 PG 등 다른 단계의 성공을 대신하지 않는다. 원본 성공 후 24시간을 넘거나 자료가 없고 만료·모순·조회 실패가 있으면 full로 돌아간다. 원본 PR에서 실제 사용한 workflow와 현재 dev를 비교하므로 PR 자체의 CI 코드 변경을 금지하는 규칙은 아니다.
+
+통과한 dev 실행은 별도 `backend-app-postmerge-proof-<run>-<attempt>`의 `postmerge-proof.txt`에 `reused-full`과 원본 실행을 기록하고 새 package/full은 실행하지 않는다. 과거 XML·fixture·토큰·receipt를 새 시험 결과로 복제하거나 JAR을 다시 빌드해 과거 SHA와 비교하지 않는다. 새 merge SHA와 검사 당시 synthetic SHA는 다를 수 있으며 전체 tree로 결속한다. 다른 필수 CI와 이미지 발행 차단은 유지한다.
+
+최종 `Backend app CI result`는 선택·판정이 성공하고 **full+package/check 성공**, 또는 **검증된 reused-full+package/check의 예상된 생략**만 허용한다. 판정 실패·빈 mode·예상 밖 생략은 성공이 아니다. 읽기 권한과 현재 실행 토큰은 판정 job에 한정하며 새 secret이나 쓰기 권한을 요구하지 않는다.
+
+이 방식은 같은 코드에 대한 기존 검증을 인수한다. 새 runner/JDK·외부 의존성을 다시 시험했다는 의미가 아니며 원본 환경·검증 시각을 보존한다. 실제 제거한 중복 실행과 병합 후 소요를 측정하고 PR 자체의 full 소요 또는 전체 개발시간 단축과 구분한다. 재사용에 문제가 있으면 CI 수정/revert로 기존 full 경로로 돌아가며 앱·DB·배포를 되돌리지 않는다.
+
+판정과 최종 gate는 `.github/scripts/test_backend_postmerge_proof.py`와 `test_backend_app_ci_policy.py`에서 합성 Git/API 응답·임시 파일·실제 gate 실행으로 검증한다. 실제 hosted full·병합 후 재사용 성공은 해당 실행 증거가 있어야 선언한다.
