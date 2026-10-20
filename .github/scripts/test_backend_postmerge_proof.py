@@ -251,12 +251,16 @@ class PostmergeProofTest(unittest.TestCase):
             def git(*args):
                 if args == ('diff', '--name-only', '--no-renames', '-z', proof.profile.POST_READS_BASE, 'HEAD', '--', 'backend-app'):
                     return b'\0'.join(path.encode() for path in blobs) + b'\0'
+                if args == ('show', 'HEAD:' + proof.WORKFLOW):
+                    data.git_calls.append(args)
+                    return data.workflow
                 if len(args) == 2 and args[0] == 'show' and args[1].startswith('HEAD:'):
                     return blobs.get(args[1][5:], b'tampered')
                 return original_git(*args)
             data.git = git
             data.cohort_blobs = blobs
-            yield data
+            with patch.object(proof.profile, 'POST_READS_WORKFLOW_SHA256', hashlib.sha256(data.workflow).hexdigest()):
+                yield data
 
     def test_given_same_tree_cohort_success__when_deciding__then_reuse_original_scoped_coverage_without_full_promotion(self):
         with self.cohort() as data:
@@ -267,6 +271,7 @@ class PostmergeProofTest(unittest.TestCase):
             self.assertIn('scoped', result['source_proof']['artifact_ids'])
             self.assertNotIn('full', result['source_proof']['artifact_ids'])
             self.assertEqual(JAR, result['source_proof']['jar_sha256'])
+            self.assertIn(('show', 'HEAD:' + proof.WORKFLOW), data.git_calls)
 
     def test_given_incomplete_or_forged_cohort_proof__when_deciding__then_execute_instead_of_reusing(self):
         defects = ('head-tree', 'source-tree', 'scope-bytes', 'scope-boolean', 'job-failure', 'required-skip',
