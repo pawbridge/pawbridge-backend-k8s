@@ -349,7 +349,7 @@ POST_READS_WORKFLOW_SHA256 = 'ed72d491f3bb7457c9d47d09104340909725d0dd3604edb7c3
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a3bc09a8d152aee086fa1169b9053096244504b85198d69a4524e55345147d46',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '5a5215541aeb8bd82bfe6bf1f632b4d41576fb06e002f917673084e0d3c07806',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '858a6341d8c3adddbdeba4f2223fd34cea7f40513ad9c1f6d5b98d8fa2ac5454',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -592,7 +592,12 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a3bc09a8d152aee086fa1
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalModuleReadConfiguration.java': 'c128e7efa1383ba076d6e5adc58ae0b4174a79b3096a47ecb4f86a278b9e6aaf',
  'backend-app/boot/src/test/java/com/pawbridge/backend/ShelterModuleConfigurationTest.java': 'a4861bcde1aa67aa60a94447a9a5adee224aedbb47a9cd7aecbb50a60e8dffa5',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/infrastructure/ModuleShelterLookup.java': 'ad8beab20388ea5088349ab318208278d0ed79c27dbc345ae1dff4ba23e46ef8',
- 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/ModuleShelterLookupTest.java': '2a9da4ad80b0cef65b29d0f6515d853a0920ec1967d8b8e5cbaeb38db6d48272'}
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/ModuleShelterLookupTest.java': '2a9da4ad80b0cef65b29d0f6515d853a0920ec1967d8b8e5cbaeb38db6d48272',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserMaintenanceConfiguration.java': 'b2c7743701c03ac1efaa6198ba5d80884d990270b156e074ce0c0847bbac75fe',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/UserMaintenanceConfigurationTest.java': 'd471aa9e932e0b3173fb16d5db291603caf33879e32b19349253d460fce91a98',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/api/UserEventRetention.java': '667c398af2c4b39711d5ac4fa28ff85cd7ef51049bc84acb657d31871cb88866',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/maintenance/infrastructure/JdbcUserEventRetention.java': 'd85e555e018d26203020e63110c0e051f7bea554a3124eceb502f77d42c614e8',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/maintenance/infrastructure/JdbcUserEventRetentionTest.java': 'eb5a1c56cfe6bac640f026b67cc9b2cd21cc15ea9a432b19ce187b7d5aacc34a'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
@@ -922,7 +927,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 247
+                or len(POST_READS_APP_HASHES) != 252
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
