@@ -505,7 +505,7 @@ Community 실패는 pending을 보존하고503을 반환한다. Community가 커
 
 ADMIN GET `/api/v1/admin/users/{userId}`는 기존 `UserProfileQuery`와 같은 read-only 조회 bean을 소비한다. 기존 회원7필드와 성공200/부재400/예외500 응답을 재사용하고 새 SQL·열 권한·pool·TM·schema를 추가하지 않는다. pending 행을 임의로 제외하거나 비밀번호 등 다른 필드를 반환하지 않는다.
 
-서명된 ADMIN 권한을 경로 바인딩/조회보다 먼저 확인하며 X-User 헤더나 query의 userId로 대상을 바꾸지 않는다. 아직 편입하지 않은 `/users/search`는 이 단건 matcher에서 제외하고 목록·검색·나머지 통계·PUT의 기본 거부를 유지한다. 기존 관리자 DELETE는 그대로다.
+서명된 ADMIN 권한을 경로 바인딩/조회보다 먼저 확인하며 X-User 헤더나 query의 userId로 대상을 바꾸지 않는다. 아직 편입하지 않은 `/users/search`는 이 단건 matcher에서 제외하고 목록·검색·미편입 이웃 경로의 기본 거부를 유지한다. 기존 관리자 DELETE는 그대로다.
 
 이 변화의 가장 가까운 보호는 실제 MVC의 JWT·대상 바인딩·7필드/오류·인접 경로와 명시 조립 시험이다. 기존 F12의 변경 없는7열 SQL/실제 PG 근거를 재사용하고 API마다 별도 PG fixture·JAR 여정을 복제하지 않는다. 새 기능의 실제 Git 기준/hosted CI/병합은 해당 PR 실행 근거와 구분한다.
 
@@ -520,3 +520,9 @@ ADMIN GET `/api/v1/admin/users/stats/daily-signups?startDate=YYYY-MM-DD&endDate=
 기존 reader/Clock/열 권한·응답 envelope·ADMIN 선행 인가를 재사용하며 새 schema/권한/pool은 없다. 필수 날짜 누락400과 원문의 날짜 변환 Runtime500을 구분한다. 기존 F19 JAR의 음성 경로는 이제 미편입 `/api/v1/admin/users/stats/daily-signups/extra`로 옮기고6요청·역할·복구·DB/S3 불변 검증은 유지한다.
 
 private 앱 준비에서 단위·실제 JWT MVC·조립·기존 회원수 회귀5XML52건을 확인했다. 원문/후보 날짜 SQL과 중간 commit 가시성 비교는 기존 F19 자료를 확장한 UTC3·Seoul 경계1의 별도 PG gate이며 새 JAR 여정은 추가하지 않는다. 이 기록은 private 준비 근거다. 실제 feature head의 PG/hosted CI·병합 결과는 해당 run 산출물로 확인하며, local compile이나 모의 journey를 실제 PG/JAR 성공으로 세지 않는다.
+
+## 관리자 회원 수정
+
+ADMIN PUT `/api/v1/admin/users/{userId}`는 기존 writer의 한 TX에서 회원을 `FOR UPDATE`로 읽고, 보호소 승인 필요 조건 → 닉네임 중복 → 변경 순서를 유지한다. 관리자 전용 nullable 닉네임 Pattern(2~10자 영문·숫자·한글), 세 역할과 careRegNo의 원문 제약을 보존한다. 같은 raw 닉네임은 중복 조회를 하지 않고, 실제 dirty가 있을 때만 감사시각과 UPDATE를 수행한다. 선행 중복은409, SQL unique 경합과 commit 실패는500이며 새로운 retry나 역할 승격 정책을 추가하지 않는다. 기존 writer/TM·TT15를 재사용하고 무제한 대기까지 원문과 같다고 주장하지 않는다.
+
+`admin-member-update` 선택 검증은 고정 앱20 SHA와 공통 빌드·단위 검사를 유지한다. 원문 컴파일 → 회원 합성 fixture24 → 후기 최소4열 권한 준비 → 원문 JPA/후보 JDBC의 UTC16 고유 사례 → 소유 정리를 요구하며 과거 JAR28·무관 PG를 반복하지 않는다. 운영 권한·DDL·회원 이력은 변경하지 않는다. 실제 source PG/잠금/감사시각/원복 성공은 해당 CI 결과로만 판정한다.

@@ -732,7 +732,7 @@ def member_database_snapshot():
     return value
 
 
-def member_require_fixture():
+def _member_require_fixture_without_user_writer_acl():
     owner=member_require_identity()
     # Initial DDL is hash-pinned and all six relations must be absent before creation.
     # Recheck complete column inventory, owner, PK/FK/index counts and exact app ACL.
@@ -763,7 +763,6 @@ def member_require_fixture():
         if owned_sql("SELECT pg_get_serial_sequence('"+relation+"','"+field+"') IS NOT NULL AND NOT has_sequence_privilege('pawbridge_f2_reader',pg_get_serial_sequence('"+relation+"','"+field+"'),'USAGE,SELECT,UPDATE') AND NOT has_sequence_privilege('pawbridge_f3_writer',pg_get_serial_sequence('"+relation+"','"+field+"'),'USAGE,SELECT,UPDATE')")!='t':raise SystemExit('Member cleanup identity requires zero app sequence ACL')
     # Preserve inherited nickname writes/readers; grant only cleanup deltas, never a User-wide SELECT.
     changed_acl={
-      'pawbridge_user.users':(('user_id','nickname'),(),('user_id','nickname','updated_at'),True),
       'pawbridge_user.favorites':(('user_id',),(),(),True),
       'pawbridge_user.contact_deletions':((),('user_id',),(),False),
       'pawbridge_community.private_note_members':(('member_id',),('member_id',),('member_id',),True),
@@ -779,6 +778,22 @@ def member_require_fixture():
         query="SELECT NOT has_table_privilege('pawbridge_f3_writer','"+relation+"','SELECT,INSERT,UPDATE,TRUNCATE,REFERENCES,TRIGGER') AND has_table_privilege('pawbridge_f3_writer','"+relation+"','DELETE')="+str(delete).lower()
         if owned_sql(query)!='t':raise SystemExit('Member cleanup exact inherited-plus-delta writer table rights differ')
     require_reports_fixture()  # Unchanged relation-only checker, never old F29 global strict.
+    return owner
+
+
+def _member_require_user_writer_acl(read, change):
+    relation='pawbridge_user.users'
+    for mode,columns in [('SELECT',read),('INSERT',()),('UPDATE',change),('REFERENCES',())]:
+        predicate='column_name IN ('+','.join(f4.literal(c) for c in columns)+')' if columns else 'false'
+        if owned_sql("SELECT count(*)=11 AND bool_and(has_column_privilege('pawbridge_f3_writer','"+relation+"',column_name,'"+mode+"')=("+predicate+")) FROM information_schema.columns WHERE table_schema='pawbridge_user' AND table_name='users'")!='t':
+            raise SystemExit('Member cleanup exact User writer columns differ')
+    if owned_sql("SELECT NOT has_table_privilege('pawbridge_f3_writer','pawbridge_user.users','SELECT,INSERT,UPDATE,TRUNCATE,REFERENCES,TRIGGER') AND has_table_privilege('pawbridge_f3_writer','pawbridge_user.users','DELETE')")!='t':
+        raise SystemExit('Member cleanup exact User writer table rights differ')
+
+
+def member_require_fixture():
+    owner=_member_require_fixture_without_user_writer_acl()
+    _member_require_user_writer_acl(('user_id','nickname'),('user_id','nickname','updated_at'))
     return owner
 
 
@@ -850,7 +865,94 @@ def member_cleanup_smoke():
     return run_member_cleanup(sys.modules[__name__])
 
 
+# Optional late administrator-write fixture: no preceding member PG/JAR is required.
+ADMIN_UPDATE_RECEIPT = 'admin-user-update-fixture-write.txt'
+ADMIN_UPDATE_GRANTS = ('GRANT SELECT(role,care_reg_no),UPDATE(role,care_reg_no) '
+                       'ON pawbridge_user.users TO pawbridge_f3_writer;')
+
+
+def admin_update_fixture_proof(owner):
+    return ('owner=' + owner + '\nsource_sha=c32ae0d84b69969abd35c541dbdd4e81738c4be5\n'
+            'fixture=member cleanup plus administrator User update\nnew_business_ddl=0\nnew_marker=0\n'
+            'snapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\n'
+            'writer_user_select=user_id,nickname,role,care_reg_no\n'
+            'writer_user_update=user_id,nickname,updated_at,role,care_reg_no\n'
+            + hashlib.sha256(ADMIN_UPDATE_GRANTS.encode()).hexdigest() + '  admin-user-exact-grants\n')
+
+
+def admin_update_require_oracle_receipt():
+    import prepare_f13_legacy_oracle as admin
+    try:
+        outputs = {}
+        for source, relative in admin.ADMIN_SHARED.items():
+            artifact = ROOT.parent / relative
+            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
+                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != admin.ADMIN_EXPECTED[source]):
+                raise ValueError()
+        for relative, expected in admin.ADMIN_GENERATED.items():
+            artifact = ROOT / 'boot/build/generated/sources/f13LegacyOracle/java' / relative
+            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
+                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != expected):
+                raise ValueError()
+            outputs[relative] = artifact.read_bytes()
+        target = EVIDENCE / 'f13-admin-update-oracle-sha256.txt'
+        if (target.is_symlink() or target.resolve() != target or not target.is_file()
+                or target.read_text() != admin.admin_update_receipt(outputs)):
+            raise ValueError()
+    except (OSError, UnicodeError, ValueError):
+        raise SystemExit('Administrator User update oracle receipt or source artifacts differ') from None
+
+
+def admin_update_require_identity():
+    owner = member_require_identity()  # Marker/receipt identity, safe during ACL denial.
+    f21.check_receipt(EVIDENCE / ADMIN_UPDATE_RECEIPT, admin_update_fixture_proof(owner))
+    admin_update_require_oracle_receipt()
+    return owner
+
+
+def admin_update_require_fixture():
+    owner = admin_update_require_identity()
+    _member_require_fixture_without_user_writer_acl()
+    _member_require_user_writer_acl(('user_id','nickname','role','care_reg_no'),
+                                    ('user_id','nickname','updated_at','role','care_reg_no'))
+    return owner
+
+
+def admin_update_prepare():
+    f2.require_hosted()
+    owner = member_require_fixture()  # Final old strict before the four new column rights.
+    admin_update_require_oracle_receipt()  # Reject every artifact conflict before GRANT.
+    target = EVIDENCE / ADMIN_UPDATE_RECEIPT
+    f21.check_receipt(target, admin_update_fixture_proof(owner), allow_missing=True)
+    if target.exists():
+        raise SystemExit('Refusing an existing administrator User update fixture receipt')
+    before = member_database_snapshot()
+    owned_sql(input_text='BEGIN;\n' + ADMIN_UPDATE_GRANTS + '\nCOMMIT;\n')
+    with target.open('x') as out:
+        out.write(admin_update_fixture_proof(owner))
+    admin_update_require_fixture()
+    if member_database_snapshot() != before:
+        raise SystemExit('Administrator User update extension changed the existing twenty-four tables')
+
+
+@contextmanager
+def admin_update_denied_privilege(kind):
+    owner = admin_update_require_fixture()
+    clauses = {'care-read': 'SELECT(care_reg_no)', 'role-write': 'UPDATE(role)'}
+    if kind not in clauses:
+        raise SystemExit('Unknown administrator User update privilege check')
+    clause = clauses[kind] + ' ON pawbridge_user.users'
+    try:
+        owned_sql('REVOKE ' + clause + ' FROM pawbridge_f3_writer')
+        yield
+    finally:
+        if admin_update_require_identity() != owner:
+            raise SystemExit('Administrator User update owner changed before privilege restoration')
+        owned_sql('GRANT ' + clause + ' TO pawbridge_f3_writer')
+        admin_update_require_fixture()
+
+
 if __name__ == "__main__":
     import sys
     f2.require_hosted()
-    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke}[sys.argv[1]]()
+    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke, "admin-update-prepare": admin_update_prepare}[sys.argv[1]]()

@@ -292,19 +292,23 @@ class PostmergeProofTest(unittest.TestCase):
                          (b"|| 'Pilot' }}", b"|| matrix.profile == 'member-management' && 'Member' || matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
                          (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile != 'note-expiry' && always() }}"),
                          (b"|| 'Pilot' }}", b"|| matrix.profile == 'signup-statistics' && 'Signup' || matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
-                         (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile != 'signup-statistics' || always() }}")):
+                         (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile != 'signup-statistics' || always() }}"),
+                         (b"|| 'Pilot' }}", b"|| matrix.profile == 'admin-member-update' && 'Administrator' || matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
+                         (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile == 'admin-member-update' || always() }}")):
             data = self.fixture();data.workflow = WORKFLOW.replace(old, new)
             self.execute(data)
 
     def test_given_known_scoped_recipes__when_reusing_full__then_omit_only_scope_shape_but_require_all_pg(self):
-        for member_arm, signup_arm in ((False, False), (True, False), (True, True)):
-            with self.subTest(member_arm=member_arm, signup_arm=signup_arm):
+        for member_arm, signup_arm, admin_arm in ((False, False, False), (True, False, False), (True, True, False), (True, True, True)):
+            with self.subTest(member_arm=member_arm, signup_arm=signup_arm, admin_arm=admin_arm):
                 data = self.fixture()
                 expression = b"|| matrix.profile == 'note-expiry' && 'Note expiry PostgreSQL' || "
                 if member_arm:
                     expression += b"matrix.profile == 'member-management' && 'Member management' || "
                 if signup_arm:
                     expression += b"matrix.profile == 'signup-statistics' && 'Signup statistics' || "
+                if admin_arm:
+                    expression += b"matrix.profile == 'admin-member-update' && 'Administrator update' || "
                 expression += b"'Pilot' }}"
                 data.workflow = WORKFLOW.replace(b"|| 'Pilot' }}", expression).replace(
                     b"        if: ${{ matrix.profile == 'full' }}",
@@ -323,6 +327,17 @@ class PostmergeProofTest(unittest.TestCase):
                         b'      - name: Packaged contracts',
                         b"      - name: Signup statistics PG\n        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}\n        run: signup-pg\n"
                         b'      - name: Packaged contracts')
+                if admin_arm:
+                    data.workflow = data.workflow.replace(
+                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}",
+                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' }}").replace(
+                        b"matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}",
+                        b"matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' }}").replace(
+                        b'      - name: Packaged contracts',
+                        b"      - name: Administrator compile only\n        if: ${{ matrix.profile == 'admin-member-update' }}\n        run: compile-only\n"
+                        b"      - name: Administrator fixture\n        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}\n        run: admin-fixture\n"
+                        b"      - name: Administrator PG\n        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}\n        run: admin-pg\n"
+                        b'      - name: Packaged contracts')
                 contract = proof.workflow_contract(data.workflow)
                 self.assertNotIn('Scoped shape only', contract['check'][1])
                 self.assertIn('New F30 expiry PG gate', contract['check'][1])
@@ -333,9 +348,15 @@ class PostmergeProofTest(unittest.TestCase):
                 if signup_arm:
                     self.assertIn('Signup statistics PG', contract['check'][1])
                     data.jobs[1]['steps'].append({'name': 'Signup statistics PG', 'status': 'completed', 'conclusion': 'success'})
+                if admin_arm:
+                    self.assertNotIn('Administrator compile only', contract['check'][1])
+                    for name in ('Administrator fixture', 'Administrator PG'):
+                        self.assertIn(name, contract['check'][1])
+                        data.jobs[1]['steps'].append({'name': name, 'status': 'completed', 'conclusion': 'success'})
+                    data.jobs[1]['steps'].append({'name': 'Administrator compile only', 'status': 'completed', 'conclusion': 'skipped'})
                 self.assertEqual('reused-full', data.decide()['mode'])
                 successful = copy.deepcopy(data.jobs)
-                for name in ('New F30 expiry PG gate', 'Late member PG', *(['Signup statistics PG'] if signup_arm else [])):
+                for name in ('New F30 expiry PG gate', 'Late member PG', *(['Signup statistics PG'] if signup_arm else []), *(['Administrator fixture', 'Administrator PG'] if admin_arm else [])):
                     data.jobs = copy.deepcopy(successful)
                     for step in data.jobs[1]['steps']:
                         if step['name'] == name:
@@ -412,13 +433,14 @@ class PostmergeProofTest(unittest.TestCase):
     def test_given_execute_receipt_with_either_scoped_plan_or_execution__when_deciding__then_never_promote_it_to_full(self):
         paths = ['backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java']
         with patch.dict(globals(), PATHS=paths):
-            for mode in (proof.profile.NOTE_EXPIRY, proof.profile.MEMBER_MANAGEMENT, proof.profile.SIGNUP_STATISTICS):
+            for mode in (proof.profile.NOTE_EXPIRY, proof.profile.MEMBER_MANAGEMENT, proof.profile.SIGNUP_STATISTICS, proof.profile.ADMIN_MEMBER_UPDATE):
                 for defect in ('plan', 'execution', 'both'):
                     with self.subTest(mode=mode, defect=defect):
                         data = self.fixture()
                         flag = ('note_expiry_scope_verified' if mode == proof.profile.NOTE_EXPIRY
                                 else 'member_management_scope_verified' if mode == proof.profile.MEMBER_MANAGEMENT
-                                else 'signup_statistics_scope_verified')
+                                else 'signup_statistics_scope_verified' if mode == proof.profile.SIGNUP_STATISTICS
+                                else 'admin_member_update_scope_verified')
                         context = dict(data.plan['identity'], **{flag: True})
                         plan = proof.profile.make_plan(context, paths, mode, JAR)
                         required = {*plan['required_smokes'], *plan['required_contracts'], 'owned_cleanup'}

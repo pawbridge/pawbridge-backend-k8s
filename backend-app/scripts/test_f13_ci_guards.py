@@ -335,5 +335,107 @@ class F13GuardTest(unittest.TestCase):
                     self.assertIn(primary, evidence); self.assertIn('[redacted]', evidence)
 
 
+class AdminUserUpdateGuardTest(unittest.TestCase):
+    """New control/ownership branches only; no resource, Git command or original-business simulation."""
+
+    def test_given_non_dedicated_admin_output__when_extracting__then_refuse_before_any_git_or_write(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(oracle.subprocess, 'check_output') as git, \
+                patch.object(Path, 'write_bytes') as write:
+            root = Path(directory).resolve()
+            with self.assertRaisesRegex(SystemExit, 'non-dedicated'):
+                oracle.extract_admin_update(root, root / 'other', root / 'receipt')
+            git.assert_not_called(); write.assert_not_called()
+
+    def test_given_a_wrong_admin_source_hash__when_extracting__then_refuse_before_any_output(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(oracle.subprocess, 'check_output', return_value=b'changed original'), \
+                patch.object(Path, 'write_bytes') as write:
+            root = Path(directory).resolve()
+            with self.assertRaisesRegex(SystemExit, 'immutable input'):
+                oracle.extract_admin_update(root, root / 'backend-app/boot/build/generated/sources/f13LegacyOracle/java',
+                                            root / 'backend-app/build/ci/f13-admin-update-oracle-sha256.txt')
+            write.assert_not_called()
+
+    def test_given_a_conflicting_receipt_after_valid_controlled_inputs__when_extracting__then_preserve_every_existing_file_before_write(self):
+        # Controlled byte inputs test write ordering, not actual legacy business/checksum equivalence.
+        dto, shelter = oracle.PREFIX + oracle.ADMIN_OUTPUTS[0], oracle.PREFIX + oracle.ADMIN_OUTPUTS[1]
+        contents = {dto: b'dto', shelter: b'shelter', oracle.SERVICE: b'service'}
+        hashes = {p: hashlib.sha256(raw).hexdigest() for p, raw in contents.items()}
+        generated = dict(zip(oracle.ADMIN_OUTPUTS, (b'dto', b'shelter', b'wrapper')))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve(); output = root / 'backend-app/boot/build/generated/sources/f13LegacyOracle/java'
+            output.mkdir(parents=True); keep = output / 'Unrelated.java'; keep.write_bytes(b'keep')
+            evidence = root / 'backend-app/build/ci/f13-admin-update-oracle-sha256.txt'; evidence.parent.mkdir(parents=True)
+            evidence.write_bytes(b'old receipt')
+            with patch.object(oracle, 'ADMIN_EXPECTED', hashes), patch.object(oracle, 'ADMIN_SHARED', {}), \
+                    patch.object(oracle, 'ADMIN_GENERATED', {p: hashlib.sha256(raw).hexdigest() for p, raw in generated.items()}), \
+                    patch.object(oracle, 'admin_update_wrapper', return_value=b'wrapper'), \
+                    patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kwargs: contents[args[-1].split(':', 1)[1]]), \
+                    patch.object(Path, 'write_bytes', side_effect=AssertionError('no writes before conflict rejection')):
+                with self.assertRaisesRegex(SystemExit, 'oracle receipt'):
+                    oracle.extract_admin_update(root, output, evidence)
+            self.assertEqual(b'keep', keep.read_bytes()); self.assertEqual(b'old receipt', evidence.read_bytes())
+            self.assertEqual([keep], list(output.iterdir()))
+
+    def test_given_missing_or_tampered_admin_artifacts__when_preparing__then_no_grant_or_business_sql(self):
+        import f29_ci as late
+        # Exercise the actual late artifact checker with controlled hashes, never a fake successful checker.
+        for defect in ('missing-shared', 'changed-generated', 'changed-receipt'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory).resolve(); root = repository / 'backend-app'; evidence = root / 'build/ci'
+                evidence.mkdir(parents=True); shared = root / 'shared.java'; shared.write_bytes(b'shared')
+                full = {'shared-source.java': hashlib.sha256(b'shared').hexdigest()}
+                raw = dict(zip(oracle.ADMIN_OUTPUTS, (b'dto', b'shelter', b'wrapper')))
+                for relative, content in raw.items():
+                    target = root / 'boot/build/generated/sources/f13LegacyOracle/java' / relative
+                    target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(content)
+                with patch.object(oracle, 'ADMIN_EXPECTED', full), \
+                        patch.object(oracle, 'ADMIN_SHARED', {'shared-source.java': 'backend-app/shared.java'}), \
+                        patch.object(oracle, 'ADMIN_GENERATED', {p: hashlib.sha256(content).hexdigest() for p, content in raw.items()}), \
+                        patch.object(late, 'ROOT', root), patch.object(late, 'EVIDENCE', evidence), \
+                        patch.object(late.f2, 'require_hosted'), patch.object(late, 'member_require_fixture', return_value='123-1'), \
+                        patch.object(late, 'owned_sql') as sql, patch.object(late, 'member_database_snapshot') as snapshot:
+                    receipt = evidence / 'f13-admin-update-oracle-sha256.txt'; receipt.write_text(oracle.admin_update_receipt(raw))
+                    if defect == 'missing-shared': shared.unlink()
+                    elif defect == 'changed-generated': (root / 'boot/build/generated/sources/f13LegacyOracle/java' / oracle.ADMIN_OUTPUTS[-1]).write_bytes(b'changed')
+                    else: receipt.write_text(receipt.read_text() + 'unexpected\n')
+                    with self.assertRaisesRegex(SystemExit, 'receipt or source artifacts differ'): late.admin_update_prepare()
+                    sql.assert_not_called(); snapshot.assert_not_called()
+
+    def test_given_original_or_admin_stage__when_checking_user_acl__then_old_strict_remains_exact_and_new_rights_are_only_four(self):
+        import f29_ci as late
+        with patch.object(late, '_member_require_fixture_without_user_writer_acl', return_value='123-1'), \
+                patch.object(late, '_member_require_user_writer_acl') as acl:
+            self.assertEqual('123-1', late.member_require_fixture())
+            acl.assert_called_once_with(('user_id','nickname'), ('user_id','nickname','updated_at'))
+        with patch.object(late, 'admin_update_require_identity', return_value='123-1'), \
+                patch.object(late, '_member_require_fixture_without_user_writer_acl'), \
+                patch.object(late, '_member_require_user_writer_acl') as acl:
+            self.assertEqual('123-1', late.admin_update_require_fixture())
+            acl.assert_called_once_with(('user_id','nickname','role','care_reg_no'), ('user_id','nickname','updated_at','role','care_reg_no'))
+        self.assertEqual('GRANT SELECT(role,care_reg_no),UPDATE(role,care_reg_no) ON pawbridge_user.users TO pawbridge_f3_writer;', late.ADMIN_UPDATE_GRANTS)
+        with patch.object(late, 'owned_sql', side_effect=['f']) as sql:
+            with self.assertRaisesRegex(SystemExit, 'exact User writer columns'):
+                late._member_require_user_writer_acl(('user_id','nickname'), ('user_id','nickname','updated_at'))
+            self.assertIn('count(*)=11', sql.call_args.args[0])
+
+    def test_given_a_denied_column_or_changed_owner__when_finalizing__then_restore_only_the_same_owner_and_never_reenter_old_strict(self):
+        import f29_ci as late
+        for owner in ('123-1', 'other-owner'):
+            with self.subTest(owner=owner), patch.object(late, 'admin_update_require_fixture', return_value='123-1') as strict, \
+                    patch.object(late, 'admin_update_require_identity', return_value=owner), \
+                    patch.object(late, 'member_require_fixture', side_effect=AssertionError('old strict after grant')), \
+                    patch.object(late, 'owned_sql') as sql:
+                if owner == '123-1':
+                    with self.assertRaisesRegex(RuntimeError, 'controlled failure'):
+                        with late.admin_update_denied_privilege('role-write'): raise RuntimeError('controlled failure')
+                    self.assertEqual(2, strict.call_count)
+                    self.assertEqual(['REVOKE UPDATE(role) ON pawbridge_user.users FROM pawbridge_f3_writer',
+                                      'GRANT UPDATE(role) ON pawbridge_user.users TO pawbridge_f3_writer'], [c.args[0] for c in sql.call_args_list])
+                else:
+                    with self.assertRaisesRegex(SystemExit, 'owner changed'):
+                        with late.admin_update_denied_privilege('role-write'): pass
+                    self.assertEqual(1, sql.call_count); self.assertEqual(1, strict.call_count)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -43,7 +43,13 @@ ALLOWED_STEP_CONDITIONS = {'always()', "${{ matrix.profile == 'full' }}",
                            "${{ matrix.profile != 'signup-statistics' }}",
                            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' }}",
                            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}",
-                           "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}"}
+                           "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}",
+                           "${{ matrix.profile == 'admin-member-update' }}",
+                           "${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' }}",
+                           "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' }}",
+                           "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' }}",
+                           "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' }}",
+                           "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' }}"}
 
 
 class Unavailable(ValueError):
@@ -226,7 +232,7 @@ def workflow_contract(raw):
         require(name is not None and 'continue-on-error' not in body, 'unknown-workflow')
         name = name.group(1)
         if key == 'check':
-            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?(?:matrix.profile == 'signup-statistics' && '[^']+' \|\| )?'[^']+' \}\}", name)
+            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?(?:matrix.profile == 'signup-statistics' && '[^']+' \|\| )?(?:matrix.profile == 'admin-member-update' && '[^']+' \|\| )?'[^']+' \}\}", name)
             require(expression is not None, 'unknown-workflow')
             name = expression.group(1)
         require('${{' not in name, 'unknown-workflow')
@@ -241,7 +247,9 @@ def workflow_contract(raw):
             # A scoped-only preparation is not part of that full execution.
             if condition not in (["${{ matrix.profile == 'note-expiry' }}"],
                                   ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"],
-                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}"]):
+                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}"],
+                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' }}"],
+                                  ["${{ matrix.profile == 'admin-member-update' }}"]):
                 steps.append(step.group(1))
         require(bool(steps) and len(steps) == len(set(steps)), 'unknown-workflow')
         result[key] = (name, steps)
