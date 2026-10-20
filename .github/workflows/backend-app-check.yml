@@ -1208,7 +1208,7 @@ jobs:
           test -s build/ci/f25-fixture-write.txt
           test -s build/ci/f25-helper-refusal.txt
           python3 - <<'PYTHON'
-          import json
+          import json, math
           import sys
           from pathlib import Path
           sys.path.insert(0, 'scripts')
@@ -1222,6 +1222,17 @@ jobs:
           assert result['protected_database_changes'] == result['s3_requests'] == 0
           assert result['shutdown_pools'] == 2
           assert result['remaining_application_connections'] == 0
+          comparisons = result['snapshot_comparisons']
+          assert set(comparisons) == {'before_start', 'after_stop'}
+          for boundary, proof in comparisons.items():
+              assert proof['status'] == 'passed' and proof['boundary'] == boundary and proof['tables'] == 16
+              assert proof['order'] == ['old', 'new', 'new', 'old']
+              samples = proof['samples']
+              assert len(samples) == 4 and [sample['mode'] for sample in samples] == proof['order']
+              assert all(type(sample['wall_seconds']) in (int, float) and math.isfinite(sample['wall_seconds']) and sample['wall_seconds'] >= 0 for sample in samples)
+              assert len({sample['row_count'] for sample in samples}) == len({sample['canonical_json_bytes'] for sample in samples}) == 1
+              assert all(sample['snapshot_calls'] == 1 for sample in samples)
+              assert proof['call_counts_basis'] == 'static source path, not observed subprocess instrumentation'
           PYTHON
 
       - name: Verify F26 fixed sources, exact writer fixture, ownership, receipts and XML guards without resources

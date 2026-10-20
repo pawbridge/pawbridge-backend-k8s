@@ -84,14 +84,14 @@ def packaged_harness(directory, failure=None, mutation=None, wire=None, after_sn
     """Only a stateful control fixture. expected_page and cleanup are shared/mocked, not business/SQL oracles."""
     root=Path(directory).resolve();evidence=root/'evidence'
     jar=root/'boot/build/libs/pawbridge-backend-app.jar';jar.parent.mkdir(parents=True);jar.write_bytes(b'not-a-real-jar')
-    baseline={'private_note_blocks':[],'private_note_members':[],'users':[]}
-    baseline.update({'protected_'+str(i):[{'sentinel':i}] for i in range(13)})
+    baseline={name:[] for name,_,_ in f25.SNAPSHOT_TABLES}
+    baseline.update({name:[{'sentinel':index}] for index,(name,_,_) in enumerate(f25.SNAPSHOT_TABLES) if name not in ('private_note_blocks','private_note_members','users')})
     database=copy.deepcopy(baseline);events=[];calls=[];snapshots=[];state={'started':False}
     created='2031-01-01T00:00:00.123456Z'
     def snapshot():
         if after_snapshot and len(calls)==1:raise AssertionError('post-commit snapshot failed')
         value=copy.deepcopy(database)
-        if startup and state['started']:value['protected_0'][0]['sentinel']='changed'
+        if startup and state['started']:value['favorites'][0]['sentinel']='changed'
         events.append('snapshot');snapshots.append(value);return value
     def seed():
         events.append('seed');database['users']=[{'user_id':i,'nickname':f25.NAMES[i]} for i in f25.USERS]
@@ -144,6 +144,7 @@ def packaged_harness(directory, failure=None, mutation=None, wire=None, after_sn
             patch.object(f25,'REPORTS',MEASURED_XML),patch.object(f25,'require_fixture',return_value=OWNER),
             patch.object(f25,'require_owner',return_value=OWNER),patch.object(f25,'require_prior_receipts'),
             patch.object(f25.f21,'check_receipt'),patch.object(f25,'database_snapshot',side_effect=snapshot),
+            patch.object(f25,'old_reference_snapshot',side_effect=snapshot),
             patch.object(f25.f3,'request',side_effect=request),patch.object(f25.f3,'expect',side_effect=storage),
             patch.object(f25.f4,'fresh_log',return_value=shutdown if shutdown is not None else 'Shutdown completed. Shutdown completed. Graceful shutdown complete')):
             stack.enter_context(patcher)
@@ -158,7 +159,7 @@ def packaged_harness(directory, failure=None, mutation=None, wire=None, after_sn
 class F25GuardTest(unittest.TestCase):
     def test_given_non_hosted_entry__when_calling_resource_actions__then_refuse_before_sql_or_children(self):
         for action in (f25.prepare,f25.require_owner,f25.require_fixture,f25.require_measurements,f25.verify_results,
-                f25.prepare_business_rows,lambda:f25.cleanup_business_rows(f25.OWNED,()),
+                f25.database_snapshot,lambda:f25.compare_snapshots('before_start'),f25.prepare_business_rows,lambda:f25.cleanup_business_rows(f25.OWNED,()),
                 lambda:f25.observe_created_members(f25.OWNED),f25.load_tokens,f25.smoke):
             with self.subTest(action=action),patch.dict(os.environ,{},clear=True),patch.object(f25.f3,'sql') as sql,patch.object(f25.f4,'start_ready_children') as start:
                 with self.assertRaisesRegex(SystemExit,'restricted to this repository on GitHub-hosted Linux'):action()
@@ -204,7 +205,82 @@ class F25GuardTest(unittest.TestCase):
                 with self.assertRaises(ValueError):f25.catalog(query,stage)
             sql.assert_not_called()
         with patch.object(f25.f24,'database_snapshot',return_value={str(i):[] for i in range(15)}):
-            with self.assertRaises(SystemExit):f25.database_snapshot()
+            with self.assertRaises(SystemExit):f25.old_reference_snapshot()
+
+    def test_given_all_raw_tables__when_batching__then_one_owned_select_keeps_original_relations_order_values_and_no_reference_fallback(self):
+        tables=(('users','pawbridge_user.users','user_id'),('favorites','pawbridge_user.favorites','favorite_id'),
+                ('posts','pawbridge_community.posts','post_id'),('comments','pawbridge_community.comments','comment_id'),
+                ('f4comments','pawbridge_f4_fixture.comments','comment_id'),('notes','pawbridge_f4_fixture.private_notes','note_id'),
+                ('outbox','pawbridge_community.outbox_events','outbox_id'),('search','pawbridge_community.post_search_documents','post_id'),
+                ('videos','pawbridge_community.home_videos','id'),('board','pawbridge_community.home_video_board','id'),
+                ('daily_visit_count','pawbridge_community.daily_visit_count','visit_date'),('contact_deletions','pawbridge_user.contact_deletions','user_id'),
+                ('private_note_members','pawbridge_community.private_note_members','member_id'),('private_note_blocks','pawbridge_community.private_note_blocks','member_id,blocked_id'),
+                ('private_notes','pawbridge_community.private_notes','note_id'),('private_note_mailboxes','pawbridge_community.private_note_mailboxes','member_id,note_id'))
+        self.assertEqual(tables,f25.SNAPSHOT_TABLES)
+        value={name:[] for name,_,_ in tables}
+        value['users']=[{'user_id':9223372036854775807,'nickname':'한글🦊','nullable':None,'flags':[False,True],
+                         'nested':{'array':[None,{'number':1.0}],'empty':[]}}]
+        value['private_notes']=[{'note_id':'ffffffff-ffff-ffff-ffff-ffffffffffff','created_at':'2032-02-29T15:00:00.123456+00:00'},
+                                {'note_id':'80000000-0000-0000-0000-000000000000'}]
+        wire=json.dumps(value,ensure_ascii=False)
+        with patch.dict(os.environ,HOSTED,clear=True),patch.object(f25.f3,'sql',return_value=wire) as sql,patch.object(f25.f24,'database_snapshot',side_effect=AssertionError('reference fallback')):
+            actual=f25.database_snapshot()
+        sql.assert_called_once();query=sql.call_args.args[0]
+        expected='SELECT json_build_object('+','.join("'"+name+"',(SELECT COALESCE(json_agg(r ORDER BY "+order+"),'[]'::json) FROM "+relation+' r)' for name,relation,order in tables)+')'
+        self.assertEqual(expected,query)
+        self.assertEqual(f25._snapshot_bytes(value),f25._snapshot_bytes(actual));self.assertIs(type(actual['users'][0]['user_id']),int)
+        with patch.object(f25.f24,'database_snapshot',return_value=value) as old,patch.object(f25,'owned_sql',side_effect=AssertionError('batched reference')):
+            self.assertIs(value,f25.old_reference_snapshot());old.assert_called_once_with()
+
+    def test_given_invalid_snapshot_or_sql_failure__when_batching__then_fail_without_fallback_or_private_diagnostics(self):
+        value={name:[] for name,_,_ in f25.SNAPSHOT_TABLES}
+        malformed=[None,{},[],dict(value,unexpected=[]),{name:rows for name,rows in value.items() if name!='users'},
+                   dict(value,users=None),dict(value,users=[None])]
+        with patch.dict(os.environ,HOSTED,clear=True),patch.object(f25.f24,'database_snapshot',side_effect=AssertionError('fallback')):
+            for wire in ['not-json']+[json.dumps(item) for item in malformed]:
+                with self.subTest(wire_shape=type(wire).__name__),patch.object(f25.f3,'sql',return_value=wire):
+                    with self.assertRaises(SystemExit):f25.database_snapshot()
+            failure=subprocess.CalledProcessError(1,['private-command'],output='private-rows',stderr='private-sql')
+            with patch.object(f25.f3,'sql',side_effect=failure):
+                with self.assertRaises(SystemExit) as actual:f25.database_snapshot()
+            self.assertNotRegex(str(actual.exception),'private-command|private-rows|private-sql')
+
+    def test_given_quiescent_snapshots__when_balancing_comparison__then_compare_types_and_array_order_without_logging_rows(self):
+        value={name:[] for name,_,_ in f25.SNAPSHOT_TABLES};value['users']=[{'id':9223372036854775807,'flag':True,'name':'비공개🦊','nullable':None,'array':[1,2]}]
+        calls=[]
+        def sample(mode):calls.append(mode);return copy.deepcopy(value)
+        with patch.dict(os.environ,HOSTED,clear=True),patch.object(f25,'old_reference_snapshot',side_effect=lambda:sample('old')),patch.object(f25,'database_snapshot',side_effect=lambda:sample('new')),patch.object(f25.time,'perf_counter',side_effect=range(8)),redirect_stdout(io.StringIO()) as output:
+            result=f25.compare_snapshots('before_start',value)
+        self.assertEqual(['old','new','new','old'],calls);self.assertEqual('',output.getvalue());self.assertEqual('passed',result['status'])
+        self.assertEqual([1,1,1,1],[row['wall_seconds'] for row in result['samples']]);self.assertEqual([21,3,3,21],[row['static_docker_subprocesses'] for row in result['samples']])
+        self.assertEqual([1,1,1,1],[row['snapshot_calls'] for row in result['samples']]);self.assertIn('not observed',result['call_counts_basis'])
+        self.assertNotIn('비공개',json.dumps(result,ensure_ascii=False))
+        for change in ('bool-int','int-float','array-order'):
+            different=copy.deepcopy(value)
+            if change=='bool-int':different['users'][0]['flag']=1
+            elif change=='int-float':different['users'][0]['array'][0]=1.0
+            else:different['users'][0]['array'].reverse()
+            with self.subTest(change=change),patch.dict(os.environ,HOSTED,clear=True),patch.object(f25,'old_reference_snapshot',return_value=value),patch.object(f25,'database_snapshot',return_value=different):
+                with self.assertRaisesRegex(SystemExit,'types or array order differ'):f25.compare_snapshots('after_stop',value)
+
+    def test_given_snapshot_comparison_failure__when_smoking__then_preserve_baseline_and_always_clean_after_both_children_stop(self):
+        for phase in ('before_start','after_stop','missing_after_stop'):
+            with self.subTest(phase=phase),tempfile.TemporaryDirectory() as d,packaged_harness(d) as h:
+                compare=f25.compare_snapshots
+                def failure(boundary,expected=None):
+                    h['events'].append('compare-'+boundary)
+                    if boundary==phase:raise SystemExit('comparison boundary')
+                    if phase=='missing_after_stop' and boundary=='after_stop':return None
+                    return compare(boundary,expected)
+                with patch.object(f25,'compare_snapshots',side_effect=failure):
+                    with self.assertRaisesRegex((SystemExit,AssertionError),'comparison'):f25.smoke()
+                result=json.loads((h['evidence']/'f25-packaged-result.txt').read_text());self.assertEqual('incomplete',result['status'])
+                self.assertEqual(h['baseline'],h['database'])
+                if phase=='before_start':h['start'].assert_not_called();h['cleanup'].assert_not_called();self.assertEqual([],h['requests'])
+                else:
+                    self.assertEqual(2,h['stop'].call_count);h['cleanup'].assert_called_once_with(f25.OWNED,f25.USERS)
+                    events=[e for e in h['events'] if e in ('stop','compare-after_stop','observe','cleanup')]
+                    self.assertEqual(['stop','stop','compare-after_stop','observe','cleanup'],events)
 
     def test_given_absent_receipt_and_original_insert_zero__when_preparing__then_grant_once_before_new_strict_without_rows(self):
         with tempfile.TemporaryDirectory() as d:
@@ -359,6 +435,8 @@ class F25GuardTest(unittest.TestCase):
             self.assertEqual('/api/v1/notes/blocks/'+str(f25.OTHER)+'/extra',h['requests'][-1][0]);self.assertNotIn('Authorization',h['requests'][15][1]['headers'])
             self.assertEqual(18,h['load'].call_count);self.assertEqual(['stop','stop','observe','cleanup'],[v for v in h['events'] if v in ('stop','observe','cleanup')]);h['cleanup'].assert_called_once_with(f25.OWNED,f25.USERS)
             self.assertEqual(h['baseline'],h['database'])
+            self.assertEqual({'before_start','after_stop'},set(value['snapshot_comparisons']))
+            self.assertTrue(all(record['status']=='passed' and record['order']==['old','new','new','old'] for record in value['snapshot_comparisons'].values()))
             for n,event in enumerate(h['events']):
                 if event=='request' and h['events'][n-1]=='token':self.assertEqual('snapshot',h['events'][n-2])
             self.assertTrue(any(len(s['private_note_blocks'])==1 for s in h['snapshots']))
