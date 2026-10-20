@@ -81,7 +81,7 @@ public final class JpaDirectOrders implements DirectOrders {
         if(!TransactionSynchronizationManager.isActualTransactionActive() || TransactionSynchronizationManager.isCurrentTransactionReadOnly()!=readOnly)
             throw new IllegalStateException("An active order transaction with the expected read mode is required");
     }
-    private static OrderDetails details(OrderResponse source) {
+    static OrderDetails details(OrderResponse source) {
         return new OrderDetails(source.getOrderId(),source.getOrderUuid(),source.getUserId(),source.getTotalAmount(),source.getStatus(),
                 source.getDeliveryStatus(),source.getReceiverName(),source.getReceiverPhone(),source.getDeliveryAddress(),source.getDeliveryMessage(),
                 source.getCreatedAt(),source.getItems().stream().map(item->new Item(item.getProductName(),item.getSkuCode(),item.getPrice(),item.getQuantity())).toList());

@@ -16,10 +16,6 @@ public final class DirectOrderController {
         return ResponseEntity.status(201).body(orders.create(current(current),new DirectOrders.Command(request.getSkuId(),request.getQuantity(),
                 request.getReceiverName(),request.getReceiverPhone(),request.getDeliveryAddress(),request.getDeliveryMessage())));
     }
-    @GetMapping("/api/v1/orders/{orderId}")
-    public ResponseEntity<DirectOrders.OrderDetails> get(@AuthenticationPrincipal Long current,@PathVariable("orderId") long orderId) {
-        return ResponseEntity.ok(orders.get(current(current),orderId));
-    }
     private static long current(Long member) {
         if(member==null) throw new AuthenticationCredentialsNotFoundException("An authenticated member is required");
         return member;

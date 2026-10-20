@@ -44,7 +44,7 @@ class DirectOrderControllerTest {
     private MockMvc mvc;
     @BeforeEach void setup() {
         SecurityContextHolder.clearContext();
-        mvc=MockMvcBuilders.standaloneSetup(new DirectOrderController(orders)).setControllerAdvice(new DirectOrderExceptionHandler())
+        mvc=MockMvcBuilders.standaloneSetup(new DirectOrderController(orders),new OrderReadController(orders)).setControllerAdvice(new DirectOrderExceptionHandler())
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(json)).build();
     }

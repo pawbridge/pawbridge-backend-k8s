@@ -813,7 +813,7 @@ READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수�
 
 ## 바로구매와 본인 주문 상세 편입
 
-`pawbridge.store-direct-orders.enabled=true`에서만 `POST /api/v1/orders/direct`와 `GET /api/v1/orders/{orderId}`를 조립한다. 기본값과 `on` 별칭은 비활성이다. 검증된 JWT 회원 ID를 사용하고 현재 회원·삭제 대기를 확인한다. 주문·상품/SKU 잠금·전체 SKU Outbox·PostgreSQL 검색 반영은 같은 writer JPA 트랜잭션에 참여한다. 주문 상세는 같은 한정 persistence unit의 별도 읽기 전용 트랜잭션에서 조회한다. 기존 MyPage reader는 그대로 유지한다.
+`pawbridge.store-direct-orders.enabled=true`에서만 `POST /api/v1/orders/direct`를 조립한다. `GET /api/v1/orders/{orderId}`는 Direct 또는 Cart flag가 명시적으로 true일 때 공유 컨트롤러 한 개로 조립한다. 기본값과 `on` 별칭은 비활성이다. 검증된 JWT 회원 ID를 사용하고 현재 회원·삭제 대기를 확인한다. 주문·상품/SKU 잠금·전체 SKU Outbox·PostgreSQL 검색 반영은 같은 writer JPA 트랜잭션에 참여한다. 주문 상세는 같은 한정 persistence unit의 별도 읽기 전용 트랜잭션에서 조회한다. 기존 MyPage reader는 그대로 유지한다.
 
 기존 주문 응답과 구매 당시 상품명·가격·수량 스냅샷을 보존한다. 수량/금액 overflow는400, 기존 재고/상품 상태 오류는500이며 rollback charset CHECK에 한정한 원문400/C007도 유지한다. overflow·검색·Outbox·주문 저장 실패 시 재고까지 함께 롤백한다. 재요청은 새 주문이며 멱등키나 PENDING 자동 만료를 추가하지 않았다. 장바구니·Payment 및 외부 결제는 이 편입에 포함하지 않는다.
 
@@ -831,3 +831,28 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 공개 활성화 전에는 기존 Gateway admission 계약(실제 요청 전체6MiB, 동시2, 인스턴스당 분당30회, 전체50초, 외부 인증·내부 키 헤더 제거)을 별도로 인계해야 한다. 서비스의5MiB 검사와 permit1은 multipart 파싱 전 메모리·전송 제한의 대체물이 아니다. 이 구성의 로컬 합성 성공만으로 공개 운영 준비 완료라고 판단하지 않는다.
 
 `P10_PG_SETTINGS`의 소유 marker·SELECT 전용 계정을 검증한 경우에만 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalLostSearchTest`를 선택한다. 이 시험은 새 합성 동물과 임시127.0.0.1 Python 응답 대역을 사용하고 Animal/Shelter 전체 행 불변을 확인한다. 실제 AI 품질·R2·운영 검증은 포함하지 않는다. 비밀설정·데이터·로그·실행 JAR는 Git에 넣지 않는다.
+
+
+## 장바구니 관리와 주문 생성 편입
+
+`pawbridge.store-carts.enabled=true`에서만 다음 흐름을 조립한다. 기본 off와 `on` 별칭은 닫혀 있고, Direct flag는 Cart API를 열지 않으며 Cart flag도 바로구매 POST를 열지 않는다.
+
+| 메서드 | 경로 | 계약 |
+|---|---|---|
+| GET | `/api/v1/carts` | 기존 배열·품목 ID null 응답 |
+| POST | `/api/v1/carts/items` | 기존 SKU 수량 누적, 200 빈 본문 |
+| PATCH | `/api/v1/carts/items/{skuId}?quantity=...` | 수량 설정, 비양수는 제거 |
+| DELETE | `/api/v1/carts/items/{skuId}` | 품목 제거, 200 빈 본문 |
+| DELETE | `/api/v1/carts` | 전체 품목 제거, 부모 Cart 보존 |
+| POST | `/api/v1/orders` | 저장된 Cart로 PENDING 주문 생성, 배송 4필드·기존 201 응답 |
+| GET | `/api/v1/orders/{orderId}` | 현재 회원의 본인 주문·구매 당시 스냅샷 조회 |
+
+신뢰할 수 있는 JWT principal과 현재 회원·삭제 대기를 확인하고, 같은 writer 트랜잭션의 회원 행 잠금으로 해당 회원의 Cart 변경과 주문 소비를 직렬화한다. Cart 두 표는 기존 migration 모델을 사용하며 Redis dirty 동기화 대신 DB에 즉시 반영한다. 기존 MyPage 조회의 Cart 없음과 저장된 빈 Cart 구분을 유지한다. 새 pool·DDL·전역 JPA scan은 만들지 않는다.
+
+주문은 SKU ID만 먼저 추린 뒤 기존 상품/SKU 잠금·재고 차감·전체 SKU Outbox·검색 반영을 재사용한다. 잠금 후의 같은 현재 가격으로 합계와 OrderItem 스냅샷을 만든다. 이는 원문의 잠금 전 합계와 잠금 후 스냅샷 가격이 달라질 수 있던 경계를 강화한 변경이다. 주문 저장과 Cart 비우기까지 하나의 writer 커밋이며, Cart 삭제 후 커밋 실패도 재고·주문·이벤트·검색과 함께 롤백한다. 원문 배송 4필드에 새 필수·길이 규칙을 넣지 않는다.
+
+누락 SKU만 남은 Cart는 400과 함께 보존한다. 유효·누락 SKU가 섞이면 기존처럼 유효 품목을 주문하고 전체 Cart를 비운다. 중복 SKU 저장 상태는 임의 보정 없이 실패하며, 금액·수량 overflow는 400이다. 새 멱등키나 PENDING 만료, 결제·환불 정책을 만들지 않는다. 동시에 같은 Cart를 주문하면 한 번 소비하지만, 두 주문 사이에 새 추가가 있으면 별도 주문이 생길 수 있다.
+
+소유 PG 검증은 `P12_PG_SETTINGS`와 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreCartOrderTest`를 사용한다. 별도 새 DB·제한 writer·표식을 확인한 fixture에만 적용한다. 기존 `P11_PG_SETTINGS` Cart 전용 최소권한은 유지한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다. ordinary CI는 owned 태그를 실행한 것으로 표시하지 않는다.
+
+공개 활성화 전에는 기존 Redis 미동기화 Cart 인계, 기존 Cart API·동기화 실행기와 새 실행기의 배타적 소유권, DB 권한과 라우팅을 별도로 확인해야 한다. 이 소스 편입은 기존 운영·Kafka/CDC·외부 결제나 데이터·복구 자료를 제어하지 않는다.

@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** No request, account, shipping, token, response or exception-body logging. */
-@RestControllerAdvice(assignableTypes=DirectOrderController.class)
+@RestControllerAdvice(assignableTypes={DirectOrderController.class,OrderReadController.class,CartOrderController.class})
 public final class DirectOrderExceptionHandler {
     public record FieldError(String field,String value,String reason) { }
     public record Error(String message,String code,List<FieldError> errors) { }
