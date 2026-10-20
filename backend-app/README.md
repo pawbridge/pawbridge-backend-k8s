@@ -678,3 +678,25 @@ Boot는 기존 selected reader/TM과 단일 Nori 수명을 공유합니다. 추�
 source20·추천30·정책5·새 Boot11은 각 독립 합성 검증 결과이며 한 번의 전체 실행 합계로 표현하지 않습니다. TX 순서 지적의 신규 반례1은 RED→관련3 GREEN으로 닫았습니다. 새 조립은 실제 business525 검사와 일반 독립 검수를 통과했습니다. 실제 PG SQL/최소권한·락/격리·Python/TLS/AI·실행 JAR은 아직 미검증이며 기존 관리자 페이지 PG11을 Animal 검증으로 확대하지 않습니다.
 
 CI는 검수한 Animal40경로와 변경 F9 guard를 포함한 고정184입력 및 알려진 workflow 지문을 확인합니다. JAR 허용 예외는 정확한 feign-core13.5 하나뿐입니다. 알 수 없는 workflow/입력은 선택 회귀를 거부하고 전체 회귀 경로를 유지합니다. 공통 selector를 바꾸지 않아 이번 workflow 변경의 기존 서비스3 검증은 그대로 수행합니다. 실제 이 단계의 CI 시간 절감을 보장하지 않습니다.
+
+
+### Store 상품 탐색·상세 조회 편입
+
+Store 업무 모듈은 상품 목록/검색/상세·SKU/옵션·카테고리 조회를 소유합니다. `pawbridge.store-catalog.enabled`는 기본 false이며, 명시 활성화된 정확5 GET만 고정 원문 Gateway처럼 공개합니다. 스토어 메뉴의 ADMIN 노출과 실제 조회 API의 공개 정책은 별개입니다. 새 ADMIN 제한을 도입하거나 기존 Gateway 별칭/쓰기 경로를 등록하지 않습니다. 실제 운영 라우팅/활성화는 포함하지 않습니다.
+
+기존 PG 단일 CTE·Nori/준비 상태·정렬/Page·상태 필터와 금액/시간/NULL DTO를 재사용합니다. 상세는 원문처럼 status 필터나 view 증가 없이 조회하고, SKU/옵션·빈 그룹·카테고리 트리를 기존 값 구조로 반환합니다. JPA 조회는 기존 pawbridge_store 스키마의 명시 SELECT로 구현했습니다. Redis cache/lock을 재사용하지 않는 직접 조회이므로 성능·freshness·Redis 장애 경계의 동등성을 주장하지 않습니다.
+
+동일 selected reader/TM을 사용하되 검색의 원문5초 query 예산을 위해 전용 JdbcTemplate을 조립합니다. readOnly/default isolation/default TX timeout을 사용하고, Nori 빈을 소유 종료합니다. 기존 공용3초 TX 예산을 강제하지 않습니다. 검색에도 읽기 TX를 추가한 알려진 후보 차이가 있습니다. 새 풀/계정/GRANT·DDL/JPA/Redis/Kafka는 추가하지 않았습니다.
+
+원문 source8은44사례와 독립 검수를 통과했습니다. 후보 ADMIN 제한을 철회한 변경 HTTP36사례는4초에 성공했고 원본과 구39사례를 보존했습니다. 원문 유지의 최종 고유51은 분할 성공 합집합으로 단일 실행/75사례가 아닙니다. Animal과 공통8 조립은 새 TestKit3+기본 App1의4사례/12초 및 actual business542 검사에 성공했습니다. 기존44/36/11/전체 architecture는 반복하지 않았습니다.
+
+Root는 공통 Gradle/Boot/정책/인가 합집합을 독립 대조했습니다. 고정 입력196개와 기존 known workflow/선택·전체 회귀·PG11·cleanup 계약을 유지합니다. 실제 PostgreSQL CTE/FTS·권한/view security·락/시간/타입/timeout·Redis/실행 JAR은 미검증이며, 기존 관리자 PG11은 Store 연동 시험이 아닙니다. 최소 reader 권한과 라우팅/단일 소유권을 확인하기 전 활성화하지 않습니다.
+
+
+### User 내정보의 Store 모듈 호출
+
+기존 `pawbridge.user-store-mypage.enabled`는 기본 false이며, 활성화 시 backend 기본값 http를 보존합니다. 명시 `pawbridge.user-store-mypage.backend=module`에서만 User의 회원 확인 트랜잭션을 끝낸 뒤 Store 공개 API로 본인의 위시리스트·주문·장바구니를 조회합니다. 이 모드에 HTTP origin/client는 필요 없고, 알 수 없는 backend는 조립을 거부합니다. 본인 JWT와 기존 3GET·cart 없음204 계약을 재사용합니다.
+
+Store는 동일 reader/TM에 별도 readOnly REPEATABLE_READ·TX5/query5초를 조립합니다. 주문 헤더·상품 조회를 같은 스냅샷에 두기 위한 후보 선택이며 원문 기본 격리/timeout과 완전히 같다는 주장은 아닙니다. User→Store.api만 허용하고, Community→User→Store의 실제 resolved artifact는 허용하면서 Community의 Store 직접 의존/실제 API 참조/임의 파일 우회는 계속 거부합니다.
+
+Store 공개 API/JDBC 최소30사례와 User 어댑터25사례, 새 Boot4/TestKit4의8사례·12초 및 실제 business556 클래스 검사가 통과했습니다. 성공 사례는 반복하지 않았고 실제 SQL/권한·동시성·NULL/collation/시간·GRANT/라우팅·운영 활성화는 미검증입니다. Wishlist의 페이지/옵션은 단일 CTE로 처리합니다. 임의 JPA 중첩 sort 전체 호환은 주장하지 않으며, 기존 User의 sort 쉼표 flatten 동작과 고정 Store Feign serializer의 배열 순서를 비교해 보존합니다.

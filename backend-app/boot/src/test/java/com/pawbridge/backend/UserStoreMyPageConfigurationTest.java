@@ -31,6 +31,7 @@ class UserStoreMyPageConfigurationTest {
             assertThat(context.getBeansOfType(StoreMyPageController.class)).isEmpty();
             assertThat(context.getBeansOfType(StoreMyPageExceptionHandler.class)).isEmpty();
             assertThat(context.getBeansOfType(HttpClient.class)).isEmpty();
+            assertThat(context.getBeansOfType(com.pawbridge.backend.store.api.StoreMemberReads.class)).isEmpty();
         });
     }
 
@@ -61,6 +62,53 @@ class UserStoreMyPageConfigurationTest {
                     assertThat(context).hasFailed();
                     assertThat(context.getStartupFailure()).hasRootCauseMessage("An explicit Store HTTP origin is required");
                 });
+    }
+
+    @Test
+    void given__module_backend_without_http_origin__when__assembling__then__reuse_reader_and_separate_repeatable_read_without_client() {
+        runner().withUserConfiguration(ModuleInputs.class)
+                .withPropertyValues("pawbridge.user-store-mypage.enabled=true", "pawbridge.user-store-mypage.backend=module")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(com.pawbridge.backend.store.api.StoreMemberReads.class);
+                    assertThat(context.getBean(StoreMyPage.class)).isInstanceOf(com.pawbridge.backend.user.internal.storemypage.infrastructure.ModuleStoreMyPage.class);
+                    var service = context.getBean(StoreMyPage.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(service,"profiles")).isSameAs(context.getBean(UserProfileQuery.class));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(service,"read")).isSameAs(context.getBean("readOnlyTransaction"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(service,"store")).isSameAs(context.getBean(com.pawbridge.backend.store.api.StoreMemberReads.class));
+                    var jdbc = context.getBean("userStoreModuleJdbc",org.springframework.jdbc.core.JdbcTemplate.class);
+                    assertThat(jdbc.getDataSource()).isSameAs(context.getBean("dataSource"));
+                    assertThat(jdbc.getQueryTimeout()).isEqualTo(5);
+                    var reads = context.getBean("userStoreModuleReadTransaction",TransactionTemplate.class);
+                    assertThat(reads.getTransactionManager()).isSameAs(context.getBean("transactionManager"));
+                    assertThat(reads.isReadOnly()).isTrue();
+                    assertThat(reads.getIsolationLevel()).isEqualTo(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                    assertThat(reads.getTimeout()).isEqualTo(5);
+                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(HttpClient.class)).isEmpty();
+                    try {
+                        verify(context.getBean("dataSource",javax.sql.DataSource.class),never()).getConnection();
+                    } catch (java.sql.SQLException impossible) { throw new AssertionError(impossible); }
+                    verify(context.getBean("transactionManager",org.springframework.jdbc.support.JdbcTransactionManager.class),never()).getTransaction(any());
+                });
+    }
+
+    @Test
+    void given__unknown_backend__when__explicitly_enabled__then__fail_closed_without_a_default_http_client() {
+        runner().withPropertyValues("pawbridge.user-store-mypage.enabled=true", "pawbridge.user-store-mypage.backend=unexpected")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasRootCauseMessage("Unknown User Store MyPage backend");
+                });
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class ModuleInputs {
+        @Bean javax.sql.DataSource dataSource() { return mock(javax.sql.DataSource.class); }
+        @Bean org.springframework.jdbc.support.JdbcTransactionManager transactionManager() {
+            return mock(org.springframework.jdbc.support.JdbcTransactionManager.class);
+        }
     }
 
     @Configuration(proxyBeanMethods = false)

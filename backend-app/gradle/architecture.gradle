@@ -19,12 +19,13 @@ import org.gradle.language.jvm.tasks.ProcessResources
 
 // Business dependencies are a DAG. Boot is the sole composition/packaging root.
 def allowedDependencies = [
-    ':boot'     : [':user', ':community', ':animal'] as Set,
-    ':user'     : [] as Set,
+    ':boot'     : [':user', ':community', ':animal', ':store'] as Set,
+    ':user'     : [':store'] as Set,
     ':community': [':user'] as Set,
-    ':animal'   : [] as Set
+    ':animal'   : [] as Set,
+    ':store'    : [] as Set
 ]
-def businessModules = [':user', ':community', ':animal'] as Set
+def businessModules = [':user', ':community', ':animal', ':store'] as Set
 
 def rejectArchitecture = { String detail ->
     throw new GradleException("Architecture violation: ${detail}")
@@ -39,7 +40,7 @@ def verifyDeclaredGraph = {
     }
     def expectedProjects = allowedDependencies.keySet()
     if (rootProject.subprojects.collect { it.path }.toSet() != expectedProjects) {
-        rejectArchitecture('only boot, user, community and animal projects are allowed')
+        rejectArchitecture('only boot, user, community, animal and store projects are allowed')
     }
     if (!gradle.includedBuilds.empty) {
         rejectArchitecture('included builds are not allowed in this isolated application')
@@ -71,7 +72,7 @@ def verifyDeclaredGraph = {
 
 def verifyArchitecture = tasks.register('verifyArchitecture') {
     group = 'verification'
-    description = 'Checks the boot/user/community/animal production Gradle dependency graph and input isolation.'
+    description = 'Checks the boot/user/community/animal/store production Gradle dependency graph and input isolation.'
 
     doLast {
         verifyDeclaredGraph()
@@ -122,6 +123,9 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
                                   main.annotationProcessorConfigurationName].collect {
                 module.configurations.getByName(it)
             }
+            // Only exact artifacts resolved from a verified project graph may arrive transitively.
+            // Directory ownership alone does not authorize arbitrary files(...) or classpath overrides.
+            def resolvedProjectArtifacts = [:].withDefault { [] as Set }
             configurations.each { configuration ->
                 configuration.incoming.resolutionResult.allDependencies.each { dependency ->
                     if (dependency instanceof ResolvedDependencyResult &&
@@ -135,6 +139,13 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
                 }
                 // Fail on unresolved dependencies too; an incomplete graph is not evidence.
                 configuration.files
+                configuration.incoming.artifacts.artifacts.each { artifact ->
+                    def component = artifact.id.componentIdentifier
+                    if (component instanceof ProjectComponentIdentifier && component.build.buildPath == ':' &&
+                        expectedProjects.contains(component.projectPath)) {
+                        resolvedProjectArtifacts[artifact.file.canonicalFile.toPath()].add(component.projectPath)
+                    }
+                }
             }
             // File collections can bypass ProjectDependency. Check actual paths, including
             // relocated outputs, compiler overrides, sourcepath and resource-copy inputs.
@@ -170,7 +181,8 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
                     }
                     def owner = owners.empty ? null : owners.first()
                     if (owner != null && owner != module &&
-                        !allowedDependencies[module.path].contains(owner.path)) {
+                        !allowedDependencies[module.path].contains(owner.path) &&
+                        !resolvedProjectArtifacts[artifactPath].contains(owner.path)) {
                         rejectArchitecture("forbidden project dependency ${module.path} -> ${owner.path} through files")
                     }
                     def repositoryDirectory = rootProject.projectDir.parentFile.canonicalFile.toPath()
@@ -191,7 +203,7 @@ def describeBusinessType = { String name ->
     while (normalized.endsWith('[]')) {
         normalized = normalized.substring(0, normalized.length() - 2)
     }
-    def moduleName = ['user', 'community', 'animal'].find { normalized.startsWith("${businessPrefix}${it}.") }
+    def moduleName = ['user', 'community', 'animal', 'store'].find { normalized.startsWith("${businessPrefix}${it}.") }
     if (moduleName == null) {
         return null
     }

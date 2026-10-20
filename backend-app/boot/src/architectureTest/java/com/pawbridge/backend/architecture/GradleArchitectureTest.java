@@ -16,6 +16,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GradleArchitectureTest extends BusinessBuildFixture {
     @Test
+    void givenUserStoreApiAndCommunityUserChain_whenCheck_thenPermitOnlyResolvedTransitiveStoreArtifacts() throws IOException {
+        javaSource("user", "internal.infrastructure.StoreAdapter", "public class StoreAdapter { com.pawbridge.backend.store.api.StoreLookup store; }");
+        BuildResult result = runner("check").build();
+        assertTask(result, ":verifyArchitecture", SUCCESS);
+        assertTask(result, ":verifyBusinessPackages", SUCCESS);
+        assertCompiled("community", "internal.application.PostReader");
+        assertCompiled("user", "internal.infrastructure.StoreAdapter");
+    }
+
+    @Test
+    void givenCommunityDirectStoreEdge_whenCheck_thenStillRejectGraph() throws IOException {
+        appendModuleBuild("community", "dependencies { implementation project(':store') }");
+        assertGraphRejected(runner("check").buildAndFail(), "forbidden project dependency :community -> :store");
+    }
+
+    @Test
+    void givenCommunityUsesTransitiveStoreApi_whenCheck_thenStillRejectActualBusinessReference() throws IOException {
+        appendModuleBuild("user", "dependencies { api project(':store') }");
+        javaSource("community", "internal.infrastructure.StoreBypass", "public class StoreBypass { com.pawbridge.backend.store.api.StoreLookup store; }");
+        assertPackageRejected(runner("check").buildAndFail(), "BUSINESS_INTERNAL", "com.pawbridge.backend.store.api.StoreLookup");
+    }
+
+    @Test
+    void givenCommunityUnregisteredStoreArtifactFile_whenCheck_thenRejectDespiteTheValidTransitiveGraph() throws IOException {
+        createEmptyJar("store/build/unregistered/store-copy.jar");
+        appendModuleBuild("community", "dependencies { runtimeOnly files(rootProject.file('store/build/unregistered/store-copy.jar')) }");
+        assertGraphRejected(runner("check").buildAndFail(), "forbidden project dependency :community -> :store through files");
+    }
+
+    @Test
     void givenAllowedBusinessGraph_whenRootCheck_thenCompilesClassesAndCopiesLocalResources() throws IOException {
         write("boot/config/fixture.properties", "fixture.enabled=true\n");
         appendModuleBuild("boot", """
@@ -31,6 +61,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
         assertTask(result, ":animal:compileJava", SUCCESS);
+        assertTask(result, ":store:compileJava", SUCCESS);
         for (String module : MODULES) {
             assertCheckCompleted(result, ":" + module + ":check");
         }
@@ -38,13 +69,15 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         assertCompiled("user", "internal.domain.UserName");
         assertCompiled("community", "internal.application.PostReader");
         assertCompiled("animal", "internal.application.AnimalReader");
+        assertCompiled("store", "internal.application.StoreReader");
         assertEquals("fixture.enabled=true\n",
                 Files.readString(fixture.resolve("boot/build/resources/main/fixture.properties")));
     }
 
     @ParameterizedTest
     @CsvSource({"user, community", "user, boot", "community, boot", "user, animal", "community, animal",
-            "animal, user", "animal, community", "animal, boot"})
+            "animal, user", "animal, community", "animal, boot",
+            "community, store", "store, user", "store, community", "store, boot"})
     void givenForbiddenBusinessEdge_whenCheck_thenRejectsGraph(String source, String target) throws IOException {
         appendModuleBuild(source, "dependencies { implementation project(':" + target + "') }");
 
@@ -61,7 +94,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"user", "community", "animal"})
+    @ValueSource(strings = {"user", "community", "animal", "store"})
     void givenBusinessBootPlugin_whenCheck_thenRejectsExecutableBusinessModule(String module) throws IOException {
         appendModuleBuild(module, "apply plugin: 'org.springframework.boot'");
 
@@ -70,7 +103,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"user", "community", "animal"})
+    @ValueSource(strings = {"user", "community", "animal", "store"})
     void givenBusinessUsesPlainJavaPlugin_whenCheck_thenRejectsMissingLibraryContract(String module) throws IOException {
         write(module + "/build.gradle", "plugins { id 'java' }\n"
                 + (module.equals("community") ? "dependencies { implementation project(':user') }\n" : ""));
@@ -106,6 +139,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         assertCompiled("animal", "api.AnimalLookup");
         assertCompiled("animal", "internal.domain.AnimalName");
         assertCompiled("animal", "internal.application.AnimalReader");
+        assertCompiled("store", "internal.application.StoreReader");
         assertCompiled("boot", "AnimalAssembly");
     }
 
@@ -128,6 +162,50 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
         assertGraphRejected(runner(":animal:check").buildAndFail(),
                 ":animal production classpath references a sibling service");
+    }
+
+    @Test
+    void givenStoreBusinessModule_whenStoreCheck_thenCompilesClassesAndRunsSharedGuards() throws IOException {
+        javaSource("boot", "StoreAssembly", """
+                public class StoreAssembly {
+                    private final com.pawbridge.backend.store.internal.application.StoreReader stores =
+                        new com.pawbridge.backend.store.internal.application.StoreReader();
+                    public String breed() { return stores.breed(); }
+                }
+                """);
+
+        BuildResult result = runner(":store:check").build();
+
+        assertTask(result, ":verifyArchitecture", SUCCESS);
+        assertTask(result, ":verifyBusinessPackages", SUCCESS);
+        for (String module : MODULES) assertTask(result, ":" + module + ":compileJava", SUCCESS);
+        assertCheckCompleted(result, ":store:check");
+        assertCompiled("store", "api.StoreLookup");
+        assertCompiled("store", "internal.domain.StoreName");
+        assertCompiled("store", "internal.application.StoreReader");
+        assertCompiled("animal", "internal.application.AnimalReader");
+        assertCompiled("boot", "StoreAssembly");
+    }
+
+    @Test
+    void givenStoreReferencesUserOutputAsFiles_whenStoreCheck_thenRejectsOwner() throws IOException {
+        appendModuleBuild("store", """
+                evaluationDependsOn(':user')
+                dependencies { implementation files(project(':user').sourceSets.main.output) }
+                """);
+
+        assertGraphRejected(runner(":store:check").buildAndFail(),
+                "forbidden project dependency :store -> :user through files");
+    }
+
+    @Test
+    void givenStoreSiblingServiceFileClasspath_whenStoreCheck_thenRejects() throws IOException {
+        appendModuleBuild("boot", "configurations.implementation.dependencies.clear()");
+        createEmptyJar("../store-service/build/libs/store-service.jar");
+        appendModuleBuild("store", "dependencies { runtimeOnly files(rootProject.file('../store-service/build/libs/store-service.jar')) }");
+
+        assertGraphRejected(runner(":store:check").buildAndFail(),
+                ":store production classpath references a sibling service");
     }
 
     @Test
@@ -269,7 +347,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         append("settings.gradle", "include 'legacy'");
         write("legacy/build.gradle", "plugins { id 'java-library' }");
 
-        assertGraphRejected(runner("check").buildAndFail(), "only boot, user, community and animal projects are allowed");
+        assertGraphRejected(runner("check").buildAndFail(), "only boot, user, community, animal and store projects are allowed");
     }
 
     @Test
@@ -364,4 +442,47 @@ class GradleArchitectureTest extends BusinessBuildFixture {
                 """);
         javaSource("community", "internal.application.PostReader", "public class PostReader {}");
     }
+
+    @Test
+    void givenCombinedAnimalAndStore_whenRootCheck_thenCompileAllFiveModulesAndBothBootAssemblies() throws IOException {
+        javaSource("boot", "CombinedAssembly", """
+                public class CombinedAssembly {
+                    private final com.pawbridge.backend.animal.internal.application.AnimalReader animal =
+                        new com.pawbridge.backend.animal.internal.application.AnimalReader();
+                    private final com.pawbridge.backend.store.internal.application.StoreReader store =
+                        new com.pawbridge.backend.store.internal.application.StoreReader();
+                    public String description() { return animal.breed() + store.breed(); }
+                }
+                """);
+
+        BuildResult result = runner("check").build();
+
+        assertTask(result, ":verifyArchitecture", SUCCESS);
+        assertTask(result, ":verifyBusinessPackages", SUCCESS);
+        for (String module : MODULES) {
+            assertTask(result, ":" + module + ":compileJava", SUCCESS);
+            assertCheckCompleted(result, ":" + module + ":check");
+        }
+        assertCheckCompleted(result, ":check");
+        assertCompiled("animal", "internal.application.AnimalReader");
+        assertCompiled("store", "internal.application.StoreReader");
+        assertCompiled("boot", "CombinedAssembly");
+    }
+
+    @Test
+    void givenCombinedAnimalReferencesStore_whenAnimalCheck_thenRejectCrossModuleDependency() throws IOException {
+        appendModuleBuild("animal", "dependencies { implementation project(':store') }");
+
+        assertGraphRejected(runner(":animal:check").buildAndFail(),
+                "forbidden project dependency :animal -> :store");
+    }
+
+    @Test
+    void givenCombinedStoreReferencesAnimal_whenStoreCheck_thenRejectCrossModuleDependency() throws IOException {
+        appendModuleBuild("store", "dependencies { implementation project(':animal') }");
+
+        assertGraphRejected(runner(":store:check").buildAndFail(),
+                "forbidden project dependency :store -> :animal");
+    }
+
 }

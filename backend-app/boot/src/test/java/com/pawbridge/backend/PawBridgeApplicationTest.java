@@ -89,6 +89,9 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.catalog.application.StoreCatalog.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.catalog.web.StoreCatalogController.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.catalog.web.StoreCatalogExceptionHandler.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.application.AnimalReports.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.web.AnimalReportController.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.web.AnimalReportExceptionHandler.class)).isEmpty();

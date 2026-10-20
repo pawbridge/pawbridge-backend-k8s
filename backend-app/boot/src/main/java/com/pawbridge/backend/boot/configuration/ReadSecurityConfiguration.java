@@ -36,7 +36,8 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.animal-reports.enabled:false}") boolean reportsEnabledFlag,
             @Value("${pawbridge.user-store-mypage.enabled:false}") boolean storeMyPageEnabledFlag,
             @Value("${pawbridge.animal-discovery.enabled:false}") boolean animalDiscoveryEnabledFlag,
-            @Value("${pawbridge.animal-recommendations.enabled:false}") boolean animalRecommendationsEnabledFlag) throws Exception {
+            @Value("${pawbridge.animal-recommendations.enabled:false}") boolean animalRecommendationsEnabledFlag,
+            @Value("${pawbridge.store-catalog.enabled:false}") boolean storeCatalogEnabledFlag) throws Exception {
 
         var animalDiscoveryEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->animalDiscoveryEnabledFlag;
         var animalDiscoveryReading=new AndRequestMatcher(animalDiscoveryEnabled,new OrRequestMatcher(
@@ -46,6 +47,13 @@ public class ReadSecurityConfiguration {
         var animalRecommendationReading=new AndRequestMatcher(animalRecommendationsEnabled,
                 new RegexRequestMatcher("^/api/v1/animals/[0-9]+/similar(?:\\?.*)?$","GET"));
 
+        var storeCatalogEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->storeCatalogEnabledFlag;
+        var storeCatalog=new AndRequestMatcher(storeCatalogEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/products","GET"),
+                new AntPathRequestMatcher("/api/v1/products/{productId}","GET"),
+                new AntPathRequestMatcher("/api/v1/categories","GET"),
+                new AntPathRequestMatcher("/api/v1/option-groups","GET"),
+                new AntPathRequestMatcher("/api/v1/option-groups/{groupId}","GET")));
         var storeMyPageEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->storeMyPageEnabledFlag;
         var storeMyPage=new AndRequestMatcher(storeMyPageEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/users/me/wishlists","GET"),
@@ -160,7 +168,7 @@ public class ReadSecurityConfiguration {
                 .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers(animalDiscoveryReading, animalRecommendationReading).permitAll()
+                        .requestMatchers(animalDiscoveryReading, animalRecommendationReading, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()
