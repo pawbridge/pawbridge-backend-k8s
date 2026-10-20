@@ -69,7 +69,9 @@ def archive(members):
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as zipped:
         for name, raw in members.items():
-            zipped.writestr(name, raw)
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zipped.writestr(info, raw)
     return output.getvalue()
 
 
