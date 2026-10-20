@@ -537,3 +537,13 @@ ADMIN PUT `/api/v1/admin/users/{userId}`는 기존 writer의 한 TX에서 회원
 단일 Spring lifecycle이 준비 완료 때 수집 시작을 기록하고 60초 간격으로 정리한다. 서울00:05 이전에는 지우지 않으며 날짜별 배타 잠금·개별 커밋으로 오래된 식별자만 제거한다. 일별 합계와 수집 시작 시각은 보존한다. 기존 writer/Clock을 재사용하고 scheduler는 후보 내부에만 조립한다. 운영의 예약 작업을 인계하거나 실행한 변경이 아니다.
 
 고정된 앱22개와 README 경로만 허용하는 `visit-collection` CI는 공통 Java21 빌드·단위 검사, 원문 준비, member24→방문26표의 최소 fixture, 실제 UTC9·Seoul1 비교와 소유 정리를 요구한다. selected는 기존 관리자 추가 권한을 받지 않으며 full은 명시 admin 모드를 사용한다. 과거28 JAR 여정은 selected에서 미실행이고 전체 회귀 성공으로 승격하지 않는다. 현재 원문·후보 준비와 관련 단위/HTTP 검증은 통과했으며 실제 PostgreSQL10사례와 실행중 정리·종료 검증은 CI 결과로 별도 판단한다.
+
+## refresh 회전과 logout
+
+`pawbridge.auth.sessions-enabled`는 기본 false다. true일 때만 공개 POST `/api/v1/auth/refresh`와 인증이 필요한 POST `/api/v1/auth/logout`을 조립한다. 기존 `PostWriteSettings`의 같은 키·writer·트랜잭션 관리자를 사용하며 외부 `X-User-*` 값은 인증 근거로 쓰지 않는다. 두 TTL 설정 `jwt.access-token-expiration`, `jwt.refresh-token-expiration`은 원문과 같은 밀리초 단위로 명시 입력하며 새 운영 기본값을 만들지 않는다. false인 기존 기동은 TTL을 요구하지 않는다.
+
+refresh는 body의 refreshToken 검증→저장 행 조회→DB 만료 시각의 strict 비교→현재 회원 필드 조회→두 토큰 발급→선택한 PK의 token/expiry 갱신 순서로 한 writer 트랜잭션에서 처리한다. 원문의 createdAt·밀리초에서 초로 내림한 DB 만료·현재 회원 claim을 보존한다. 이미 만료된 행을 삭제한 뒤 Runtime 예외로 롤백하는 원문은 실제 SQL DELETE 전에 롤백되므로 후보는 이를 물리 삭제로 바꾸지 않는다. 실제 비교 결과는 PG gate에서 확인한다.
+
+logout은 인증된 사용자에게 속한 refresh 행을 먼저 선택하고 해당 PK만 지운다. 선택 뒤 별도 트랜잭션에서 추가된 행까지 일괄 삭제하지 않는다. 원문처럼 이미 발급된 access token을 별도 차단 목록에 넣지 않으며, CAS·version·nonce·새 계정 연결 정책도 추가하지 않는다. 동시에 같은 refresh를 읽은 두 요청이 모두 성공할 수 있고 최종 저장값은 마지막 갱신 결과일 수 있다. 후보 TT15는 원문 무제한 대기와 같다고 주장하지 않는다.
+
+고정 앱23개에 한정한 `auth-sessions` CI는 공통 빌드·단위 검사, 기존 member24와 명시 admin24 준비, 새7컬럼 권한의 합성 확장, 원문 실제 JPA와 UTC17·Seoul 정상회전1 비교를 요구한다. 실패한 경우에도 새7권한만 회수하고 원래 admin strict를 검증하며, 원래 PG 실패와 권한 복구 실패를 각각 감사한다. full은 권한 복구 뒤 방문26표를 준비한다. 새 테이블·seed 생성 JAR·별도 source set·원문 fetch는 없다. 실제 PostgreSQL과 hosted CI는 게시 후 판단하며 운영 키·TTL이나 현재 로그인 정책은 변경하지 않았다.

@@ -3,6 +3,16 @@ package com.pawbridge.backend.compatibility;
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
 import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
 import com.pawbridge.userservice.entity.User;
+import com.pawbridge.userservice.entity.RefreshToken;
+import com.pawbridge.userservice.repository.RefreshTokenRepository;
+import com.pawbridge.userservice.service.F13LegacyAuthSessionsService;
+import com.pawbridge.userservice.dto.request.RefreshTokenRequestDto;
+import com.pawbridge.userservice.jwt.JwtProvider;
+import java.lang.reflect.InvocationTargetException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongConsumer;
+import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
+import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import com.pawbridge.userservice.repository.UserRepository;
 import com.pawbridge.userservice.service.F13LegacyNicknameService;
 import com.pawbridge.userservice.service.F13LegacyAdminUserUpdateService;
@@ -38,6 +48,13 @@ final class F13LegacyNicknameOracle implements AutoCloseable {
     final AtomicInteger duplicateQueries = new AtomicInteger();
     final AtomicInteger saves = new AtomicInteger();
     private final F13LegacyNicknameService service;
+    // Counts only SQL operation kinds, never token values, SQL text or Throwable details.
+    final AtomicInteger authSelects = new AtomicInteger(), authUpdates = new AtomicInteger(), authDeletes = new AtomicInteger();
+    final AtomicInteger authRemoveCalls = new AtomicInteger();
+    private Runnable afterAuthRead = () -> { };
+    private LongConsumer beforeAuthRemove = id -> { };
+    private final AtomicBoolean firstAuthRemove = new AtomicBoolean();
+    static final long AUTH_ACCESS_MS = 120_999, AUTH_REFRESH_MS = 600_999;
 
     F13LegacyNicknameOracle(F3PostgresqlFixture fixture, Clock clock, Runnable verifyOwnership) {
         this(fixture, clock, verifyOwnership, () -> { }, () -> { });
@@ -101,6 +118,45 @@ final class F13LegacyNicknameOracle implements AutoCloseable {
                             };
                         });
             });
+            context.registerBean("authSqlKindsOnly", HibernatePropertiesCustomizer.class, () -> properties ->
+                    properties.put("hibernate.session_factory.statement_inspector", (org.hibernate.resource.jdbc.spi.StatementInspector) sql -> {
+                        String operation = sql.stripLeading().toLowerCase(java.util.Locale.ROOT);
+                        if (operation.contains("refresh_tokens")) {
+                            if (operation.startsWith("select")) authSelects.incrementAndGet();
+                            else if (operation.startsWith("update")) authUpdates.incrementAndGet();
+                            else if (operation.startsWith("delete")) authDeletes.incrementAndGet();
+                        }
+                        return sql;
+                    }));
+            context.registerBean(RefreshTokenRepository.class, () -> {
+                EntityManager delegate = SharedEntityManagerCreator.createSharedEntityManager(context.getBean(EntityManagerFactory.class));
+                EntityManager observed = (EntityManager) Proxy.newProxyInstance(EntityManager.class.getClassLoader(),
+                        new Class<?>[] {EntityManager.class}, (proxy, method, args) -> {
+                            if (method.getName().equals("remove") && args[0] instanceof RefreshToken token) {
+                                authRemoveCalls.incrementAndGet();
+                                if (firstAuthRemove.compareAndSet(false, true)) beforeAuthRemove.accept(token.getRefreshTokenId());
+                            }
+                            try { return method.invoke(delegate, args); }
+                            catch (InvocationTargetException failure) { throw failure.getCause(); }
+                        });
+                // The derived SELECT/delete implementation is Spring Data's actual repository, not a hand-written substitute.
+                RefreshTokenRepository actual = new JpaRepositoryFactory(observed).getRepository(RefreshTokenRepository.class);
+                return (RefreshTokenRepository) Proxy.newProxyInstance(RefreshTokenRepository.class.getClassLoader(),
+                        new Class<?>[] {RefreshTokenRepository.class}, (proxy, method, args) -> {
+                            final Object result;
+                            try { result = method.invoke(actual, args); }
+                            catch (InvocationTargetException failure) { throw failure.getCause(); }
+                            if (method.getName().equals("findByToken")) afterAuthRead.run();
+                            return result;
+                        });
+            }, definition -> definition.setLazyInit(true));
+            context.registerBean("authSourceIssuer", JwtProvider.class,
+                    () -> new JwtProvider(F3PostgresqlFixture.required("F3_TEST_JWT_SECRET"), AUTH_ACCESS_MS, AUTH_REFRESH_MS),
+                    definition -> definition.setLazyInit(true));
+            context.registerBean(F13LegacyAuthSessionsService.class,
+                    () -> new F13LegacyAuthSessionsService(context.getBean(RefreshTokenRepository.class),
+                            context.getBean(UserRepository.class), context.getBean("authSourceIssuer", JwtProvider.class)),
+                    definition -> definition.setLazyInit(true));
             context.registerBean(F13LegacyNicknameService.class,
                     () -> new F13LegacyNicknameService(context.getBean(UserRepository.class)));
             context.registerBean(F13LegacyAdminUserUpdateService.class,
@@ -123,6 +179,33 @@ final class F13LegacyNicknameOracle implements AutoCloseable {
         var admin = context.getBean(F13LegacyAdminUserUpdateService.class);
         if (!AopUtils.isCglibProxy(admin)) throw new IllegalStateException("Original administrator method lacks its transaction proxy");
         admin.updateUserByAdmin(id, request);
+    }
+
+    AuthTokens refresh(String token) {
+        verifyOwnership.run();
+        var result = authService().refreshToken(new RefreshTokenRequestDto(token));
+        return new AuthTokens(result.accessToken(), result.refreshToken());
+    }
+
+    void logout(long id) { verifyOwnership.run(); authService().logout(id); }
+
+    void observeAuth(Runnable afterRead, LongConsumer beforeRemove) {
+        afterAuthRead = afterRead; beforeAuthRemove = beforeRemove; firstAuthRemove.set(false);
+        resetAuthObservations();
+    }
+
+    void resetAuthObservations() {
+        authSelects.set(0); authUpdates.set(0); authDeletes.set(0); authRemoveCalls.set(0);
+    }
+
+    private F13LegacyAuthSessionsService authService() {
+        var auth = context.getBean(F13LegacyAuthSessionsService.class);
+        if (!AopUtils.isCglibProxy(auth)) throw new IllegalStateException("Original auth methods lack their real transaction proxy");
+        return auth;
+    }
+
+    record AuthTokens(String accessToken, String refreshToken) {
+        @Override public String toString() { return "AuthTokens[redacted]"; }
     }
 
     @Override public void close() { context.close(); }

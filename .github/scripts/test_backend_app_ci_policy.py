@@ -35,7 +35,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertTrue(marker in body, 'Required workflow script is missing: ' + name)
         return textwrap.dedent(body.split(marker, 1)[1])
 
-    def select(self, paths, *, pilot=False, raw=False, note=False, member=False, signup=False, admin=False, visit=False):
+    def select(self, paths, *, pilot=False, raw=False, note=False, member=False, signup=False, admin=False, visit=False, auth=False):
         script = self.script('selection')
         marker = 'python3 - <<\'PY\' >> "$GITHUB_OUTPUT"\n'
         self.assertIn(marker, script)
@@ -58,6 +58,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                     patch.object(backend_contract_profile, 'verify_signup_statistics_inputs', return_value=signup), \
                     patch.object(backend_contract_profile, 'verify_admin_member_update_inputs', return_value=admin), \
                     patch.object(backend_contract_profile, 'verify_visit_collection_inputs', return_value=visit), \
+                    patch.object(backend_contract_profile, 'verify_auth_sessions_inputs', return_value=auth), \
                     contextlib.redirect_stdout(output):
                 exec(compile(program, str(WORKFLOW), 'exec'), {})
         value = output.getvalue()
@@ -96,6 +97,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                      '.github/scripts/test_backend_signup_statistics_profile.py',
                      '.github/scripts/test_backend_admin_member_update_profile.py',
                      '.github/scripts/test_backend_visit_collection_profile.py',
+                     '.github/scripts/test_backend_auth_sessions_profile.py',
                      '.github/scripts/backend_postmerge_proof.py',
                      '.github/scripts/test_backend_postmerge_proof.py'):
             with self.subTest(path=path):
@@ -225,13 +227,13 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         modes = (backend_contract_profile.FULL, backend_contract_profile.PILOT,
                  backend_contract_profile.NOTE_EXPIRY, backend_contract_profile.MEMBER_MANAGEMENT,
                  backend_contract_profile.SIGNUP_STATISTICS, backend_contract_profile.ADMIN_MEMBER_UPDATE,
-                 backend_contract_profile.VISIT_COLLECTION)
+                 backend_contract_profile.VISIT_COLLECTION, backend_contract_profile.AUTH_SESSIONS)
         selected = {mode: [] for mode in modes}
         wanted_conditions = {
             "${{ matrix.profile == 'full' }}": {backend_contract_profile.FULL},
-            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' }}":
+            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' }}":
                 {backend_contract_profile.FULL, backend_contract_profile.PILOT},
-            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' }}":
+            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' }}":
                 {backend_contract_profile.FULL, backend_contract_profile.PILOT, backend_contract_profile.MEMBER_MANAGEMENT},
         }
         allowed_conditions = {'Remove only the owned disposable fixture',
@@ -244,6 +246,9 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                               'Compile pinned visit collection and member source closure without database tests',
                               'Add visit collection tables and exact writer rights on the member-only fixture',
                               'Add visit collection tables after full administrator PostgreSQL verification',
+                              'Compile pinned refresh logout and member source closure without database tests',
+                              'Add only refresh logout column rights on the exact administrator fixture',
+                              'Always restore only auth column rights and verify the prior administrator fixture',
                               'Add only administrator role and care registration column rights after member fixture preparation',
                               'Verify owned note expiry, original limits, rollback and active scheduler shutdown in UTC'}
         for part in parts[1:]:
@@ -303,12 +308,12 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             if re.search(r'run: python3 scripts/f[0-9]+_ci.py prepare\n', part):
                 self.assertNotIn('        if:', part)
         shape = next(part for part in parts if 'id: fixture_f4_shape\n' in part)
-        self.assertIn("if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' }}", shape)
+        self.assertIn("if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' || matrix.profile == 'auth-sessions' }}", shape)
         self.assertIn('python3 scripts/f4_ci.py prepare-shape', shape)
         self.assertLess(check.index('id: jar_f3\n'), check.index('id: fixture_f4_shape\n'))
         self.assertLess(check.index('id: fixture_f4_shape\n'), check.index('id: jar_f4\n'))
         pg = next(part for part in parts if 'id: pg_note_expiry\n' in part)
-        self.assertIn("if: ${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' }}", pg)
+        self.assertIn("if: ${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' }}", pg)
         self.assertIn(':boot:noteExpiryCompatibilityTest', pg)
         self.assertIn('verify_note_expiry_report', pg)
         self.assertIn('note_expiry_scope_verified', self.job('selection'))
@@ -331,7 +336,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             step = next(part for part in parts if 'id: ' + key + '\n' in part)
             condition = ("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' }}"
                          if key == 'fixture_member_cleanup' else
-                         "if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' }}")
+                         "if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' }}")
             self.assertIn(condition, step)
             self.assertIn(command, step)
         pg = next(part for part in parts if 'id: pg_member_cleanup\n' in part)
@@ -350,7 +355,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         pg = next(part for part in parts if 'id: pg_signup_statistics\n' in part)
         self.assertLess(check.index('python3 scripts/f19_ci.py prepare'), check.index('id: pg_signup_statistics'))
         self.assertLess(check.index('id: pg_signup_statistics'), check.index('      - name: Add only the existing block timestamp SELECT after the F19 regressions'))
-        self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' }}", pg)
+        self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' }}", pg)
         self.assertIn(':boot:signupStatisticsCompatibilityTest :boot:signupStatisticsCompatibilitySeoulTest', pg)
         self.assertIn('test -s build/ci/f19-oracle-sha256.txt', pg)
         self.assertIn('test -s build/ci/f19-signup-statistics-oracle-sha256.txt', pg)

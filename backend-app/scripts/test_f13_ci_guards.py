@@ -437,5 +437,47 @@ class AdminUserUpdateGuardTest(unittest.TestCase):
                     self.assertEqual(1, sql.call_count); self.assertEqual(1, strict.call_count)
 
 
+
+SOURCE_REPOSITORY = f13.ROOT.parent
+
+
+class AuthSessionsSourceGuardTest(unittest.TestCase):
+    def sources(self):
+        import subprocess
+        read_git = subprocess.check_output
+        return {path: read_git(['git','show',oracle.AUTH_SOURCE + ':' + path], cwd=SOURCE_REPOSITORY)
+                for path in oracle.AUTH_EXPECTED}
+
+    def test_given_fixed_auth_methods_and_shared_originals__when_building__then_preserve_two_methods_and_the_default_extractors(self):
+        import ast
+        sources = self.sources()
+        wrapped = oracle.auth_sessions_wrapper(sources[oracle.PREFIX + 'com/pawbridge/userservice/service/AuthServiceImpl.java'])
+        self.assertEqual(15, len(oracle.AUTH_EXPECTED)); self.assertEqual(8, len(oracle.AUTH_SHARED)); self.assertEqual(7, len(oracle.AUTH_OUTPUTS))
+        for name, digest in oracle.AUTH_METHODS.items():
+            self.assertIn(name, wrapped.decode()); self.assertEqual(64, len(digest))
+        self.assertNotIn(b'EmailVerificationService', wrapped); self.assertNotIn(b'PasswordEncoder', wrapped)
+        for name, digest in {'service_wrapper': '1159183711246a453b730aa48b2c0bf5d282fc6a08823a265808eeb9ffd4b0d6', 'extract': '73b78a6d19653c019519ed155bce8c44b808564e18ee24e5a49eb4e5a26517bd'}.items():
+            self.assertEqual(digest, hashlib.sha256(inspect.getsource(getattr(oracle,name)).encode()).hexdigest())
+
+    def test_given_changed_auth_source_or_conflicting_receipt__when_extracting__then_refuse_before_any_generated_write(self):
+        sources = self.sources()
+        for defect in ('source','receipt','shared'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory).resolve(); output = repository / 'backend-app/boot/build/generated/sources/f13LegacyOracle/java'
+                evidence = repository / 'backend-app/build/ci/f13-auth-sessions-oracle-sha256.txt'
+                for path, relative in oracle.AUTH_SHARED.items():
+                    target = repository / relative; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(sources[path])
+                if defect == 'receipt': evidence.parent.mkdir(parents=True); evidence.write_text('conflicting-private-evidence')
+                if defect == 'shared': (repository / next(iter(oracle.AUTH_SHARED.values()))).write_bytes(b'changed shared bytes')
+                def read(command, **kwargs):
+                    path = command[2].split(':',1)[1]
+                    return b'changed' if defect == 'source' and path.endswith('AuthServiceImpl.java') else sources[path]
+                before = {str(path.relative_to(repository)):path.read_bytes() for path in repository.rglob('*') if path.is_file()}
+                with patch.object(oracle.subprocess, 'check_output', side_effect=read):
+                    with self.assertRaises(SystemExit): oracle.extract_auth_sessions(repository,output,evidence)
+                after = {str(path.relative_to(repository)):path.read_bytes() for path in repository.rglob('*') if path.is_file()}
+                self.assertEqual(before, after)
+
+
 if __name__ == '__main__':
     unittest.main()

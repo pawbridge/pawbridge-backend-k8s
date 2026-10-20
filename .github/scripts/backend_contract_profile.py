@@ -216,6 +216,63 @@ VISIT_REPORT_CASES = tuple(name + '()' for name in VISIT_SINGLE_METHODS) + tuple
     for index in range(1, count + 1))
 VISIT_SEOUL_METHOD = 'givenAMicrosecondCollectionStartAndSparseLeapDays__whenStartingTwiceAndReadingPeriodsInEitherZone__thenKeepTheFirstInstantAndZeroFillOnlyCollectedDays'
 
+
+AUTH_SESSIONS = 'auth-sessions'
+# Future Visitor feature head is unconfirmed. Root must replace this before publication.
+AUTH_BASE = '4afaae145d48aab153147515687a518a3c654c50'
+AUTH_APP_HASHES = {'backend-app/boot/build.gradle': 'b55126579bf4dbe023d3b902cde581de1bb64cbfd16121522880999a103f65c1',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F13LegacyNicknameOracle.java': '1426ace48a10528820b4d77d9a1f107a044a899b530dbe662e3392d5f39cb8a4',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAuthSessionCompatibilityTest.java': '5c2999519d8e0f923d7db273c879633b0017ce7276a0bdd234148e049ebf53d2',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'ae69ef2af6733112754e401448f0f6df3d6a5239f532b16d0ba104fb2d49d9fc',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AuthSessionConfiguration.java': '744e524291706c8776ca1feb282b1f91c62b402f085356aabaf15f7d0342b4e5',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '826a969854c20c5e655c1df5de7d92a2661bf3e18c2daa083cb34ded5aaebc53',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AuthSessionConfigurationTest.java': '71fcc30f3ea2672aa744a733d01e95da5a89c7d0b341282af18d69938a8c69c5',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AuthSessionHttpTest.java': 'e10a7528d9ae681f64cf3c6489dca6ae3617c26d7736a86aca8b2cc38c6a47d6',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '5f53b3946e628db01de51e65a56c7023406b5b1d9951f331fdd14c4890c3ffaf',
+ 'backend-app/scripts/f29_ci.py': '0a2ef3e499de41cc3283e50d30fe1b590d03feb777c4c297272ea1cb8a0f8ee5',
+ 'backend-app/scripts/prepare_f13_legacy_oracle.py': '3e2efdddf404acf473be918c1978d4e41d5393d3a0ef761ed3369f2d92f973be',
+ 'backend-app/scripts/test_f13_ci_guards.py': 'd9dbbd6168aa6e5c15a64af5e53321e53a23c9f4c00079c73e3f8b2448fc2300',
+ 'backend-app/scripts/test_f29_ci_guards.py': '22fab98283f57021ff9b297a7acb387dc33286b37991cf197c4d44c39205a1a1',
+ 'backend-app/user/build.gradle': 'e6e67564e8a003e76a2fe0ddf5d08b0c3fead5b350bd8f1e2b20643d4b898d0a',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/session/application/AuthSessionRejectedException.java': 'a3dc6fe6ff2b82cbc50ca23812aa1bcb87e4f89f072b12c91ec6cc1b1276b4f7',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/session/application/AuthSessions.java': 'a46b8769fa1f7d8a7072e386f78df50463cb41b2e0d47a64f7475528d0b70559',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/session/infrastructure/JdbcAuthSessions.java': '45b18f42126776200bc0c458f077ff0110655c853c826cd619991a78a131030a',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/session/infrastructure/JwtSessionTokens.java': '060302527670a7296d2c9ece4fb060d9ea47d8dc2070f5540de5edbc726215d2',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/session/web/AuthSessionController.java': '05e324a149c6b2ae20690034df31539203aa263281e592f74a3397c99561d0d6',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/session/web/AuthSessionExceptionHandler.java': 'e52fcb42a85d00ec8d06799fac8e5928a16dc02c4aacce6b7d4b8e87a2592396',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/session/web/RefreshSessionRequest.java': '2fe4538058ad6212b95828eb46c80598a50e5d191ad22ca4350efb7baa1f250a',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/session/infrastructure/JdbcAuthSessionsTest.java': '6f9021bc883071a63a12d01151e7b382e9dcad991603c806579b6b8d05c29676',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/session/infrastructure/JwtSessionTokensTest.java': '0610aa83cb8ac9938079628c9626caeadfec763bf28926b26aa0dc8a030b24bd'}
+AUTH_APP_EXCEPTIONS = frozenset(AUTH_APP_HASHES) | {'backend-app/README.md'}
+AUTH_ALLOWED_PATHS = VISIT_ALLOWED_PATHS | frozenset(AUTH_APP_HASHES) | {
+    '.github/scripts/test_backend_auth_sessions_profile.py',
+}
+AUTH_REQUIRED_CONTRACTS = ('fixture_f4_shape', 'compile_auth_sessions', 'fixture_member_cleanup',
+                           'fixture_admin_update', 'fixture_auth_sessions', 'pg_auth_sessions',
+                           'restore_auth_sessions')
+AUTH_FULL_CONTRACTS = ('compile_auth_sessions', 'fixture_auth_sessions', 'pg_auth_sessions', 'restore_auth_sessions')
+AUTH_SKIPPED_CONTRACTS = ('pg_note_expiry', 'pg_member_cleanup', 'pg_admin_update', 'pg_signup_statistics',
+                          'compile_admin_update', 'compile_visit_collection', 'fixture_visit_collection',
+                          'fixture_admin_visit_collection', 'pg_visit_collection')
+AUTH_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
+AUTH_METHOD_CASES = (('givenCurrentClaimsAndMicrosecondStoredExpiry__whenRotatingThenReplaying__thenPreserveCreatedAtAndOnlyChangeTheSelectedRefresh',
+  1),
+ ('givenRejectedRefreshInputs__whenCallingTheTransactionalSourceAndCandidate__thenPreservePrecedenceAndNoMutation',
+  4),
+ ('givenLogoutSelectionAndAnIndependentLaterInsert__whenDeletingByUser__thenRemoveOnlySelectedRowsWithoutReadingUser',
+  3),
+ ('givenAnAlreadyLoadedRefreshDisappearsInAnotherTransaction__whenUpdatingOrDeletingIt__thenBothFailAndRollbackRemainingSelectedRows',
+  2),
+ ('givenBothRequestsReadTheSameRefreshBeforeEitherWrites__whenRotatingWithoutVersionOrCas__thenBothMayCommitAndTheLastStoredTokenIsOneReturnedValue',
+  2),
+ ('givenExactlyOneRequiredWriterPrivilegeIsRevoked__whenCallingThenRestoring__thenFailServerSideWithoutPartialMutationAndRecover',
+  3),
+ ('givenAnOwnedDeferredConstraintRejectsTheRefreshUpdate__whenCommitting__thenBothExposeServerFailureAndRestoreTheEntireSnapshot',
+  2))
+AUTH_REPORT_CASES = (AUTH_METHOD_CASES[0][0] + '()',) + tuple(
+    method + '[' + str(index) + ']' for method,count in AUTH_METHOD_CASES[1:] for index in range(1,count+1))
+AUTH_SEOUL_METHOD = 'givenCurrentClaimsAndMicrosecondStoredExpiry__whenRotatingThenReplaying__thenPreserveCreatedAtAndOnlyChangeTheSelectedRefresh'
+
 REPOSITORY = 'pawbridge/pawbridge-backend-k8s'
 PILOT_REF = 'ci/backend-contract-regression-scope'
 PILOT_BASE = '0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3'
@@ -383,6 +440,31 @@ def verify_visit_collection_inputs(git_reader=None):
         return False
 
 
+def verify_auth_sessions_inputs(git_reader=None):
+    """Accept only the fixed auth application/compiler/fixture bytes on the confirmed Visitor parent."""
+    def read(*args):
+        return subprocess.run(['git', *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, check=True, timeout=8).stdout
+    git = git_reader if git_reader is not None else read
+    try:
+        if (not re.fullmatch(r'[0-9a-f]{40}', AUTH_BASE) or AUTH_BASE == '0' * 40
+                or len(AUTH_APP_HASHES) != 23):
+            return False
+        raw = git('diff', '--name-only', '--no-renames', '-z', AUTH_BASE, 'HEAD', '--', 'backend-app')
+        if not isinstance(raw, bytes):
+            return False
+        paths = [value.decode('utf-8') for value in raw.split(b'\0') if value]
+        if len(paths) != len(set(paths)) or not set(paths).issubset(AUTH_APP_EXCEPTIONS):
+            return False
+        for path, digest in AUTH_APP_HASHES.items():
+            blob = git('show', 'HEAD:' + path)
+            if not isinstance(blob, bytes) or hashlib.sha256(blob).hexdigest() != digest:
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, TypeError):
+        return False
+
+
 def verify_admin_member_update_report(directory):
     """Check all sixteen unique, source-pinned parameterized method/index labels."""
     try:
@@ -438,6 +520,37 @@ def verify_visit_collection_report(utc_directory, seoul_directory):
             raise ProfileBlocked('The visit collection report is invalid.') from None
 
 
+def verify_auth_sessions_report(utc_directory, seoul_directory):
+    """Require all seventeen method/index labels and only the designated Seoul boundary case."""
+    for folder, expected in ((utc_directory, AUTH_REPORT_CASES),
+                             (seoul_directory, (AUTH_SEOUL_METHOD + '()',))):
+        try:
+            directory = Path(folder).absolute()
+            reports = list(directory.glob('TEST-*.xml'))
+            if (directory.is_symlink() or directory.resolve() != directory or len(reports) != 1
+                    or reports[0].is_symlink() or reports[0].resolve() != reports[0]
+                    or reports[0].name != 'TEST-' + AUTH_REPORT_CLASS + '.xml'):
+                raise ProfileBlocked('The auth session report is missing or redirected.')
+            suite = ET.parse(reports[0]).getroot()
+            cases = list(suite.iter('testcase'))
+            names = [case.attrib.get('name', '') for case in cases]
+            if (suite.tag != 'testsuite' or suite.attrib.get('name') != AUTH_REPORT_CLASS
+                    or int(suite.attrib.get('tests', -1)) != len(expected) or len(cases) != len(expected)
+                    or len(suite.findall('testcase')) != len(expected)
+                    or len(set(names)) != len(expected) or set(names) != set(expected)
+                    or any(int(suite.attrib.get(key, -1)) != 0 for key in ('failures', 'errors', 'skipped'))
+                    or any(int(node.attrib.get(key, 0)) != 0 for node in suite.iter()
+                           for key in ('failures', 'errors', 'skipped', 'disabled'))
+                    or any(node.tag in ('failure', 'error', 'skipped', 'disabled') for node in suite.iter())
+                    or any(case.attrib.get('classname') != AUTH_REPORT_CLASS
+                           or case.attrib.get('status', 'run') not in ('run', 'passed')
+                           or case.attrib.get('result', 'completed') not in ('completed', 'passed', 'success')
+                           for case in cases)):
+                raise ProfileBlocked('The auth session cases did not all execute successfully.')
+        except (OSError, ValueError, TypeError, ET.ParseError):
+            raise ProfileBlocked('The auth session report is invalid.') from None
+
+
 def verify_note_expiry_report(directory):
     try:
         directory = Path(directory)
@@ -466,7 +579,7 @@ def select_profiles(context, paths):
     if not isinstance(context, dict):
         raise ProfileBlocked('Profile context is invalid.')
     requested = context.get('requested_profile')
-    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION):
+    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION, AUTH_SESSIONS):
         raise ProfileBlocked('Requested profile is unknown.')
     if requested == FULL:
         return [FULL]
@@ -520,6 +633,16 @@ def select_profiles(context, paths):
         raise ProfileBlocked('The requested visit collection scope differs from its reviewed inputs.')
     if visit_scoped and requested in (None, '', VISIT_COLLECTION):
         return [VISIT_COLLECTION]
+    auth_scoped = (context.get('event_name') in ('pull_request', 'push')
+                   and context.get('repository') == REPOSITORY
+                   and context.get('head_repository') == REPOSITORY
+                   and (context.get('event_name') != 'push' or context.get('head_ref') == 'dev')
+                   and context.get('auth_sessions_scope_verified') is True
+                   and bool(paths) and set(paths).issubset(AUTH_ALLOWED_PATHS))
+    if requested == AUTH_SESSIONS and not auth_scoped:
+        raise ProfileBlocked('The requested auth session scope differs from its reviewed inputs.')
+    if auth_scoped and requested in (None, '', AUTH_SESSIONS):
+        return [AUTH_SESSIONS]
     eligible = (context.get('event_name') == 'pull_request'
                 and context.get('repository') == REPOSITORY
                 and context.get('head_repository') == REPOSITORY
@@ -534,6 +657,8 @@ def select_profiles(context, paths):
 
 
 def expected_smokes(profile):
+    if profile == AUTH_SESSIONS:
+        return ()
     if profile == VISIT_COLLECTION:
         return ()
     if profile == ADMIN_MEMBER_UPDATE:
@@ -591,7 +716,8 @@ def make_plan(context, paths, profile, jar_sha256):
         'schema_version': 1, 'status': 'planned', 'profile': profile,
         'identity': identity, 'jar_sha256': jar_sha256,
         'changed_paths_sha256': hashlib.sha256(_encoded(paths)).hexdigest(),
-        'selection_reason': ('fixed-visit-inputs-and-scoped-postgresql' if profile == VISIT_COLLECTION else
+        'selection_reason': ('fixed-auth-inputs-and-scoped-postgresql' if profile == AUTH_SESSIONS else
+                             'fixed-visit-inputs-and-scoped-postgresql' if profile == VISIT_COLLECTION else
                              'fixed-admin-update-inputs-and-scoped-postgresql' if profile == ADMIN_MEMBER_UPDATE else
                              'fixed-signup-inputs-and-scoped-postgresql' if profile == SIGNUP_STATISTICS else
                              'fixed-member-inputs-and-scoped-postgresql' if profile == MEMBER_MANAGEMENT else
@@ -601,7 +727,10 @@ def make_plan(context, paths, profile, jar_sha256):
         'skipped_smokes': [step for step in ALL_SMOKES if step not in required],
     }
     if profile == FULL:
-        result['required_contracts'] = list(VISIT_FULL_CONTRACTS)
+        result['required_contracts'] = list(AUTH_FULL_CONTRACTS + VISIT_FULL_CONTRACTS)
+    elif profile == AUTH_SESSIONS:
+        result['required_contracts'] = list(AUTH_REQUIRED_CONTRACTS)
+        result['skipped_contracts'] = list(AUTH_SKIPPED_CONTRACTS)
     elif profile == VISIT_COLLECTION:
         result['required_contracts'] = list(VISIT_REQUIRED_CONTRACTS)
         result['skipped_contracts'] = list(VISIT_SKIPPED_CONTRACTS)
@@ -702,6 +831,7 @@ def runtime_context():
         identity['signup_statistics_scope_verified'] = verify_signup_statistics_inputs()
         identity['admin_member_update_scope_verified'] = verify_admin_member_update_inputs()
         identity['visit_collection_scope_verified'] = verify_visit_collection_inputs()
+        identity['auth_sessions_scope_verified'] = verify_auth_sessions_inputs()
         return identity, _paths(paths)
     except (ImportError, KeyError, TypeError, AttributeError, OSError, UnicodeError, ValueError):
         raise ProfileBlocked('The verified runtime context could not be constructed.') from None
@@ -728,7 +858,7 @@ def _write_evidence(path, expected_name, value):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('plan', 'audit'), required=True)
-    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION), required=True)
+    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION, AUTH_SESSIONS), required=True)
     parser.add_argument('--jar', type=Path, required=True)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--execution', type=Path)

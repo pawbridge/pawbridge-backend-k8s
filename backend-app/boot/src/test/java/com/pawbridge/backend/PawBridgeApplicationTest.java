@@ -74,6 +74,8 @@ class PawBridgeApplicationTest {
                     var adminUpdateTx = (org.springframework.transaction.support.TransactionTemplate)org.springframework.test.util.ReflectionTestUtils.getField(adminUpdate, "transaction");
                     assertThat(adminUpdateTx.getTransactionManager()).isSameAs(context.getBean("writeTransactionManager"));
                     assertThat(adminUpdateTx.getTimeout()).isEqualTo(15);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.session.application.AuthSessions.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens.class)).isEmpty();
                     assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
