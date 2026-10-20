@@ -113,7 +113,7 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual('passed', result['status'])
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
-                self.assertEqual(29 + (8 if mode == profile.FULL else 0), len(result['step_results']))
+                self.assertEqual(29 + (10 if mode == profile.FULL else 0), len(result['step_results']))
 
     def test_given_other_source_base_head_tree_run_or_jar__when_auditing__then_reject_stale_evidence(self):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
