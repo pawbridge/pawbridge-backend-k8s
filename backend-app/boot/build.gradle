@@ -1231,8 +1231,16 @@ tasks.register('ownedPostgresqlTest', Test) {
     systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     filter { failOnNoMatchingTests = true }
     doFirst {
-        // Keep the original direct-environment fixture as a separately verified legacy contract.
-        if (System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') != 'owned-fixture-only') {
+        // Gradle 8.14.3 stores --tests separately from configured includes; both filters intersect.
+        def legacyClass = 'com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest'
+        def commandLineIncludes = filter.getCommandLineIncludePatterns()
+        def legacySelection = commandLineIncludes.size() == 1 && filter.includePatterns.isEmpty() &&
+                filter.excludePatterns.isEmpty() && commandLineIncludes.every { name ->
+                    name == legacyClass || (name.startsWith(legacyClass + '.') &&
+                            name.substring(legacyClass.length() + 1) ==~ /[A-Za-z_$][A-Za-z0-9_$]*/)
+                }
+        def legacyFixture = System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') == 'owned-fixture-only' && legacySelection
+        if (!legacyFixture) {
             def settingsEnvironment = System.getenv('PAWBRIDGE_OWNED_SETTINGS_ENV')
             def settingsPath = settingsEnvironment ==~ /P[1-9][0-9]*_PG_SETTINGS/ ? System.getenv(settingsEnvironment) : null
             def validPath = false

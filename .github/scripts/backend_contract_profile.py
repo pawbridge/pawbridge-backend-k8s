@@ -346,7 +346,7 @@ POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
 POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d57f7606f60d2987'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7064fbd95c6b9d3be7978122650959e12572ae465eedf4a09c9707daeabe3eb1',
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '3b73f3d6102882d7de5863f05442315e22949a311210b7a61817d0d3dd4d8681',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
  'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '6192bdc876a6094d75aae5fa2b4c05abd97a24fb6ce16ac6865dd2b025e02507',
