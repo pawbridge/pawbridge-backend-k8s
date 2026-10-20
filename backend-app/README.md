@@ -700,3 +700,14 @@ Root는 공통 Gradle/Boot/정책/인가 합집합을 독립 대조했습니다.
 Store는 동일 reader/TM에 별도 readOnly REPEATABLE_READ·TX5/query5초를 조립합니다. 주문 헤더·상품 조회를 같은 스냅샷에 두기 위한 후보 선택이며 원문 기본 격리/timeout과 완전히 같다는 주장은 아닙니다. User→Store.api만 허용하고, Community→User→Store의 실제 resolved artifact는 허용하면서 Community의 Store 직접 의존/실제 API 참조/임의 파일 우회는 계속 거부합니다.
 
 Store 공개 API/JDBC 최소30사례와 User 어댑터25사례, 새 Boot4/TestKit4의8사례·12초 및 실제 business556 클래스 검사가 통과했습니다. 성공 사례는 반복하지 않았고 실제 SQL/권한·동시성·NULL/collation/시간·GRANT/라우팅·운영 활성화는 미검증입니다. Wishlist의 페이지/옵션은 단일 CTE로 처리합니다. 임의 JPA 중첩 sort 전체 호환은 주장하지 않으며, 기존 User의 sort 쉼표 flatten 동작과 고정 Store Feign serializer의 배열 순서를 비교해 보존합니다.
+
+
+### Animal 보호소·통계 조회 편입
+
+`pawbridge.animal-shelters.enabled`와 `pawbridge.animal-statistics.enabled`는 각각 기본 false입니다. 보호소는 정확 일반4GET과, 명시 `pawbridge.animal-query.backend=postgresql`에서만 discovery/observations2GET을 등록합니다. 통계는 정확공개3GET·ADMIN2GET만 기존 JWT/role 보호로 연결합니다. Gateway legacy alias나 임의 인접경로·쓰기·배치는 등록하지 않습니다.
+
+기존 보호소 조회·날짜/페이지·관측/미발견/오류 계약과 통계의 happen_date/APMS수정일/created_at+9h의 서로 다른 집계 날짜를 보존합니다. 통계 기간은 공개 default와 관리자 intake-trend366일 검증을 분리하고, 빈 날짜/상태/지역을 임의 보충하지 않습니다. 입양 통계는 실제 입양 이벤트 수가 아닌 기존 현재ADOPTED+오늘APMS수정 의미입니다.
+
+동일 reader/TM을 사용하고 보호소 discovery만 기존 RO/RR·5초를, 일반보호소/통계는 원문 RO/default isolation/timeout을 유지합니다. 새 풀/TM/analyzer/외부요청/예약을 추가하지 않습니다. 보호소 source56·새조립12/8초, 통계 source36·새조립7/7초와business578 검사가 통과했습니다. 성공시험은 반복하지 않았으며 실제PG집계/SQL·최소GRANT·격리/콜레이션/시간·실행JAR/운영활성화는 미검증입니다.
+
+User→Store 모듈 연결과 Animal 보호소/통계를 실제 함께 조립한 뒤, 변경된 조합의 기존 기본 App 시험 클래스8사례와 생산 컴파일·business592 검사를8초에 확인했습니다. 신규8계약으로 세지 않습니다. 원문 source/HTTP/전체 구조 시험은 반복하지 않았습니다. 고정 입력230 시험1은0.012초에 성공했습니다. 이는 실제 서비스·데이터베이스 실행 시험이 아닙니다.
