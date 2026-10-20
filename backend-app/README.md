@@ -731,3 +731,14 @@ source25사례·일반 독립검수와 새 합집합 Boot22사례·production co
 Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named reader/TM/ObjectMapper를 사용합니다. 기존 ShelterReads 빈이 없으면 동일 구현을 내부용으로 생성하며 공개 Shelter 경로를 켜지 않습니다. Reader RO REQUIRES_NEW와 기존 User writer는 분리합니다. 원문의 관리자/회원/잠금/상태검증·null/id/care 검증 및 원문 missing500→User503 분류를 보존합니다. 실제 Reader 권한·트랜잭션 suspend/resume·연결/잠금은 미검증입니다.
 
 동결 Shelter source7사례, 같은구조 guard6 성공과 독립 검수를 보존했습니다. 활동 module을 제외한 새조합은2사례·production compile/Business605를6초에 확인했습니다. 기존 source/전체구조 성공시험은 반복하지 않았습니다. 활동조회의 특정 collection sort는 원문200/후보500 차이가 있어 해당 API/JDBC/어댑터/시험/선택 설정을 게시에서 전부 제외하고 별도 준비본에 보존했습니다. 기존 User 활동조회는 HTTP를 유지합니다. 활동 모듈·전체 HTTP 동등성·운영 활성화 완료를 주장하지 않습니다.
+
+
+### User Outbox·Processed 보존 작업
+
+`pawbridge.user-maintenance.enabled=true`와 canonical `pawbridge.jobs.cleanup-enabled=true`를 둘 다 명시할 때만 단일 소유 scheduler와 두 작업을 조립합니다. 기본 off는 원문 cleanup missing=true와 다른 안전 활성화 경계이며, 구 실행기·작업 소유권을 확인하기 전 켜지 않습니다.
+
+원문처럼 Outbox created_at7일 전/Processed processed_at30일 전의 strict `<` 행을 상태·LIMIT 없이 삭제합니다. 각 작업의 TX 시작 뒤 JVM 현지 시각을 한 번 표본하고, UTC Calendar 바인딩과 별도 기본 timeout(-1)의 writer TX를 사용합니다. 기존 named writer JDBC/TM을 재사용하며 새 pool/DDL/GRANT는 없습니다. 예약은 JVM local03:00/03:30입니다. 삭제 예외는 TX 안에서 잡되 오류 타입만 로그로 남기고 begin/clock/commit/rollback 실패는 밖으로 전달합니다. 시간 기준 삭제가 CDC 전달 완료를 보증하지는 않습니다.
+
+source 신규28사례는 User12와 Boot16의 분할 성공 근거이며 한 번의 전체 실행으로 표현하지 않습니다. source에서 발생한 Mockito 준비 오류·이전 XML/로그는 보존했습니다. 최종 결합은 생산 컴파일·실제 business package 검사와 고정252입력 시험1만 수행하며 기존28 성공시험은 반복하지 않습니다.
+
+재사용 writeJdbc의 SQL5초 제한은 원문에 없던 상속 차이입니다. 실제 장시간 DELETE, JPA rollback-only와 PostgreSQL failed-TX/commit·rollback 차이, 최소 DELETE 권한/ACL, 시간 바인딩, 실제03:00/03:30 예약·종료와 단일 실행기 소유권은 미검증입니다. 활성화·구 실행기 종료 전 이를 확인해야 합니다. 실제 DB·데이터 삭제·예약·운영 변경은 하지 않았습니다.
