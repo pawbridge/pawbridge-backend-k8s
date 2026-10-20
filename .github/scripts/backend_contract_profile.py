@@ -345,7 +345,7 @@ POST_STATISTICS_SEOUL_METHOD = POST_STATISTICS_SINGLE_METHODS[0]
 POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
-POST_READS_WORKFLOW_SHA256 = '918135a137b54742bfba3272d90e98b126b08d98a16f26d82d67d68a493b5a2e'
+POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d57f7606f60d2987'
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6f44dc894486c8f0125fe7a1b8a38594cca03a53c4e9',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
@@ -722,7 +722,28 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalLostSearchConfiguration.java': '4f012d4ba49a7a843b462ff97ac6d560a7a83601f214b26dc47664900380632d',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalLostSearchConfigurationTest.java': '0809df20987749a15db02d8b243e3379feeb692fef7c86667f0aeae7b7312a2e',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlAnimalLostSearchTest.java': '2dfdfed66ff39b97effa0bc462aa322d1f2a1d8172042627cc4cbb06b94a6258',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/CombinedAnimalStoreConfigurationTest.java': 'ed90d7f6de3bcaca00fb23668dbed1839fe1ec92b5fa7e328edad16c3929885e'}
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/CombinedAnimalStoreConfigurationTest.java': 'ed90d7f6de3bcaca00fb23668dbed1839fe1ec92b5fa7e328edad16c3929885e',
+ 'api-gateway/src/test/java/com/pawbridge/apigateway/filter/LostSearchLimitsTest.java': '5b10904d36809531798a52072011c8496d9f786ba8cfbd4d621759e74596026d'}
+# Only the identical, previously successful TestKit inputs may be referenced.
+# Actual architecture and compiled business-package checks still run on every candidate.
+ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39460539409
+ARCHITECTURE_SELFTEST_REFERENCE_HEAD = 'ed6ee7b8f9637e3b79249e8740619440c7b984ab'
+ARCHITECTURE_SELFTEST_INPUT_HASHES = {'backend-app/animal/build.gradle': 'd18708a42123baae412030670f286b0632aa8c9afd01c86f07231aa2a88356cb',
+ 'backend-app/boot/build.gradle': '8acfe39689efdbf9eddc6f44dc894486c8f0125fe7a1b8a38594cca03a53c4e9',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessBuildFixture.java': '289776b8432e47b87656714c84c2d051bf456dc261f2afd23e280e616d5e7322',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessPackageArchitectureTest.java': '6522fb03fea64eb29b903fced123659e0e1012bae432458ed8ce261e4ffce616',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '1c32ca2a01d6dc5467b1e3303e55a6bac182a4034c6f4533f0a01b38e36a8983',
+ 'backend-app/build.gradle': '1633e17fa53b9172da0233ea1ec99d85c5969d498c6656fa338dbfdfc672a267',
+ 'backend-app/community/build.gradle': 'cae9d8a06febf4ceb5abe9a7728ed663ec07164883f85e01cba1f23fe3737408',
+ 'backend-app/gradle.properties': '4491e9ef524b507cce154ba37ed5ff7618bedf95a2546dc7c73d0d826ab87f14',
+ 'backend-app/gradle/architecture.gradle': 'bb048697d4f1d17ff95398f7902c8177ba4755630905a64775502a82e62ef0ca',
+ 'backend-app/gradle/wrapper/gradle-wrapper.jar': '7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172',
+ 'backend-app/gradle/wrapper/gradle-wrapper.properties': '05fcb55a155233ee632da57149d1ba3cd39a001701ae00e0c20782fbaf6c378b',
+ 'backend-app/gradlew': 'b187b4c52e749f5760afdd6fadc31b2a98ad35fb249bf0dff03b72650f320409',
+ 'backend-app/gradlew.bat': '94102713eb8fb22d032397924c0f38ab2da783ba60d07054339f1190a0c4e2cd',
+ 'backend-app/settings.gradle': '6a488a40f2aa4afc2ae1462a7fdac6280159510e65362f5a0f1724dd3cb0473f',
+ 'backend-app/store/build.gradle': 'ac392803320ec701149beddf2d4b17aeb099f54b909caf0a5f8ee799a632907e',
+ 'backend-app/user/build.gradle': '2618227c07294560b5e318808d990152272acef69c1a071d7dc2a44d656f0835'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
@@ -1052,7 +1073,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 377
+                or len(POST_READS_APP_HASHES) != 378
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
@@ -1072,6 +1093,33 @@ def verify_post_reads_inputs(git_reader=None):
     except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, TypeError):
         return False
 
+
+
+def verify_architecture_selftest_inputs(profiles, git_reader=None):
+    """Reference only this successful fixed guard input set, never application checks."""
+    if type(profiles) is not list or profiles != [POST_READS]:
+        return False
+    if (type(ARCHITECTURE_SELFTEST_REFERENCE_RUN) is not int
+            or ARCHITECTURE_SELFTEST_REFERENCE_RUN <= 0
+            or not re.fullmatch(r'[0-9a-f]{40}', ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
+            or len(ARCHITECTURE_SELFTEST_INPUT_HASHES) != 16
+            or any(not re.fullmatch(r'[0-9a-f]{64}', digest)
+                   for digest in ARCHITECTURE_SELFTEST_INPUT_HASHES.values())):
+        return False
+    def read(*args):
+        return subprocess.run(['git', *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, check=True, timeout=8).stdout
+    git = git_reader if git_reader is not None else read
+    if not verify_post_reads_inputs(git_reader=git):
+        return False
+    try:
+        for path, digest in ARCHITECTURE_SELFTEST_INPUT_HASHES.items():
+            blob = git('show', 'HEAD:' + path)
+            if not isinstance(blob, bytes) or hashlib.sha256(blob).hexdigest() != digest:
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, TypeError):
+        return False
 
 
 def verify_admin_post_statistics_report(utc_directory, seoul_directory):

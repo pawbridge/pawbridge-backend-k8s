@@ -151,6 +151,7 @@ jobs:
           sparse-checkout: |
             backend-app
             .github/workflows/backend-app-check.yml
+            .github/scripts/backend_contract_profile.py
             store-service/src/main/java/com/pawbridge/storeservice/common/entity/BaseEntity.java
             store-service/src/main/java/com/pawbridge/storeservice/domain/order/entity/DeliveryStatus.java
             store-service/src/main/java/com/pawbridge/storeservice/domain/order/entity/Order.java
@@ -215,9 +216,36 @@ jobs:
           grep -Fx 'Gradle 8.14.3' build/ci/gradle-version.txt
 
       - name: Check modules, boundaries, unit tests and executable JAR
+        env:
+          SELECTED_CONTRACT_PROFILES: ${{ needs.selection.outputs.profiles }}
         run: |
           set -euo pipefail
-          bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          selftests=$(python3 - <<'PYTHON'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "../.github/scripts")
+          from backend_contract_profile import (verify_architecture_selftest_inputs,
+              ARCHITECTURE_SELFTEST_REFERENCE_RUN, ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
+          try:
+              profiles = json.loads(os.environ.get("SELECTED_CONTRACT_PROFILES", ""))
+          except ValueError:
+              profiles = None
+          reuse = verify_architecture_selftest_inputs(profiles)
+          decision = {"decision": "reference-previous-selftests" if reuse else "execute-current-selftests"}
+          if reuse:
+              decision.update(reference_run=ARCHITECTURE_SELFTEST_REFERENCE_RUN,
+                              reference_head=ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
+          Path("build/ci/architecture-selftests.txt").write_text(json.dumps(decision, sort_keys=True) + "\n")
+          print("reference" if reuse else "execute")
+          PYTHON
+          )
+          architecture_args=()
+          if [[ "$selftests" == reference ]]; then
+            architecture_args=(-x :boot:architectureTest)
+          fi
+          bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false "${architecture_args[@]}"
 
       - name: Bind the candidate JAR to this checked source
         id: package
@@ -246,6 +274,7 @@ jobs:
             backend-app/**/build/test-results/**/TEST-*.xml
             backend-app/build/ci/runtime-metadata.txt
             backend-app/build/ci/gradle-version.txt
+            backend-app/build/ci/architecture-selftests.txt
             backend-app/build/ci/boot-jar.sha256
           if-no-files-found: warn
           include-hidden-files: false

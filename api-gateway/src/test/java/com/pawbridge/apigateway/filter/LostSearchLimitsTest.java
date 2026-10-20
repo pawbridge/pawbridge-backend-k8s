@@ -98,10 +98,16 @@ class LostSearchLimitsTest {
 
     @Test
     void givenStalledDownstream__whenDeadlinePasses__then504AndPermitReleased() {
-        var filter = filter(100, 1, 30, 1);
+        var factory = new LostSearchLimitsGatewayFilterFactory(100, 1, 30, 1);
+        var filter = factory.apply(new LostSearchLimitsGatewayFilterFactory.Config());
         var exchange = exchange("ok");
         filter.filter(exchange, ignored -> Mono.never()).block(Duration.ofSeconds(3));
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
+        var permits = (java.util.concurrent.Semaphore) org.springframework.test.util.ReflectionTestUtils
+                .getField(factory, "active");
+        // doFinally runs after downstream completion; block() does not await its side effect.
+        org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(2))
+                .untilAsserted(() -> assertThat(permits.availablePermits()).isEqualTo(1));
         var next = exchange("ok"); filter.filter(next, ok).block();
         assertThat(next.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
     }

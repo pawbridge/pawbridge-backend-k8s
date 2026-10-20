@@ -141,8 +141,8 @@ class AdminPostReadsProfileTest(unittest.TestCase):
 
     def test_given_frozen_cohort_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.POST_READS_BASE)
-        self.assertEqual(377, len(profile.POST_READS_APP_HASHES))
-        self.assertEqual('63952316583b084486f5dc437ecf0a6434873ee3c8c253d62a0ced3de4e5054e', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual(378, len(profile.POST_READS_APP_HASHES))
+        self.assertEqual('008cb97efb6eaf2425a489679a9fa81c37ea19f1086f575150781b4c44ca0b02', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.POST_READS_APP_HASHES) | {'backend-app/README.md'}, profile.POST_READS_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.POST_READS_APP_HASHES)
         self.assertEqual(profile.POST_READS_WORKFLOW_SHA256, hashlib.sha256(
@@ -154,6 +154,80 @@ class AdminPostReadsProfileTest(unittest.TestCase):
         git.assert_any_call('show', 'HEAD:.github/workflows/backend-app-check.yml')
         for path in hashes:
             git.assert_any_call('show', 'HEAD:' + path)
+
+    def test_given_identical_reviewed_guard_inputs__when_only_the_fixed_cohort_is_selected__then_reference_only_selftests(self):
+        self.assertEqual(39460539409, profile.ARCHITECTURE_SELFTEST_REFERENCE_RUN)
+        self.assertEqual('ed6ee7b8f9637e3b79249e8740619440c7b984ab', profile.ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
+        self.assertEqual(16, len(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES))
+        blobs = {path: ('fixed guard input ' + str(i)).encode()
+                 for i, path in enumerate(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES)}
+        hashes = {path: hashlib.sha256(raw).hexdigest() for path, raw in blobs.items()}
+        git = Mock(side_effect=lambda *args: blobs[args[1].removeprefix('HEAD:')])
+        with patch.object(profile, 'ARCHITECTURE_SELFTEST_INPUT_HASHES', hashes), \
+                patch.object(profile, 'verify_post_reads_inputs', return_value=True) as cohort:
+            self.assertIs(True, profile.verify_architecture_selftest_inputs([profile.POST_READS], git))
+            cohort.assert_called_once_with(git_reader=git)
+        self.assertEqual(16, git.call_count)
+        for selected in ([profile.FULL], [profile.PILOT], [profile.NOTE_EXPIRY], [profile.MEMBER_MANAGEMENT],
+                         [profile.SIGNUP_STATISTICS], [profile.ADMIN_MEMBER_UPDATE], [profile.VISIT_COLLECTION],
+                         [profile.AUTH_SESSIONS], [profile.POST_STATISTICS], [profile.POST_READS, profile.FULL],
+                         [], None, profile.POST_READS, ('user-community-integration',), [True], ['unknown']):
+            git = Mock(side_effect=AssertionError('Other profiles must not read guard inputs'))
+            with self.subTest(selected=selected):
+                self.assertIs(False, profile.verify_architecture_selftest_inputs(selected, git))
+            git.assert_not_called()
+
+    def test_given_changed_missing_unknown_or_unverified_guard_inputs__when_deciding__then_execute_current_selftests(self):
+        paths = tuple(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES)
+        blobs = {path: ('fixed guard input ' + str(i)).encode() for i, path in enumerate(paths)}
+        hashes = {path: hashlib.sha256(raw).hexdigest() for path, raw in blobs.items()}
+        defects = [('changed', path) for path in paths] + [(kind, paths[0])
+                   for kind in ('missing', 'timeout', 'wrong-type', 'partial-map', 'extra-map', 'cohort-unverified')]
+        for defect, target in defects:
+            actual = dict(blobs); declared = dict(hashes)
+            if defect == 'changed': actual[target] += b'changed'
+            elif defect == 'wrong-type': actual[target] = 'not Git bytes'
+            elif defect == 'partial-map': declared.pop(target)
+            elif defect == 'extra-map': declared['backend-app/unknown.gradle'] = 'a' * 64
+            def read(*args):
+                if defect == 'missing': raise subprocess.CalledProcessError(1, ['synthetic-git'])
+                if defect == 'timeout': raise subprocess.TimeoutExpired('synthetic-git', 8)
+                return actual[args[1].removeprefix('HEAD:')]
+            git = Mock(side_effect=read)
+            with self.subTest(defect=defect, path=target), \
+                    patch.object(profile, 'ARCHITECTURE_SELFTEST_INPUT_HASHES', declared), \
+                    patch.object(profile, 'verify_post_reads_inputs', return_value=defect != 'cohort-unverified'):
+                self.assertIs(False, profile.verify_architecture_selftest_inputs([profile.POST_READS], git))
+            if defect in ('partial-map', 'extra-map', 'cohort-unverified'): git.assert_not_called()
+
+    def test_given_package_selftest_reference__when_reading_the_workflow__then_exclude_only_the_guard_task_and_preserve_checks(self):
+        workflow = (Path(__file__).resolve().parents[1] / 'workflows/backend-app-check.yml').read_text()
+        package = workflow.split('\n  package:\n', 1)[1].split('\n  check:\n', 1)[0]
+        self.assertIn('SELECTED_CONTRACT_PROFILES: ${{ needs.selection.outputs.profiles }}', package)
+        self.assertIn('.github/scripts/backend_contract_profile.py', package)
+        self.assertIn('reuse = verify_architecture_selftest_inputs(profiles)', package)
+        self.assertEqual(1, package.count('architecture_args=(-x :boot:architectureTest)'))
+        self.assertEqual(1, package.count('-x '))
+        self.assertIn('architecture_args=()', package)
+        self.assertIn('projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false "${architecture_args[@]}"', package)
+        self.assertIn('reference-previous-selftests', package)
+        self.assertIn('execute-current-selftests', package)
+        self.assertIn('backend-app/build/ci/architecture-selftests.txt', package)
+        self.assertNotIn('cache-enabled', package)
+
+    def test_given_the_single_gateway_race_fix__when_selecting__then_pin_it_and_refuse_siblings_or_changed_bytes(self):
+        path = 'api-gateway/src/test/java/com/pawbridge/apigateway/filter/LostSearchLimitsTest.java'
+        self.assertEqual(profile.POST_READS_APP_HASHES[path], hashlib.sha256(
+            (Path(__file__).resolve().parents[2] / path).read_bytes()).hexdigest())
+        self.assertEqual([profile.POST_READS], profile.select_profiles(context(), [path]))
+        for unknown in (path + '.extra', path.replace('LostSearchLimitsTest', 'AnotherTest'),
+                        'api-gateway/src/main/java/com/pawbridge/apigateway/filter/LostSearchLimitsGatewayFilterFactory.java'):
+            self.assertEqual([profile.FULL], profile.select_profiles(context(), [unknown]))
+        git, hashes = self.synthetic_git()
+        read = git.side_effect
+        git.side_effect = lambda *args: read(*args) + b'changed' if args == ('show', 'HEAD:' + path) else read(*args)
+        with patch.object(profile, 'POST_READS_APP_HASHES', hashes), patch.object(profile, 'POST_READS_BASE', SYNTHETIC_BASE):
+            self.assertIs(False, profile.verify_post_reads_inputs(git_reader=git))
 
     def test_given_an_unconfirmed_or_invalid_future_base__when_verifying__then_refuse_before_any_git_read(self):
         for base in ('0'*40,'not-a-commit'):
