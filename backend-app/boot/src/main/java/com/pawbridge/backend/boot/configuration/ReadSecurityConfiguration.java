@@ -75,7 +75,8 @@ public class ReadSecurityConfiguration {
         var storeWishlistEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->storeWishlistEnabledFlag;
         var storeWishlistWriting=new AndRequestMatcher(storeWishlistEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/wishlists","POST"),
-                new AntPathRequestMatcher("/api/v1/wishlists","DELETE")));
+                new AntPathRequestMatcher("/api/v1/wishlists","DELETE"),
+                new AntPathRequestMatcher("/api/v1/wishlists/{wishlistId}","DELETE")));
         var storeCatalogEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->storeCatalogEnabledFlag;
         var storeCatalog=new AndRequestMatcher(storeCatalogEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/products","GET"),

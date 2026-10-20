@@ -115,27 +115,41 @@ class JdbcWishlistCommandsTest {
         assertEquals(List.of("find"),events);
     }
 
-    @Test void given__owned_identity__when__removing_by_id__then__constrain_both_read_and_delete_to_member() {
-        commands.removeById(7,33);assertEquals(List.of("find","delete"),events);
-        assertTrue(sql.getFirst().contains("id=:id AND user_id=:member"));
-        assertEquals("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",sql.get(1));
-        assertEquals(Map.of("member",7L,"id",33L),params.get(1));
+    @Test void given__owned_identity__when__removing_by_id__then__one_atomic_owner_scoped_delete_without_lookup() {
+        commands.removeById(7,33);
+        assertEquals(List.of("delete"),events);
+        assertEquals("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",sql.getFirst());
+        assertEquals(Map.of("member",7L,"id",33L),params.getFirst());
+        verify(write,times(1)).executeWithoutResult(any());
+        verify(jdbc).update(sql.getFirst(),params.getFirst());verifyNoMoreInteractions(jdbc);verifyNoInteractions(clock);assertFalse(active);
     }
 
-    @Test void given__wrong_owner_or_missing_id__when__removing_by_id__then__indistinguishable_missing_and_no_delete() {
-        matches=List.of();assertEquals("찜을 찾을 수 없습니다: 33",assertThrows(IllegalArgumentException.class,()->commands.removeById(8,33)).getMessage());
-        assertEquals(List.of("find"),events);assertEquals(Map.of("member",8L,"id",33L),params.getFirst());
-        assertTrue(sql.getFirst().contains("id=:id AND user_id=:member"));
+    @Test void given__wrong_owner_or_missing_identity__when__removing_by_id__then__zero_rows_is_the_same_noop_without_lookup() {
+        deleted=0;
+        assertDoesNotThrow(()->commands.removeById(8,33));
+        assertEquals(List.of("delete"),events);assertEquals(Map.of("member",8L,"id",33L),params.getFirst());
+        assertEquals("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",sql.getFirst());
+        verify(jdbc).update(sql.getFirst(),params.getFirst());verifyNoMoreInteractions(jdbc);verifyNoInteractions(clock);assertFalse(active);
+    }
+
+    @Test void given__identity_already_removed__when__retrying_or_losing_a_delete_race__then__zero_rows_stays_a_noop() {
+        commands.removeById(7,33);deleted=0;
+        assertDoesNotThrow(()->commands.removeById(7,33));
+        assertEquals(List.of("delete","delete"),events);
+        assertEquals(List.of(Map.of("member",7L,"id",33L),Map.of("member",7L,"id",33L)),params);
+        verify(write,times(2)).executeWithoutResult(any());verify(jdbc,times(2)).update(sql.getFirst(),params.getFirst());
+        verifyNoMoreInteractions(jdbc);verifyNoInteractions(clock);assertFalse(active);
     }
 
     @Test void given__concurrent_disappearance__when__deleting_selected_pair__then__fail_instead_of_claiming_delete_success() {
         deleted=0;assertThrows(IllegalStateException.class,()->commands.removeByMemberAndSku(7,80));assertFalse(active);
     }
 
-    @Test void given__database_failure__when__finding_delete_target__then__propagate_failure_without_delete() {
-        var failure=new DataAccessResourceFailureException("synthetic SQL");doThrow(failure).when(jdbc).query(anyString(),anyMap(),any(RowMapper.class));
+    @Test void given__database_failure__when__deleting_identity__then__propagate_without_lookup_or_retry() {
+        var failure=new DataAccessResourceFailureException("synthetic SQL");doThrow(failure).when(jdbc).update(anyString(),anyMap());
         assertSame(failure,assertThrows(DataAccessResourceFailureException.class,()->commands.removeById(7,33)));
-        verify(jdbc,never()).update(anyString(),anyMap());assertFalse(active);
+        verify(jdbc).update("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",Map.of("member",7L,"id",33L));
+        verifyNoMoreInteractions(jdbc);assertFalse(active);
     }
 
     private void capture(String event,String query,Map<String,?> values) { assertTrue(active);events.add(event);sql.add(query);params.add(new HashMap<>(values)); }

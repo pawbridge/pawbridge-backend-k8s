@@ -73,9 +73,43 @@ class WishlistCommandControllerTest {
                 .andExpect(status().isUnauthorized());verifyNoInteractions(commands);
     }
 
-    @Test void given__bare_wishlist_id_delete__when__requesting__then__no_candidate_handler_or_application_call() throws Exception {
-        current(7L);mvc.perform(delete("/api/v1/wishlists/33")).andExpect(status().isNotFound());verifyNoInteractions(commands);
+    @ParameterizedTest @ValueSource(longs={33L,9007199254740993L})
+    void given__authenticated_member_and_forged_user_sources__when__removing_identity__then__use_only_principal_and_return_no_content(long wishlistId) throws Exception {
+        current(7L);
+        mvc.perform(delete("/api/v1/wishlists/{wishlistId}",wishlistId).param("userId","99").header("X-User-Id","99")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"userId\":99}"))
+                .andExpect(status().isNoContent()).andExpect(content().string(""));
+        verify(commands).removeById(7,wishlistId);verifyNoMoreInteractions(commands);
     }
+
+    @ParameterizedTest @ValueSource(strings={"missing","text"})
+    void given__missing_or_non_long_principal__when__removing_identity_with_forged_user__then__unauthorized_without_command(String principal) throws Exception {
+        if(principal.equals("text")) current("99");
+        mvc.perform(delete("/api/v1/wishlists/33").param("userId","99").header("X-User-Id","99"))
+                .andExpect(status().isUnauthorized()).andExpect(content().string(""));
+        verifyNoInteractions(commands);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"bad","9223372036854775808","33.0"})
+    void given__unparseable_identity__when__removing_identity__then__bad_type_without_command(String wishlistId) throws Exception {
+        current(7L);
+        mvc.perform(delete("/api/v1/wishlists/{wishlistId}",wishlistId)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("C005")).andExpect(jsonPath("$.errors[0].field").value("wishlistId"))
+                .andExpect(jsonPath("$.errors[0].value").value(wishlistId)).andExpect(jsonPath("$.errors[0].reason").value("typeMismatch"));
+        verifyNoInteractions(commands);
+    }
+
+    @ParameterizedTest @MethodSource("identityFailures")
+    void given__database_or_transaction_failure__when__removing_identity__then__return_server_error_without_private_details(RuntimeException failure) throws Exception {
+        current(7L);doThrow(failure).when(commands).removeById(7,33);
+        String body=mvc.perform(delete("/api/v1/wishlists/33")).andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("C004")).andExpect(jsonPath("$.message").value("Server Error"))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(body.contains("private delete"));verify(commands).removeById(7,33);verifyNoMoreInteractions(commands);
+    }
+    static Stream<Arguments> identityFailures() { return Stream.of(
+            Arguments.of(new org.springframework.dao.DataAccessResourceFailureException("private delete SQL")),
+            Arguments.of(new org.springframework.transaction.CannotCreateTransactionException("private delete transaction"))); }
 
     @ParameterizedTest @MethodSource("addFailures")
     void given__source_command_failure__when__adding__then__preserve_status_code_and_hide_private_details(RuntimeException failure,int statusCode,String code) throws Exception {

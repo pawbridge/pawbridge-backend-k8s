@@ -742,3 +742,9 @@ Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named 
 source 신규28사례는 User12와 Boot16의 분할 성공 근거이며 한 번의 전체 실행으로 표현하지 않습니다. source에서 발생한 Mockito 준비 오류·이전 XML/로그는 보존했습니다. 최종 결합은 생산 컴파일·실제 business package 검사와 고정252입력 시험1만 수행하며 기존28 성공시험은 반복하지 않습니다.
 
 재사용 writeJdbc의 SQL5초 제한은 원문에 없던 상속 차이입니다. 실제 장시간 DELETE, JPA rollback-only와 PostgreSQL failed-TX/commit·rollback 차이, 최소 DELETE 권한/ACL, 시간 바인딩, 실제03:00/03:30 예약·종료와 단일 실행기 소유권은 미검증입니다. 활성화·구 실행기 종료 전 이를 확인해야 합니다. 실제 DB·데이터 삭제·예약·운영 변경은 하지 않았습니다.
+
+### 본인 찜상품 항목 관리
+
+`pawbridge.store-wishlist.enabled=true`에서만 JWT 회원의 `DELETE /api/v1/wishlists/{wishlistId}`를 허용합니다. body·query·헤더의 회원 ID 대신 검증된 principal을 사용하며, 항목 ID와 회원 ID를 같은 DELETE 조건에 묶습니다. 없음·다른 회원 소유·반복 삭제는 동일한 204이고 DB/TX 오류는 성공으로 숨기지 않습니다. 기존 POST와 SKU 기반 DELETE는 유지합니다.
+
+회원 찜 조회 정렬의 `skuPrice`·`sku_price`는 기존 `sku.price`와 같은 컬럼을 사용합니다. Store의 전체 재귀·컬렉션 JPA 정렬 호환성은 아직 미완료입니다. 이 변경과 합성 시험·CI는 운영 배포 또는 전체 회원 조회 전환 완료를 뜻하지 않습니다.
