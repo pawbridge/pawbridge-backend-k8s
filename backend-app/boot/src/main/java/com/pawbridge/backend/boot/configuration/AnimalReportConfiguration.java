@@ -10,6 +10,7 @@ import com.pawbridge.backend.community.internal.post.application.PostMediaRemove
 import com.pawbridge.backend.user.api.UserNicknameQuery;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,6 +18,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import software.amazon.awssdk.services.s3.S3Client;
 
 @Configuration(proxyBeanMethods=false)
+@ConditionalOnProperty(prefix="pawbridge.animal-reports",name="enabled",havingValue="true",matchIfMissing=false)
 public class AnimalReportConfiguration {
     @Bean AnimalReports animalReports(@Qualifier("readJdbc") JdbcTemplate reader,
             @Qualifier("writeJdbc") JdbcTemplate writer,@Qualifier("readOnlyTransaction") TransactionTemplate read,

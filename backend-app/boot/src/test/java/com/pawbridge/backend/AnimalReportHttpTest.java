@@ -30,7 +30,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
 
-@WebMvcTest(controllers=AnimalReportController.class,
+@WebMvcTest(controllers=AnimalReportController.class,properties="pawbridge.animal-reports.enabled=true",
         excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
 @ContextConfiguration(classes={AnimalReportController.class,AnimalReportExceptionHandler.class,
         ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
@@ -104,5 +104,23 @@ class AnimalReportHttpTest {
         try{mvc.perform(get(ROOT+"/42")).andExpect(status().isInternalServerError()).andExpect(jsonPath("$.message").value("서버 에러!"));
             assertThat(appender.list).hasSize(1);assertThat(appender.list.getFirst().getFormattedMessage()).contains("IllegalStateException").doesNotContain(secret);assertThat(appender.list.getFirst().getThrowableProxy()).isNull();}
         finally{log.detachAppender(appender);appender.stop();}
+    }
+}
+
+@WebMvcTest(controllers=AnimalReportController.class,properties="pawbridge.animal-reports.enabled=false",
+        excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
+@ContextConfiguration(classes={AnimalReportController.class,AnimalReportExceptionHandler.class,
+        ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
+class AnimalReportDisabledHttpTest {
+    @Autowired MockMvc mvc;
+    @MockitoBean AnimalReports reports;
+
+    @ParameterizedTest @CsvSource({"GET,/api/v1/reports","GET,/api/v1/reports/42","POST,/api/v1/reports",
+            "PUT,/api/v1/reports/42","DELETE,/api/v1/reports/42"})
+    void given__reports_disabled__when__requesting_public_or_authenticated_routes__then__deny_before_any_report_query(String method,String path)throws Exception{
+        var request=request(HttpMethod.valueOf(method),path);
+        if(!method.equals("GET"))request.header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_USER"));
+        mvc.perform(request).andExpect(status().isForbidden()).andExpect(header().doesNotExist("Set-Cookie"));
+        verifyNoInteractions(reports);
     }
 }
