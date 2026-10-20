@@ -604,6 +604,28 @@ Kafka 보상 소비/manualACK·재시도·processed 저장·정리 예약의 소
 
 선택 CI는 고정108 입력과 공통 빌드·단위/HTTP/구조, 기존 관리자 페이지 PG11·소유 정리를 요구한다.39계약·28JAR의 미실행과 새로운 User SQL/외부 연동의 미실증은 명시적으로 남기며 full 또는 운영 인계 성공으로 확대하지 않는다.
 
+## 실종·목격 제보
+
+공개 GET `/api/v1/reports`와 `/{reportId}`, JWT 본인 POST/PUT/DELETE를 조립한다. 기존 목록 필터·Page wire·상세22필드·소유권·soft-delete·사진/종류 변경 제한과 닉네임 fallback을 유지한다. reader/writer·TM·R2·User nickname 조회를 재사용한다. 원문 JPA의 int 범위를 넘는 offset은 읽기 TX 안·SQL 전에 같은 예외로 거부하며 공개 조회를 큰 OFFSET SQL로 넘기지 않는다.
+
+사진은 reports/images 경로를 사용하고 부분 업로드 실패는 앞서 올린 객체를 정리한다. INSERT 본문/saveAndFlush 상당 실패는 업로드를 정리하지만 proxy commit 실패는 원문처럼 별도 보상하지 않는다. soft-delete에서 사진을 지우거나 새 Outbox를 만들지 않는다. JPA preflush 응답의 이전 updatedAt을 보존한다. 이런 원문 동작을 새로운 보상 정책으로 대체하지 않았다.
+
+비작성 서브가 생산8/시험4·변경23메서드를 대조했다. 고유49사례는 분할 선택 성공 합집합이고 초과 offset 신규1은 RED→GREEN으로 SQL0을 확인했다. User와 함께 명시 조립을 합친 뒤 새 조립1·466class 계층 검사도 수행했다. 실제 PG 권한/SQL·JPA 감사시각/경합·R2/활성 JAR은 아직 미실행이며 코드 편입만으로 운영 인계를 완료했다고 표시하지 않는다. 고정130 선택 CI의 관리자 페이지 PG11은 제보 연동 시험이 아니다.
+
+
+## 홈 영상 관리·갱신
+
+ADMIN 목록/미리보기/등록/수정/게시/전체순서/재검사7경로는 원문의 board revision 행 잠금, 등록100/게시3 제한, 중복ID와 전체순서 집합 검증을 유지한다. 기존 공개 HomeVideo11필드를 재사용하고 공개 GET은 변경하지 않는다. 외부 metadata 조회는 원문처럼 TX 밖이며 갱신은 만료 정리 커밋→최대50개 조회→각 board 잠금 반영 순서다.
+
+`pawbridge.home-videos.management-enabled`는 기본 false다. 관리 true와 기존 canonical `pawbridge.jobs.refresh-enabled` 명시 true가 모두 있을 때만60초 뒤/1시간 주기 갱신을 조립한다. 기존 flag=false는 항상 거부하며 미지정도 후보에서는 off다. 원문 고정990은 canonical true/matchIfMissing=true였으므로 후보 기본 off는 알려진 활성화 차이다. 변경된 working 원문을 무조건 실행으로 본 초기 설명은 정정했고 원본 파일은 수정하지 않았다.
+
+비작성 서브가16파일·30시험메서드와 원문 관리15본문/저장소11/YouTube client4본문·URL 변환을 대조했다. 고유69사례는 분할 성공 합집합이다. User/Report와 합친 새 조립1·466class 검사는4초에 통과했다. 실제 PG 잠금/rollback·YouTube·예약 true의 실행/활성 종료·JAR은 미실행이며 운영 스케줄러 소유권이 인계된 상태가 아니다. 고정 코호트의 공통 시험과 관리자 페이지 PG11을 이 통합 검증으로 확대하지 않는다.
+
+
+## Community HTTP 편입 묶음
+
+제보와 홈 영상 관리25경로를 이미 편입한 User HTTP 위에 묶는다. 독립 검수한22개 업무/시험 파일을 바이트 그대로 재사용하고 App·Security·조립시험3경로만 병합했다. User의 Google/보호소/활동 조립·인가와 기존 공개 홈 조회를 보존한다. 기존 고정108에 Community25−공통3을 더한130 입력으로 공통 단위/구조·기존 페이지 PG11·소유 정리를 실행한다. 선택 PG11은 제보/YouTube/예약 또는 실제 writer 권한 검증을 대신하지 않는다. 새 운영 권한·설정·데이터·스케줄러는 변경하지 않는다.
+
 
 ### Google 실패·경합 보완과 남은 실제 연동 검증
 

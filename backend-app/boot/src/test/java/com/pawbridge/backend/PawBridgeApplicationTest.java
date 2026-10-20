@@ -60,6 +60,14 @@ class PawBridgeApplicationTest {
                 .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
+                    var reports=context.getBean(com.pawbridge.backend.community.internal.report.application.AnimalReports.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(reports,"reader")).isSameAs(context.getBean("readJdbc"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(reports,"writer")).isSameAs(context.getBean("writeJdbc"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(reports,"readTransaction")).isSameAs(context.getBean("readOnlyTransaction"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(reports,"writeTransaction")).isSameAs(context.getBean("writeTransaction"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(reports,"clock")).isSameAs(context.getBean("readClock"));
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.web.AnimalReportController.class)).hasSize(1);
+
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.web.AdminUserDetailController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.directory.web.AdminUserDirectoryController.class)).hasSize(1);
                     var directory=context.getBean(com.pawbridge.backend.user.internal.directory.application.UserDirectoryQuery.class);
@@ -101,6 +109,9 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostStatisticsExceptionHandler.class)).hasSize(1);
                     assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.application.HomeVideoManagement.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.infrastructure.YouTubeVideoClient.class)).isEmpty();
+                    assertThat(context.getBeansOfType(java.net.http.HttpClient.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.VisitCollection.class)).isEmpty();
