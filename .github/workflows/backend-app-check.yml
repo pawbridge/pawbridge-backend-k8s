@@ -90,7 +90,7 @@ jobs:
 
 
   proof:
-    name: Resolve postmerge full evidence
+    name: Resolve postmerge validation evidence
     needs: selection
     if: ${{ needs.selection.outputs.selected == 'true' }}
     runs-on: ubuntu-24.04
@@ -111,7 +111,7 @@ jobs:
       - name: Test the bounded postmerge decision without network or application resources
         run: python3 -B -m unittest discover -s .github/scripts -p 'test_backend_postmerge_proof.py'
 
-      - name: Decide full validation or reference one reviewed PR full
+      - name: Decide validation or reference one reviewed PR result
         id: proof
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1919,6 +1919,6 @@ jobs:
           set -euo pipefail
           test "$SELECTION_RESULT" = success
           case "$MODULE_SELECTED:$PROOF_RESULT:$PROOF_MODE:$PACKAGE_RESULT:$MODULE_RESULT" in
-            true:success:execute:success:success|true:success:reused-full:skipped:skipped|false:skipped::skipped:skipped) ;;
+            true:success:execute:success:success|true:success:reused-full:skipped:skipped|true:success:reused-scoped:skipped:skipped|false:skipped::skipped:skipped) ;;
             *) printf 'Backend app checks failed or were unexpectedly skipped\n' >&2; exit 1 ;;
           esac

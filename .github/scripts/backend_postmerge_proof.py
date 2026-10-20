@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Reuse one completed PR full only for its identical-tree, two-parent dev merge."""
+"""Reference one executed PR profile for its identical-tree, two-parent dev merge."""
 
 import argparse
+import ast
 import base64
 import binascii
 import datetime as dt
@@ -303,12 +304,40 @@ def zip_members(raw, wanted):
         raise Unavailable('invalid-artifact') from None
 
 
-def workflow_contract(raw):
+def cohort_condition(condition):
+    """Only the already allowlisted workflow expressions may select cohort steps."""
+    require(condition in ALLOWED_STEP_CONDITIONS, 'unknown-workflow-condition')
+    if 'steps.fixture_auth_sessions.outcome' in condition:
+        # This exact known restore expression is full/auth-only, never the cohort.
+        require("matrix.profile == 'full' || matrix.profile == 'auth-sessions'" in condition,
+                'unknown-workflow-condition')
+        return False
+    expression = condition.removeprefix('${{').removesuffix('}}').strip()
+    expression = expression.replace('always()', 'True').replace('success()', 'True')
+    expression = re.sub(r"matrix[.]profile (==|!=) '([^']+)'",
+        lambda match: str((profile.POST_READS == match.group(2)) == (match.group(1) == '==')), expression)
+    expression = expression.replace('&&', ' and ').replace('||', ' or ')
+    try:
+        tree = ast.parse(expression, mode='eval')
+    except (SyntaxError, ValueError):
+        raise Unavailable('unknown-workflow-condition') from None
+    def value(node):
+        if isinstance(node, ast.Expression): return value(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) is bool: return node.value
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
+            values = [value(child) for child in node.values]
+            return all(values) if isinstance(node.op, ast.And) else any(values)
+        raise Unavailable('unknown-workflow-condition')
+    return value(tree)
+
+
+def workflow_contract(raw, selected_profile=profile.FULL):
     require(isinstance(raw, bytes) and len(raw) <= MAX_JSON, 'unknown-workflow')
     try:
         text = raw.decode('utf-8')
     except UnicodeError:
         raise Unavailable('unknown-workflow') from None
+    require(selected_profile in (profile.FULL, profile.POST_READS), 'unsupported-source-profile')
     result = {}
     for key in ('package', 'check', 'ci-result', 'proof'):
         match = re.search(r'^  ' + key + r':\n(.*?)(?=^  [A-Za-z][A-Za-z0-9_-]*:|\Z)',
@@ -321,7 +350,12 @@ def workflow_contract(raw):
         if key == 'check':
             expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?(?:matrix.profile == 'signup-statistics' && '[^']+' \|\| )?(?:matrix.profile == 'admin-member-update' && '[^']+' \|\| )?(?:matrix.profile == 'visit-collection' && '[^']+' \|\| )?(?:matrix.profile == 'auth-sessions' && '[^']+' \|\| )?(?:matrix.profile == 'admin-post-statistics' && '[^']+' \|\| )?(?:matrix.profile == 'user-community-integration' && '[^']+' \|\| )?'[^']+' \}\}", name)
             require(expression is not None, 'unknown-workflow')
-            name = expression.group(1)
+            if selected_profile == profile.POST_READS:
+                scoped = re.search(r"matrix.profile == 'user-community-integration' && '([^']+)'", name)
+                require(scoped is not None, 'unknown-workflow')
+                name = scoped.group(1)
+            else:
+                name = expression.group(1)
         require('${{' not in name, 'unknown-workflow')
         steps = []
         for part in re.split(r'(?=^      - )', body, flags=re.MULTILINE)[1:]:
@@ -330,8 +364,11 @@ def workflow_contract(raw):
             condition = re.findall(r'^        if: (.+)$', part, re.MULTILINE)
             require(len(condition) <= 1 and all(c in ALLOWED_STEP_CONDITIONS for c in condition),
                     'unknown-workflow-condition')
-            # This verifier still accepts only an actually executed full profile.
-            # A scoped-only preparation is not part of that full execution.
+            if selected_profile == profile.POST_READS:
+                if not condition or cohort_condition(condition[0]):
+                    steps.append(step.group(1))
+                continue
+            # Preserve the existing full recipe and its full-only coverage.
             if condition not in (["${{ matrix.profile == 'note-expiry' }}"],
                                   ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"],
                                   ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}"],
@@ -468,6 +505,13 @@ def verify(identity, payload, workflow, git, api, now):
             'source-run-changed')
     jobs = pages(api, prefix + '/actions/runs/' + str(run_id) + '/attempts/' + str(attempt) + '/jobs', 'jobs')
     contract = workflow_contract(workflow)
+    scoped_name = re.search(rb"matrix.profile == 'user-community-integration' && '([^']+)'", workflow)
+    scoped_name = scoped_name.group(1).decode('utf-8') if scoped_name else None
+    candidates = [job for job in jobs if job.get('name') in (contract['check'][0], scoped_name)]
+    require(len(candidates) == 1, 'missing-or-duplicate-job')
+    selected_profile = profile.POST_READS if scoped_name and candidates[0].get('name') == scoped_name else profile.FULL
+    if selected_profile == profile.POST_READS:
+        contract = workflow_contract(workflow, selected_profile)
     source_jobs = {}
     for key, (name, step_names) in contract.items():
         job, completed = one_job(jobs, name, now)
@@ -490,9 +534,10 @@ def verify(identity, payload, workflow, git, api, now):
             timestamp(run.get('created_at')) <= finished <= timestamp(run.get('updated_at')) <= now,
             'source-proof-expired-or-unordered')
     artifacts = pages(api, prefix + '/actions/runs/' + str(run_id) + '/artifacts', 'artifacts')
+    validation_key = 'full' if selected_profile == profile.FULL else 'scoped'
     wanted = {
         'package': ('backend-app-package-' + str(run_id) + '-' + str(attempt), PACKAGE_MEMBERS),
-        'full': ('backend-app-check-' + str(run_id) + '-' + str(attempt) + '-full', FULL_MEMBERS),
+        validation_key: ('backend-app-check-' + str(run_id) + '-' + str(attempt) + '-' + selected_profile, FULL_MEMBERS),
         'proof': ('backend-app-postmerge-proof-' + str(run_id) + '-' + str(attempt), ('postmerge-proof.txt',)),
     }
     contents, artifact_ids = {}, {}
@@ -525,6 +570,9 @@ def verify(identity, payload, workflow, git, api, now):
                 ('full', 'pull-request-full'), ('execute', 'pull-request-validation')) and
             'source_proof' not in saved,
             'source-proof-was-not-executed-full')
+    if selected_profile == profile.POST_READS:
+        require((saved.get('mode'), saved.get('reason')) == ('execute', 'pull-request-validation'),
+                'source-scoped-proof-was-not-executed')
     source = saved.get('identity')
     require(isinstance(source, dict) and source.get('repository') == profile.REPOSITORY and
             source.get('event_name') == 'pull_request' and source.get('before_sha') == before and
@@ -541,6 +589,10 @@ def verify(identity, payload, workflow, git, api, now):
             all(isinstance(parent, dict) for parent in commit['parents']) and
             [parent.get('sha') for parent in commit['parents']] == [before, head],
             'synthetic-merge-differs')
+    feature = api.json(prefix + '/git/commits/' + head)
+    require(isinstance(feature, dict) and feature.get('sha') == head and
+            isinstance(feature.get('tree'), dict) and feature['tree'].get('sha') == identity['tree_sha'],
+            'feature-head-tree-differs')
     file = api.json(prefix + '/contents/' + WORKFLOW + '?ref=' + workflow_sha)
     require(isinstance(file, dict) and file.get('type') == 'file' and file.get('encoding') == 'base64' and
             type(file.get('size')) is int and 0 < file['size'] <= MAX_JSON and
@@ -550,7 +602,7 @@ def verify(identity, payload, workflow, git, api, now):
     except (ValueError, binascii.Error):
         raise Unavailable('source-workflow-unavailable') from None
     require(len(raw) == file['size'] and raw == workflow, 'source-workflow-differs')
-    package, full = contents['package'], contents['full']
+    package, full = contents['package'], contents[validation_key]
     metadata(package['build/ci/runtime-metadata.txt'], source)
     metadata(full['build/ci/runtime-metadata.txt'], source)
     jar = jar_digest(package['build/ci/boot-jar.sha256'])
@@ -563,14 +615,18 @@ def verify(identity, payload, workflow, git, api, now):
         expected_context = dict(event_name='pull_request', repository=profile.REPOSITORY,
             head_repository=profile.REPOSITORY, head_ref=head_ref, base_sha=before, head_sha=head,
             source_sha=source_sha, tree_sha=identity['tree_sha'], run_id=str(run_id), run_attempt=str(attempt))
-        expected_plan = profile.make_plan(expected_context, paths, profile.FULL, jar)
-        require(isinstance(execution, dict) and plan == expected_plan, 'source-full-plan-differs')
-        expected_execution = profile.audit_execution(plan, expected_context, paths, profile.FULL,
+        if selected_profile == profile.POST_READS:
+            require(profile.verify_post_reads_inputs(git_reader=git) is True, 'source-scope-inputs-differ')
+            expected_context['post_reads_scope_verified'] = True
+        expected_plan = profile.make_plan(expected_context, paths, selected_profile, jar)
+        require(isinstance(execution, dict) and plan == expected_plan,
+                'source-full-plan-differs' if selected_profile == profile.FULL else 'source-scoped-plan-differs')
+        expected_execution = profile.audit_execution(plan, expected_context, paths, selected_profile,
                                                      jar, execution.get('step_results'))
         require(profile._encoded(execution) == profile._encoded(expected_execution),
-                'source-full-execution-differs')
+                'source-full-execution-differs' if selected_profile == profile.FULL else 'source-scoped-execution-differs')
     except (UnicodeError, profile.ProfileBlocked):
-        raise Unavailable('source-full-execution-differs') from None
+        raise Unavailable('source-full-execution-differs' if selected_profile == profile.FULL else 'source-scoped-execution-differs') from None
     latest = api.json(prefix + '/actions/runs/' + str(run_id))
     require(isinstance(latest, dict) and all(latest.get(k) == run.get(k) for k in
             ('id', 'run_attempt', 'event', 'head_sha', 'path', 'status', 'conclusion', 'workflow_id')),
@@ -578,7 +634,7 @@ def verify(identity, payload, workflow, git, api, now):
     return dict(pr_number=pr_number, run_id=str(run_id), run_attempt=str(attempt), source_sha=source_sha,
                 base_sha=before, head_sha=head, tree_sha=identity['tree_sha'],
                 workflow_sha=workflow_sha, workflow_sha256=hashlib.sha256(workflow).hexdigest(),
-                jar_sha256=jar, artifact_ids=artifact_ids)
+                jar_sha256=jar, artifact_ids=artifact_ids, profile=selected_profile)
 
 
 def decide(env, *, git_reader=git_read, github_reader=None, now=None):
@@ -592,7 +648,10 @@ def decide(env, *, git_reader=git_read, github_reader=None, now=None):
         api = github_reader if github_reader is not None else GitHubReader(env.get('GH_TOKEN'))
         reference = verify(identity, payload, workflow, git_reader, api,
                            now if now is not None else dt.datetime.now(dt.timezone.utc))
-        result.update(mode='reused-full', reason='identical-tree-merged-pr-full', source_proof=reference)
+        scoped = reference['profile'] == profile.POST_READS
+        result.update(mode='reused-scoped' if scoped else 'reused-full',
+                      reason='identical-tree-merged-pr-scoped' if scoped else 'identical-tree-merged-pr-full',
+                      source_proof=reference)
     except Unavailable as failure:
         result['reason'] = str(failure)
     return result

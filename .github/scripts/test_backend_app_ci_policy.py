@@ -307,6 +307,17 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 with self.subTest(key=key, value=value):
                     self.assertNotEqual(0, self.gate(**dict(valid, **{key: value})).returncode)
 
+    def test_given_verified_scoped_reuse__when_gating__then_accept_only_verified_reuse_and_both_expected_skips(self):
+        valid = dict(selected='true', proof='success', mode='reused-scoped', package='skipped', check='skipped')
+        self.assertEqual(0, self.gate(**valid).returncode)
+        for key, values in {'proof': ('failure', 'cancelled', 'skipped', ''),
+                            'mode': ('', 'scoped', 'reuse'),
+                            'package': ('success', 'failure', 'cancelled', ''),
+                            'check': ('success', 'failure', 'cancelled', '')}.items():
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    self.assertNotEqual(0, self.gate(**dict(valid, **{key: value})).returncode)
+
     def test_given_scoped_expiry__when_wiring__then_keep_preparation_pg_and_cleanup_with_explicit_noncoverage(self):
         check = self.job('check')
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)[1:]
