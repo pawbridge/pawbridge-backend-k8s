@@ -104,6 +104,10 @@ def select_services(group, env):
         for path in paths:
             if path.startswith(service + "/"):
                 return True
+            if path in (
+                    ".github/scripts/backend_contract_profile.py",
+                    ".github/scripts/test_backend_admin_post_reads_profile.py"):
+                continue
             if path.startswith((".github/scripts/", ".github/workflows/")):
                 return True
             if service != "api-gateway" and path.startswith(".github/migrations/"):

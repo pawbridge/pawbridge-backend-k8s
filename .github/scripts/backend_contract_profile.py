@@ -456,6 +456,8 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
+    '.github/scripts/ci_branch_policy.py',
+    '.github/scripts/test_ci_branch_policy.py',
 }
 POST_READS_REQUIRED_CONTRACTS = ('fixture_f4_shape', 'compile_post_reads', 'pg_post_reads')
 POST_READS_FULL_CONTRACTS = ('compile_post_reads', 'pg_post_reads')
