@@ -56,6 +56,20 @@ class GoogleOAuthHandlersTest {
             assertFalse(events.list.isEmpty());for(var event:events.list){assertFalse(event.getFormattedMessage().contains(PRIVATE));assertNull(event.getThrowableProxy());}
         }finally{logger.detachAppender(events);events.stop();}
     }
+    @ParameterizedTest @ValueSource(strings={"?tenant=a","#oauth-error"})
+    void given__frontend_query_or_fragment__when__token_completion_fails__then__preserve_them_and_append_the_fixed_error_parameter(String suffix)throws Exception{
+        var login=mock(GoogleLogin.class);var user=new GoogleLogin.GoogleUser(7,"fixture@example.invalid","name","ROLE_USER",null,"GOOGLE");
+        when(login.complete(user)).thenThrow(new IllegalStateException(PRIVATE));var response=response();
+        new GoogleOAuth2SuccessHandler(login,FRONT+suffix).onAuthenticationSuccess(mock(HttpServletRequest.class),response,
+                new UsernamePasswordAuthenticationToken(new GoogleOAuthPrincipal(user,Map.of()),null));
+        var url=ArgumentCaptor.forClass(String.class);verify(response).sendRedirect(url.capture());
+        var target=java.net.URI.create(url.getValue());
+        String error=java.net.URLEncoder.encode("로그인 처리 중 오류가 발생했습니다",java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals("/login",target.getPath());
+        assertEquals(suffix.startsWith("?")?"tenant=a&error="+error:"error="+error,target.getRawQuery());
+        assertEquals(suffix.startsWith("#")?"oauth-error":null,target.getFragment());
+        assertFalse(url.getValue().contains(PRIVATE));verify(login).complete(user);
+    }
     @Test void given__known_static_local_account_conflict__when__oauth_fails__then__retain_only_that_allowed_reason()throws Exception{
         var response=response();String message="이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.";
         new GoogleOAuth2FailureHandler(FRONT).onAuthenticationFailure(mock(HttpServletRequest.class),response,

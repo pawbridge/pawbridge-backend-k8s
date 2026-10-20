@@ -435,7 +435,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/oauth/infrastructure/GoogleOAuthPrincipal.java': '85fce8ebf34026391b662720bfe67796a8989ef7e8ad11aa38e18df9e51a69b6',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/oauth/infrastructure/JdbcGoogleLogin.java': '14aff29726c93ba37b5419645acca67925aaa92fb5529c3367d25147759d0bec',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/oauth/web/GoogleOAuth2FailureHandler.java': '0e427a1ea64105f37c93238f03404eab84b196c50289ac09175ae4e97e5e2fd1',
- 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/oauth/web/GoogleOAuth2SuccessHandler.java': '803da48ed29cebc4c06705294d970ba0d7cc3de803330a48467cc660ba5b0ab0',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/oauth/web/GoogleOAuth2SuccessHandler.java': '7c89a5586d64760e3c776135eb36692df76b32e54033b75ecbdc69cd3216db1c',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/profile/web/UserProfileExceptionHandler.java': '19b0ed4e482d0a9df828580c22a5f4681b192f9845b30115c1f205c5c6ef7737',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/application/ShelterMembership.java': 'e7d6d353b925cc635fb91d55686a36da1d6e9c1e02b5c4ac567d8d50cab2bd89',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/application/ShelterMembershipRejectedException.java': '300027bd01b3e4bc3c56c4ac0bf8e847fdf1b000a5f2cc1e43d9dbc8220e7d80',
@@ -450,7 +450,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/directory/infrastructure/JdbcUserDirectoryQueryTest.java': 'cac45bd629bad9e3740910cdd5ecc4c92b9c66cab614fcc46976f48811e82aa6',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/oauth/infrastructure/GoogleOAuth2UserServiceTest.java': '3672db348fdf86b8bf10d58f1e669a2956dfb3f9193002db08722d5ac074046c',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/oauth/infrastructure/JdbcGoogleLoginTest.java': 'c55e41ce17dfa574c97dd9a913ff46187bb21a6f235fc73addbe13111f665d3f',
- 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/oauth/web/GoogleOAuthHandlersTest.java': 'a686872cbee9bf2a142da58b1e1d29d8fdc165ce9aad1b17d3f4fbd1fb4b2693',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/oauth/web/GoogleOAuthHandlersTest.java': 'bf085676cd5195bfe652aa827703bd798747c7e7a855c1ba3a989aa826554825',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/HttpShelterLookupTest.java': '280304494a1bbbaf3fd71d7a8441d4af639a058284974e664e48d605b0aafe3e',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/JdbcShelterMembershipTest.java': '8401c06ec852ab363745e08500ad78a22be546651c9d2b836844d6b52c4f1a9f'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}

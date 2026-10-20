@@ -603,3 +603,10 @@ Kafka 보상 소비/manualACK·재시도·processed 저장·정리 예약의 소
 코드 활성화 전에는 선택한 writer의 실제 DML 권한, Google/Animal/Redis/Kafka·DB 통합 및 JPA flush/감사시각/경합을 격리 환경에서 검증해야 한다. CI cleanup 역할을 새 true 기능에 그대로 재사용할 수 있다고 가정하지 않는다. 이 작업은 실제 권한이나 운영 설정을 변경하지 않았다.
 
 선택 CI는 고정108 입력과 공통 빌드·단위/HTTP/구조, 기존 관리자 페이지 PG11·소유 정리를 요구한다.39계약·28JAR의 미실행과 새로운 User SQL/외부 연동의 미실증은 명시적으로 남기며 full 또는 운영 인계 성공으로 확대하지 않는다.
+
+
+### Google 활성화 전 해결할 기존 DB 결함
+
+자동 리뷰에서 고정 원문에도 있던 두 문제를 확인했다. 닉네임 unique 충돌 후 같은 TX에서 다시 INSERT하는 재시도는 PostgreSQL aborted TX를 회복하지 못한다. 또한 최초 동시 로그인 두 요청이 refresh 행을 TX 밖에서 조회한 뒤 각각 INSERT하면 user_id UNIQUE가 없는 구조에서 두 행이 생길 수 있다. 기존 구현과 같다는 사실은 결함이 없다는 뜻이 아니다. 두 문제의 수정 정책과 실제 PostgreSQL 경합 회귀를 확정하기 전에는 Google을 활성화하지 않는다. 이 PR은 그 정책·DDL·실제 데이터를 변경하거나 문제를 해결한 것으로 기록하지 않는다.
+
+별도로 오류 redirect에 기존 query가 있으면 두 번째 물음표가 붙는 결함은 URI builder로 보완했다. 새2 RED 실패 후 기존 포함7 GREEN을 확인했으며, 기존 오류 문구·query 없는 응답·토큰 미기록을 유지했다. fragment 시험은 handler 경계이며 Boot의 fragment 거부 정책을 바꾸지 않는다.

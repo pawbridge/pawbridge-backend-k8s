@@ -28,7 +28,9 @@ public final class GoogleOAuth2SuccessHandler extends SimpleUrlAuthenticationSuc
         } catch(Exception failure){
             LOG.error("OAuth2 token completion failed; exceptionType={}",failure.getClass().getName());
             String message=URLEncoder.encode("로그인 처리 중 오류가 발생했습니다",StandardCharsets.UTF_8);
-            response.sendRedirect(response.encodeRedirectURL(redirectUri.replace("/oauth/callback","/login")+"?error="+message));
+            String target=UriComponentsBuilder.fromUriString(redirectUri.replace("/oauth/callback","/login"))
+                    .queryParam("error",message).build().toUriString();
+            response.sendRedirect(response.encodeRedirectURL(target));
         }
     }
 }
