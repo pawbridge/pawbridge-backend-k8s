@@ -78,14 +78,14 @@ class AdminPostReadsProfileTest(unittest.TestCase):
 
     def test_given_frozen_cohort_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.POST_READS_BASE)
-        self.assertEqual(130, len(profile.POST_READS_APP_HASHES))
-        self.assertEqual('a21079e67ec88514c8c6cc02e80c627b92468d0ccb0db9d1b0b6dae0de4d8294', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual(140, len(profile.POST_READS_APP_HASHES))
+        self.assertEqual('9afc38376deb443e2af2f96f4e2d81ced0e9521683442230cd58f4c439619de5', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.POST_READS_APP_HASHES) | {'backend-app/README.md'}, profile.POST_READS_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.POST_READS_APP_HASHES)
         git, hashes = self.synthetic_git()
         with patch.object(profile, 'POST_READS_APP_HASHES', hashes), patch.object(profile,'POST_READS_BASE',SYNTHETIC_BASE):
             self.assertIs(True, profile.verify_post_reads_inputs(git_reader=git))
-        self.assertEqual(131, git.call_count)
+        self.assertEqual(len(profile.POST_READS_APP_HASHES) + 1, git.call_count)
         for path in hashes:
             git.assert_any_call('show', 'HEAD:' + path)
 

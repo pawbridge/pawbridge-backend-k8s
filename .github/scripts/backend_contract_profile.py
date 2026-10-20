@@ -348,7 +348,7 @@ POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c9b5cd946e219e09f9cd69f5669dc7d6d97e79275341',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '773ac213e2ff2ab80cdb67f00b15822dcad0a225b885af34f84a6f95abe665db',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'b6eaed5d6e1b70379919ce699c4299e8a682aa5b835737acb6c33000e69702d1',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -360,9 +360,10 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c7430dfd017008c3f65ddc7e92209a6a4a65d07421264a78f50b0407d0e2a6c9',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '85614e8c517d88073300119529e840c2473fc41703998199ced75c20a74c2b96',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'bc687b513b62a7ed76bbabd4d463092b16c768cdd6c5653905fb2e7c585f261d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': 'c492af8ec9be6af0ced820f124d176eee696992ee45b6ed63bfd8b3416db0fb8',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': '3b8fd66dc4f308940fdf6e0028a721f5e7daa56b45d2508eae9f7c8fdca7b427',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '1b430c256a0045fa45e45751721855bdfbd9f81420213769d709b4903a1d4555',
  'backend-app/boot/src/main/resources/application.properties': '98b95621811fecccee450ba697537736c46ccf1c020b7ed8697e18ad8e6f981b',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostMutationHttpTest.java': 'feca1b7a4f4f7c6cb6c97d06157ef1cea8005722b64c1a90258df18af4ca18fb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostReadHttpTest.java': 'ee591506da75a0841f5322f7d3d5f2db6a1654a5034c1d70b1a88bd8cced891b',
@@ -375,7 +376,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatProtocolTest.java': 'fdbeeba7aa7da996e0b40ce0fe71af8005ec0d8fe3418f3621a82584726934f3',
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatSessionLifecycleTest.java': '8e1d8a6b05a1b114461bcf39fa11c0e90500a407f079dd3a6252d3a55362edf0',
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatTransportHttpTest.java': '11fb099240fc857c3a0311ef90d5f70df04f291b3393440639e147a558543ecd',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': 'b8865408263e79f0f99f51bf3a122a13f51656d8f6d574ac3b58aa5169c209d2',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '63a43bb03c053edc82eb6e15cad1897fc4b986c0f77a646e86d13fb6f8388b15',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostDeleteHttpTest.java': 'ca8bec58cfbc8251b772cbcaaef91d8dfa14d5d525dc9510440c39df7e2d1cd6',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostListHttpTest.java': 'c23bff985fd2dc3a8ef48cc5d9f4bb2d6bfecc91d69cc985cb0d74c4ddbb2f37',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostSearchHttpTest.java': '009c20bb4daf58dba55e2ae670eb2c8c77723f37b3f9f72ae30a726a0caabae8',
@@ -385,6 +386,8 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/boot/src/test/java/com/pawbridge/backend/TotalUserCountHttpTest.java': 'a31d08c8cf26757474afca2e01b3b972840a4bf73b7590c8ffe995045d707505',
  'backend-app/boot/src/test/java/com/pawbridge/backend/UserAnimalActivitiesConfigurationTest.java': 'e82202d8df51d1e4141883b55f3e94f15b117c135084de3f9dc516fe5ced2d7f',
  'backend-app/boot/src/test/java/com/pawbridge/backend/UserAnimalActivitiesHttpTest.java': 'ef5fa2af2acda98096162ac2aa061a842620ccd451c580fdefe83d60f52c7e88',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/UserStoreMyPageConfigurationTest.java': 'baa56a1f9b3cd7f82dd320e97ee7ae30ec5a87f961c3b920b725203098e53e10',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/UserStoreMyPageHttpTest.java': '3d006bace797b107446c091a9f417f76a618efcd8e4539228f8b8b1efb69d5df',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/GoogleOAuthBusinessConfigurationTest.java': '43749a7a5792d5ead06477bcf154186a23c4a3ea756f19016bae1801bb7c772f',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/HomeVideoManagementConfigurationTest.java': '7093c4d81904e8b16d019e621399029903b3917198ca52dc2e58f1c8373498e4',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/MemberChatConfigurationTest.java': '132692a396854dffaeaf5a85ad2c9c6970290cafec8e13b553db5eafa91aac1f',
@@ -467,6 +470,10 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/web/AdminShelterMemberController.java': '9c6c2f675e7e7d488a747c993de57bf8425269da5f4ff83283e2ae00928871f2',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/web/ShelterApplicationController.java': '1d3173c8942aacbe02782bc77286876dbeaf6b14b7f2f6e503e2a942c56c9b08',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/web/ShelterMembershipExceptionHandler.java': 'c109ab292033923fdc1d03884599ad0e11bcb208aed672e6530bbc9f2c7159c0',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/application/StoreMyPage.java': '4c35b5d47e2736c0be5c8b2f0558661a406d9396c05400065e7ff8d819577883',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPage.java': 'ab17852c0ed974049b6283a1c24602d63c68b388ba43c25139a08254992d96b6',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/web/StoreMyPageController.java': 'bc74232c2b27b38a25b33b81e4e84ab7a78a9ae5a31b8f9b90d49513bd5974fa',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/web/StoreMyPageExceptionHandler.java': '142d96fb4089cdc4bc2163a204901b26d6b37fd8153791468a09459d4984e673',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/animalactivity/infrastructure/HttpUserAnimalLookupTest.java': '48b5088130a892d62cda8819860312c62babe89a90d3a70d3304c08570e76e63',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/animalactivity/infrastructure/JdbcUserAnimalActivitiesTest.java': '187b090266447d0f66809980501399f73c93ce3d5e96d40f5f76e0a52cd36d48',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/directory/infrastructure/JdbcUserDirectoryQueryTest.java': 'cac45bd629bad9e3740910cdd5ecc4c92b9c66cab614fcc46976f48811e82aa6',
@@ -474,7 +481,10 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/oauth/infrastructure/JdbcGoogleLoginTest.java': '31d6268c525f3c5cc5aa90d6dccbd736d9becb41f6237c2dae283b511d29aa4e',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/oauth/web/GoogleOAuthHandlersTest.java': 'bf085676cd5195bfe652aa827703bd798747c7e7a855c1ba3a989aa826554825',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/HttpShelterLookupTest.java': '280304494a1bbbaf3fd71d7a8441d4af639a058284974e664e48d605b0aafe3e',
- 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/JdbcShelterMembershipTest.java': '8401c06ec852ab363745e08500ad78a22be546651c9d2b836844d6b52c4f1a9f'}
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/JdbcShelterMembershipTest.java': '8401c06ec852ab363745e08500ad78a22be546651c9d2b836844d6b52c4f1a9f',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPageTest.java': '2f36cb808f159f448809aecbb02282910cb55e5d40f7d729b0a943eaaeb5a09c',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPageTransportTest.java': 'd662499bc8cf42d2a62cfbd86d3967515ff6ee1e42fcecf96356cec4c7e5834b',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storemypage/web/StoreMyPageControllerTest.java': '0757146f099d405f125d5666674eec33ee5bc9092df4237f9c1290b787a0c3a7'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
@@ -804,7 +814,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 130):
+                or len(POST_READS_APP_HASHES) != 140):
             return False
         raw = git('diff', '--name-only', '--no-renames', '-z', POST_READS_BASE, 'HEAD', '--', 'backend-app')
         if not isinstance(raw, bytes):
