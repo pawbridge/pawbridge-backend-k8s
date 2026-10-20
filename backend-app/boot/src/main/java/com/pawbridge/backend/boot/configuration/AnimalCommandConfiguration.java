@@ -23,7 +23,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.orm.jpa.JpaTransactionManager;
@@ -35,8 +34,7 @@ import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 /** One opt-in writer persistence unit; no entity/repository scan or additional pool. */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "pawbridge.animal-commands", name = "enabled", havingValue = "true")
-@EnableJpaAuditing
-@Import(AnimalSearchConfiguration.class)
+@Import({AnimalSearchConfiguration.class, JpaAuditingConfiguration.class})
 public class AnimalCommandConfiguration {
     private static final String MODEL = "com.pawbridge.backend.animal.internal.command.infrastructure.entity.";
 
