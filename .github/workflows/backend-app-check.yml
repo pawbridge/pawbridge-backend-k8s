@@ -42,7 +42,7 @@ jobs:
           from pathlib import Path
           sys.path.insert(0, ".github/scripts")
           from ci_branch_policy import changed_paths, validate_event
-          from backend_contract_profile import select_profiles, verify_note_expiry_inputs, verify_member_management_inputs, verify_signup_statistics_inputs, verify_admin_member_update_inputs, verify_visit_collection_inputs, verify_auth_sessions_inputs, verify_post_statistics_inputs
+          from backend_contract_profile import select_profiles, verify_note_expiry_inputs, verify_member_management_inputs, verify_signup_statistics_inputs, verify_admin_member_update_inputs, verify_visit_collection_inputs, verify_auth_sessions_inputs, verify_post_statistics_inputs, verify_post_reads_inputs
 
           paths = changed_paths(os.environ, validate_event(os.environ))
           selected = any(
@@ -60,6 +60,7 @@ jobs:
                   ".github/scripts/test_backend_visit_collection_profile.py",
                   ".github/scripts/test_backend_auth_sessions_profile.py",
                   ".github/scripts/test_backend_admin_post_statistics_profile.py",
+                  ".github/scripts/test_backend_admin_post_reads_profile.py",
                   ".github/scripts/backend_postmerge_proof.py",
                   ".github/scripts/test_backend_postmerge_proof.py",
               }
@@ -79,6 +80,7 @@ jobs:
               "visit_collection_scope_verified": verify_visit_collection_inputs(),
               "auth_sessions_scope_verified": verify_auth_sessions_inputs(),
               "post_statistics_scope_verified": verify_post_statistics_inputs(),
+              "post_reads_scope_verified": verify_post_reads_inputs(),
               "base_sha": pr.get("base", {}).get("sha", ""),
           }
           profiles = select_profiles(context, paths)
@@ -235,7 +237,7 @@ jobs:
   check:
     needs: [selection, proof, package]
     if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}
-    name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || matrix.profile == 'note-expiry' && 'Scoped note expiry PostgreSQL contracts' || matrix.profile == 'member-management' && 'Scoped member management PostgreSQL and HTTP contracts' || matrix.profile == 'signup-statistics' && 'Scoped administrator signup statistics PostgreSQL contracts' || matrix.profile == 'admin-member-update' && 'Scoped administrator member update PostgreSQL contracts' || matrix.profile == 'visit-collection' && 'Scoped visit collection PostgreSQL contracts' || matrix.profile == 'auth-sessions' && 'Scoped refresh and logout PostgreSQL contracts' || matrix.profile == 'admin-post-statistics' && 'Scoped administrator post statistics PostgreSQL contracts' || 'F25 six-smoke pilot with the same candidate JAR' }}
+    name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || matrix.profile == 'note-expiry' && 'Scoped note expiry PostgreSQL contracts' || matrix.profile == 'member-management' && 'Scoped member management PostgreSQL and HTTP contracts' || matrix.profile == 'signup-statistics' && 'Scoped administrator signup statistics PostgreSQL contracts' || matrix.profile == 'admin-member-update' && 'Scoped administrator member update PostgreSQL contracts' || matrix.profile == 'visit-collection' && 'Scoped visit collection PostgreSQL contracts' || matrix.profile == 'auth-sessions' && 'Scoped refresh and logout PostgreSQL contracts' || matrix.profile == 'admin-post-statistics' && 'Scoped administrator post statistics PostgreSQL contracts' || matrix.profile == 'admin-post-management' && 'Scoped administrator post management with page PostgreSQL contracts' || 'F25 six-smoke pilot with the same candidate JAR' }}
     strategy:
       fail-fast: false
       matrix:
@@ -557,7 +559,7 @@ jobs:
 
       - name: Extend the owned fixture with only the comment table and reader columns
         id: fixture_post_unrelated_f8
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f8_ci.py prepare
 
       - name: Verify F9 fixture, oracle and workflow guards without starting resources
@@ -565,11 +567,11 @@ jobs:
 
       - name: Extend the owned fixture with minimal F9 comment INSERT permissions
         id: fixture_post_unrelated_f9
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f9_ci.py prepare
 
       - name: Compare legacy reads/writes, issuer, atomicity and resource boundaries in UTC and Seoul
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:compatibilityTest :boot:compatibilitySeoulTest             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
@@ -596,25 +598,25 @@ jobs:
             --jar boot/build/libs/pawbridge-backend-app.jar --plan build/ci/contract-plan.txt
 
       - name: Verify packaged POST/GET, synthetic SDK uploads, failures and normal termination
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f3
         run: python3 scripts/f3_ci.py smoke
 
       - name: Prepare only the owned F4 dependent table shape for scoped expiry
         id: fixture_f4_shape
-        if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' || matrix.profile == 'auth-sessions' || matrix.profile == 'admin-post-statistics' }}
+        if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' || matrix.profile == 'auth-sessions' || matrix.profile == 'admin-post-statistics' || matrix.profile == 'admin-post-management' }}
         run: python3 scripts/f4_ci.py prepare-shape
 
       - name: Verify F4 listener startup with socket and process mocks only
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f4_ci_startup.py
 
       - name: Verify packaged owner deletion, best-effort storage and rollback recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f4
         run: python3 scripts/f4_ci.py smoke
 
       - name: Verify packaged owner PUT, SDK replacement and failure recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f5
         run: python3 scripts/f5_ci.py smoke
 
@@ -622,7 +624,7 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f6_ci_guards.py
 
       - name: Verify packaged public list journey, per-GET zero writes and recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f6
         run: |
           set -euo pipefail
@@ -671,11 +673,33 @@ jobs:
               Path('boot/build/test-results/adminPostStatisticsCompatibilitySeoulTest'))
           PYTHON
 
+      - name: Compile pinned administrator post management source without database tests
+        if: ${{ matrix.profile == 'full' || matrix.profile == 'admin-post-management' }}
+        id: compile_post_reads
+        run: |
+          set -euo pipefail
+          JAVA_TOOL_OPTIONS=-Duser.timezone=UTC bash ./gradlew :boot:compileCompatibilityTestJava --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          test -s build/ci/f6-oracle-sha256.txt
+
+      - name: Compare administrator post pagination and bounded reader permissions in UTC
+        if: ${{ matrix.profile == 'full' || matrix.profile == 'admin-post-management' }}
+        id: pg_post_reads
+        run: |
+          set -euo pipefail
+          JAVA_TOOL_OPTIONS=-Duser.timezone=UTC bash ./gradlew :boot:adminPostReadCompatibilityTest --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, '../.github/scripts')
+          from backend_contract_profile import verify_admin_post_reads_report
+          verify_admin_post_reads_report(Path('boot/build/test-results/adminPostReadCompatibilityTest'))
+          PYTHON
+
       - name: Verify F7 grants and oracle guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f7_ci_guards.py
 
       - name: Verify packaged public search journey, per-GET zero writes and recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f7
         run: |
           set -euo pipefail
@@ -694,7 +718,7 @@ jobs:
           PY
 
       - name: Verify packaged public comment reads, denied writes, zero side effects and recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f8
         run: |
           set -euo pipefail
@@ -714,7 +738,7 @@ jobs:
           PY
 
       - name: Verify packaged authenticated comment POST, F8 GET and isolated rollback recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f9
         run: |
           set -euo pipefail
@@ -740,11 +764,11 @@ jobs:
 
       - name: Extend the owned fixture with exact F10 comment deletion permissions
         id: fixture_post_unrelated_f10
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f10_ci.py prepare
 
       - name: Compare only F10 comment deletion in UTC and Seoul with the extended ACL
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:commentDeleteCompatibilityTest :boot:commentDeleteCompatibilitySeoulTest \
@@ -752,7 +776,7 @@ jobs:
           python3 scripts/f10_ci.py results
 
       - name: Verify packaged authenticated comment deletion, preserved rows and rollback recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f10
         run: |
           set -euo pipefail
@@ -779,11 +803,11 @@ jobs:
 
       - name: Extend the owned fixture with exact F11 comment content update permission
         id: fixture_post_unrelated_f11
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f11_ci.py prepare
 
       - name: Compare only F11 comment update in UTC and Seoul with the extended ACL
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:commentUpdateCompatibilityTest :boot:commentUpdateCompatibilitySeoulTest \
@@ -791,7 +815,7 @@ jobs:
           python3 scripts/f11_ci.py results
 
       - name: Verify packaged comment PUT, old response timestamps, no-op writes and rollback recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f11
         run: |
           set -euo pipefail
@@ -820,11 +844,11 @@ jobs:
 
       - name: Extend the owned fixture with exact F12 profile columns and reader permissions
         id: fixture_post_unrelated_f12
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f12_ci.py prepare
 
       - name: Compare only F12 profile reads in UTC and Seoul after the owned User fixture extension
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:profileCompatibilityTest :boot:profileCompatibilitySeoulTest \
@@ -832,7 +856,7 @@ jobs:
           python3 scripts/f12_ci.py results
 
       - name: Verify packaged authenticated profile reads, private-column exclusion and recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f12
         run: |
           set -euo pipefail
@@ -858,11 +882,11 @@ jobs:
 
       - name: Extend the owned fixture with pinned User constraints and exact F13 nickname permissions
         id: fixture_post_unrelated_f13
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f13_ci.py prepare
 
       - name: Compare only F13 nickname writes in UTC and Seoul after the owned User writer extension
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:nicknameCompatibilityTest :boot:nicknameCompatibilitySeoulTest \
@@ -870,7 +894,7 @@ jobs:
           python3 scripts/f13_ci.py results
 
       - name: Verify packaged nickname PUT, profile and Community visibility, no-op and recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f13
         run: |
           set -euo pipefail
@@ -899,11 +923,11 @@ jobs:
 
       - name: Extend the owned fixture with exact F14 favorites schema and reader-only columns
         id: fixture_post_unrelated_f14
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f14_ci.py prepare
 
       - name: Compare only F14 favorite status in UTC after the owned favorites fixture extension
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:favoriteStatusCompatibilityTest \
@@ -911,7 +935,7 @@ jobs:
           python3 scripts/f14_ci.py results
 
       - name: Verify packaged favorite Boolean GET, missing-user false, no side effects and permission recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f14
         run: |
           set -euo pipefail
@@ -938,11 +962,11 @@ jobs:
 
       - name: Extend the owned fixture with pinned F15 board and videos and reader-only columns
         id: fixture_post_unrelated_f15
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f15_ci.py prepare
 
       - name: Compare only F15 home videos in UTC and Seoul after the owned V9 fixture extension
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:homeVideoCompatibilityTest :boot:homeVideoCompatibilitySeoulTest \
@@ -950,7 +974,7 @@ jobs:
           python3 scripts/f15_ci.py results
 
       - name: Verify packaged public home videos, expiry, permission recovery and no side effects
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f15
         run: |
           set -euo pipefail
@@ -978,11 +1002,11 @@ jobs:
 
       - name: Extend the owned fixture with only pinned F16 daily totals and reader columns
         id: fixture_post_unrelated_f16
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f16_ci.py prepare
 
       - name: Compare F16 date binding in UTC and Seoul and access and original MVC once
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:visitTodayCompatibilityTest :boot:visitTodayCompatibilitySeoulTest :boot:visitTodayLegacyMvcTest \
@@ -1021,11 +1045,11 @@ jobs:
 
       - name: Extend the owned fixture with only F17 pending and block tables and three reader columns
         id: fixture_post_unrelated_f17
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f17_ci.py prepare
 
       - name: Compare F17 recipients and lightweight original lookup boundaries once in UTC
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteRecipientCompatibilityTest \
@@ -1061,11 +1085,11 @@ jobs:
 
       - name: Verify the unchanged F17 fixture for F18 without new schema or grants
         id: fixture_post_unrelated_f18
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f18_ci.py prepare
 
       - name: Compare F18 outgoing block status and actual original MVC once in UTC
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:blockedAuthorsCompatibilityTest \
@@ -1073,7 +1097,7 @@ jobs:
           python3 scripts/f18_ci.py results
 
       - name: Verify packaged block status, mixed errors, invalid-before-active and SQL recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f18
         run: |
           set -euo pipefail
@@ -1105,11 +1129,11 @@ jobs:
 
       - name: Reuse the unchanged F18 and F17 fixture for F19 without schema or grants
         id: fixture_post_unrelated_f19
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f19_ci.py prepare
 
       - name: Compare F19 inherited count and original MVC once in UTC
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:totalUserCountCompatibilityTest \
@@ -1143,7 +1167,7 @@ jobs:
 
       - name: Compare administrator signup statistics UTC and one Seoul boundary after the F19 fixture
         id: pg_signup_statistics
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:signupStatisticsCompatibilityTest :boot:signupStatisticsCompatibilitySeoulTest \
@@ -1165,11 +1189,11 @@ jobs:
 
       - name: Add only the existing block timestamp SELECT after the F19 regressions
         id: fixture_post_unrelated_f20
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f20_ci.py prepare
 
       - name: Compare F20 full UTC behavior and one Seoul timestamp method
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteBlockListCompatibilityTest :boot:noteBlockListCompatibilitySeoulTest \
@@ -1177,7 +1201,7 @@ jobs:
           python3 scripts/f20_ci.py results
 
       - name: Verify packaged block pages, display and timestamp with source-specific recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f20
         run: |
           set -euo pipefail
@@ -1207,11 +1231,11 @@ jobs:
 
       - name: Extend the owned fixture with only original notes and mailboxes after F20
         id: fixture_post_unrelated_f21
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f21_ci.py prepare
 
       - name: Compare only F21 notifications in UTC and its one Seoul timestamp case
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteNotificationsCompatibilityTest :boot:noteNotificationsCompatibilitySeoulTest \
@@ -1248,11 +1272,11 @@ jobs:
 
       - name: Extend only five existing reader columns after the full F21 stage
         id: fixture_post_unrelated_f22
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f22_ci.py prepare
 
       - name: Compare only F22 private detail in UTC and one Seoul timestamp case
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:privateNoteReadCompatibilityTest :boot:privateNoteReadCompatibilitySeoulTest \
@@ -1289,11 +1313,11 @@ jobs:
 
       - name: Reuse the exact F22 fixture for F23 without new DDL or privileges
         id: fixture_post_unrelated_f23
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f23_ci.py prepare
 
       - name: Compare only F23 owned mailbox pages in UTC and one Seoul sort and timestamp case
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:privateNoteListCompatibilityTest :boot:privateNoteListCompatibilitySeoulTest \
@@ -1330,11 +1354,11 @@ jobs:
 
       - name: Extend only the existing member lock and outgoing block writer privileges for F24
         id: fixture_post_unrelated_f24
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f24_ci.py prepare
 
       - name: Compare only F24 owned unblock transactions and measured original MVC in UTC
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteBlockRemoveCompatibilityTest \
@@ -1342,7 +1366,7 @@ jobs:
           python3 scripts/f24_ci.py results
 
       - name: Verify packaged unblock, exact permitted writes and protected state recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f24
         run: |
           set -euo pipefail
@@ -1371,22 +1395,22 @@ jobs:
 
       - name: Extend only the outgoing block INSERT columns for F25
         id: fixture_post_unrelated_f25
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f25_ci.py prepare
 
       - name: Compare F25 owned block creation in UTC and only timestamp preservation in Seoul
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteBlockCreateCompatibilityTest :boot:noteBlockCreateCompatibilitySeoulTest \
             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
 
       - name: Require exact F25 measured UTC and thin Seoul reports
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f25_ci.py results
 
       - name: Verify packaged block creation, duplicate timestamps and protected state recovery
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f25
         run: |
           set -euo pipefail
@@ -1430,22 +1454,22 @@ jobs:
 
       - name: Extend only the owned note read and lock writer columns after the complete F25 stage
         id: fixture_post_unrelated_f26
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f26_ci.py prepare
 
       - name: Compare F26 owned read transactions and measured original MVC in UTC and one Seoul timestamp case
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteReadStreamCompatibilityTest :boot:noteReadStreamCompatibilitySeoulTest \
             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
 
       - name: Require exact F26 measured UTC and thin Seoul reports with original byte receipts
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f26_ci.py results
 
       - name: Verify packaged read commit, own SSE resync, expiry, restoration and owned resource shutdown
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f26
         run: |
           set -euo pipefail
@@ -1486,22 +1510,22 @@ jobs:
 
       - name: Extend only mailbox favorite UPDATE after the complete F26 stage
         id: fixture_post_unrelated_f27
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f27_ci.py prepare
 
       - name: Compare F27 owned favorite mutations and measured original MVC only in UTC
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteFavoriteCompatibilityTest \
             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
 
       - name: Require exact F27 UTC reports with unchanged original byte receipts
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f27_ci.py results
 
       - name: Verify packaged favorite commit, own resync, read projections and resource shutdown
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f27
         run: |
           set -euo pipefail
@@ -1542,22 +1566,22 @@ jobs:
 
       - name: Add only the original requests table and two DELETE grants after the complete F27 stage
         id: fixture_post_unrelated_f28
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f28_ci.py prepare
 
       - name: Compare F28 owned mailbox deletion and measured original MVC only in UTC
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteDeletionCompatibilityTest \
             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
 
       - name: Require exact F28 UTC reports with original source and generated receipts
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f28_ci.py results
 
       - name: Verify packaged deletion, protected counterpart, owned FK changes, resync and shutdown
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f28
         run: |
           set -euo pipefail
@@ -1601,22 +1625,22 @@ jobs:
 
       - name: Add only pinned report context and exact send columns after the complete F28 stage
         id: fixture_post_unrelated_f29
-        if: ${{ matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f29_ci.py prepare
 
       - name: Compare F29 owned sends in UTC and only one timestamp slice in Seoul
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteSendCompatibilityTest :boot:noteSendCompatibilitySeoulTest \
             --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
 
       - name: Require exact F29 UTC and thin Seoul reports with original byte receipts
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f29_ci.py results
 
       - name: Verify packaged send, recipient note, replay, REST recovery and owned shutdown
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         id: jar_f29
         run: |
           set -euo pipefail
@@ -1655,7 +1679,7 @@ jobs:
 
       - name: Verify owned note expiry, original limits, rollback and active scheduler shutdown in UTC
         id: pg_note_expiry
-        if: ${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:noteExpiryCompatibilityTest \
@@ -1669,7 +1693,7 @@ jobs:
           PYTHON
 
       - name: Verify late member cleanup runtime controls without resources
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f29_ci_runtime.py
 
       - name: Compile pinned administrator update and member source closure without database tests
@@ -1706,12 +1730,12 @@ jobs:
 
       - name: Add pinned User and installed chat tables only after fixed source preparation
         id: fixture_member_cleanup
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f29_ci.py member-cleanup-prepare
 
       - name: Compare member cleanup pending, rollback and retry once in UTC with final issuer refresh
         id: pg_member_cleanup
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:memberCleanupCompatibilityTest \
@@ -1725,7 +1749,7 @@ jobs:
 
       - name: Verify packaged admin deletion, synchronous chat cleanup, SSE closure and authorized retry
         id: jar_f31
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           python3 scripts/f29_ci.py member-cleanup-smoke
@@ -1748,12 +1772,12 @@ jobs:
 
       - name: Add only administrator role and care registration column rights after member fixture preparation
         id: fixture_admin_update
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'visit-collection' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'visit-collection' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: python3 scripts/f29_ci.py admin-update-prepare
 
       - name: Compare administrator member update auditing, priority, lock and unique rollback in UTC
         id: pg_admin_update
-        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' }}
+        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'visit-collection' && matrix.profile != 'auth-sessions' && matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:adminUserUpdateCompatibilityTest \

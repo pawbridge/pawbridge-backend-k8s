@@ -342,6 +342,57 @@ POST_STATISTICS_REPORT_CASES = (POST_STATISTICS_SINGLE_METHODS[0] + '()',) + tup
     POST_STATISTICS_PARAMETER_METHOD + '[' + str(index) + ']' for index in (1,2)) + (POST_STATISTICS_SINGLE_METHODS[1] + '()',)
 POST_STATISTICS_SEOUL_METHOD = POST_STATISTICS_SINGLE_METHODS[0]
 
+POST_READS = 'admin-post-management'
+# The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
+POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '9715076a40a1567faf7b4ee3f0a20052e82d80b5f469986048b1f2a7e36abe36',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '3fc1087c0a510723172c84b236aebfe5280a2b97d17ab48d64e4c27b0341b7b9',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c7430dfd017008c3f65ddc7e92209a6a4a65d07421264a78f50b0407d0e2a6c9',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'eea8e296ef5a2bd7bdd821543df4d70d7af194a250a77f3930f6fda5a218ca95',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostMutationHttpTest.java': 'feca1b7a4f4f7c6cb6c97d06157ef1cea8005722b64c1a90258df18af4ca18fb',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostReadHttpTest.java': 'ee591506da75a0841f5322f7d3d5f2db6a1654a5034c1d70b1a88bd8cced891b',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostStatisticsHttpTest.java': '8042c41ce6a179c48aa170fd448f2769c948efc5f2d66a9c59d86abef42cb93b',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '423c26d89ab90c7c963adfa30396ea0178717e8e4711cd0f26ceaff413a209de',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PostDeleteHttpTest.java': 'ca8bec58cfbc8251b772cbcaaef91d8dfa14d5d525dc9510440c39df7e2d1cd6',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PostListHttpTest.java': 'c23bff985fd2dc3a8ef48cc5d9f4bb2d6bfecc91d69cc985cb0d74c4ddbb2f37',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PostSearchHttpTest.java': '009c20bb4daf58dba55e2ae670eb2c8c77723f37b3f9f72ae30a726a0caabae8',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PostUpdateHttpTest.java': '35b3fb4b30680e8854a7b864e14debe6203cb240de14106c07c7b89cd3f7dd40',
+ 'backend-app/community/build.gradle': 'bfdd6dc1a1a1e17bd0f3254ed02727c2071f778f2016d8ead39c97b51d980b7a',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/DeletePost.java': '48910eea5c1d148dde25a2c5b1509f7f162ab45de22f311589941377a6049c8a',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/PostPageReader.java': '31eaad2d4f714300efcd91428a0dc33329fb4f1049733812cbfd9a53d3fd1137',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/ReadAdminPosts.java': 'ac9502c3db7e87e0cc2bde72d040ecffea00b7c8762cb6a5e9403b3641e8a702',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/ReadPost.java': 'bfbe086e02db7f5e5f347dd93e642be7cccde9a1000e774cc73a668fac9e1831',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/UpdatePost.java': 'ae391245bb52759341ba735cf998b428760ce6c3a26666d54df9c2f855720862',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/infrastructure/JdbcPostReader.java': '23086ae32ea1192b0d1ddec302fae44ee491d94a60866cdcbd277ca702dc5c84',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/AdminPostDeleteController.java': 'ab25ce1ce8de12548c42926c00dc0f02fe4f14cb9e08bb25a0845711bbdcf324',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/AdminPostReadController.java': '13ec438a6ffb0bb5422a96d7468af96031626a88dbcec493340e2dbfc23f4691',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/AdminPostReadExceptionHandler.java': '79032b7b37b6c8022468f7e127adbb49afe041f6139d69967a279c2c101010cb',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/AdminPostUpdateController.java': 'eb13dc45bba0fdd17db69d61f0c3cbde162199a7d1ff787d01c6e2cafeb9d207',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/PostDeleteExceptionHandler.java': '6c7793adfaba00f401fbf125d7e096528f2b3f6ad0bd9a042ab44eb67973754e',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/PostUpdateExceptionHandler.java': 'e0697043fe9073aaeb18e7e7a5a74a5bf5681c5efc98870155b8a746326dc1bb',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/DeletePostTest.java': '6425b8aae237ee816f521cb6ff2462d9fd19b970c0d581482f864dc47da0948a',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/ReadAdminPostsTest.java': 'fab415c6b47b2a8458d3f52d97e3a3e92ad10a14efc7fec8b311517a839cadb5',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/UpdatePostTest.java': 'e0841d5708df3d033cf4c5d909859d6210bff1aa4c3591fc17d73f95e0ddd001',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/infrastructure/JdbcAdminPostPageReaderTest.java': '9e7d26b505d8f7af1286b588938b4126230771b94060c180a66563bd01e7d1b3'}
+POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
+POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
+    '.github/scripts/test_backend_admin_post_reads_profile.py',
+}
+POST_READS_REQUIRED_CONTRACTS = ('fixture_f4_shape', 'compile_post_reads', 'pg_post_reads')
+POST_READS_FULL_CONTRACTS = ('compile_post_reads', 'pg_post_reads')
+POST_READS_SKIPPED_CONTRACTS = POST_STATISTICS_SKIPPED_CONTRACTS + POST_STATISTICS_FULL_CONTRACTS
+POST_READS_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlAdminPostReadCompatibilityTest'
+POST_READS_METHOD_CASES = (('givenOwnedActiveAndDeletedPosts__whenPagingWithTheActualRepository__thenMatchRowsTotalsCountElisionAndNineFields',
+  3),
+ ('givenMappedStringNullableJsonAndUnknownSorts__whenReading__thenKeepActualPostgresOrderingOrFailureWithoutInventingTextCasts',
+  4),
+ ('givenExactlyTheExistingReaderColumnsRevoked__whenContentOrCountFails__thenBothManagersRaise42501WithoutPartialRowsAndRecover',
+  4))
+POST_READS_REPORT_CASES = tuple(method + '[' + str(index) + ']' for method, count in POST_READS_METHOD_CASES for index in range(1, count + 1))
+
 REPOSITORY = 'pawbridge/pawbridge-backend-k8s'
 PILOT_REF = 'ci/backend-contract-regression-scope'
 PILOT_BASE = '0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3'
@@ -645,6 +696,32 @@ def verify_auth_sessions_report(utc_directory, seoul_directory):
             raise ProfileBlocked('The auth session report is invalid.') from None
 
 
+def verify_post_reads_inputs(git_reader=None):
+    """Accept only the fixed auth application/compiler/fixture bytes on the confirmed Visitor parent."""
+    def read(*args):
+        return subprocess.run(['git', *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, check=True, timeout=8).stdout
+    git = git_reader if git_reader is not None else read
+    try:
+        if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
+                or len(POST_READS_APP_HASHES) != 32):
+            return False
+        raw = git('diff', '--name-only', '--no-renames', '-z', POST_READS_BASE, 'HEAD', '--', 'backend-app')
+        if not isinstance(raw, bytes):
+            return False
+        paths = [value.decode('utf-8') for value in raw.split(b'\0') if value]
+        if len(paths) != len(set(paths)) or not set(paths).issubset(POST_READS_APP_EXCEPTIONS):
+            return False
+        for path, digest in POST_READS_APP_HASHES.items():
+            blob = git('show', 'HEAD:' + path)
+            if not isinstance(blob, bytes) or hashlib.sha256(blob).hexdigest() != digest:
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, TypeError):
+        return False
+
+
+
 def verify_admin_post_statistics_report(utc_directory, seoul_directory):
     """Require all four method/index labels and only the designated Seoul boundary case."""
     for folder, expected in ((utc_directory, POST_STATISTICS_REPORT_CASES),
@@ -676,6 +753,37 @@ def verify_admin_post_statistics_report(utc_directory, seoul_directory):
             raise ProfileBlocked('The administrator post statistics report is invalid.') from None
 
 
+def verify_admin_post_reads_report(directory):
+    """Require every frozen UTC method/index label."""
+    for folder, expected in ((directory, POST_READS_REPORT_CASES),):
+        try:
+            directory = Path(folder).absolute()
+            reports = list(directory.glob('TEST-*.xml'))
+            if (directory.is_symlink() or directory.resolve() != directory or len(reports) != 1
+                    or reports[0].is_symlink() or reports[0].resolve() != reports[0]
+                    or reports[0].name != 'TEST-' + POST_READS_REPORT_CLASS + '.xml'):
+                raise ProfileBlocked('The administrator post reads report is missing or redirected.')
+            suite = ET.parse(reports[0]).getroot()
+            cases = list(suite.iter('testcase'))
+            names = [case.attrib.get('name', '') for case in cases]
+            if (suite.tag != 'testsuite' or suite.attrib.get('name') != POST_READS_REPORT_CLASS
+                    or int(suite.attrib.get('tests', -1)) != len(expected) or len(cases) != len(expected)
+                    or len(suite.findall('testcase')) != len(expected)
+                    or len(set(names)) != len(expected) or set(names) != set(expected)
+                    or any(int(suite.attrib.get(key, -1)) != 0 for key in ('failures', 'errors', 'skipped'))
+                    or any(int(node.attrib.get(key, 0)) != 0 for node in suite.iter()
+                           for key in ('failures', 'errors', 'skipped', 'disabled'))
+                    or any(node.tag in ('failure', 'error', 'skipped', 'disabled') for node in suite.iter())
+                    or any(case.attrib.get('classname') != POST_READS_REPORT_CLASS
+                           or case.attrib.get('status', 'run') not in ('run', 'passed')
+                           or case.attrib.get('result', 'completed') not in ('completed', 'passed', 'success')
+                           for case in cases)):
+                raise ProfileBlocked('The administrator post reads cases did not all execute successfully.')
+        except (OSError, ValueError, TypeError, ET.ParseError):
+            raise ProfileBlocked('The administrator post reads report is invalid.') from None
+
+
+
 def verify_note_expiry_report(directory):
     try:
         directory = Path(directory)
@@ -704,7 +812,7 @@ def select_profiles(context, paths):
     if not isinstance(context, dict):
         raise ProfileBlocked('Profile context is invalid.')
     requested = context.get('requested_profile')
-    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION, AUTH_SESSIONS, POST_STATISTICS):
+    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION, AUTH_SESSIONS, POST_STATISTICS, POST_READS):
         raise ProfileBlocked('Requested profile is unknown.')
     if requested == FULL:
         return [FULL]
@@ -778,6 +886,16 @@ def select_profiles(context, paths):
         raise ProfileBlocked('The requested post statistics scope differs from its reviewed inputs.')
     if post_scoped and requested in (None, '', POST_STATISTICS):
         return [POST_STATISTICS]
+    post_reads_scoped = (context.get('event_name') in ('pull_request', 'push')
+                   and context.get('repository') == REPOSITORY
+                   and context.get('head_repository') == REPOSITORY
+                   and (context.get('event_name') != 'push' or context.get('head_ref') == 'dev')
+                   and context.get('post_reads_scope_verified') is True
+                   and bool(paths) and set(paths).issubset(POST_READS_ALLOWED_PATHS))
+    if requested == POST_READS and not post_reads_scoped:
+        raise ProfileBlocked('The requested post reads scope differs from its reviewed inputs.')
+    if post_reads_scoped and requested in (None, '', POST_READS):
+        return [POST_READS]
     eligible = (context.get('event_name') == 'pull_request'
                 and context.get('repository') == REPOSITORY
                 and context.get('head_repository') == REPOSITORY
@@ -792,6 +910,8 @@ def select_profiles(context, paths):
 
 
 def expected_smokes(profile):
+    if profile == POST_READS:
+        return ()
     if profile == POST_STATISTICS:
         return ()
     if profile == AUTH_SESSIONS:
@@ -853,7 +973,8 @@ def make_plan(context, paths, profile, jar_sha256):
         'schema_version': 1, 'status': 'planned', 'profile': profile,
         'identity': identity, 'jar_sha256': jar_sha256,
         'changed_paths_sha256': hashlib.sha256(_encoded(paths)).hexdigest(),
-        'selection_reason': ('fixed-post-statistics-inputs-and-scoped-postgresql' if profile == POST_STATISTICS else
+        'selection_reason': ('fixed-post-management-inputs-and-scoped-read-postgresql' if profile == POST_READS else
+                             'fixed-post-statistics-inputs-and-scoped-postgresql' if profile == POST_STATISTICS else
                              'fixed-auth-inputs-and-scoped-postgresql' if profile == AUTH_SESSIONS else
                              'fixed-visit-inputs-and-scoped-postgresql' if profile == VISIT_COLLECTION else
                              'fixed-admin-update-inputs-and-scoped-postgresql' if profile == ADMIN_MEMBER_UPDATE else
@@ -865,7 +986,10 @@ def make_plan(context, paths, profile, jar_sha256):
         'skipped_smokes': [step for step in ALL_SMOKES if step not in required],
     }
     if profile == FULL:
-        result['required_contracts'] = list(POST_STATISTICS_FULL_CONTRACTS + AUTH_FULL_CONTRACTS + VISIT_FULL_CONTRACTS)
+        result['required_contracts'] = list(POST_READS_FULL_CONTRACTS + POST_STATISTICS_FULL_CONTRACTS + AUTH_FULL_CONTRACTS + VISIT_FULL_CONTRACTS)
+    elif profile == POST_READS:
+        result['required_contracts'] = list(POST_READS_REQUIRED_CONTRACTS)
+        result['skipped_contracts'] = list(POST_READS_SKIPPED_CONTRACTS)
     elif profile == POST_STATISTICS:
         result['required_contracts'] = list(POST_STATISTICS_REQUIRED_CONTRACTS)
         result['skipped_contracts'] = list(POST_STATISTICS_SKIPPED_CONTRACTS)
@@ -974,6 +1098,7 @@ def runtime_context():
         identity['visit_collection_scope_verified'] = verify_visit_collection_inputs()
         identity['auth_sessions_scope_verified'] = verify_auth_sessions_inputs()
         identity['post_statistics_scope_verified'] = verify_post_statistics_inputs()
+        identity['post_reads_scope_verified'] = verify_post_reads_inputs()
         return identity, _paths(paths)
     except (ImportError, KeyError, TypeError, AttributeError, OSError, UnicodeError, ValueError):
         raise ProfileBlocked('The verified runtime context could not be constructed.') from None
@@ -1000,7 +1125,7 @@ def _write_evidence(path, expected_name, value):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('plan', 'audit'), required=True)
-    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION, AUTH_SESSIONS, POST_STATISTICS), required=True)
+    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION, AUTH_SESSIONS, POST_STATISTICS, POST_READS), required=True)
     parser.add_argument('--jar', type=Path, required=True)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--execution', type=Path)

@@ -187,7 +187,7 @@ class AdminMemberUpdateProfileTest(unittest.TestCase):
                     patch.object(profile, 'verify_member_management_inputs', return_value=False), \
                     patch.object(profile, 'verify_signup_statistics_inputs', return_value=False), \
                     patch.object(profile, 'verify_auth_sessions_inputs', return_value=False), \
-                    patch.object(profile, 'verify_post_statistics_inputs', return_value=False), \
+                    patch.object(profile, 'verify_post_statistics_inputs', return_value=False), patch.object(profile, 'verify_post_reads_inputs', return_value=False), \
                     patch.object(profile, 'verify_visit_collection_inputs', return_value=False), \
                     patch.object(profile, 'verify_admin_member_update_inputs', return_value=verified) as check:
                 actual, _ = profile.runtime_context()

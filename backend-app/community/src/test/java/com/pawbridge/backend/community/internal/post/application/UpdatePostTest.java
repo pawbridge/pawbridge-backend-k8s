@@ -25,6 +25,17 @@ class UpdatePostTest {
 
     @BeforeEach void givenExistingOwner(){when(reader.findById(42)).thenReturn(Optional.of(previous));when(users.findNickname(7)).thenReturn(Optional.of("작성자"));}
 
+    @Test void given__another_authors_post__when__updating_as_admin__then__retain_its_author_and_reuse_the_same_writer_without_media() {
+        when(writer.update(42,7,"admin edit",null,null)).thenReturn(previous);
+        PostDetails result=update.updateAsAdmin(42,"admin edit",null,List.of());
+        assertThat(result.authorId()).isEqualTo(7);
+        assertThat(result.authorNickname()).isEqualTo("작성자");
+        var order=inOrder(reader,users,writer);
+        order.verify(reader).findById(42);order.verify(users).findNickname(7);
+        order.verify(writer).update(42,7,"admin edit",null,null);order.verifyNoMoreInteractions();
+        verifyNoInteractions(remover,uploader);
+    }
+
     @Test void given__omitted_files_and_null_fields__when__updating__then__pass_null_patch_without_media_and_keep_missing_board() {
         when(writer.update(42,7,null,null,null)).thenReturn(previous);
         PostDetails response=update.update(42,7,null,null,List.of());

@@ -128,7 +128,7 @@ class PostDeleteHttpTest {
     }
 
     @ParameterizedTest @ValueSource(strings={"DELETE /api/v1/posts", "DELETE /api/v1/posts/42/extra",
-            "DELETE /api/v1/posts/read/42", "DELETE /api/v1/admin/posts/42",
+            "DELETE /api/v1/posts/read/42", "DELETE /api/v1/admin/posts/42/extra",
             "PATCH /api/v1/posts/42", "GET /api/v1/posts/42"})
     void given__unexposed_method_or_path__when__requesting__then__deny_before_business(String request) throws Exception {
         String[] parts=request.split(" ",2);

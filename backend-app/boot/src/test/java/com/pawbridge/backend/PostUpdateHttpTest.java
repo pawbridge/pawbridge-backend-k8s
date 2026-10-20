@@ -125,7 +125,7 @@ class PostUpdateHttpTest {
         verifyNoInteractions(reader,remover,uploader,users,writer);
     }
     @ParameterizedTest @ValueSource(strings={"PUT /api/v1/posts","PUT /api/v1/posts/42/extra","PUT /api/v1/posts/read/42",
-            "PUT /api/v1/admin/posts/42","PATCH /api/v1/posts/42","POST /api/v1/posts/42","GET /api/v1/posts/42"})
+            "PUT /api/v1/admin/posts/42/extra","PATCH /api/v1/posts/42","POST /api/v1/posts/42","GET /api/v1/posts/42"})
     void given__unexposed_path_or_method__when__requesting__then__deny_before_business(String request) throws Exception {
         String[] parts=request.split(" ",2);
         mvc.perform(request(HttpMethod.valueOf(parts[0]),parts[1]).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_USER")))

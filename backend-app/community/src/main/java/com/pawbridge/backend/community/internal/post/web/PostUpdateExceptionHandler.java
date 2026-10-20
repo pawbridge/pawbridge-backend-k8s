@@ -13,7 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice(assignableTypes = PostUpdateController.class)
+@RestControllerAdvice(assignableTypes = {PostUpdateController.class, AdminPostUpdateController.class})
 public final class PostUpdateExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(PostUpdateExceptionHandler.class);
     private static final int MAX_LOGGED_CAUSES = 4;

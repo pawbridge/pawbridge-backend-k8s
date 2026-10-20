@@ -15,8 +15,11 @@ public final class ReadPost {
     public PostDetails read(long postId) {
         PostSnapshot post = postReader.findById(postId)
                 .orElseThrow(PostNotFoundException::new);
-        String nickname = findAuthorNickname(post.authorId());
+        return details(post);
+    }
 
+    PostDetails details(PostSnapshot post) {
+        String nickname = findAuthorNickname(post.authorId());
         return new PostDetails(
                 post.postId(), post.authorId(), nickname, post.title(), post.content(),
                 post.boardType(), post.imageUrls(), post.createdAt(), post.updatedAt());

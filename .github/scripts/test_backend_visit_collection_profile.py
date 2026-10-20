@@ -153,7 +153,7 @@ class VisitCollectionProfileTest(unittest.TestCase):
     def test_given_full_execution__when_auditing__then_keep_all_jars_and_require_admin_parent_plus_visit_pg(self):
         ctx=context();plan=profile.make_plan(ctx,PATHS,profile.FULL,JAR)
         self.assertEqual(list(profile.ALL_SMOKES),plan['required_smokes'])
-        self.assertEqual(list(profile.POST_STATISTICS_FULL_CONTRACTS+profile.AUTH_FULL_CONTRACTS+profile.VISIT_FULL_CONTRACTS),plan['required_contracts'])
+        self.assertEqual(list(profile.POST_READS_FULL_CONTRACTS+profile.POST_STATISTICS_FULL_CONTRACTS+profile.AUTH_FULL_CONTRACTS+profile.VISIT_FULL_CONTRACTS),plan['required_contracts'])
         actual={key:dict(outcome='success',conclusion='success') for key in (*profile.ALL_SMOKES,*plan['required_contracts'],'owned_cleanup')}
         self.assertEqual('passed',profile.audit_execution(plan,ctx,PATHS,profile.FULL,JAR,actual)['status'])
         for key in (*plan['required_contracts'],'owned_cleanup'):
@@ -221,7 +221,7 @@ class VisitCollectionProfileTest(unittest.TestCase):
         env=dict(GITHUB_EVENT_PATH='/unused/event.json',GITHUB_REPOSITORY=profile.REPOSITORY,GITHUB_SHA=ctx['source_sha'],GITHUB_RUN_ID=ctx['run_id'],GITHUB_RUN_ATTEMPT='1',PULL_REQUEST_BASE_SHA=BASE,VISIT_COLLECTION_SCOPE_VERIFIED='true')
         for valid in (True,False):
             common=types.SimpleNamespace(validate_event=Mock(return_value='pull_request'),changed_paths=Mock(return_value=PATHS),git=Mock(return_value=(ctx['tree_sha']+'\n').encode()))
-            with self.subTest(valid=valid),patch.dict('sys.modules',{'ci_branch_policy':common}),patch.dict(profile.os.environ,env,clear=True),patch.object(profile.Path,'read_text',return_value=json.dumps(payload)),patch.object(profile,'verify_note_expiry_inputs',return_value=False),patch.object(profile,'verify_member_management_inputs',return_value=False),patch.object(profile,'verify_signup_statistics_inputs',return_value=False),patch.object(profile,'verify_admin_member_update_inputs',return_value=False),patch.object(profile,'verify_auth_sessions_inputs',return_value=False),patch.object(profile,'verify_post_statistics_inputs',return_value=False),patch.object(profile,'verify_visit_collection_inputs',return_value=valid) as verify:
+            with self.subTest(valid=valid),patch.dict('sys.modules',{'ci_branch_policy':common}),patch.dict(profile.os.environ,env,clear=True),patch.object(profile.Path,'read_text',return_value=json.dumps(payload)),patch.object(profile,'verify_note_expiry_inputs',return_value=False),patch.object(profile,'verify_member_management_inputs',return_value=False),patch.object(profile,'verify_signup_statistics_inputs',return_value=False),patch.object(profile,'verify_admin_member_update_inputs',return_value=False),patch.object(profile,'verify_auth_sessions_inputs',return_value=False),patch.object(profile,'verify_post_statistics_inputs',return_value=False),patch.object(profile,'verify_post_reads_inputs',return_value=False),patch.object(profile,'verify_visit_collection_inputs',return_value=valid) as verify:
                 actual,_=profile.runtime_context()
             verify.assert_called_once_with();self.assertIs(valid,actual['visit_collection_scope_verified'])
             self.assertNotIn('visit_collection_scope_verified',profile.make_plan(ctx,PATHS,profile.VISIT_COLLECTION,JAR)['identity'])

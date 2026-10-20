@@ -42,6 +42,7 @@ configurations {
 }
 
 dependencies {
+    implementation 'org.springframework.data:spring-data-commons'
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
@@ -324,6 +325,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminUserUpdateCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminPostStatisticsCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminPostReadCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
@@ -1162,3 +1164,20 @@ tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF6Ad
     }
 }
 tasks.named('adminPostStatisticsCompatibilitySeoulTest') { shouldRunAfter tasks.named('adminPostStatisticsCompatibilityTest') }
+
+
+tasks.register('adminPostReadCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Compares original raw Repository/Pageable and restricted read SQL without new fixtures.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'admin.post.read.oracle.receipt', rootProject.file('build/ci/f6-oracle-sha256.txt').absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminPostReadCompatibilityTest'
+        failOnNoMatchingTests = true
+    }
+    outputs.upToDateWhen { false }
+}

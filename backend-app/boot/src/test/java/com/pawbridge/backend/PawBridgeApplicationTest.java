@@ -76,6 +76,10 @@ class PawBridgeApplicationTest {
                     assertThat(adminUpdateTx.getTimeout()).isEqualTo(15);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.session.application.AuthSessions.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostReadController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.ReadAdminPosts.class)).hasSize(1);
+                    assertThat(context.getBean(com.pawbridge.backend.community.internal.post.application.PostPageReader.class)).isSameAs(context.getBean("postReader"));
+                    assertThat(context.getBeansOfType(org.springframework.data.web.PageableHandlerMethodArgumentResolver.class)).hasSize(1);
                     var postStatistics = context.getBean(com.pawbridge.backend.community.internal.post.application.AdminPostStatisticsQuery.class);
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(postStatistics, "jdbc")).isSameAs(context.getBean("readJdbc"));
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(postStatistics, "todayTransaction")).isSameAs(context.getBean("readOnlyTransaction"));
@@ -200,6 +204,8 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.UpdatePost.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.application.PostModification.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.PostUpdateController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostUpdateController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostDeleteController.class)).hasSize(1);
                     var pools = context.getBeansOfType(com.zaxxer.hikari.HikariDataSource.class);
                     assertThat(pools.get("dataSource").isReadOnly()).isTrue();
                     assertThat(pools.get("dataSource").getMaximumPoolSize()).isEqualTo(2);
