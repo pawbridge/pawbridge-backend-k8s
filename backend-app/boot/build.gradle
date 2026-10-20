@@ -325,6 +325,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitCollectionCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayAccessTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.F16LegacyVisitMvcTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteRecipientCompatibilityTest'
@@ -1021,3 +1022,42 @@ tasks.register('adminUserUpdateCompatibilityTest', Test) {
     }
     outputs.upToDateWhen { false }
 }
+
+// Existing F16 raw classes already contain the collection methods. Add evidence, no generated wrapper/class.
+tasks.register('prepareF16VisitCollectionOracle', Exec) {
+    dependsOn tasks.named('prepareF16LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f16_legacy_oracle.py'))
+    outputs.file(rootProject.file('build/ci/f16-collection-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f16_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f16LegacyOracle/java').get().asFile,
+            rootProject.file('build/ci/f16-collection-oracle-sha256.txt'), '--collection'
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF16VisitCollectionOracle') }
+
+['visitCollectionCompatibilityTest': 'UTC', 'visitCollectionCompatibilitySeoulTest': 'Asia/Seoul'].each { taskName, zone ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+        classpath = sourceSets.compatibilityTest.runtimeClasspath
+        useJUnitPlatform()
+        systemProperty 'user.timezone', zone
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        // The workflow explicitly supplies member or admin; never infer an ACL mode from live privileges.
+        def mode = providers.gradleProperty('visitCollectionFixtureMode').getOrElse('UNSET')
+        systemProperty 'visit.collection.fixture.mode', mode
+        doFirst {
+            if (!(mode in ['member','admin'])) throw new GradleException('Explicit visitCollectionFixtureMode member/admin is required')
+        }
+        systemProperty 'visit.collection.fixture.receipt', rootProject.file('build/ci/visit-collection-fixture-write.txt').absolutePath
+        systemProperty 'visit.collection.oracle.receipt', rootProject.file('build/ci/f16-collection-oracle-sha256.txt').absolutePath
+        filter {
+            includeTestsMatching(zone == 'UTC'
+                    ? 'com.pawbridge.backend.compatibility.PostgresqlVisitCollectionCompatibilityTest'
+                    : 'com.pawbridge.backend.compatibility.PostgresqlVisitCollectionCompatibilityTest.givenAMicrosecondCollectionStartAndSparseLeapDays__whenStartingTwiceAndReadingPeriodsInEitherZone__thenKeepTheFirstInstantAndZeroFillOnlyCollectedDays')
+            failOnNoMatchingTests = true
+        }
+        outputs.upToDateWhen { false }
+    }
+}
+tasks.named('visitCollectionCompatibilitySeoulTest') { shouldRunAfter tasks.named('visitCollectionCompatibilityTest') }

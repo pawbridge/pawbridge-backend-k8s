@@ -78,6 +78,8 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.config.ScheduledTaskHolder.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.VisitCollection.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.VisitIdentity.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.VisitCountReader.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.application.ReadTodayVisits.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.visit.web.VisitTodayController.class)).hasSize(1);

@@ -367,6 +367,108 @@ class F16GuardTest(unittest.TestCase):
         self.assertIsNotNone(re.search(allowed, 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar'))
 
 
+class VisitCollectionGuardTest(unittest.TestCase):
+    """New artifact/mode/late-DDL controls only; no database, Git process, JVM or network."""
+
+    def test_given_wrong_collection_destination_or_source_hash__when_verifying__then_no_evidence_write(self):
+        for wrong in ('path','hash'):
+            with self.subTest(wrong=wrong), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory).resolve();output=root/'backend-app/boot/build/generated/sources/f16LegacyOracle/java'
+                target=root/'backend-app/build/ci/f16-collection-oracle-sha256.txt'
+                with patch.object(oracle.subprocess,'check_output',return_value=b'changed source') as git,patch.object(Path,'write_text') as write:
+                    with self.assertRaises(SystemExit):oracle.extract_collection(root,output if wrong=='hash' else root/'other',target)
+                    write.assert_not_called()
+                    if wrong=='path':git.assert_not_called()
+
+    def test_given_a_conflicting_collection_receipt_after_controlled_inputs__when_verifying__then_preserve_old_get_and_other_files(self):
+        # Controlled input hashes prove conflict-before-write, not the original visit SQL/business contract.
+        raw={oracle.COLLECTION_DDL:b'ddl'}
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();output=root/'backend-app/boot/build/generated/sources/f16LegacyOracle/java';output.mkdir(parents=True)
+            old=output/'Keep.java';old.write_bytes(b'keep');target=root/'backend-app/build/ci/f16-collection-oracle-sha256.txt';target.parent.mkdir(parents=True)
+            base=target.with_name('f16-oracle-sha256.txt');base.write_text(oracle.collection_base_receipt());before=base.read_bytes();target.write_text('conflict')
+            with patch.object(oracle,'COLLECTION_EXPECTED',{p:hashlib.sha256(b).hexdigest() for p,b in raw.items()}),patch.object(oracle,'COLLECTION_SHARED',{}), \
+                    patch.object(oracle.subprocess,'check_output',return_value=b'ddl'),patch.object(oracle,'collection_fragments',return_value=('first','second')),patch.object(Path,'write_text') as write:
+                with self.assertRaisesRegex(SystemExit,'changed F16 collection receipt'):oracle.extract_collection(root,output,target)
+                write.assert_not_called()
+            self.assertEqual(before,base.read_bytes());self.assertEqual(b'keep',old.read_bytes());self.assertEqual('conflict',target.read_text())
+
+    def test_given_missing_or_changed_shared_or_receipt__when_preparing_either_mode__then_refuse_before_any_ddl_or_grant(self):
+        import f29_ci as late
+        for action,parent in ((late.visit_collection_prepare,'member_require_fixture'),(late.admin_visit_collection_prepare,'admin_update_require_fixture')):
+            for defect in ('shared','receipt'):
+                with self.subTest(action=action.__name__,defect=defect),tempfile.TemporaryDirectory() as directory:
+                    root=Path(directory).resolve()/'backend-app';evidence=root/'build/ci';evidence.mkdir(parents=True)
+                    shared=root/'shared.java';shared.write_bytes(b'shared')
+                    with patch.object(oracle,'COLLECTION_EXPECTED',{'source':hashlib.sha256(b'shared').hexdigest()}),patch.object(oracle,'COLLECTION_SHARED',{'source':'backend-app/shared.java'}), \
+                            patch.object(late,'ROOT',root),patch.object(late,'EVIDENCE',evidence),patch.object(late.f2,'require_hosted'),patch.object(late,parent,return_value='123-1'),patch.object(late,'owned_sql') as sql:
+                        (evidence/'f16-oracle-sha256.txt').write_text(oracle.collection_base_receipt());extra=evidence/'f16-collection-oracle-sha256.txt';extra.write_text(oracle.collection_receipt())
+                        if defect=='shared':shared.write_bytes(b'changed')
+                        else:extra.write_text(extra.read_text()+'unexpected\n')
+                        with self.assertRaisesRegex(SystemExit,'artifacts or separate source receipt'):action()
+                        sql.assert_not_called()
+                    self.assertFalse((evidence/late.VISIT_COLLECTION_RECEIPT).exists())
+
+    def test_given_either_exact_parent__when_extending__then_create_only_two_original_tables_and_record_the_fixed_mode_without_rows(self):
+        import f29_ci as late
+        for mode,action,parent,strict,snapshot in (
+                ('member-cleanup',late.visit_collection_prepare,'member_require_fixture','visit_collection_require_fixture','visit_collection_database_snapshot'),
+                ('admin-user-update',late.admin_visit_collection_prepare,'admin_update_require_fixture','admin_visit_collection_require_fixture','admin_visit_collection_database_snapshot')):
+            with self.subTest(mode=mode),tempfile.TemporaryDirectory() as directory:
+                evidence=Path(directory).resolve();before={'users':[{'user_id':42}]};after=dict(before,daily_visitor=[],visit_collection=[])
+                with patch.object(late,'EVIDENCE',evidence),patch.object(late.f2,'require_hosted'),patch.object(late,parent,return_value='123-1') as prior, \
+                        patch.object(late,'visit_collection_require_oracle_receipt'),patch.object(late.subprocess,'check_output',return_value=b'controlled DDL'), \
+                        patch.object(oracle,'collection_fragments',return_value=('CREATE TABLE first;\n','CREATE TABLE second;\n')), \
+                        patch.object(late,'owned_sql',return_value='t') as sql,patch.object(late,'member_database_snapshot',return_value=before), \
+                        patch.object(late,strict,return_value='123-1'),patch.object(late,snapshot,return_value=after):
+                    action();prior.assert_called_once()
+                    writes=[c.kwargs['input_text'] for c in sql.call_args_list if 'input_text' in c.kwargs]
+                    self.assertEqual(1,len(writes));self.assertEqual(2,writes[0].count('CREATE TABLE '));self.assertEqual(3,writes[0].count('GRANT '))
+                    self.assertNotIn('INSERT INTO ',writes[0]);self.assertNotIn('UPDATE pawbridge_user',writes[0]);self.assertNotIn('SEQUENCE',writes[0])
+                    self.assertIn('fixture='+mode+' plus visit collection\n',(evidence/late.VISIT_COLLECTION_RECEIPT).read_text())
+
+    def test_given_fixed_modes_and_catalog_failures__when_checking__then_keep_exact_old_or_admin_user_acl_and_reject_every_bad_visit_catalog(self):
+        import f29_ci as late
+        for action,identity,reads,updates in (
+                (late.visit_collection_require_fixture,'visit_collection_require_identity',('user_id','nickname'),('user_id','nickname','updated_at')),
+                (late.admin_visit_collection_require_fixture,'admin_visit_collection_require_identity',('user_id','nickname','role','care_reg_no'),('user_id','nickname','updated_at','role','care_reg_no'))):
+            with patch.object(late,identity,return_value='123-1'),patch.object(late,'_member_require_fixture_without_user_writer_acl'),patch.object(late,'_member_require_user_writer_acl') as acl,patch.object(late,'_visit_collection_require_tables'):
+                self.assertEqual('123-1',action());acl.assert_called_once_with(reads,updates)
+        with self.assertRaises(ValueError):late._visit_collection_proof('123-1','inferred-mode')
+        self.assertNotEqual(late.visit_collection_fixture_proof('123-1'),late.admin_visit_collection_fixture_proof('123-1'))
+        self.assertEqual('GRANT SELECT(visit_date,visitor_hash),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;',late.VISIT_COLLECTION_GRANTS.splitlines()[0])
+        self.assertEqual(3,len(late.VISIT_COLLECTION_GRANTS.splitlines()))
+        self.assertNotIn('pawbridge_f2_reader',late.VISIT_COLLECTION_GRANTS)
+        with patch.object(late,'owned_sql',return_value='t') as sql:
+            late._visit_collection_require_tables();self.assertEqual(14,sql.call_count)
+            visitor_columns=sql.call_args_list[1].args[0]
+            self.assertIn("has_column_privilege('pawbridge_f3_writer','pawbridge_community.daily_visitor',column_name,'SELECT')=(true)",visitor_columns)
+            self.assertIn("has_column_privilege('pawbridge_f2_reader','pawbridge_community.daily_visitor',column_name,'SELECT')=false",visitor_columns)
+            self.assertIn("column_name,'UPDATE')=(false)",visitor_columns)
+        for failed in range(14):
+            with self.subTest(failed=failed),patch.object(late,'owned_sql',side_effect=['t']*failed+['f']) as sql:
+                with self.assertRaises(SystemExit):late._visit_collection_require_tables()
+                self.assertEqual(failed+1,sql.call_count)
+
+    def test_given_preexisting_count_writer_right_or_business_table__when_extending__then_never_commit_or_write_receipt(self):
+        import f29_ci as late
+        for answers in (['f'],['t','f']):
+            with self.subTest(answers=answers),tempfile.TemporaryDirectory() as directory,patch.object(late,'EVIDENCE',Path(directory).resolve()), \
+                    patch.object(late,'visit_collection_require_oracle_receipt'),patch.object(late.subprocess,'check_output',return_value=b'controlled DDL'),patch.object(oracle,'collection_fragments',return_value=('one','two')), \
+                    patch.object(late,'owned_sql',side_effect=answers) as sql:
+                with self.assertRaises(SystemExit):late._visit_collection_extend('123-1',late.visit_collection_fixture_proof('123-1'),lambda:'123-1',lambda:{})
+                self.assertFalse(any('input_text' in c.kwargs for c in sql.call_args_list));self.assertFalse((Path(directory)/late.VISIT_COLLECTION_RECEIPT).exists())
+
+    def test_given_twenty_six_snapshot_keys_or_unknown_rows__when_observing__then_keep_all_old_raw_tables_and_reject_missing_or_extra_keys(self):
+        import f29_ci as late
+        valid={key:[] for key,_,_ in late.SNAPSHOT_TABLES+late.MEMBER_TABLES+late.VISIT_COLLECTION_TABLES};valid['users']=[{'user_id':42}]
+        self.assertEqual(26,len(valid));self.assertIn('daily_visitor',valid);self.assertIn('visit_collection',valid)
+        with patch.object(late,'owned_sql',return_value=json.dumps(valid)) as sql:self.assertEqual(valid,late._visit_collection_snapshot());self.assertEqual(1,sql.call_count)
+        for changed in ({k:v for k,v in valid.items() if k!='users'},dict(valid,unknown=[]),dict(valid,daily_visitor='not rows')):
+            with self.subTest(changed_keys=len(changed)),patch.object(late,'owned_sql',return_value=json.dumps(changed)):
+                with self.assertRaisesRegex(SystemExit,'twenty-six raw tables'):late._visit_collection_snapshot()
+
+
 if __name__ == '__main__':
     print('F16 guards: mocked PostgreSQL/JAR/JVM/sockets; fixed inputs use read-only git show, no Git mutations.', flush=True)
     with redirect_stdout(io.StringIO()):

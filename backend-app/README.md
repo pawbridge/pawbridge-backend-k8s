@@ -197,7 +197,7 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 
 ## F16 공개 오늘 방문자 합계 조회
 
-정확한 `GET /api/v1/visits/today`는 기존 `pawbridge.visits.enabled` 설정과 `DAILY_VISITORS_ENABLED` 환경 변수의 기본 false를 유지한다. true일 때만 조회 실행자·reader·controller·advice를 조립하며 서명키·VisitCookie·원본 lifecycle·시작 INSERT·집계 POST·정리/예약 작업은 등록하지 않는다. 공개 GET 보안 matcher는 두 상태에서 같고 false/누락은404다. 이404 본문을 원본 global envelope와 동일하다고 주장하지 않으며 미편입 경로를 열지 않는다.
+정확한 `GET /api/v1/visits/today`는 기존 `pawbridge.visits.enabled` 설정과 `DAILY_VISITORS_ENABLED` 환경 변수의 기본 false를 유지한다. 단독 조회 모드(`pawbridge.visits.collection-enabled=false`)에서 true일 때 조회 실행자·reader·controller·advice만 조립하며 서명키·VisitCookie·원본 lifecycle·시작 INSERT·집계 POST·정리/예약 작업은 등록하지 않는다. 공개 GET 보안 matcher는 두 상태에서 같고 false/누락은404다. 이404 본문을 원본 global envelope와 동일하다고 주장하지 않으며 미편입 경로를 열지 않는다.
 
 조회 실행자는 F15의 Clock에서 instant를 한 번 읽고 서울 날짜를 TX/연결 전에 결정한다. DATE 조건·BIGINT 합계만 읽어 정확한 date/count 두 필드와 부재0을 반환한다. Date.valueOf 바인딩, 원문 long JSON number와 최초 날짜를 보존하며 대기 중 자정 재검사·현재 시각 재조회·음수/null 보정은 없다. 익명·잘못된 Bearer·X-User 헤더·Origin·Cookie·bot 여부로 합계를 바꾸지 않는다. 성공과 DataAccessException503은 명시적 no-store이며 쿠키를 발급하지 않는다. DAO503은 `방문 통계를 불러올 수 없습니다.`, 일반 Runtime500은 `서버 에러!`다. 실제 commit 예외가 DAO로 번역되면503이며 TX 실패를 모두500/503으로 묶지 않는다. 일반500에는 별도 캐시 정책을 추가하지 않고 공통 보안 헤더를 구분한다.
 
@@ -526,3 +526,14 @@ private 앱 준비에서 단위·실제 JWT MVC·조립·기존 회원수 회귀
 ADMIN PUT `/api/v1/admin/users/{userId}`는 기존 writer의 한 TX에서 회원을 `FOR UPDATE`로 읽고, 보호소 승인 필요 조건 → 닉네임 중복 → 변경 순서를 유지한다. 관리자 전용 nullable 닉네임 Pattern(2~10자 영문·숫자·한글), 세 역할과 careRegNo의 원문 제약을 보존한다. 같은 raw 닉네임은 중복 조회를 하지 않고, 실제 dirty가 있을 때만 감사시각과 UPDATE를 수행한다. 선행 중복은409, SQL unique 경합과 commit 실패는500이며 새로운 retry나 역할 승격 정책을 추가하지 않는다. 기존 writer/TM·TT15를 재사용하고 무제한 대기까지 원문과 같다고 주장하지 않는다.
 
 `admin-member-update` 선택 검증은 고정 앱20 SHA와 공통 빌드·단위 검사를 유지한다. 원문 컴파일 → 회원 합성 fixture24 → 후기 최소4열 권한 준비 → 원문 JPA/후보 JDBC의 UTC16 고유 사례 → 소유 정리를 요구하며 과거 JAR28·무관 PG를 반복하지 않는다. 운영 권한·DDL·회원 이력은 변경하지 않는다. 실제 source PG/잠금/감사시각/원복 성공은 해당 CI 결과로만 판정한다.
+
+
+## 방문 식별·집계와 관리자 기간 통계
+
+`pawbridge.visits.collection-enabled`는 기본 false다. 기존 `pawbridge.visits.enabled`가 true인 단독 조회는 서명키나 쓰기 lifecycle을 요구하지 않는다. collection=true는 read=true와 유효한 `pawbridge.visits.signing-key`를 요구하며 모순된 설정은 기동에 실패한다.
+
+활성화하면 공개 POST `/api/v1/visits/identity`, `/api/v1/visits/today`와 ADMIN GET `/api/v1/admin/visits/stats/period`를 조립한다. Origin·bot·중복 cookie 검사, host cookie/HMAC·서울 일자 구분과 원본 204/409 응답을 유지한다. 집계는 기존 writer/TM의 10초 트랜잭션으로 날짜별 공유 잠금 후 날짜를 다시 확인하고 식별자 중복 제거와 일별 합계를 함께 반영한다. 기간 조회는 수집 시작 이전 날짜를 만들지 않고 수집된 날짜의 빈 합계만0으로 채운다.
+
+단일 Spring lifecycle이 준비 완료 때 수집 시작을 기록하고 60초 간격으로 정리한다. 서울00:05 이전에는 지우지 않으며 날짜별 배타 잠금·개별 커밋으로 오래된 식별자만 제거한다. 일별 합계와 수집 시작 시각은 보존한다. 기존 writer/Clock을 재사용하고 scheduler는 후보 내부에만 조립한다. 운영의 예약 작업을 인계하거나 실행한 변경이 아니다.
+
+고정된 앱22개와 README 경로만 허용하는 `visit-collection` CI는 공통 Java21 빌드·단위 검사, 원문 준비, member24→방문26표의 최소 fixture, 실제 UTC9·Seoul1 비교와 소유 정리를 요구한다. selected는 기존 관리자 추가 권한을 받지 않으며 full은 명시 admin 모드를 사용한다. 과거28 JAR 여정은 selected에서 미실행이고 전체 회귀 성공으로 승격하지 않는다. 현재 원문·후보 준비와 관련 단위/HTTP 검증은 통과했으며 실제 PostgreSQL10사례와 실행중 정리·종료 검증은 CI 결과로 별도 판단한다.
