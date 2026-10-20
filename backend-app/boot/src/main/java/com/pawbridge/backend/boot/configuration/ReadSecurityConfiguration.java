@@ -33,8 +33,14 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.shelter-membership.enabled:false}") boolean shelterMembershipEnabled,
             @Value("${pawbridge.user-animal-activities.enabled:false}") boolean animalActivitiesEnabled,
             @Value("${pawbridge.home-videos.management-enabled:false}") boolean videoManagementEnabled,
-            @Value("${pawbridge.animal-reports.enabled:false}") boolean reportsEnabledFlag) throws Exception {
+            @Value("${pawbridge.animal-reports.enabled:false}") boolean reportsEnabledFlag,
+            @Value("${pawbridge.user-store-mypage.enabled:false}") boolean storeMyPageEnabledFlag) throws Exception {
 
+        var storeMyPageEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->storeMyPageEnabledFlag;
+        var storeMyPage=new AndRequestMatcher(storeMyPageEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/users/me/wishlists","GET"),
+                new AntPathRequestMatcher("/api/v1/users/me/orders","GET"),
+                new AntPathRequestMatcher("/api/v1/users/me/cart","GET")));
         var reportsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->reportsEnabledFlag;
         var reportReading=new AndRequestMatcher(reportsEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/reports","GET"),
@@ -133,7 +139,7 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
         var adminRoutes = new OrRequestMatcher(homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var postWriting = new OrRequestMatcher(storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)

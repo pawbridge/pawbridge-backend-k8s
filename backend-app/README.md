@@ -643,3 +643,12 @@ Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/
 합성 CI 계정은 제보·홈 관리 전체를 지원하는 운영 계정이 아니다. Reader/Writer는 필수 외부 설정으로 선택되며, 기존 fixture 역할을 그대로 적용하면 새 조회·저장에 실패한다. 제보 기본 off와 홈 관리 기본 off를 유지하고 선택 계정의 실제 테이블/열·잠금·생성키 권한과 격리 요청·외부 연동을 확인하기 전 true/라우팅/예약 인계를 하지 않는다. 기존 strict 최소권한 계약을 느슨하게 만들거나 실제 GRANT를 실행하지 않았다.
 
 제보 기존활성 HTTP16과 비활성5경로의403·호출0, 기본off/명시true조립2의 실제23사례는 RED6→GREEN23/3XML/각5초로 검증하고 비작성 검수했다. 변경4파일/11메서드 전수 대조, 새 프로덕션 타입·architecture 반복은 없다. 이 결과는 실제 PG 권한/SQL·R2·활성 서버 검증이 아니다.
+
+
+### 본인 스토어 내정보 조회
+
+`pawbridge.user-store-mypage.enabled=true`와 명시적인 `service.store.url`일 때만 `/api/v1/users/me/wishlists`, `/orders`, `/cart`의 GET을 조립합니다. 기본은 비활성이고 활성 요청은 기존 JWT에서 검증한 본인 ID만 사용합니다. Store 소유의 읽기 API를 호출하며 새 SQL·DDL·권한·장바구니 생성·이벤트 발행은 없습니다.
+
+원문 `f06a72a06bd26662c647bde780dfc7a27bf7349c`의 회원 존재 확인 → 같은 읽기 TX 안 Store HTTP 순서를 유지하고, 기존 회원 프로필7열 조회와 기존 reader/TX를 재사용합니다. 원문의 exists 조회보다 넓은 기존 projection이며 응답으로 회원 정보를 내보내지 않습니다. 목록 Page/정렬/DTO·없는 장바구니204·없는 회원400·외부 오류500을 보존합니다. 예외 응답과 진단에는 외부 본문/인증값을 넣지 않습니다.
+
+후보 HTTP는 연결10초·읽기60초·redirect 금지입니다. 기존 읽기 TX의3초는 JDBC 예산이며 HTTP3초 제한이 아닙니다. 실제 Store 응답/Feign 전체 변형·reader 권한·DB 연결 수명·부하/고장 복구는 별도 활성화 전 검증이 필요합니다. 합성 loopback/단위·JWT/MVC·조립/구조 검증을 실제 Store·PG 검증으로 표현하지 않습니다. 이 PR로 원래 User/Store 실행기나 Kafka/CDC를 종료하지 않습니다.
