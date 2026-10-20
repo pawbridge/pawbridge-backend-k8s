@@ -722,3 +722,12 @@ User→Store 모듈 연결과 Animal 보호소/통계를 실제 함께 조립한
 source25사례·일반 독립검수와 새 합집합 Boot22사례·production compile/Business600 검사가8초에 성공했습니다. 원래 Boot22와 합집합22를44고유사례로 합산하지 않습니다. 위시리스트 source12 조립 단계에서 공통 App/보안/Storebuild 외 다른803부모파일과 source6을 보존했습니다. ID삭제 소유정책·실제PG/RETURNING/시간정밀도·writer 최소권한/identity sequence·commit/rollback·동시성·실제pool 종료는 미검증이며 활성화 전 확인해야 합니다. 운영·DB·결제/재고/Outbox/Redis·기존 데이터 변경은 없습니다.
 
 별도의 새 PG17.11 ARM64 컨테이너1에서 실제 SELECT/CTE·INSERT RETURNING·owner DELETE의 합성 SQL12사례가 psql 단일 세션으로 성공했습니다. networknone/포트0/hostmount0/volume0·tmpfs·512MiB/CPU1 한도였고 해당 컨테이너만 정상 종료·삭제했습니다. 이는 JDBC/ResultSet 매핑·최소권한·인가·rollback/동시성의 증거가 아니며, source SQL의 schema/placeholder를 합성 값으로 바꾼 구문·결과 형태 확인입니다. 기존 서비스·DB·자격증명을 사용하지 않았습니다.
+
+
+### 보호소 회원승인의 Animal 모듈 조회
+
+기존 `pawbridge.shelter-membership.enabled`는 기본 false이고, `pawbridge.shelter-membership.animal-backend`의 기본값은 http입니다. 명시 module일 때만 승인 중 보호소 등록번호를 Animal 공개 API로 조회하며 외부 origin/client를 만들지 않습니다. User→Animal.api만 추가하고 Animal→User나 Community의 직접 Animal 의존/참조는 계속 차단합니다.
+
+Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named reader/TM/ObjectMapper를 사용합니다. 기존 ShelterReads 빈이 없으면 동일 구현을 내부용으로 생성하며 공개 Shelter 경로를 켜지 않습니다. Reader RO REQUIRES_NEW와 기존 User writer는 분리합니다. 원문의 관리자/회원/잠금/상태검증·null/id/care 검증 및 원문 missing500→User503 분류를 보존합니다. 실제 Reader 권한·트랜잭션 suspend/resume·연결/잠금은 미검증입니다.
+
+동결 Shelter source7사례, 같은구조 guard6 성공과 독립 검수를 보존했습니다. 활동 module을 제외한 새조합은2사례·production compile/Business605를6초에 확인했습니다. 기존 source/전체구조 성공시험은 반복하지 않았습니다. 활동조회의 특정 collection sort는 원문200/후보500 차이가 있어 해당 API/JDBC/어댑터/시험/선택 설정을 게시에서 전부 제외하고 별도 준비본에 보존했습니다. 기존 User 활동조회는 HTTP를 유지합니다. 활동 모듈·전체 HTTP 동등성·운영 활성화 완료를 주장하지 않습니다.

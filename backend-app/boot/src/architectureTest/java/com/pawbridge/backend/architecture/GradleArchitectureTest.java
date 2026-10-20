@@ -16,6 +16,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GradleArchitectureTest extends BusinessBuildFixture {
     @Test
+    void givenUserAnimalApiAndCommunityUserChain_whenCheck_thenPermitResolvedTransitiveAnimalArtifacts() throws IOException {
+        javaSource("user", "internal.infrastructure.AnimalAdapter", "public class AnimalAdapter { com.pawbridge.backend.animal.api.AnimalLookup animals; }");
+        BuildResult result = runner("check").build();
+        assertTask(result, ":verifyArchitecture", SUCCESS); assertTask(result, ":verifyBusinessPackages", SUCCESS);
+        assertCompiled("community", "internal.application.PostReader");
+    }
+    @Test
+    void givenCommunityDirectAnimalEdge_whenCheck_thenStillRejectGraph() throws IOException {
+        appendModuleBuild("community", "dependencies { implementation project(':animal') }");
+        assertGraphRejected(runner("check").buildAndFail(), "forbidden project dependency :community -> :animal");
+    }
+    @Test
+    void givenCommunityUsesTransitiveAnimalApi_whenCheck_thenStillRejectBusinessReference() throws IOException {
+        appendModuleBuild("user", "dependencies { api project(':animal') }");
+        javaSource("community", "internal.infrastructure.AnimalBypass", "public class AnimalBypass { com.pawbridge.backend.animal.api.AnimalLookup animals; }");
+        assertPackageRejected(runner("check").buildAndFail(), "BUSINESS_INTERNAL", "com.pawbridge.backend.animal.api.AnimalLookup");
+    }
+    @Test
+    void givenCommunityUnregisteredAnimalFile_whenCheck_thenStillRejectArtifactBypass() throws IOException {
+        createEmptyJar("animal/build/unregistered/animal-copy.jar");
+        appendModuleBuild("community", "dependencies { runtimeOnly files(rootProject.file('animal/build/unregistered/animal-copy.jar')) }");
+        assertGraphRejected(runner("check").buildAndFail(), "forbidden project dependency :community -> :animal through files");
+    }
+
+    @Test
     void givenUserStoreApiAndCommunityUserChain_whenCheck_thenPermitOnlyResolvedTransitiveStoreArtifacts() throws IOException {
         javaSource("user", "internal.infrastructure.StoreAdapter", "public class StoreAdapter { com.pawbridge.backend.store.api.StoreLookup store; }");
         BuildResult result = runner("check").build();
@@ -75,7 +100,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     }
 
     @ParameterizedTest
-    @CsvSource({"user, community", "user, boot", "community, boot", "user, animal", "community, animal",
+    @CsvSource({"user, community", "user, boot", "community, boot", "community, animal",
             "animal, user", "animal, community", "animal, boot",
             "community, store", "store, user", "store, community", "store, boot"})
     void givenForbiddenBusinessEdge_whenCheck_thenRejectsGraph(String source, String target) throws IOException {
@@ -145,6 +170,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
     @Test
     void givenAnimalReferencesUserOutputAsFiles_whenAnimalCheck_thenRejectsOwner() throws IOException {
+        appendModuleBuild("user", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':animal' }");
         appendModuleBuild("animal", """
                 evaluationDependsOn(':user')
                 dependencies { implementation files(project(':user').sourceSets.main.output) }
@@ -156,6 +182,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
     @Test
     void givenAnimalSiblingServiceFileClasspath_whenAnimalCheck_thenRejects() throws IOException {
+        appendModuleBuild("user", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':animal' }");
         appendModuleBuild("boot", "configurations.implementation.dependencies.clear()");
         createEmptyJar("../store-service/build/libs/store-service.jar");
         appendModuleBuild("animal", "dependencies { runtimeOnly files(rootProject.file('../store-service/build/libs/store-service.jar')) }");
