@@ -956,7 +956,7 @@ def admin_update_denied_privilege(kind):
 VISIT_COLLECTION_RECEIPT = 'visit-collection-fixture-write.txt'
 VISIT_COLLECTION_TABLES = (('daily_visitor','pawbridge_community.daily_visitor','visit_date,visitor_hash'),
                            ('visit_collection','pawbridge_community.visit_collection','singleton'))
-VISIT_COLLECTION_GRANTS = """GRANT SELECT(visit_date),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;
+VISIT_COLLECTION_GRANTS = """GRANT SELECT(visit_date,visitor_hash),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;
 GRANT SELECT(visit_date,unique_visitors),INSERT(visit_date,unique_visitors),UPDATE(unique_visitors) ON pawbridge_community.daily_visit_count TO pawbridge_f3_writer;
 GRANT SELECT(singleton,started_at),INSERT(singleton,started_at) ON pawbridge_community.visit_collection TO pawbridge_f3_writer;
 """
@@ -1012,7 +1012,7 @@ def admin_visit_collection_require_identity():
 
 def _visit_collection_require_tables():
     expected = {
-        'daily_visitor': (2, "('visit_date','date',0,'NO',0),('visitor_hash','character',64,'NO',0)", "column_name='visit_date'", 'true', 'false', True, 1),
+        'daily_visitor': (2, "('visit_date','date',0,'NO',0),('visitor_hash','character',64,'NO',0)", 'true', 'true', 'false', True, 1),
         'daily_visit_count': (2, "('visit_date','date',0,'NO',0),('unique_visitors','bigint',0,'NO',0)", 'true', 'true', "column_name='unique_visitors'", False, 2),
         'visit_collection': (2, "('singleton','boolean',0,'NO',0),('started_at','timestamp with time zone',0,'NO',6)", 'true', 'true', 'false', False, 2),
     }

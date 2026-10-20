@@ -178,7 +178,7 @@ VISIT_COLLECTION = 'visit-collection'
 VISIT_BASE = 'd938003e464c1413b8c27071e3f07d85b4e25ed6'
 VISIT_APP_HASHES = {'backend-app/boot/build.gradle': 'e06453da8a4f23d3b939c1abccb5b17829579353267580fba64eec18f62d2ce8',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F16VisitCollectionOracle.java': '2cbd4d9067a00caa6bc4c94137936d8d68e880fdb9e1c513ed4282785090ab6b',
- 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlVisitCollectionCompatibilityTest.java': 'acd0d06225f49f1b5c1b65d16bdab727e75d643d91be53fabdf4c8607764d274',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlVisitCollectionCompatibilityTest.java': '9d9179a468a021d94347493a4d24ce7559fa71ee10ab9e7868a8659b08dde23d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '1309aa9842a35a9ff349c48b944d131bf4e5944778d59224ef0f3e203f94e5cd',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '1db238567ec15f202c447b1f7d56c8275e75c348b6002342b8f38bbedf69858a',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/VisitCollectionConfiguration.java': 'fbae2dc5a9ff22773dbe843e4a83dc0c9e64e6492ecc942bfd36e521f55f0070',
@@ -195,9 +195,9 @@ VISIT_APP_HASHES = {'backend-app/boot/build.gradle': 'e06453da8a4f23d3b939c1abcc
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/web/VisitCollectionExceptionHandler.java': '25b695f5d6721152e2db1fdb212f357718f3da167541554947eea9eb9a0405ad',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionTest.java': '60fe6146779d2690c54c3fea7dd4488a6918930281e2a71ed631b1606e547a40',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/visit/application/VisitIdentityTest.java': 'f1ca42cd42fe49519bdb5c9bcaf300768f7d4877cdca06028f42cc931d563c6e',
- 'backend-app/scripts/f29_ci.py': 'bee3366d450ec82a462ea586221ac5812d76d6a96cc75f62e7f4c23596478151',
+ 'backend-app/scripts/f29_ci.py': 'a44e649a73f8201ac97df5132bb5db7804f9e30a33e9c7135c2e3f201e5f9e45',
  'backend-app/scripts/prepare_f16_legacy_oracle.py': 'c315deaa411d3664830f0a3c3d038a0e8959654479998202dbcd9043f2dd44eb',
- 'backend-app/scripts/test_f16_ci_guards.py': '30e7a9ce10484d47806e5ee6e718c60ea2b55a668cff240d8bb3b0cce8ab7dcf'}
+ 'backend-app/scripts/test_f16_ci_guards.py': '35ff03ffab8f52ac4e3926d6fbb290e9f4773a98a3e865452f150c1fe2e98470'}
 VISIT_APP_EXCEPTIONS = frozenset(VISIT_APP_HASHES) | {'backend-app/README.md'}
 VISIT_ALLOWED_PATHS = ADMIN_ALLOWED_PATHS | frozenset(VISIT_APP_HASHES) | {
     '.github/scripts/test_backend_visit_collection_profile.py',
@@ -212,7 +212,8 @@ VISIT_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlVisitCollect
 VISIT_SINGLE_METHODS = ('givenAMicrosecondCollectionStartAndSparseLeapDays__whenStartingTwiceAndReadingPeriodsInEitherZone__thenKeepTheFirstInstantAndZeroFillOnlyCollectedDays', 'givenNewAndRepeatedDayIdentities__whenCountingThenARealSqlFailureOccursAfterTheCte__thenDedupeAndRollbackBothPhysicalWritesWithEitherManager', 'givenOldAndCurrentVisitorRows__whenCleanupCrossesTheSeoulFiveMinuteGrace__thenCommitEachOldDayAndPreserveAllAggregatesAndStartMetadata', 'givenCleanupHoldsTheExclusiveOldDayLock__whenCountWaitsAcrossSeoulMidnight__thenRecheckTheDayAfterWaitingAndNeverRecreateTheCleanedIdentity')
 VISIT_PARAMETER_METHODS = ('givenSharedDayLocksAndConcurrentIdentities__whenBothCount__thenSameIdentityDedupesAndDifferentIdentitiesIncrementWithoutLostUpdates', 'givenAnExactWriterPrivilegeRevoked__whenCountingOrCleaning__thenKeepTheWholePriorStateAndRestoreOnlyThatPrivilegeBeforeRecovery')
 VISIT_REPORT_CASES = tuple(name + '()' for name in VISIT_SINGLE_METHODS) + tuple(
-    name + '[' + str(index) + ']' for name in VISIT_PARAMETER_METHODS for index in (1,2))
+    name + '[' + str(index) + ']' for name, count in zip(VISIT_PARAMETER_METHODS, (2, 3))
+    for index in range(1, count + 1))
 VISIT_SEOUL_METHOD = 'givenAMicrosecondCollectionStartAndSparseLeapDays__whenStartingTwiceAndReadingPeriodsInEitherZone__thenKeepTheFirstInstantAndZeroFillOnlyCollectedDays'
 
 REPOSITORY = 'pawbridge/pawbridge-backend-k8s'
@@ -407,7 +408,7 @@ def verify_admin_member_update_report(directory):
 
 
 def verify_visit_collection_report(utc_directory, seoul_directory):
-    """Require all eight method/index labels and only the designated Seoul boundary case."""
+    """Require all nine method/index labels and only the designated Seoul boundary case."""
     for folder, expected in ((utc_directory, VISIT_REPORT_CASES),
                              (seoul_directory, (VISIT_SEOUL_METHOD + '()',))):
         try:

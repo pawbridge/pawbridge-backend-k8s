@@ -436,7 +436,15 @@ class VisitCollectionGuardTest(unittest.TestCase):
                 self.assertEqual('123-1',action());acl.assert_called_once_with(reads,updates)
         with self.assertRaises(ValueError):late._visit_collection_proof('123-1','inferred-mode')
         self.assertNotEqual(late.visit_collection_fixture_proof('123-1'),late.admin_visit_collection_fixture_proof('123-1'))
-        with patch.object(late,'owned_sql',return_value='t') as sql:late._visit_collection_require_tables();self.assertEqual(14,sql.call_count)
+        self.assertEqual('GRANT SELECT(visit_date,visitor_hash),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;',late.VISIT_COLLECTION_GRANTS.splitlines()[0])
+        self.assertEqual(3,len(late.VISIT_COLLECTION_GRANTS.splitlines()))
+        self.assertNotIn('pawbridge_f2_reader',late.VISIT_COLLECTION_GRANTS)
+        with patch.object(late,'owned_sql',return_value='t') as sql:
+            late._visit_collection_require_tables();self.assertEqual(14,sql.call_count)
+            visitor_columns=sql.call_args_list[1].args[0]
+            self.assertIn("has_column_privilege('pawbridge_f3_writer','pawbridge_community.daily_visitor',column_name,'SELECT')=(true)",visitor_columns)
+            self.assertIn("has_column_privilege('pawbridge_f2_reader','pawbridge_community.daily_visitor',column_name,'SELECT')=false",visitor_columns)
+            self.assertIn("column_name,'UPDATE')=(false)",visitor_columns)
         for failed in range(14):
             with self.subTest(failed=failed),patch.object(late,'owned_sql',side_effect=['t']*failed+['f']) as sql:
                 with self.assertRaises(SystemExit):late._visit_collection_require_tables()

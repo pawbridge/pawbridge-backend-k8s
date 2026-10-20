@@ -536,4 +536,4 @@ ADMIN PUT `/api/v1/admin/users/{userId}`는 기존 writer의 한 TX에서 회원
 
 단일 Spring lifecycle이 준비 완료 때 수집 시작을 기록하고 60초 간격으로 정리한다. 서울00:05 이전에는 지우지 않으며 날짜별 배타 잠금·개별 커밋으로 오래된 식별자만 제거한다. 일별 합계와 수집 시작 시각은 보존한다. 기존 writer/Clock을 재사용하고 scheduler는 후보 내부에만 조립한다. 운영의 예약 작업을 인계하거나 실행한 변경이 아니다.
 
-고정된 앱22개와 README 경로만 허용하는 `visit-collection` CI는 공통 Java21 빌드·단위 검사, 원문 준비, member24→방문26표의 최소 fixture, 실제 UTC8·Seoul1 비교와 소유 정리를 요구한다. selected는 기존 관리자 추가 권한을 받지 않으며 full은 명시 admin 모드를 사용한다. 과거28 JAR 여정은 selected에서 미실행이고 전체 회귀 성공으로 승격하지 않는다. 현재 원문·후보 준비와 관련 단위/HTTP 검증은 통과했으며 실제 PostgreSQL9사례와 실행중 정리·종료 검증은 CI 결과로 별도 판단한다.
+고정된 앱22개와 README 경로만 허용하는 `visit-collection` CI는 공통 Java21 빌드·단위 검사, 원문 준비, member24→방문26표의 최소 fixture, 실제 UTC9·Seoul1 비교와 소유 정리를 요구한다. selected는 기존 관리자 추가 권한을 받지 않으며 full은 명시 admin 모드를 사용한다. 과거28 JAR 여정은 selected에서 미실행이고 전체 회귀 성공으로 승격하지 않는다. 현재 원문·후보 준비와 관련 단위/HTTP 검증은 통과했으며 실제 PostgreSQL10사례와 실행중 정리·종료 검증은 CI 결과로 별도 판단한다.

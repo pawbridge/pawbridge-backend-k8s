@@ -61,7 +61,7 @@ class PostgresqlVisitCollectionCompatibilityTest {
     private static final Instant BEGAN = Instant.parse("2044-02-27T15:00:00.123456Z");
     private static final List<LocalDate> RESERVED_DAYS = List.of(DAY.minusDays(3),DAY.minusDays(2),DAY.minusDays(1),DAY,DAY.plusDays(1));
     private static final String SOURCE_RECEIPT_SHA = "abb6051b4a30d00250b4a1fe34c27acfaaef9ec8b19384a6c17d53102e35b916";
-    private static final String GRANTS = "GRANT SELECT(visit_date),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;\n"
+    private static final String GRANTS = "GRANT SELECT(visit_date,visitor_hash),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;\n"
             + "GRANT SELECT(visit_date,unique_visitors),INSERT(visit_date,unique_visitors),UPDATE(unique_visitors) ON pawbridge_community.daily_visit_count TO pawbridge_f3_writer;\n"
             + "GRANT SELECT(singleton,started_at),INSERT(singleton,started_at) ON pawbridge_community.visit_collection TO pawbridge_f3_writer;\n";
     private static final String MEMBER_PROOF="source_sha=f06a72a06bd26662c647bde780dfc7a27bf7349c\nfixture=F29 plus User deletion and installed-chat cleanup\nnew_business_ddl=0\nsynthetic_tables_added=6\nsynthetic_identity_sequences_added=2\nnew_schema=0\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\ncf93ed908b18f63f59832cd0fe5bcf500ccf9e4c39972deeda5de446c4dd953d  member-ddl-fragment-0\neb3fe612fe9d4aff8372539b0d59e1da4c34266036ce88f1ed0ba51b88f5e139  member-ddl-fragment-1\nb705222e7a9c9a6964628c937cff63470e1dd30103b27111ae3c5d94d284e1ec  member-ddl-fragment-2\n7afb8a3d992eba1258d61a610a418133f56766e9def3eb2e105c584bedcd2fdb  member-ddl-fragment-3\n5604c03964f051343785c2d30f9bf20022d6a0c867152b6175168c4f5ea81754  member-exact-grants\n";
@@ -179,8 +179,37 @@ class PostgresqlVisitCollectionCompatibilityTest {
     }
 
     @ParameterizedTest(name="givenAnExactWriterPrivilegeRevoked__whenCountingOrCleaning__thenKeepTheWholePriorStateAndRestoreOnlyThatPrivilegeBeforeRecovery[{index}]")
-    @ValueSource(strings={"count-update","visitor-delete"})
+    @ValueSource(strings={"count-update","visitor-delete","visitor-hash-read"})
     void givenAnExactWriterPrivilegeRevoked__whenCountingOrCleaning__thenKeepTheWholePriorStateAndRestoreOnlyThatPrivilegeBeforeRecovery(String denied)throws Exception{
+        if(denied.equals("visitor-hash-read")){
+            String privilege="SELECT(visitor_hash) ON pawbridge_community.daily_visitor";
+            for(boolean source:new boolean[]{true,false}){
+                String value=cookie(DAY);seedCount(DAY,3);
+                JdbcTemplate[] originalJdbc=new JdbcTemplate[1];
+                try(var r=new Round(source,writer,Clock.fixed(DAY.atStartOfDay(VisitCookie.ZONE).toInstant().plusSeconds(300),ZoneOffset.UTC),exclusive->{
+                    assertThat(exclusive).isFalse();
+                    // The reference context uses admin connections. Restrict this bound count TX only; rollback/commit resets the role.
+                    if(source){
+                        assertThat(TransactionSynchronizationManager.hasResource(originalJdbc[0].getDataSource())).isTrue();
+                        Integer backend=originalJdbc[0].queryForObject("SELECT pg_backend_pid()",Integer.class);
+                        originalJdbc[0].execute("SET LOCAL ROLE pawbridge_f3_writer");
+                        assertThat(originalJdbc[0].queryForObject("SELECT pg_backend_pid()",Integer.class)).isEqualTo(backend);
+                        assertThat(originalJdbc[0].queryForObject("SELECT current_user",String.class)).isEqualTo(F3PostgresqlFixture.WRITER);
+                    }
+                })){
+                    if(source)originalJdbc[0]=r.original.jdbc;
+                    String before=snapshot();
+                    try{
+                        execute("REVOKE "+privilege+" FROM "+F3PostgresqlFixture.WRITER);
+                        Throwable failure=catchThrowable(()->r.count(value));
+                        assertThat(failure).isInstanceOf(DataAccessException.class);assertThat(sqlState(failure)).isEqualTo("42501");
+                        assertThat(snapshot().equals(before)).as("All twenty-six tables remain unchanged after hash SELECT denial").isTrue();returned();
+                    }finally{verifyOwnership();execute("GRANT "+privilege+" TO "+F3PostgresqlFixture.WRITER);}
+                    assertToday(r.count(value),DAY,4);
+                }finally{cleanupOwned();}
+            }
+            return;
+        }
         String clause=denied.equals("count-update")?"UPDATE(unique_visitors) ON pawbridge_community.daily_visit_count":"DELETE ON pawbridge_community.daily_visitor";
         String a=cookie(DAY.minusDays(1));seedVisitor(DAY.minusDays(1),a);seedCount(DAY.minusDays(1),1);
         String b=cookie(DAY);seedCount(DAY,3);

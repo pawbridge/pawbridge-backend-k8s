@@ -80,7 +80,7 @@ class VisitCollectionProfileTest(unittest.TestCase):
     def test_given_twenty_two_frozen_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.VISIT_BASE)
         self.assertEqual(22, len(profile.VISIT_APP_HASHES))
-        self.assertEqual('04415e1c301151c87b4b6aa96beb8644313227d77fa5f18ac2f2e64186b9e884', hashlib.sha256(json.dumps(sorted(profile.VISIT_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual('a37b4b2b0c4f7c66bb03331f2f81ab42ba41c80b45400d1c2dd68f7f0437ccac', hashlib.sha256(json.dumps(sorted(profile.VISIT_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.VISIT_APP_HASHES) | {'backend-app/README.md'}, profile.VISIT_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.VISIT_APP_HASHES)
         git, hashes = self.synthetic_git()
@@ -170,8 +170,10 @@ class VisitCollectionProfileTest(unittest.TestCase):
             path=folder/('TEST-'+profile.VISIT_REPORT_CLASS+'.xml');ET.ElementTree(suite).write(path);paths.append(path)
         return paths
 
-    def test_given_all_six_methods_and_only_one_seoul_boundary__when_verifying__then_require_the_exact_nine_invocations(self):
-        self.assertEqual((4,2,8),(len(profile.VISIT_SINGLE_METHODS),len(profile.VISIT_PARAMETER_METHODS),len(set(profile.VISIT_REPORT_CASES))))
+    def test_given_all_six_methods_and_only_one_seoul_boundary__when_verifying__then_require_the_exact_ten_invocations(self):
+        self.assertEqual((4,2,9),(len(profile.VISIT_SINGLE_METHODS),len(profile.VISIT_PARAMETER_METHODS),len(set(profile.VISIT_REPORT_CASES))))
+        self.assertIn(profile.VISIT_PARAMETER_METHODS[1] + '[3]', profile.VISIT_REPORT_CASES)
+        self.assertNotIn(profile.VISIT_PARAMETER_METHODS[0] + '[3]', profile.VISIT_REPORT_CASES)
         self.assertEqual(profile.VISIT_SINGLE_METHODS[0],profile.VISIT_SEOUL_METHOD)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp).resolve();self.reports(root)
@@ -180,7 +182,8 @@ class VisitCollectionProfileTest(unittest.TestCase):
     def test_given_missing_wrong_nested_disabled_or_unsuccessful_reports__when_verifying__then_refuse_before_claiming_pg_success(self):
         defects=('missing','extra-file','file-name','wrong-root','wrong-class','wrong-count','wrong-label','duplicate-label',
                  'nested-case','failure-attr','missing-failure-attr','error-child','skipped-child','disabled-attr',
-                 'disabled-child','bad-status','bad-result','malformed','file-link','directory-link','seoul-extra')
+                 'disabled-child','bad-status','bad-result','malformed','file-link','directory-link','seoul-extra',
+                 'missing-hash-permission')
         for defect in defects:
             with self.subTest(defect=defect),tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp).resolve();path,seoul=self.reports(root);tree=ET.parse(path);suite=tree.getroot()
@@ -191,6 +194,9 @@ class VisitCollectionProfileTest(unittest.TestCase):
                 elif defect=='wrong-class':suite[0].set('classname','Other')
                 elif defect=='wrong-count':suite.set('tests','7')
                 elif defect=='wrong-label':suite[0].set('name','unknown()')
+                elif defect=='missing-hash-permission':
+                    suite.remove(next(case for case in suite if case.get('name') == profile.VISIT_PARAMETER_METHODS[1] + '[3]'))
+                    suite.set('tests','8')
                 elif defect=='duplicate-label':suite[1].set('name',suite[0].get('name'))
                 elif defect=='nested-case':
                     case=suite[0];suite.remove(case);ET.SubElement(suite,'wrapper').append(case)
