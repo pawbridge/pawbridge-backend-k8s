@@ -23,6 +23,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 final class F19LegacyTotalUserCountOracle implements AutoCloseable {
     private final AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
     private final SimpleJpaRepository<User, Long> users;
+    private final jakarta.persistence.EntityManager entityManager;
+    private final com.pawbridge.userservice.service.F19LegacySignupStatisticsService signup;
+    private final java.util.List<SignupRange> signupQueries = new java.util.ArrayList<>();
+    private java.util.function.IntConsumer afterSignupQuery = ignored -> { };
+    record SignupRange(java.time.LocalDate start, java.time.LocalDate end, int isolation, boolean readOnly) { }
+
     private final TransactionTemplate transaction;
     private final Runnable verifyOwnership;
 
@@ -39,12 +45,29 @@ final class F19LegacyTotalUserCountOracle implements AutoCloseable {
             context.registerBean("dataSource", DataSource.class, () -> admin);
             context.register(LegacyJpa.class);
             context.refresh();
-            var entityManager = SharedEntityManagerCreator.createSharedEntityManager(context.getBean(EntityManagerFactory.class));
+            entityManager = SharedEntityManagerCreator.createSharedEntityManager(context.getBean(EntityManagerFactory.class));
             // The pinned UserRepository does not override count. Do not initialize its unrelated custom queries.
             users = new SimpleJpaRepository<>(User.class, entityManager);
             transaction = new TransactionTemplate(context.getBean(PlatformTransactionManager.class));
             transaction.setReadOnly(true);
             transaction.setTimeout(3);
+            var repository = (com.pawbridge.userservice.repository.UserRepository) java.lang.reflect.Proxy.newProxyInstance(
+                    com.pawbridge.userservice.repository.UserRepository.class.getClassLoader(),
+                    new Class<?>[]{com.pawbridge.userservice.repository.UserRepository.class}, (proxy, method, arguments) -> {
+                        if (!method.getName().equals("countDailySignups"))
+                            throw new UnsupportedOperationException("Only the original daily signup query is wired");
+                        String jpql = method.getAnnotation(org.springframework.data.jpa.repository.Query.class).value();
+                        var start = (java.time.LocalDate) arguments[0];
+                        var end = (java.time.LocalDate) arguments[1];
+                        var rows = entityManager.createQuery(jpql, com.pawbridge.userservice.dto.response.DailySignupStatsResponse.class)
+                                .setParameter("startDate", start).setParameter("endDate", end).getResultList();
+                        var session = entityManager.unwrap(org.hibernate.Session.class);
+                        signupQueries.add(session.doReturningWork(connection ->
+                                new SignupRange(start, end, connection.getTransactionIsolation(), connection.isReadOnly())));
+                        afterSignupQuery.accept(signupQueries.size());
+                        return rows;
+                    });
+            signup = new com.pawbridge.userservice.service.F19LegacySignupStatisticsService(repository);
         } catch (RuntimeException | Error failure) {
             context.close();
             throw failure;
@@ -55,6 +78,22 @@ final class F19LegacyTotalUserCountOracle implements AutoCloseable {
         verifyOwnership.run();
         return transaction.execute(status -> users.count());
     }
+
+    java.util.List<com.pawbridge.userservice.dto.response.DailySignupStatsResponse> daily(java.time.LocalDate start, java.time.LocalDate end) {
+        verifyOwnership.run();
+        return transaction.execute(status -> signup.getDailySignupStats(start, end));
+    }
+
+    com.pawbridge.userservice.dto.response.SignupPeriodsResponse periods() {
+        verifyOwnership.run();
+        return transaction.execute(status -> signup.getSignupPeriods());
+    }
+
+    void observeSignupQueries(java.util.function.IntConsumer afterQuery) {
+        signupQueries.clear(); afterSignupQuery = afterQuery;
+    }
+
+    java.util.List<SignupRange> signupQueries() { return java.util.List.copyOf(signupQueries); }
 
     @Override public void close() { context.close(); }
 

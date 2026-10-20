@@ -35,7 +35,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertTrue(marker in body, 'Required workflow script is missing: ' + name)
         return textwrap.dedent(body.split(marker, 1)[1])
 
-    def select(self, paths, *, pilot=False, raw=False, note=False, member=False):
+    def select(self, paths, *, pilot=False, raw=False, note=False, member=False, signup=False):
         script = self.script('selection')
         marker = 'python3 - <<\'PY\' >> "$GITHUB_OUTPUT"\n'
         self.assertIn(marker, script)
@@ -55,6 +55,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                     patch.object(ci_branch_policy, 'changed_paths', return_value=paths), \
                     patch.object(backend_contract_profile, 'verify_note_expiry_inputs', return_value=note), \
                     patch.object(backend_contract_profile, 'verify_member_management_inputs', return_value=member), \
+                    patch.object(backend_contract_profile, 'verify_signup_statistics_inputs', return_value=signup), \
                     contextlib.redirect_stdout(output):
                 exec(compile(program, str(WORKFLOW), 'exec'), {})
         value = output.getvalue()
@@ -90,6 +91,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                      '.github/scripts/test_backend_contract_profile.py',
                      '.github/scripts/test_backend_note_expiry_profile.py',
                      '.github/scripts/test_backend_member_management_profile.py',
+                     '.github/scripts/test_backend_signup_statistics_profile.py',
                      '.github/scripts/backend_postmerge_proof.py',
                      '.github/scripts/test_backend_postmerge_proof.py'):
             with self.subTest(path=path):
@@ -217,13 +219,14 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)
         found, conditional = [], []
         modes = (backend_contract_profile.FULL, backend_contract_profile.PILOT,
-                 backend_contract_profile.NOTE_EXPIRY, backend_contract_profile.MEMBER_MANAGEMENT)
+                 backend_contract_profile.NOTE_EXPIRY, backend_contract_profile.MEMBER_MANAGEMENT,
+                 backend_contract_profile.SIGNUP_STATISTICS)
         selected = {mode: [] for mode in modes}
         wanted_conditions = {
             "${{ matrix.profile == 'full' }}": {backend_contract_profile.FULL},
-            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}":
+            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}":
                 {backend_contract_profile.FULL, backend_contract_profile.PILOT},
-            "${{ matrix.profile != 'note-expiry' }}":
+            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' }}":
                 {backend_contract_profile.FULL, backend_contract_profile.PILOT, backend_contract_profile.MEMBER_MANAGEMENT},
         }
         allowed_conditions = {'Remove only the owned disposable fixture',
@@ -231,7 +234,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                               'Preserve tests and bounded runtime evidence',
                               'Preserve the verified executable JAR',
                               'Verify late member cleanup runtime controls without resources',
-                              'Add pinned User and installed chat tables only after fixed source preparation and F30 evidence'}
+                              'Add pinned User and installed chat tables only after fixed source preparation and F30 evidence',
+                              'Verify owned note expiry, original limits, rollback and active scheduler shutdown in UTC'}
         for part in parts[1:]:
             name = part.splitlines()[0].removeprefix('      - name: ')
             smoke = re.findall(r'^\s*(?:run: )?python3 scripts/(f[0-9]+)_ci.py smoke\s*$', part, re.MULTILINE)
@@ -289,12 +293,12 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             if re.search(r'run: python3 scripts/f[0-9]+_ci.py prepare\n', part):
                 self.assertNotIn('        if:', part)
         shape = next(part for part in parts if 'id: fixture_f4_shape\n' in part)
-        self.assertIn("if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}", shape)
+        self.assertIn("if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}", shape)
         self.assertIn('python3 scripts/f4_ci.py prepare-shape', shape)
         self.assertLess(check.index('id: jar_f3\n'), check.index('id: fixture_f4_shape\n'))
         self.assertLess(check.index('id: fixture_f4_shape\n'), check.index('id: jar_f4\n'))
         pg = next(part for part in parts if 'id: pg_note_expiry\n' in part)
-        self.assertNotIn('        if:', pg)
+        self.assertIn("if: ${{ matrix.profile != 'signup-statistics' }}", pg)
         self.assertIn(':boot:noteExpiryCompatibilityTest', pg)
         self.assertIn('verify_note_expiry_report', pg)
         self.assertIn('note_expiry_scope_verified', self.job('selection'))
@@ -315,7 +319,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 ('pg_member_cleanup', ':boot:memberCleanupCompatibilityTest'),
                 ('jar_f31', 'python3 scripts/f29_ci.py member-cleanup-smoke')):
             step = next(part for part in parts if 'id: ' + key + '\n' in part)
-            self.assertIn("if: ${{ matrix.profile != 'note-expiry' }}", step)
+            self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' }}", step)
             self.assertIn(command, step)
         pg = next(part for part in parts if 'id: pg_member_cleanup\n' in part)
         self.assertIn('f29_ci.member_require_runtime_results()', pg)
@@ -323,6 +327,32 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('verify_member_management_inputs()', self.job('selection'))
         self.assertIn("result['request_checks'] == result['delete_checks'] + result['get_checks'] == 9", check)
         self.assertIn("result['child_log_evidence'] == 'safe-copied'", check)
+
+    def test_given_verified_signup_scope__when_wiring__then_keep_exact_two_zone_pg_after_f19_and_skip_unrelated_late_contracts(self):
+        actual = self.select(['.github/workflows/backend-app-check.yml'], signup=True, raw=True)
+        self.assertEqual({'selected': 'true', 'profiles': '["signup-statistics"]'},
+                         dict(line.split('=', 1) for line in actual.splitlines()))
+        check = self.job('check')
+        parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)[1:]
+        pg = next(part for part in parts if 'id: pg_signup_statistics\n' in part)
+        self.assertLess(check.index('python3 scripts/f19_ci.py prepare'), check.index('id: pg_signup_statistics'))
+        self.assertLess(check.index('id: pg_signup_statistics'), check.index('      - name: Add only the existing block timestamp SELECT after the F19 regressions'))
+        self.assertIn("if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}", pg)
+        self.assertIn(':boot:signupStatisticsCompatibilityTest :boot:signupStatisticsCompatibilitySeoulTest', pg)
+        self.assertIn('test -s build/ci/f19-oracle-sha256.txt', pg)
+        self.assertIn('test -s build/ci/f19-signup-statistics-oracle-sha256.txt', pg)
+        self.assertIn('verify_signup_statistics_report(', pg)
+        self.assertIn("Path('boot/build/test-results/signupStatisticsCompatibilityTest')", pg)
+        self.assertIn("Path('boot/build/test-results/signupStatisticsCompatibilitySeoulTest')", pg)
+        for key in ('pg_note_expiry', 'fixture_member_cleanup', 'pg_member_cleanup', 'jar_f31'):
+            part = next(part for part in parts if 'id: ' + key + '\n' in part)
+            self.assertIn("matrix.profile != 'signup-statistics'", part)
+        for part in parts:
+            if re.search(r'run: python3 scripts/f[0-9]+_ci.py prepare\n', part):
+                self.assertNotIn('        if:', part)
+        self.assertIn('signup_statistics_scope_verified', self.job('selection'))
+        self.assertIn('verify_signup_statistics_inputs()', self.job('selection'))
+        self.assertIn(':boot:bootJar', self.job('package'))
 
     def test_given_unknown_or_failed_proof__when_gating__then_do_not_accept_full_success(self):
         for proof, mode in (('failure', 'full'), ('cancelled', 'full'),

@@ -28,7 +28,7 @@ class TotalUserCountExceptionHandlerTest {
             assertNull(response.getHeaders().getCacheControl());
             assertEquals(1, appender.list.size());
             var event = appender.list.getFirst();
-            assertEquals("Total user count failed (IllegalStateException)", event.getFormattedMessage());
+            assertEquals("User statistics query failed (IllegalStateException)", event.getFormattedMessage());
             assertNull(event.getThrowableProxy());
             assertEquals(1, event.getArgumentArray().length);
             assertEquals("IllegalStateException", event.getArgumentArray()[0]);

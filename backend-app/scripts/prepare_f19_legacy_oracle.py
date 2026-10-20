@@ -221,7 +221,100 @@ import org.springframework.web.bind.annotation.RestController;
     print('Verified thirteen inputs, eight shared byte identities and nine source units; wrote one test-only controller and evidence')
 
 
+# Optional later contract: the original F19 controller and receipt above remain byte-identical.
+SIGNUP_DTO = 'user-service/src/main/java/com/pawbridge/userservice/dto/response/SignupPeriodsResponse.java'
+SIGNUP_DAILY_DTO = 'user-service/src/main/java/com/pawbridge/userservice/dto/response/DailySignupStatsResponse.java'
+SIGNUP_DTO_SHA = 'a7b639ff7d61c2679be3f9e5b40aae84d685221ff39775d4d43241548def3a74'
+SIGNUP_DAILY_SHA = '6e02c189626dcd739a01684e5747a733ba2ad962ac1ca594136a7028ce463a2e'
+SIGNUP_UNITS = [{'label': 'signup statistics public List<DailySignupStatsResponse> getDailySignupStats(', 'start_anchor': '    @Override\n    @Transactional(readOnly = true)\n    public List<DailySignupStatsResponse> getDailySignupStats(', 'signature': '    public List<DailySignupStatsResponse> getDailySignupStats(', 'end_delimiter': '\n    }\n', 'sha256': '97fd7c4386290765db52a27a11f8ff172fdab43b831c44b7ccc20b7975a2cbda'}, {'label': 'signup statistics private List<DailySignupStatsResponse> fillMissingDates(', 'start_anchor': '    private List<DailySignupStatsResponse> fillMissingDates(', 'signature': '    private List<DailySignupStatsResponse> fillMissingDates(', 'end_delimiter': '\n    }\n', 'sha256': '95122d5846e02c231fa2468b76e6279b63ba2d608a4a11cca72dad45dbcbc4c3'}, {'label': 'signup statistics public SignupPeriodsResponse getSignupPeriods(', 'start_anchor': '    @Override\n    @Transactional(readOnly = true)\n    public SignupPeriodsResponse getSignupPeriods(', 'signature': '    public SignupPeriodsResponse getSignupPeriods(', 'end_delimiter': '\n    }\n', 'sha256': '995bc5151331a99c4481c63e1bccbd83132775ab561ce91f6b4b5acba0634877'}]
+SIGNUP_CONTROLLER_UNITS = [{'label': 'signup statistics public ResponseEntity<ResponseDTO<List<DailySignupStatsResponse>>> getDailySignupStats(', 'start_anchor': '    @GetMapping("/users/stats/daily-signups")\n', 'signature': '    public ResponseEntity<ResponseDTO<List<DailySignupStatsResponse>>> getDailySignupStats(', 'end_delimiter': '\n    }\n', 'sha256': '88cbd2515282dc74597d408fca897c6fdc0ba5206f63e3d7ad9555943fcd9661'}, {'label': 'signup statistics public ResponseEntity<ResponseDTO<SignupPeriodsResponse>> getSignupPeriods(', 'start_anchor': '    @GetMapping("/users/stats/signup-periods")\n', 'signature': '    public ResponseEntity<ResponseDTO<SignupPeriodsResponse>> getSignupPeriods(', 'end_delimiter': '\n    }\n', 'sha256': '77ac928ff609b6d287422b225a73af16eb12ee372554639675c3dc13c5021c37'}]
+SIGNUP_WRAPPER = 'com/pawbridge/userservice/service/F19LegacySignupStatisticsService.java'
+
+
+def extract_signup_statistics(repository, output, evidence):
+    repository, output, evidence = (pathlib.Path(value).resolve() for value in (repository, output, evidence))
+    if (output != repository / 'backend-app/boot/build/generated/sources/f19LegacyOracle/java'
+            or evidence != repository / 'backend-app/build/ci/f19-signup-statistics-oracle-sha256.txt'):
+        raise SystemExit('Refusing non-dedicated signup statistics oracle output')
+    expected = {SERVICE: EXPECTED[SERVICE], CONTROLLER: EXPECTED[CONTROLLER],
+                'user-service/src/main/java/com/pawbridge/userservice/repository/UserRepository.java':
+                    EXPECTED['user-service/src/main/java/com/pawbridge/userservice/repository/UserRepository.java'],
+                SIGNUP_DTO: SIGNUP_DTO_SHA, SIGNUP_DAILY_DTO: SIGNUP_DAILY_SHA}
+    inputs, entries = {}, []
+    for source, digest in expected.items():
+        content = subprocess.check_output(['git', 'show', SOURCE + ':' + source], cwd=repository)
+        if hashlib.sha256(content).hexdigest() != digest:
+            raise SystemExit('Signup statistics original full-source checksum differs')
+        inputs[source] = content
+        entries.append(digest + '  ' + source)
+    # These two original FQNs are already compiled by F13; do not copy or rewrite them.
+    for source in (SIGNUP_DAILY_DTO, 'user-service/src/main/java/com/pawbridge/userservice/repository/UserRepository.java'):
+        relative = 'backend-app/boot/build/generated/sources/f13LegacyOracle/java/' + source.split('src/main/java/', 1)[1]
+        if (repository / relative).read_bytes() != inputs[source]:
+            raise SystemExit('Signup statistics shared original bytes differ')
+        entries.append(expected[source] + '  shared-byte-identity ' + relative)
+    service, controller = inputs[SERVICE].decode(), inputs[CONTROLLER].decode()
+    methods = [checked_unit(service, spec) for spec in SIGNUP_UNITS]
+    for spec in SIGNUP_UNITS:
+        entries.append(spec['sha256'] + '  selected-unit ' + spec['label'])
+    for spec in SIGNUP_CONTROLLER_UNITS:
+        checked_unit(controller, spec)
+        entries.append(spec['sha256'] + '  source-only ' + spec['label'])
+    header = """package com.pawbridge.userservice.service;
+import com.pawbridge.userservice.dto.response.DailySignupStatsResponse;
+import com.pawbridge.userservice.dto.response.SignupPeriodsResponse;
+import com.pawbridge.userservice.repository.UserRepository;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Transactional;
+public class F19LegacySignupStatisticsService implements F19SignupStatisticsOperations {
+    private static final Logger log = LoggerFactory.getLogger(F19LegacySignupStatisticsService.class);
+    private final UserRepository userRepository;
+    public F19LegacySignupStatisticsService(UserRepository userRepository) { this.userRepository = userRepository; }
+"""
+    footer = """}
+interface F19SignupStatisticsOperations {
+    List<DailySignupStatsResponse> getDailySignupStats(LocalDate startDate, LocalDate endDate);
+    SignupPeriodsResponse getSignupPeriods();
+}
+"""
+    wrapper = (header + '\n'.join(methods) + footer).encode()
+    pending = [(output / SIGNUP_WRAPPER, wrapper),
+               (output / SIGNUP_DTO.split('src/main/java/', 1)[1], inputs[SIGNUP_DTO])]
+    for destination, content in pending:
+        relative = destination.relative_to(output)
+        for root in (repository / 'backend-app/boot/build/generated/sources').glob('*/java'):
+            other = root / relative
+            if other != destination and other.exists():
+                raise SystemExit('Refusing duplicate signup statistics FQN')
+        entries.append(hashlib.sha256(content).hexdigest() + '  generated ' + str(relative))
+    entries.extend((
+        'wiring: only daily/periods/fill method bodies and annotations are compiled verbatim; minimal class/dependencies',
+        'wiring: actual F19 JpaTM surrounds the wrapper; only countDailySignups delegates to its pinned JPQL via a narrow repository proxy',
+        'scope: original LocalDate.now(Asia/Seoul) remains unchanged; no original whole UserService/Gateway/OAuth execution',
+        'scope: prior F19 count controller and its original receipt are unchanged',
+    ))
+    pending.append((evidence, ('source_sha=' + SOURCE + '\n' + '\n'.join(entries) + '\n').encode()))
+    for destination, content in pending:
+        if destination.is_symlink() or destination.resolve() != destination:
+            raise SystemExit('Refusing redirected signup statistics output')
+        if destination.exists() and (not destination.is_file() or destination.read_bytes() != content):
+            raise SystemExit('Refusing differing signup statistics output or receipt before any write')
+    for destination, content in pending:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+
+
 if __name__ == '__main__':
-    if len(sys.argv) != 4:
+    if len(sys.argv) == 5 and sys.argv[4] == '--signup-statistics':
+        extract_signup_statistics(*sys.argv[1:4])
+    elif len(sys.argv) == 4:
+        extract(*sys.argv[1:])
+    else:
         raise SystemExit('F19 oracle requires repository, generated source output and evidence')
-    extract(*sys.argv[1:])

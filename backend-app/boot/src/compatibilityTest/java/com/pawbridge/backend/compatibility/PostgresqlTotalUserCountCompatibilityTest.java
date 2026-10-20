@@ -49,9 +49,13 @@ class PostgresqlTotalUserCountCompatibilityTest {
     private JdbcTemplate jdbc;
     private TotalUserCountQuery query;
     private F19LegacyTotalUserCountOracle original;
+    private StatisticsJdbc statisticsJdbc;
+    private TransactionTemplate statisticsTransaction;
+    private static final java.time.ZoneId SEOUL = java.time.ZoneId.of("Asia/Seoul");
+    private static final long SIGNUP_BASE = 9_985_300L;
 
     @BeforeAll void openOnlyTheOwnedFixtureAndOneReaderConnection() throws Exception {
-        assertThat(System.getProperty("user.timezone")).isEqualTo("UTC");
+        assertThat(System.getProperty("user.timezone")).isIn("UTC", "Asia/Seoul");
         owner = F3PostgresqlFixture.open(); verifyOwnership();
         var config = new HikariConfig(); config.setJdbcUrl(owner.reads().jdbcUrl());
         config.setUsername(owner.reads().applicationUser()); config.setPassword(owner.reads().applicationPassword());
@@ -61,6 +65,8 @@ class PostgresqlTotalUserCountCompatibilityTest {
         var manager = new JdbcTransactionManager(reader); manager.setEnforceReadOnly(true);
         var tx = new TransactionTemplate(manager); tx.setReadOnly(true); tx.setTimeout(3);
         query = new JdbcTotalUserCountQuery(jdbc, tx);
+        statisticsTransaction = tx;
+        statisticsJdbc = new StatisticsJdbc(reader); statisticsJdbc.setQueryTimeout(3);
         original = new F19LegacyTotalUserCountOracle(owner, this::verifyOwnership);
         returned();
     }
@@ -116,6 +122,137 @@ class PostgresqlTotalUserCountCompatibilityTest {
         assertThat(tokens.keySet()).containsAll(before).contains("F19_ADMIN", "F19_USER");
         Files.writeString(file, mapper.writeValueAsString(tokens)); Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
         returned();
+    }
+
+    @Test @org.junit.jupiter.api.Tag("signup-statistics")
+    void givenUtcKstMicrosecondBoundariesNullAndAGap__whenDailyQueriesRunInEitherZone__thenMatchOriginalJpqlWithoutFillingOrReordering() throws Exception {
+        var start = java.time.LocalDate.of(2044, 3, 1);
+        original.observeSignupQueries(ignored -> { });
+        assertThat(original.daily(start, start.plusDays(3))).isEmpty();
+        signupUser(SIGNUP_BASE + 1, start.atTime(14, 59, 59, 999999000));
+        signupUser(SIGNUP_BASE + 2, start.atTime(15, 0));
+        signupUser(SIGNUP_BASE + 3, start.plusDays(2).atTime(15, 0));
+        signupUser(SIGNUP_BASE + 4, null);
+        pending(SIGNUP_BASE + 2);
+        String before = snapshot();
+        original.observeSignupQueries(ignored -> { }); statisticsJdbc.reset(ignored -> { });
+        var statistics = statistics(start);
+        var expected = java.util.List.of(start + "=1", start.plusDays(1) + "=1", start.plusDays(3) + "=1");
+        assertThat(days(original.daily(start, start.plusDays(3)))).isEqualTo(expected); returned();
+        assertThat(candidateDays(statistics.daily(start, start.plusDays(3)))).isEqualTo(expected); returned();
+        assertThat(original.daily(start.plusDays(3), start)).isEmpty();
+        assertThat(statistics.daily(start.plusDays(3), start)).isEmpty();
+        assertThat(original.daily(start.plusDays(2), start.plusDays(2))).isEmpty();
+        assertThat(statistics.daily(start.plusDays(2), start.plusDays(2))).isEmpty();
+        assertThat(original.signupQueries()).hasSize(3); assertThat(statisticsJdbc.queries).hasSize(3);
+        assertReadOnlyCommitted(original.signupQueries()); assertReadOnlyCommitted(statisticsJdbc.queries);
+        returned(); assertThat(snapshot()).isEqualTo(before);
+    }
+
+    @Test @org.junit.jupiter.api.Tag("signup-statistics")
+    void givenACommitAfterTheFirstPeriodQuery__whenFourQueriesShareReadCommitted__thenMatchOriginalRangesZeroFillAndLaterVisibility() throws Exception {
+        java.util.Map<String, java.util.List<String>> sourceResult = null;
+        for (boolean source : new boolean[]{true, false}) {
+            var today = java.time.LocalDate.now(SEOUL);
+            long baselineToday = original.daily(today, today).stream().mapToLong(row -> row.count()).sum();
+            String before = snapshot();
+            java.util.function.IntConsumer insertAfterFirst = count -> {
+                if (count == 1) {
+                    try { signupUser(SIGNUP_BASE + 10, today.atTime(3, 0)); }
+                    catch (SQLException failure) { throw new IllegalStateException("Owned signup observation insert failed"); }
+                }
+            };
+            original.observeSignupQueries(insertAfterFirst); statisticsJdbc.reset(insertAfterFirst);
+            try {
+                java.util.Map<String, java.util.List<String>> result;
+                java.util.List<F19LegacyTotalUserCountOracle.SignupRange> ranges;
+                if (source) {
+                    var rows = original.periods();
+                    result = java.util.Map.of("today", days(rows.getToday()), "last7Days", days(rows.getLast7Days()),
+                            "last30Days", days(rows.getLast30Days()), "thisMonth", days(rows.getThisMonth()));
+                    ranges = original.signupQueries();
+                } else {
+                    var rows = statistics(today).periods();
+                    result = java.util.Map.of("today", candidateDays(rows.today()), "last7Days", candidateDays(rows.last7Days()),
+                            "last30Days", candidateDays(rows.last30Days()), "thisMonth", candidateDays(rows.thisMonth()));
+                    ranges = statisticsJdbc.queries;
+                }
+                assertThat(java.time.LocalDate.now(SEOUL)).as("Refuse a source LocalDate.now midnight crossing").isEqualTo(today);
+                returned(); assertThat(ranges).hasSize(4); assertReadOnlyCommitted(ranges);
+                assertThat(ranges.stream().map(r -> r.start() + "/" + r.end()).toList()).containsExactly(
+                        today + "/" + today, today.minusDays(6) + "/" + today,
+                        today.minusDays(29) + "/" + today, today.withDayOfMonth(1) + "/" + today);
+                assertThat(result.get("today")).containsExactly(today + "=" + baselineToday);
+                assertThat(result.get("last7Days")).hasSize(7).contains(today + "=" + (baselineToday + 1));
+                assertThat(result.get("last30Days")).hasSize(30).contains(today + "=" + (baselineToday + 1));
+                assertThat(result.get("thisMonth")).hasSize(today.getDayOfMonth()).contains(today + "=" + (baselineToday + 1));
+                if (source) sourceResult = result; else assertThat(result).isEqualTo(sourceResult);
+            } finally {
+                original.observeSignupQueries(ignored -> { }); statisticsJdbc.reset(ignored -> { });
+                deleteIds("pawbridge_user.users", "user_id", ownedUsers); ownedUsers.clear();
+            }
+            assertThat(snapshot()).isEqualTo(before);
+        }
+    }
+
+    @Test @org.junit.jupiter.api.Tag("signup-statistics")
+    void givenCreatedAtSelectRevoked__whenDailyReadFailsThenRecovers__thenReturnConnectionAndKeepTheOwnedBaseline() throws Exception {
+        var day = java.time.LocalDate.of(2044, 3, 1); var statistics = statistics(day);
+        var expected = days(original.daily(day, day)); String before = snapshot();
+        verifyOwnership(); execute("REVOKE SELECT(created_at) ON pawbridge_user.users FROM pawbridge_f2_reader");
+        try {
+            assertThatThrownBy(() -> statistics.daily(day, day)).isInstanceOf(DataAccessException.class);
+            returned(); assertThat(snapshot()).isEqualTo(before);
+        } finally {
+            verifyOwnership(); execute("GRANT SELECT(created_at) ON pawbridge_user.users TO pawbridge_f2_reader");
+        }
+        assertThat(candidateDays(statistics.daily(day, day))).isEqualTo(expected);
+        returned(); assertThat(snapshot()).isEqualTo(before);
+    }
+
+    private com.pawbridge.backend.user.internal.statistics.application.SignupStatisticsQuery statistics(java.time.LocalDate today) {
+        return new com.pawbridge.backend.user.internal.statistics.infrastructure.JdbcSignupStatisticsQuery(
+                statisticsJdbc, statisticsTransaction,
+                java.time.Clock.fixed(today.atTime(12, 0).atZone(SEOUL).toInstant(), java.time.ZoneOffset.UTC));
+    }
+    private void signupUser(long id, java.time.LocalDateTime createdAt) throws SQLException {
+        try (Connection c = admin(); var s = c.prepareStatement("SELECT count(*) FROM pawbridge_user.users WHERE user_id=?")) {
+            s.setLong(1, id); try (var rows = s.executeQuery()) { assertThat(rows.next()).isTrue(); assertThat(rows.getLong(1)).isZero(); }
+        }
+        user(id, id % 2 == 0 ? "ROLE_ADMIN" : "ROLE_USER", id % 2 == 0 ? "LOCAL" : "GOOGLE");
+        if (createdAt != null) try (Connection c = admin(); var s = c.prepareStatement("UPDATE pawbridge_user.users SET created_at=? WHERE user_id=?")) {
+            s.setObject(1, createdAt); s.setLong(2, id); assertThat(s.executeUpdate()).isOne();
+        }
+    }
+    private static java.util.List<String> days(java.util.List<com.pawbridge.userservice.dto.response.DailySignupStatsResponse> rows) {
+        return rows.stream().map(row -> row.date() + "=" + row.count()).toList();
+    }
+    private static java.util.List<String> candidateDays(java.util.List<com.pawbridge.backend.user.internal.statistics.application.SignupStatisticsQuery.DailySignupStats> rows) {
+        return rows.stream().map(row -> row.date() + "=" + row.count()).toList();
+    }
+    private static void assertReadOnlyCommitted(java.util.List<F19LegacyTotalUserCountOracle.SignupRange> ranges) {
+        for (var range : ranges) {
+            assertThat(range.isolation()).isEqualTo(Connection.TRANSACTION_READ_COMMITTED);
+            assertThat(range.readOnly()).isTrue();
+        }
+    }
+    private static final class StatisticsJdbc extends JdbcTemplate {
+        private final javax.sql.DataSource dataSource;
+        private final java.util.List<F19LegacyTotalUserCountOracle.SignupRange> queries = new java.util.ArrayList<>();
+        private java.util.function.IntConsumer afterQuery = ignored -> { };
+        StatisticsJdbc(javax.sql.DataSource source) { super(source); dataSource = source; }
+        void reset(java.util.function.IntConsumer hook) { queries.clear(); afterQuery = hook; }
+        @Override public <T> java.util.List<T> query(String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... args) {
+            var result = super.query(sql, mapper, args);
+            var connection = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+            try {
+                queries.add(new F19LegacyTotalUserCountOracle.SignupRange((java.time.LocalDate) args[0],
+                        (java.time.LocalDate) args[1], connection.getTransactionIsolation(), connection.isReadOnly()));
+            } catch (SQLException failure) { throw new IllegalStateException("Could not observe owned read transaction"); }
+            finally { org.springframework.jdbc.datasource.DataSourceUtils.releaseConnection(connection, dataSource); }
+            afterQuery.accept(queries.size());
+            return result;
+        }
     }
 
     private User tokenUser(long id, Role role) { return User.builder().userId(id).email("f19-token@fixture.invalid").name("F19 synthetic")

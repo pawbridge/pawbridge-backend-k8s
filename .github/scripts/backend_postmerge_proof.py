@@ -39,7 +39,11 @@ ALLOWED_STEP_CONDITIONS = {'always()', "${{ matrix.profile == 'full' }}",
                            "${{ matrix.profile == 'note-expiry' }}",
                            "${{ matrix.profile != 'note-expiry' }}",
                            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}",
-                           "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"}
+                           "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}",
+                           "${{ matrix.profile != 'signup-statistics' }}",
+                           "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' }}",
+                           "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}",
+                           "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}"}
 
 
 class Unavailable(ValueError):
@@ -222,7 +226,7 @@ def workflow_contract(raw):
         require(name is not None and 'continue-on-error' not in body, 'unknown-workflow')
         name = name.group(1)
         if key == 'check':
-            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?'[^']+' \}\}", name)
+            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?(?:matrix.profile == 'signup-statistics' && '[^']+' \|\| )?'[^']+' \}\}", name)
             require(expression is not None, 'unknown-workflow')
             name = expression.group(1)
         require('${{' not in name, 'unknown-workflow')
@@ -236,7 +240,8 @@ def workflow_contract(raw):
             # This verifier still accepts only an actually executed full profile.
             # A scoped-only preparation is not part of that full execution.
             if condition not in (["${{ matrix.profile == 'note-expiry' }}"],
-                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"]):
+                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"],
+                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}"]):
                 steps.append(step.group(1))
         require(bool(steps) and len(steps) == len(set(steps)), 'unknown-workflow')
         result[key] = (name, steps)
