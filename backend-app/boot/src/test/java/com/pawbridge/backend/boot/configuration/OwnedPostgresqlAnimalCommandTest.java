@@ -19,6 +19,9 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -26,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.crypto.SecretKey;
@@ -41,6 +45,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
@@ -154,20 +159,50 @@ class OwnedPostgresqlAnimalCommandTest {
         });
     }
 
+    @ParameterizedTest(name = "missingApmsNotice[{index}]")
+    @NullAndEmptySource
+    @ValueSource(strings = {"  "})
+    void givenCurrentAdministratorOrShelterAndApmsSourceWithoutNotice_whenCreating_thenReturn400WithoutAnyMutation(String notice) {
+        http((mvc, context) -> {
+            for (long member : List.of(ADMIN, SHELTER)) {
+                Map<String, Fingerprint> before = fingerprint();
+                Map<String, Object> body = body(null, "owned-care-a", "missing APMS notice breed");
+                body.put("apiSource", "APMS_ANIMAL"); body.put("apmsNoticeNo", notice);
+                JsonNode rejected = send(mvc, "POST", ROOT, token(member), JSON.writeValueAsString(body), 400);
+                check(rejected.path("code").asInt() == 400
+                        && "수동 등록 외 데이터는 공고번호가 필요합니다.".equals(rejected.path("message").asText())
+                        && rejected.has("data") && rejected.path("data").isNull(),
+                        "A missing APMS notice must return the fixed validation error");
+                check(fingerprint().equals(before), "Rejected APMS input must preserve all eight fixture tables");
+                released();
+            }
+        });
+    }
+
     @Test
     void givenCurrentOwningShelterAndApmsAnimal_whenUsingAllFourJsonCommands_thenKeepOriginalEventsAuditAndSearchRevision() {
         http((mvc, context) -> {
             String notice = "OWNED-P8-FOUR-COMMANDS";
             Map<String, Object> body = body(notice, "owned-care-a", "synthetic breed"); body.put("apiSource", "APMS_ANIMAL");
             JsonNode created = send(mvc, "POST", ROOT, token(SHELTER), JSON.writeValueAsString(body), 201);
-            long id = remember(created); Map<String, Object> before = animal(id);
+            long id = remember(created); Map<String, LocalDateTime> beforeAudit = commandAudit(id);
             check("APMS_ANIMAL".equals(created.path("apiSource").asText()), "An explicit source must not be rewritten to MANUAL");
-            send(mvc, "PATCH", ROOT + "/" + id + "/status", token(SHELTER), "{\"newStatus\":\"ADOPTED\"}", 200);
+            JsonNode statusResponse = send(mvc, "PATCH", ROOT + "/" + id + "/status", token(SHELTER), "{\"newStatus\":\"ADOPTED\"}", 200);
             Map<String, Object> status = animal(id);
-            check("ADOPTED".equals(status.get("status")) && before.get("created_at").equals(status.get("created_at")),
+            Map<String, LocalDateTime> statusAudit = commandAudit(id);
+            check("ADOPTED".equals(status.get("status")) && beforeAudit.get("created_at").equals(statusAudit.get("created_at")),
                     "A status change must preserve the original creation audit field");
-            check(((java.sql.Timestamp) status.get("updated_at")).after((java.sql.Timestamp) before.get("updated_at")),
+            check(statusAudit.get("updated_at").isAfter(beforeAudit.get("updated_at")),
                     "The real update must advance the JPA audit timestamp");
+            LocalDateTime responseUpdatedAt = JSON.treeToValue(statusResponse.path("updatedAt"), LocalDateTime.class);
+            LocalDateTime persistedUpdatedAt = statusAudit.get("updated_at");
+            check(responseUpdatedAt != null
+                    && responseUpdatedAt.isAfter(beforeAudit.get("updated_at")),
+                    "The status response must expose the advanced audit timestamp rather than the previous entity value");
+            check(Duration.between(responseUpdatedAt, persistedUpdatedAt).abs().compareTo(Duration.ofNanos(1000)) < 0,
+                    "The status response audit must match persisted audit within PostgreSQL microsecond precision");
+            check(beforeAudit.get("created_at").equals(JSON.treeToValue(statusResponse.path("createdAt"), LocalDateTime.class)),
+                    "The status response must preserve the original creation audit timestamp");
             projection(id, 1);
             send(mvc, "PATCH", ROOT + "/" + id + "/description", token(SHELTER), "{\"description\":\"새로운 보호 설명\"}", 200);
             check("새로운 보호 설명".equals(animal(id).get("description")), "The original description command must persist");
@@ -408,6 +443,14 @@ class OwnedPostgresqlAnimalCommandTest {
         return content.isEmpty() ? JSON.getNodeFactory().nullNode() : JSON.readTree(content);
     }
     private Map<String, Object> animal(long id) { return jdbc.queryForMap("SELECT * FROM pawbridge_animal.animals WHERE id=?", id); }
+    private Map<String, LocalDateTime> commandAudit(long id) {
+        return jdbc.queryForObject("SELECT created_at,updated_at FROM pawbridge_animal.animals WHERE id=?", (row, index) -> {
+            // Match Hibernate's configured JDBC UTC Calendar before its Timestamp -> LocalDateTime conversion.
+            Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            return Map.of("created_at", row.getTimestamp("created_at", utc).toLocalDateTime(),
+                    "updated_at", row.getTimestamp("updated_at", utc).toLocalDateTime());
+        }, id);
+    }
     private void projection(long id, long revision) {
         Map<String, Object> value = jdbc.queryForMap("SELECT a.search_revision,a.search_dirty,d.source_revision,d.analyzer_version,d.tokens::text AS tokens "
                 + "FROM pawbridge_animal.animals a JOIN pawbridge_animal.animal_search_documents d ON d.animal_id=a.id WHERE a.id=?", id);

@@ -12,6 +12,8 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.repository.*
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.stream.Stream;
 import javax.sql.DataSource;
@@ -19,6 +21,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.orm.jpa.JpaTransactionManager;
@@ -94,6 +98,89 @@ class AnimalCommandServiceTest {
         assertThat(result.getApiSource()).isEqualTo(ApiSource.APMS_ANIMAL);
         assertThat(result.getApmsNoticeNo()).isEqualTo("APMS-공고");
         verify(animals,never()).countByApmsNoticeNoStartingWith(any());
+    }
+
+    static Stream<Arguments> nonManualSourcesAndMissingNotices() {
+        return Arrays.stream(ApiSource.values()).filter(source -> source != ApiSource.MANUAL)
+                .flatMap(source -> Stream.<String>of(null, "", " \t\n")
+                        .map(notice -> Arguments.of(source, notice)));
+    }
+
+    @ParameterizedTest @MethodSource("nonManualSourcesAndMissingNotices")
+    void non_manual_without_notice_is_rejected_before_animal_search_outbox_or_generated_number(ApiSource source, String notice) {
+        var request=request();request.setApiSource(source);request.setApmsNoticeNo(notice);
+        var mapping=spy(new AnimalMapper());
+        var numbers=spy(new NoticeNumberGenerator(animals));
+        var command=new AnimalCommandService(search,animals,shelters,mapping,
+                new OutboxService(events,json),numbers,actors,manager);
+
+        assertThatThrownBy(()->command.create(11L,request)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("수동 등록 외 데이터는 공고번호가 필요합니다.");
+        assertThat(request.getApiSource()).isEqualTo(source);
+        assertThat(request.getApmsNoticeNo()).isEqualTo(notice);
+        verifyNoInteractions(animals,events,mapping,numbers);
+        verify(search,never()).animal(anyLong());
+        verify(manager).rollback(transaction);verify(manager,never()).commit(any());
+    }
+
+    static Stream<Arguments> manualSourcesAndMissingNotices() {
+        return Stream.<ApiSource>of(null,ApiSource.MANUAL)
+                .flatMap(source -> Stream.<String>of(null,""," \t\n")
+                        .map(notice -> Arguments.of(source,notice)));
+    }
+
+    @ParameterizedTest @MethodSource("manualSourcesAndMissingNotices")
+    void default_or_explicit_manual_without_notice_still_generates_notice(ApiSource source,String notice) {
+        var request=request();request.setApiSource(source);request.setApmsNoticeNo(notice);
+        var result=service.create(11L,request);
+        assertThat(result.getApiSource()).isEqualTo(ApiSource.MANUAL);
+        assertThat(result.getApmsNoticeNo()).matches("MAN-\\d{6}-000001");
+        verify(animals).countByApmsNoticeNoStartingWith(anyString());
+        verify(manager).commit(transaction);
+    }
+
+    @ParameterizedTest @EnumSource(ApiSource.class)
+    void supplied_notice_preserves_each_source_without_generating_replacement(ApiSource source) {
+        var request=request();request.setApiSource(source);request.setApmsNoticeNo("supplied-notice-7");
+        var result=service.create(11L,request);
+        assertThat(result.getApiSource()).isEqualTo(source);
+        assertThat(result.getApmsNoticeNo()).isEqualTo("supplied-notice-7");
+        verify(animals,never()).countByApmsNoticeNoStartingWith(any());
+        verify(manager).commit(transaction);
+    }
+
+    @Test void changed_status_response_contains_timestamp_updated_during_flush() {
+        var before=LocalDateTime.of(2026,10,20,10,0);
+        var after=before.plusMinutes(1);
+        ReflectionTestUtils.setField(animal,"updatedAt",before);
+        doAnswer(invocation -> {
+            ReflectionTestUtils.setField(animal,"updatedAt",after);
+            return null;
+        }).when(animals).flush();
+        var request=new UpdateAnimalStatusRequest();request.setNewStatus(AnimalStatus.ADOPTED);
+
+        var result=service.updateStatus(11L,42L,request);
+
+        assertThat(result.getStatus()).isEqualTo(AnimalStatus.ADOPTED);
+        assertThat(result.getUpdatedAt()).isEqualTo(after).isNotEqualTo(before);
+        verify(events).save(any());verify(manager).commit(transaction);
+        verify(search,never()).animal(anyLong());
+    }
+
+    @Test void status_flush_failure_rolls_back_and_does_not_map_or_return_success_response() {
+        var mapping=spy(new AnimalMapper());
+        var command=new AnimalCommandService(search,animals,shelters,mapping,
+                new OutboxService(events,json),new NoticeNumberGenerator(animals),actors,manager);
+        var failure=new org.springframework.dao.DataIntegrityViolationException("synthetic flush failure");
+        doThrow(failure).when(animals).flush();
+        var request=new UpdateAnimalStatusRequest();request.setNewStatus(AnimalStatus.ADOPTED);
+
+        assertThatThrownBy(()->command.updateStatus(11L,42L,request)).isSameAs(failure);
+
+        verify(events).save(any());
+        verify(mapping,never()).toDetailResponse(any());
+        verify(manager).rollback(transaction);verify(manager,never()).commit(any());
+        verify(search,never()).animal(anyLong());
     }
 
     @Test void status_updates_apms_animal_and_emits_original_payload_even_when_status_is_unchanged() throws Exception {

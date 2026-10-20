@@ -115,6 +115,11 @@ public final class AnimalCommandService {
             request.setApiSource(ApiSource.MANUAL);
         }
 
+        if (request.getApiSource() != ApiSource.MANUAL &&
+                (request.getApmsNoticeNo() == null || request.getApmsNoticeNo().isBlank())) {
+            throw new IllegalArgumentException("수동 등록 외 데이터는 공고번호가 필요합니다.");
+        }
+
         // 수동 등록 시 공고번호 자동 생성
         if (request.getApiSource() == ApiSource.MANUAL && 
             (request.getApmsNoticeNo() == null || request.getApmsNoticeNo().isBlank())) {
@@ -165,6 +170,7 @@ public final class AnimalCommandService {
         outboxService.saveEvent("Animal", String.valueOf(animal.getId()),
                 "ANIMAL_STATUS_CHANGED", TOPIC_ANIMAL_STATUS_CHANGED, event);
 
+        animalRepository.flush();
         return mapper.toDetailResponse(animal);
     }
 
