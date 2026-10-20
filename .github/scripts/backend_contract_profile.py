@@ -726,7 +726,7 @@ def _write_evidence(path, expected_name, value):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('plan', 'audit'), required=True)
-    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE), required=True)
+    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION), required=True)
     parser.add_argument('--jar', type=Path, required=True)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--execution', type=Path)

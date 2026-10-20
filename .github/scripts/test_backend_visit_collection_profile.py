@@ -41,6 +41,29 @@ def steps():
 
 
 class VisitCollectionProfileTest(unittest.TestCase):
+    def test_given_the_scoped_profile_cli__when_planning_and_auditing__then_reach_real_main_and_reject_unknown_names_before_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            jar = root / 'synthetic.jar'
+            jar.write_bytes(b'bounded synthetic candidate for CLI parsing')
+            plan = root / 'contract-plan.txt'
+            execution = root / 'contract-execution.txt'
+            common = ['--profile', profile.VISIT_COLLECTION, '--jar', str(jar), '--plan', str(plan)]
+            with patch.object(profile, 'runtime_context', return_value=(context(), PATHS)) as runtime, \
+                    patch.dict(profile.os.environ, {'CONTRACT_STEPS_JSON': json.dumps(steps())}):
+                self.assertEqual(0, profile.main(['--mode', 'plan', *common]))
+                self.assertEqual('planned', json.loads(plan.read_text())['status'])
+                self.assertEqual(0, profile.main(['--mode', 'audit', *common, '--execution', str(execution)]))
+                result = json.loads(execution.read_text())
+                self.assertEqual('passed', result['status'])
+                self.assertEqual(profile.VISIT_COLLECTION, result['profile'])
+                self.assertEqual(2, runtime.call_count)
+                with patch('sys.stderr'), self.assertRaises(SystemExit) as unknown:
+                    profile.main(['--mode', 'plan', '--profile', 'not-a-real-profile', '--jar', str(jar), '--plan', str(plan)])
+                self.assertEqual(2, unknown.exception.code)
+                self.assertEqual(2, runtime.call_count)
+
+
     def synthetic_git(self, diff=None, changed=False):
         blobs = {path: ('fixed visit input ' + str(i)).encode() for i, path in enumerate(profile.VISIT_APP_HASHES)}
         hashes = {path: hashlib.sha256(raw).hexdigest() for path, raw in blobs.items()}
