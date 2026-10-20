@@ -276,12 +276,12 @@ class F14GuardTest(unittest.TestCase):
                 self.assertNotIn(forbidden, text)
 
 
-    def test_given_actual_jar_filter__when_f14_or_redis_artifacts_leak__then_reject_without_widening_validator_exception(self):
+    def test_given_actual_jar_filter__when_f14_or_unapproved_redis_artifacts_leak__then_reject_except_exact_production_dependencies(self):
         workflow = (f14.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         pipeline = re.search(r'          if (grep -E .*?); then', workflow, re.DOTALL).group(1)
-        allowed = 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\n'
+        allowed = 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\nBOOT-INF/lib/spring-data-redis-3.4.11.jar\n'
         for forbidden in ('', 'BOOT-INF/classes/f14_fixture.sql', 'BOOT-INF/classes/f14LegacyOracle/Input.class',
-                          'BOOT-INF/lib/spring-data-redis-3.4.11.jar', 'BOOT-INF/classes/com/pawbridge/userservice/entity/Favorite.class',
+                          'BOOT-INF/lib/spring-data-redis-3.4.10.jar', 'BOOT-INF/classes/com/pawbridge/userservice/entity/Favorite.class',
                           'BOOT-INF/classes/com/pawbridge/backend/compatibility/F14LegacyFavoriteMvcTest.class',
                           'test/f14LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
             with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as directory:

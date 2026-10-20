@@ -1,4 +1,4 @@
-"""Administrator post management lane contracts using fake Git, raw step dictionaries and owned temporary XML only."""
+"""Fixed User Community cohort contracts using fake Git, raw step dictionaries and owned temporary XML only."""
 import copy
 import hashlib
 import json
@@ -25,7 +25,7 @@ SKIPPED = ('pg_note_expiry', 'compile_admin_update', 'compile_visit_collection',
 
 def context(**updates):
     value = dict(event_name='pull_request', repository=profile.REPOSITORY,
-                 head_repository=profile.REPOSITORY, head_ref='feat/admin-post-management', base_sha=SYNTHETIC_BASE,
+                 head_repository=profile.REPOSITORY, head_ref='feat/user-community-integration', base_sha=SYNTHETIC_BASE,
                  head_sha='1' * 40, source_sha='2' * 40, tree_sha='3' * 40,
                  run_id='12345', run_attempt='1', post_reads_scope_verified=True)
     value.update(updates)
@@ -76,16 +76,16 @@ class AdminPostReadsProfileTest(unittest.TestCase):
             raise AssertionError('Unexpected synthetic Git operation')
         return Mock(side_effect=read), hashes
 
-    def test_given_thirty_two_frozen_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
+    def test_given_frozen_cohort_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.POST_READS_BASE)
-        self.assertEqual(32, len(profile.POST_READS_APP_HASHES))
-        self.assertEqual('ba2e4b59177ff2f15b4318b671fd37d19ed56cfbd6dc0dd8773af942562af579', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual(59, len(profile.POST_READS_APP_HASHES))
+        self.assertEqual('a16f58c8a03cf16800667de66cf3436d6547d94de653545e11e23ac32b1eee18', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.POST_READS_APP_HASHES) | {'backend-app/README.md'}, profile.POST_READS_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.POST_READS_APP_HASHES)
         git, hashes = self.synthetic_git()
         with patch.object(profile, 'POST_READS_APP_HASHES', hashes), patch.object(profile,'POST_READS_BASE',SYNTHETIC_BASE):
             self.assertIs(True, profile.verify_post_reads_inputs(git_reader=git))
-        self.assertEqual(33, git.call_count)
+        self.assertEqual(60, git.call_count)
         for path in hashes:
             git.assert_any_call('show', 'HEAD:' + path)
 
@@ -128,7 +128,7 @@ class AdminPostReadsProfileTest(unittest.TestCase):
                 with self.assertRaises(profile.ProfileBlocked):
                     profile.select_profiles(dict(ctx,requested_profile=profile.POST_READS),paths)
         with self.assertRaises(profile.ProfileBlocked):
-            profile.select_profiles(dict(context(),requested_profile='admin-post-management-extra'),PATHS)
+            profile.select_profiles(dict(context(),requested_profile='user-community-integration-extra'),PATHS)
 
     def test_given_raw_post_reads_steps__when_auditing__then_block_false_skips_masked_failures_unrelated_execution_and_missing_cleanup(self):
         plan=profile.make_plan(context(),PATHS,profile.POST_READS,JAR)
@@ -224,30 +224,30 @@ class AdminPostReadsProfileTest(unittest.TestCase):
 
     def test_given_post_reads_workflow__when_wiring__then_compile_after_f6_and_preserve_only_common_shape_and_exact_pg(self):
         ci=policy_tests.BackendAppCiPolicyTest();workflow=ci.job('check')
-        self.assertEqual({'selected':'true','profiles':'["admin-post-management"]'},dict(line.split('=',1) for line in ci.select(PATHS,reads=True,raw=True).splitlines()))
+        self.assertEqual({'selected':'true','profiles':'["user-community-integration"]'},dict(line.split('=',1) for line in ci.select(PATHS,reads=True,raw=True).splitlines()))
         parts=re.split(r'(?=^      - name: )',workflow,flags=re.MULTILINE)[1:]
         keyed={m.group(1):part for part in parts if (m:=re.search(r'^        id: (\w+)$',part,re.MULTILINE))}
         order=('fixture_f4_shape','jar_f6','compile_post_reads','pg_post_reads','jar_f7','owned_cleanup')
         for a,b in zip(order,order[1:]):self.assertLess(workflow.index('id: '+a+'\n'),workflow.index('id: '+b+'\n'))
         for key in ('compile_post_reads','pg_post_reads'):
-            self.assertIn("if: ${{ matrix.profile == 'full' || matrix.profile == 'admin-post-management' }}",keyed[key])
+            self.assertIn("if: ${{ matrix.profile == 'full' || matrix.profile == 'user-community-integration' }}",keyed[key])
         self.assertIn(':boot:compileCompatibilityTestJava',keyed['compile_post_reads'])
         for receipt in ('f6-oracle-sha256.txt',):
             self.assertIn(receipt,keyed['compile_post_reads'])
         for n in range(8,30):
             part=keyed['fixture_post_unrelated_f'+str(n)]
-            self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'admin-post-management' }}",part)
+            self.assertIn("if: ${{ matrix.profile != 'admin-post-statistics' && matrix.profile != 'user-community-integration' }}",part)
             self.assertIn('python3 scripts/f'+str(n)+'_ci.py prepare',part)
         for key in SKIPPED:
-            self.assertTrue("matrix.profile != 'admin-post-management'" in keyed[key]
+            self.assertTrue("matrix.profile != 'user-community-integration'" in keyed[key]
                             or "matrix.profile == 'full'" in keyed[key]
                             or "matrix.profile == 'visit-collection'" in keyed[key]
                             or "matrix.profile == 'admin-member-update'" in keyed[key])
-        self.assertIn("matrix.profile == 'admin-post-management'",keyed['fixture_f4_shape'])
+        self.assertIn("matrix.profile == 'user-community-integration'",keyed['fixture_f4_shape'])
         for script in ('f2','f3','f4','f5','f7'):
             found=[part for part in parts if re.search(r'^        run: python3 scripts/'+script+r'_ci.py prepare$',part,re.MULTILINE)]
             if script=='f2':continue
-            self.assertEqual(1,len(found));self.assertNotIn("matrix.profile != 'admin-post-management'",found[0])
+            self.assertEqual(1,len(found));self.assertNotIn("matrix.profile != 'user-community-integration'",found[0])
         pg=keyed['pg_post_reads']
         for value in (':boot:adminPostReadCompatibilityTest','verify_admin_post_reads_report(',
                       "Path('boot/build/test-results/adminPostReadCompatibilityTest')"):
@@ -258,13 +258,13 @@ class AdminPostReadsProfileTest(unittest.TestCase):
 
     def test_given_current_full_recipe__when_interpreting_reuse__then_require_new_source_pg_and_preserve_every_prior_full_step(self):
         text=policy_tests.WORKFLOW.read_bytes();contract=proof.workflow_contract(text);full=contract['check'][1]
-        for name in ('Compile pinned administrator post management source without database tests',
+        for name in ('Compile pinned User Community cohort source without database tests',
                      'Compare administrator post pagination and bounded reader permissions in UTC',
                      'Always restore only auth column rights and verify the prior administrator fixture',
                      'Add visit collection tables after full administrator PostgreSQL verification'):
             self.assertIn(name,full)
         self.assertNotIn('Prepare only the owned F4 dependent table shape for scoped expiry',full)
-        altered=text.replace(b"matrix.profile == 'full' || matrix.profile == 'admin-post-management'",b"matrix.profile == 'admin-post-management' || always()",1)
+        altered=text.replace(b"matrix.profile == 'full' || matrix.profile == 'user-community-integration'",b"matrix.profile == 'user-community-integration' || always()",1)
         with self.assertRaises(proof.Unavailable):proof.workflow_contract(altered)
 
 

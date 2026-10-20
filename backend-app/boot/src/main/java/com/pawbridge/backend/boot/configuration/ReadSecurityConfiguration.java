@@ -6,6 +6,7 @@ import com.pawbridge.backend.boot.security.PostBearerAuthenticationFilter;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.web.util.matcher.RegexRequestMatcher;
 import org.springframework.security.web.util.matcher.AndRequestMatcher;
 import org.springframework.security.web.util.matcher.NegatedRequestMatcher;
 import jakarta.servlet.http.HttpServletResponse;
@@ -27,7 +28,8 @@ public class ReadSecurityConfiguration {
     SecurityFilterChain postReadSecurity(HttpSecurity http, PostTokenAuthenticator tokens,
             @Value("${pawbridge.visits.enabled:false}") boolean visitsEnabled,
             @Value("${pawbridge.visits.collection-enabled:false}") boolean collectionEnabled,
-            @Value("${pawbridge.auth.sessions-enabled:false}") boolean sessionsEnabled) throws Exception {
+            @Value("${pawbridge.auth.sessions-enabled:false}") boolean sessionsEnabled,
+            @Value("${pawbridge.chat.enabled:${MEMBER_CHAT_ENABLED:false}}") boolean chatEnabledFlag) throws Exception {
 
         var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
         var postDeletion = new AntPathRequestMatcher("/api/v1/posts/*", "DELETE");
@@ -72,6 +74,17 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/visits/today", "POST"));
         var visitPeriod = new AndRequestMatcher(visitCollectionEnabled,
                 new AntPathRequestMatcher("/api/v1/admin/visits/stats/period", "GET"));
+        var chatEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->chatEnabledFlag;
+        var chatSocket=new AndRequestMatcher(chatEnabled,new AntPathRequestMatcher("/api/v1/chats/socket","GET"));
+        // Keep the original 36-character UUID path constraint; query strings do not widen path matching.
+        var chatRest=new AndRequestMatcher(chatEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/chats","GET"),
+                new AntPathRequestMatcher("/api/v1/chats/notifications","GET"),
+                new AntPathRequestMatcher("/api/v1/chats/with/{member}","GET"),
+                new AntPathRequestMatcher("/api/v1/chats/connection-ticket","POST"),
+                new RegexRequestMatcher("^/api/v1/chats/[0-9a-fA-F-]{36}(?:/messages)?(?:\\?.*)?$","GET"),
+                new RegexRequestMatcher("^/api/v1/chats/[0-9a-fA-F-]{36}/read(?:\\?.*)?$","PUT"),
+                new RegexRequestMatcher("^/api/v1/chats/[0-9a-fA-F-]{36}/visibility(?:\\?.*)?$","DELETE")));
         var adminPostList = new AntPathRequestMatcher("/api/v1/admin/posts", "GET");
         var adminPostDetail = new AntPathRequestMatcher("/api/v1/admin/posts/{postId}", "GET");
         var adminPostUpdate = new AntPathRequestMatcher("/api/v1/admin/posts/{postId}", "PUT");
@@ -79,7 +92,7 @@ public class ReadSecurityConfiguration {
         var postStatsToday = new AntPathRequestMatcher("/api/v1/admin/posts/stats/today", "GET");
         var postStatsPeriod = new AntPathRequestMatcher("/api/v1/admin/posts/stats/period", "GET");
         var adminRoutes = new OrRequestMatcher(adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var postWriting = new OrRequestMatcher(chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -97,6 +110,7 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/comments/posts/read/{postId}").permitAll()
                         .requestMatchers(visitIdentity, visitCount).permitAll()
                         .requestMatchers(sessionRefresh).permitAll()
+                        .requestMatchers(chatSocket).permitAll()
                         .requestMatchers(adminRoutes).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())

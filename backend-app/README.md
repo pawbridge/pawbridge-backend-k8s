@@ -488,7 +488,7 @@ PR에서는 package와 선택된 계약 검증을 실행한다. 미분류 변경
 
 Community 정리는 쪽지 member 잠금과 pending 재검증 뒤 본인 mailbox·차단·발신 요청의 FK 효과, 원본 context/요청 hash 익명화, 영향받은 고아 note 삭제를 수행한다. 설치된 채팅 표의 membership·발신 요청 삭제와 메시지/room 회원 ID 익명화도 같은 TX에서 처리한다. 실패하면 이 Community TX 전체를 원복한다. 커밋 후에만 같은 쪽지 registry의 본인 연결을 닫고 나머지 연결에 resync한다.
 
-첫 인계는 명시적 `pawbridge.chat.enabled=false` 모드다. 미지정 시 기존 `MEMBER_CHAT_ENABLED` 별칭과 false 기본값을 따르며 canonical 속성이 우선한다. false라도 설치된 채팅 데이터 정리는 생략하지 않는다. true에 필요한 Redis WITHDRAWN 생산·기존 소비자와 연결 종료 배선은 아직 인수하지 않았으므로 true 설정은 조립 단계에서 실패한다. 전체 채팅 또는 운영의 삭제 경로 인계 완료를 뜻하지 않는다.
+첫 인계는 명시적 `pawbridge.chat.enabled=false` 모드다. 미지정 시 기존 `MEMBER_CHAT_ENABLED` 별칭과 false 기본값을 따르며 canonical 속성이 우선한다. false라도 설치된 채팅 데이터 정리는 생략하지 않는다. 후속 회원 채팅 편입에서는 true의 Redis WITHDRAWN 생산·소비와 연결 종료 배선도 조립했다. 실제 Redis·WebSocket과 회원 삭제 연계의 통합 검증 전까지 운영 삭제 인계 완료를 뜻하지 않는다.
 
 Community 실패는 pending을 보존하고503을 반환한다. Community가 커밋된 뒤 User 최종 TX가 실패하면500이며 pending 상태에서 권한 있는 재시도로 마무리한다. 최종 User 조회 시 이미 부재하면 원문 deleteById처럼 성공하고, 조회 후 동시 삭제로 DELETE가0행이면 optimistic 실패로 최종 TX를 원복한다. 모든 단계를 감싸는 새 outer TX나 추가 행 잠금은 없다.
 
@@ -561,3 +561,12 @@ ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`�
 관리자 PUT/DELETE는 명시적인 AsAdmin 진입점으로 작성자 검사를 생략한다. 개인 수정·삭제의 소유권 검사는 유지하며 실제 게시글 작성자 ID를 기존 writer·닉네임·payload에 사용한다. 기존 JDBC/locking SQL·TX·R2·Outbox·검색 정리를 재사용한다. 첨부의 부분 실패를 자동 보상하거나 외부 I/O와 DB를 새 단일 트랜잭션으로 묶지 않는다. 새 업무표·SQL·권한·풀은 추가하지 않는다.
 
 고정 앱32개와 README 경로에 한정한 `admin-post-management` CI는 공통 빌드·단위/HTTP·계층 검사, 기존 원문 준비와 실제 페이지 조회 PG11, 소유 정리를 요구한다. 과거28 JAR 여정과 무관39계약은 명시적으로 생략하며 scoped 결과를 full로 승격하지 않는다. 합집합의 관련65사례·실제계층 검사는 로컬에서 통과했다. 관리자 쓰기 전용 실제 PG 시험은 이번에 추가하지 않았고 변경되지 않은 F4/F5 인프라의 이전 검증을 재사용한다. 새 관리자 쓰기의 실제 DB/R2 통합은 운영 전 별도 확인 사항이며 현재 운영을 변경하거나 배포하는 구성이 아니다.
+
+
+## 회원 채팅의 REST·실시간 전송 편입
+
+기존 회원 채팅의 업무 메서드와 20개 SQL을 JDBC 구현으로 재사용하고, User의 명시 조회 API와 기존 차단·쪽지·탈퇴 정리에 연결한다. REST는 서명 검증된 사용자와 JWT 만료 시각으로만 본인을 결정한다. 익명 WebSocket handshake 뒤 STOMP CONNECT에서 30초짜리 일회용 Redis ticket을 원자적으로 소비하며, 인증 전 SEND·SUBSCRIBE와 다른 사용자 큐 접근을 거부한다. 기존 Origin·frame·세션 수·만료·중복 전송·본문 보관 정책을 유지한다.
+
+`pawbridge.chat.enabled`는 기본 false다. false에서는 채팅 Redis·소켓·유지관리 scheduler를 만들지 않는다. true일 때 명시 Redis 연결과 namespace를 요구한다. `pawbridge.jobs.cleanup-enabled=false`이면 true 채팅에서도 보관 기한 정리는 실행하지 않으며, 세션 lease 관리는 별도 유지한다. 기존 설치 데이터의 회원 탈퇴 정리는 이 옵션과 별개로 기존 흐름에서 한 번만 처리한다. DB 커밋 뒤 WITHDRAWN 신호로 본인 연결을 닫고 살아 있는 연결에는 재조회 신호를 보낸다.
+
+종료 시 로컬 세션을 먼저 분리해 동기·지연 close callback의 중복 Redis/User I/O를 막고 기존 lease 만료를 사용한다. 이는 모의 callback 검증이며 실제 JVM·소켓 종료 시간의 증거는 아니다. 신규·관련 단위/HTTP·인가·프로토콜·조립과 계층 검사는 수행했으나 실제 Redis Lua/리스너·WebSocket·채팅 DB 통합은 아직 미실행이다. 선택 CI의 관리자 페이지 PG11을 채팅의 통합 검증으로 세지 않는다.

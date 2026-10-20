@@ -3,6 +3,9 @@ plugins {
 }
 
 dependencies {
+    implementation 'org.springframework:spring-websocket'
+    implementation 'org.springframework:spring-messaging'
+    implementation 'org.springframework.data:spring-data-redis'
     implementation 'org.springframework.data:spring-data-commons'
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     implementation project(':user')

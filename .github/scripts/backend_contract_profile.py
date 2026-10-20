@@ -342,25 +342,48 @@ POST_STATISTICS_REPORT_CASES = (POST_STATISTICS_SINGLE_METHODS[0] + '()',) + tup
     POST_STATISTICS_PARAMETER_METHOD + '[' + str(index) + ']' for index in (1,2)) + (POST_STATISTICS_SINGLE_METHODS[1] + '()',)
 POST_STATISTICS_SEOUL_METHOD = POST_STATISTICS_SINGLE_METHODS[0]
 
-POST_READS = 'admin-post-management'
+POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '9715076a40a1567faf7b4ee3f0a20052e82d80b5f469986048b1f2a7e36abe36',
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '845b1e532c14ec902fa1aaa570d8da0c32809b53a05f1167288528801f956abf',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '3fc1087c0a510723172c84b236aebfe5280a2b97d17ab48d64e4c27b0341b7b9',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'b6b626edc1e20f8137a786800a26b31baeb8350e0e3929ed7abfd4bfcdc0006b',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatConfiguration.java': '081541c3df09529fbdafd4c16f1642e02ee87e9cf10362951c3332fb9bee6914',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatSocketConfiguration.java': 'eb6b7740f6c4ebaa467541c56a7a54859e8ba83b7727b20b730325da71bc83ae',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c7430dfd017008c3f65ddc7e92209a6a4a65d07421264a78f50b0407d0e2a6c9',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'eea8e296ef5a2bd7bdd821543df4d70d7af194a250a77f3930f6fda5a218ca95',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'e7b2bb9f834f45bbc0dae6b5eb4ff7cfb4aabf5bb4d9df5aacc8431e0aa1ca58',
+ 'backend-app/boot/src/main/resources/application.properties': '98b95621811fecccee450ba697537736c46ccf1c020b7ed8697e18ad8e6f981b',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostMutationHttpTest.java': 'feca1b7a4f4f7c6cb6c97d06157ef1cea8005722b64c1a90258df18af4ca18fb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostReadHttpTest.java': 'ee591506da75a0841f5322f7d3d5f2db6a1654a5034c1d70b1a88bd8cced891b',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostStatisticsHttpTest.java': '8042c41ce6a179c48aa170fd448f2769c948efc5f2d66a9c59d86abef42cb93b',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatProtocolTest.java': 'fdbeeba7aa7da996e0b40ce0fe71af8005ec0d8fe3418f3621a82584726934f3',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatSessionLifecycleTest.java': '8e1d8a6b05a1b114461bcf39fa11c0e90500a407f079dd3a6252d3a55362edf0',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatTransportHttpTest.java': '11fb099240fc857c3a0311ef90d5f70df04f291b3393440639e147a558543ecd',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '423c26d89ab90c7c963adfa30396ea0178717e8e4711cd0f26ceaff413a209de',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostDeleteHttpTest.java': 'ca8bec58cfbc8251b772cbcaaef91d8dfa14d5d525dc9510440c39df7e2d1cd6',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostListHttpTest.java': 'c23bff985fd2dc3a8ef48cc5d9f4bb2d6bfecc91d69cc985cb0d74c4ddbb2f37',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostSearchHttpTest.java': '009c20bb4daf58dba55e2ae670eb2c8c77723f37b3f9f72ae30a726a0caabae8',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostUpdateHttpTest.java': '35b3fb4b30680e8854a7b864e14debe6203cb240de14106c07c7b89cd3f7dd40',
- 'backend-app/community/build.gradle': 'bfdd6dc1a1a1e17bd0f3254ed02727c2071f778f2016d8ead39c97b51d980b7a',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/MemberChatConfigurationTest.java': '132692a396854dffaeaf5a85ad2c9c6970290cafec8e13b553db5eafa91aac1f',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfigurationTest.java': 'fc2a4f6157c72bfa14a014d0180376bb14c0a677819b84670a19935c946a09ea',
+ 'backend-app/community/build.gradle': 'cae9d8a06febf4ceb5abe9a7728ed663ec07164883f85e01cba1f23fe3737408',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/application/MemberChat.java': '57288d68466f12437895e0b1fbbafe15d7aed4bda9a8af559f1a7a911c3a6823',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/application/MemberChatHints.java': 'a790c79cd485fc152e5f51031c6c744c5d21d8b64ea63654d65dc9111b40b7b6',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/application/MemberChatModels.java': '5f0eeb6751566891b0fa7fc188b8b58968bdc4b55e0a5c3172dcbf206d428a05',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/application/MemberChatRejectedException.java': '80bc4242197a21f2972f7696f12f198a772cffb6063897a0bd2345a9226a9f8f',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/infrastructure/JdbcMemberChat.java': 'eedc0663caf0c9bbe207831aeb62c1e0fe291e9745510ac53a95c68e4ea330dc',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/infrastructure/JdbcMemberChatRepository.java': '17d62cc9216da66a964eb6208fe73b5858d4b1774ec645496938f2d8eed5576c',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/infrastructure/MemberChatSignals.java': 'a7cd28293e771c09bdac6a91b22e4ec0123d2d74ef4e10efb56d7bb89555f59d',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/infrastructure/MemberChatTickets.java': '1a82dec4b07c879481ba09e47176dd334f555666492252506be1db8070476325',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/web/MemberChatController.java': 'd702e82368f2404d08bd2475e4cf5999e4031779d4e5267f01d3d51c8d7eadc7',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/web/MemberChatExceptionHandler.java': '24fbaeba3f60e28d60bc799c1fb3ffcce74e1b03a0c721d88fc9f0d4fb49d9b4',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/web/MemberChatProtocolErrors.java': '61b3c3f5c871b699745db7815b2834262484575e87bb077f574d0a8d6426b762',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/web/MemberChatSessions.java': '8154b526415e0ce8f498feccd0ccc27b29eea2e3c0c11fc1c3255534ea1146cb',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/chat/web/MemberChatSocketController.java': '75059da2a6e75f23ec0a748ec0e99c41b5385c75d07080227f027dda00f6d6c0',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/DeletePost.java': '48910eea5c1d148dde25a2c5b1509f7f162ab45de22f311589941377a6049c8a',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/PostPageReader.java': '31eaad2d4f714300efcd91428a0dc33329fb4f1049733812cbfd9a53d3fd1137',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/application/ReadAdminPosts.java': 'ac9502c3db7e87e0cc2bde72d040ecffea00b7c8762cb6a5e9403b3641e8a702',
@@ -373,10 +396,14 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '9715076a40a1567faf7b4
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/AdminPostUpdateController.java': 'eb13dc45bba0fdd17db69d61f0c3cbde162199a7d1ff787d01c6e2cafeb9d207',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/PostDeleteExceptionHandler.java': '6c7793adfaba00f401fbf125d7e096528f2b3f6ad0bd9a042ab44eb67973754e',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/post/web/PostUpdateExceptionHandler.java': 'e0697043fe9073aaeb18e7e7a5a74a5bf5681c5efc98870155b8a746326dc1bb',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/chat/infrastructure/JdbcMemberChatTest.java': '037479d70f31868dab5cdf497ba94ae5fa232270d20a92c8cf5ebbf47118ef30',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/chat/infrastructure/MemberChatSignalsTest.java': '7c7cb53e7a7fa894034f254a2b470d609aa718db85e471545c3263cc5a42cb0c',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/DeletePostTest.java': '6425b8aae237ee816f521cb6ff2462d9fd19b970c0d581482f864dc47da0948a',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/ReadAdminPostsTest.java': 'fab415c6b47b2a8458d3f52d97e3a3e92ad10a14efc7fec8b311517a839cadb5',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/UpdatePostTest.java': 'e0841d5708df3d033cf4c5d909859d6210bff1aa4c3591fc17d73f95e0ddd001',
- 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/infrastructure/JdbcAdminPostPageReaderTest.java': '9e7d26b505d8f7af1286b588938b4126230771b94060c180a66563bd01e7d1b3'}
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/infrastructure/JdbcAdminPostPageReaderTest.java': '9e7d26b505d8f7af1286b588938b4126230771b94060c180a66563bd01e7d1b3',
+ 'backend-app/scripts/test_f14_ci_guards.py': 'aba0d5b772835abaa770e3bed93a4290e74609200e5a67d290e7c90a5e6d04bd',
+ 'backend-app/scripts/test_f9_ci_guards.py': '15db839b34000161ac7928ad858fec845d7b2c71629bc98dc6e91cd6af886d98'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
@@ -704,7 +731,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 32):
+                or len(POST_READS_APP_HASHES) != 59):
             return False
         raw = git('diff', '--name-only', '--no-renames', '-z', POST_READS_BASE, 'HEAD', '--', 'backend-app')
         if not isinstance(raw, bytes):
@@ -973,7 +1000,7 @@ def make_plan(context, paths, profile, jar_sha256):
         'schema_version': 1, 'status': 'planned', 'profile': profile,
         'identity': identity, 'jar_sha256': jar_sha256,
         'changed_paths_sha256': hashlib.sha256(_encoded(paths)).hexdigest(),
-        'selection_reason': ('fixed-post-management-inputs-and-scoped-read-postgresql' if profile == POST_READS else
+        'selection_reason': ('fixed-user-community-inputs-and-scoped-admin-read-postgresql' if profile == POST_READS else
                              'fixed-post-statistics-inputs-and-scoped-postgresql' if profile == POST_STATISTICS else
                              'fixed-auth-inputs-and-scoped-postgresql' if profile == AUTH_SESSIONS else
                              'fixed-visit-inputs-and-scoped-postgresql' if profile == VISIT_COLLECTION else

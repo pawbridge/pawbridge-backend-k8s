@@ -42,6 +42,8 @@ configurations {
 }
 
 dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.data:spring-data-commons'
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     implementation 'org.springframework.boot:spring-boot-starter-web'
