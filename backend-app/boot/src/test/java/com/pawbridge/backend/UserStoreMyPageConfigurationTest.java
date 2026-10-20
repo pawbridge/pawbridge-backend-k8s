@@ -32,6 +32,7 @@ class UserStoreMyPageConfigurationTest {
             assertThat(context.getBeansOfType(StoreMyPageExceptionHandler.class)).isEmpty();
             assertThat(context.getBeansOfType(HttpClient.class)).isEmpty();
             assertThat(context.getBeansOfType(com.pawbridge.backend.store.api.StoreMemberReads.class)).isEmpty();
+            assertThat(context.getBeansOfType(jakarta.persistence.EntityManagerFactory.class)).isEmpty();
         });
     }
 
@@ -85,7 +86,18 @@ class UserStoreMyPageConfigurationTest {
                     assertThat(reads.getIsolationLevel()).isEqualTo(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
                     assertThat(reads.getTimeout()).isEqualTo(5);
                     assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(1);
-                    assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
+                    var storeReads = context.getBean(com.pawbridge.backend.store.api.StoreMemberReads.class);
+                    assertThat(storeReads).isInstanceOf(com.pawbridge.backend.store.internal.memberread.infrastructure.JpaStoreMemberReads.class);
+                    var jpaReads = (TransactionTemplate) org.springframework.test.util.ReflectionTestUtils.getField(storeReads, "reads");
+                    assertThat(jpaReads.getTransactionManager()).isSameAs(context.getBean("storeMemberJpaTransactionManager"));
+                    assertThat(jpaReads.isReadOnly()).isTrue();
+                    assertThat(jpaReads.getIsolationLevel()).isEqualTo(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                    assertThat(jpaReads.getTimeout()).isEqualTo(5);
+                    var factory = context.getBean("storeMemberEntityManagerFactory", jakarta.persistence.EntityManagerFactory.class);
+                    assertThat(factory.getMetamodel().getEntities()).hasSize(9);
+                    assertThat(factory.getMetamodel().getEntities()).allSatisfy(entity ->
+                            assertThat(entity.getJavaType().getName()).startsWith("com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model."));
                     assertThat(context.getBeansOfType(HttpClient.class)).isEmpty();
                     try {
                         verify(context.getBean("dataSource",javax.sql.DataSource.class),never()).getConnection();

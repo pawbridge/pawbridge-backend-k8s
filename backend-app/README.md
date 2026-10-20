@@ -764,3 +764,15 @@ ADDED는 4회 시도 후 새 Animal TX에서 영수증을 재확인하고 필요
 단일 전용 scheduler는 지연 후 실행하고 context 종료 시 먼저 cooperative stop을 요청한다. 대기 15초는 정상 종료 완료를 입증하는 근거가 아니다. 로그는 고정 문구·실패 개수/예외 타입만 남기며 payload·계정·인증값은 기록하지 않는다. 신규 테이블/스키마 변경, Kafka/CDC 종료, 운영 활성화는 이번 코드 편입에 포함하지 않는다.
 
 합성 PG 시험은 `owned-postgresql` 태그로 일반 `test`/CI에서 제외한다. 전용 `:boot:ownedPostgresqlTest --tests ...`는 새 전용 환경만 사용하며 0건 또는 skip이 있으면 실패한다. 동물 조회는 `PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED=owned-fixture-only`와 시험이 검증하는 전용 환경값, 이벤트는 엄격한 권한의 `P6_PG_SETTINGS` 파일이 필요하다. 두 클래스는 각각 별도로 선택해야 하며 실제 계정·접속값은 예시나 Git에 넣지 않는다. SQL resource는 새 시험 DB 준비용으로만 보관한다. 시험 자체는 DDL/권한 변경을 하지 않고 생성한 행만 정리한다.
+
+## Store 회원 목록의 원문 JPA 재사용
+
+명시 `pawbridge.user-store-mypage.enabled=true`와 `backend=module`일 때 주문·찜 목록은 원래 Store의 13개 model/enum/base와 repository2·DTO2를 패키지·import만 바꿔 재사용한다. 중첩·컬렉션·underscore/camel 정렬을 SQL 별칭 표로 제한하지 않고 원래 Spring Data/Hibernate가 처리한다. Cart는 기존 JDBC 읽기를 유지한다. 공개 Store API와 User 응답, HTTP 기본 경로는 유지한다.
+
+Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을 공유한다. 별도 명명 JpaTM의 RO/RR/5초 안에서 entity→DTO 변환까지 마친다. 전역 JPA/entity/repository 자동스캔, OSIV, schema 생성·변경·validate는 켜지 않는다. schema는 pawbridge_store, 물리 naming과 UTC를 고정하며 bootstrap JDBC metadata 조회도 끈다. 기존 reader JdbcTM과 writer pool은 다른 업무에서 그대로 유지한다.
+
+원문 EntityGraph의 collection fetch는 SQL LIMIT보다 메모리에서 부모 중복 제거·페이지 처리를 수행할 수 있다. 원문 동작 보존이며 메모리/성능 개선을 뜻하지 않는다. 새 임의 ID 정렬이나 자식 MIN/MAX 축약을 추가하지 않는다. 읽기5초 제한은 기존 모듈 경계이며 원문 무제한 실행과 동일하다고 주장하지 않는다.
+
+합성 PostgreSQL의 9개 원문 테이블 모양과 고정 데이터에서 별도 원문/후보 EMF를 비교했다. 실제 27사례는 중첩/컬렉션 정렬, 부모 페이지·count·Sort metadata·nullable·구매 snapshot, RO/RR와 SELECT-only 권한·읽기 불변·연결 반환을 포함한다. 기존 Store 전체 migration/결제/실제 운영 검증은 아니다. 원문17 Java는 compileTestJava의 고정 시험 입력이며 main/실행 JAR에 포함하지 않는다. 새 extractor/sourceSet/JAR HTTP 도구는 없다.
+
+`P7_PG_SETTINGS`의 제한된 파일로 전용 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreMemberJpaTest`만 선택한다. SQL resource는 새로 만든 marker 검증 DB에 한 번 적용하는 준비 자료이며 Java 시험은 SELECT만 수행한다. 0사례/skip은 실패이고 일반 CI는 이 owned 태그를 제외한다. 키·접속값·시험 산출물은 Git에 넣지 않는다.

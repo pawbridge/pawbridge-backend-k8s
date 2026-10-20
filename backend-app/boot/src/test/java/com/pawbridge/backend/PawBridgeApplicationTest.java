@@ -83,12 +83,15 @@ class PawBridgeApplicationTest {
                     context.getBeanFactory().registerSingleton("readDatabaseSettings", settings);
                     context.getBeanFactory().registerSingleton("postWriteSettings", writeSettings);
                 })
-                .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true")
+                .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true",
+                        "pawbridge.user-store-mypage.backend=module")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage.class)).isEmpty();
+                    assertThat(context.getBeansOfType(jakarta.persistence.EntityManagerFactory.class)).isEmpty();
+                    assertThat(context.getBeansOfType(org.springframework.data.jpa.repository.JpaRepository.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.catalog.application.StoreCatalog.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.catalog.web.StoreCatalogController.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.catalog.web.StoreCatalogExceptionHandler.class)).isEmpty();

@@ -1,0 +1,57 @@
+package com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model;
+
+import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.BaseEntity;
+import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Entity
+@Getter
+@Table(name = "categories")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Category extends BaseEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String name;
+
+    @Column(length = 500)
+    private String description;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_id")
+    private Category parent;
+
+    @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
+    private List<Category> children = new ArrayList<>();
+
+    @Builder
+    public Category(String name, String description, Category parent) {
+        this.name = name;
+        this.description = description;
+        if (parent != null) {
+            this.parent = parent;
+        }
+    }
+
+    /**
+     * 카테고리 정보 수정
+     * @param name 새로운 카테고리명
+     * @param parent 새로운 부모 카테고리 (null이면 루트 카테고리)
+     */
+    public void update(String name, String description, Category parent) {
+        if (name != null && !name.isBlank()) {
+            this.name = name;
+        }
+        this.description = description;
+        this.parent = parent;
+    }
+}
