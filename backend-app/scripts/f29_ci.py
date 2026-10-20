@@ -732,7 +732,7 @@ def member_database_snapshot():
     return value
 
 
-def _member_require_fixture_without_user_writer_acl():
+def _member_require_fixture_without_user_writer_acl(*, auth_sessions=False):
     owner=member_require_identity()
     # Initial DDL is hash-pinned and all six relations must be absent before creation.
     # Recheck complete column inventory, owner, PK/FK/index counts and exact app ACL.
@@ -747,6 +747,9 @@ def _member_require_fixture_without_user_writer_acl():
     selects={'refresh_tokens':('user_id',),'shelter_applications':('user_id',),'member_chat_rooms':('room_id','first_member_id','second_member_id'),
              'member_chat_room_members':('member_id','room_id'),'member_chat_messages':('sender_id',),'member_chat_requests':('sender_id',)}
     updates={'member_chat_rooms':('first_member_id','second_member_id'),'member_chat_messages':('sender_id',)}
+    if auth_sessions:
+        selects['refresh_tokens']=('refresh_token_id','token','user_id','expires_at')
+        updates['refresh_tokens']=('token','expires_at')
     deletes=set(inventory)-{'member_chat_messages'}
     for _,relation,_ in MEMBER_TABLES:
         table=relation.split('.')[1];columns,constraints,indexes,fks=inventory[table]
@@ -1120,7 +1123,115 @@ def admin_visit_collection_prepare():
     _visit_collection_extend(owner, admin_visit_collection_fixture_proof(owner), admin_visit_collection_require_fixture, admin_visit_collection_database_snapshot)
 
 
+# Optional late auth-session writer ACL. Earlier member/admin strict paths remain exact and unchanged.
+AUTH_SESSIONS_RECEIPT = 'auth-sessions-fixture-write.txt'
+AUTH_SESSIONS_GRANTS = ('GRANT SELECT(email,name) ON pawbridge_user.users TO pawbridge_f3_writer;\n'
+                        'GRANT SELECT(refresh_token_id,token,expires_at),UPDATE(token,expires_at) '
+                        'ON pawbridge_user.refresh_tokens TO pawbridge_f3_writer;')
+
+
+def auth_sessions_fixture_proof(owner):
+    return ('owner=' + owner + '\nsource_sha=f06a72a06bd26662c647bde780dfc7a27bf7349c\n'
+            'fixture=administrator User update plus refresh/logout writer\n'
+            'new_business_ddl=0\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\n'
+            'writer_user_select=user_id,nickname,role,care_reg_no,email,name\n'
+            'writer_refresh_select=refresh_token_id,token,user_id,expires_at\n'
+            'writer_refresh_update=token,expires_at\nwriter_refresh_insert=0\n'
+            + hashlib.sha256(AUTH_SESSIONS_GRANTS.encode()).hexdigest() + '  auth-session-exact-grants\n')
+
+
+def auth_sessions_require_oracle_receipt():
+    import prepare_f13_legacy_oracle as auth
+    try:
+        for path, relative in auth.AUTH_SHARED.items():
+            artifact = ROOT.parent / relative
+            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
+                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != auth.AUTH_EXPECTED[path]):
+                raise ValueError()
+        outputs = {}
+        for relative, expected in auth.AUTH_GENERATED.items():
+            artifact = ROOT / 'boot/build/generated/sources/f13LegacyOracle/java' / relative
+            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
+                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != expected):
+                raise ValueError()
+            outputs[relative] = artifact.read_bytes()
+        target = EVIDENCE / 'f13-auth-sessions-oracle-sha256.txt'
+        if (target.is_symlink() or target.resolve() != target or not target.is_file()
+                or target.read_text() != auth.auth_sessions_receipt(outputs)):
+            raise ValueError()
+    except (OSError, UnicodeError, ValueError):
+        raise SystemExit('Auth session oracle receipt or fixed sources differ') from None
+
+
+def auth_sessions_require_identity():
+    owner = admin_update_require_identity()  # marker/receipt only; safe while exact new rights are denied.
+    f21.check_receipt(EVIDENCE / AUTH_SESSIONS_RECEIPT, auth_sessions_fixture_proof(owner))
+    auth_sessions_require_oracle_receipt()
+    return owner
+
+
+def auth_sessions_require_fixture():
+    owner = auth_sessions_require_identity()
+    _member_require_fixture_without_user_writer_acl(auth_sessions=True)
+    _member_require_user_writer_acl(('user_id','nickname','role','care_reg_no','email','name'),
+                                  ('user_id','nickname','updated_at','role','care_reg_no'))
+    return owner
+
+
+def auth_sessions_prepare():
+    f2.require_hosted()
+    owner = admin_update_require_fixture()  # Final old strict, before the seven exact new column rights.
+    auth_sessions_require_oracle_receipt()
+    target = EVIDENCE / AUTH_SESSIONS_RECEIPT
+    f21.check_receipt(target, auth_sessions_fixture_proof(owner), allow_missing=True)
+    if target.exists():
+        raise SystemExit('Refusing an existing auth session fixture receipt')
+    before = member_database_snapshot()
+    owned_sql(input_text='BEGIN;\n' + AUTH_SESSIONS_GRANTS + '\nCOMMIT;\n')
+    with target.open('x') as output:
+        output.write(auth_sessions_fixture_proof(owner))
+    auth_sessions_require_fixture()
+    if member_database_snapshot() != before:
+        raise SystemExit('Auth ACL extension changed existing twenty-four tables')
+
+
+# Remove only the seven auth-only column rights; retain all original administrator/member privileges.
+AUTH_SESSIONS_REVOKES = ('REVOKE SELECT(email,name) ON pawbridge_user.users FROM pawbridge_f3_writer;\n'
+                         'REVOKE SELECT(refresh_token_id,token,expires_at),UPDATE(token,expires_at) '
+                         'ON pawbridge_user.refresh_tokens FROM pawbridge_f3_writer;')
+
+
+def auth_sessions_restore():
+    f2.require_hosted()
+    owner = auth_sessions_require_identity()  # No full ACL check before recovery; PG may have failed mid-denial.
+    before = member_database_snapshot()
+    owned_sql(input_text='BEGIN;\n' + AUTH_SESSIONS_REVOKES + '\nCOMMIT;\n')
+    if admin_update_require_fixture() != owner:
+        raise SystemExit('Auth restoration changed the prior administrator fixture owner')
+    if member_database_snapshot() != before:
+        raise SystemExit('Auth privilege restoration changed twenty-four table rows')
+
+
+@contextmanager
+def auth_sessions_denied_privilege(kind):
+    owner = auth_sessions_require_fixture()
+    clauses = {'email-read': 'SELECT(email) ON pawbridge_user.users',
+               'rotate-write': 'UPDATE(token) ON pawbridge_user.refresh_tokens',
+               'logout-delete': 'DELETE ON pawbridge_user.refresh_tokens'}
+    if kind not in clauses:
+        raise SystemExit('Unknown auth session privilege check')
+    clause = clauses[kind]
+    try:
+        owned_sql('REVOKE ' + clause + ' FROM pawbridge_f3_writer')
+        yield
+    finally:
+        if auth_sessions_require_identity() != owner:
+            raise SystemExit('Auth session owner changed before privilege restoration')
+        owned_sql('GRANT ' + clause + ' TO pawbridge_f3_writer')
+        auth_sessions_require_fixture()
+
+
 if __name__ == "__main__":
     import sys
     f2.require_hosted()
-    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke, "admin-update-prepare": admin_update_prepare, "visit-collection-prepare": visit_collection_prepare, "admin-visit-collection-prepare": admin_visit_collection_prepare}[sys.argv[1]]()
+    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke, "admin-update-prepare": admin_update_prepare, "visit-collection-prepare": visit_collection_prepare, "admin-visit-collection-prepare": admin_visit_collection_prepare, "auth-sessions-prepare": auth_sessions_prepare, "auth-sessions-restore": auth_sessions_restore}[sys.argv[1]]()

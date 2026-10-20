@@ -322,6 +322,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminUserUpdateCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
@@ -1061,3 +1062,64 @@ tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF16V
     }
 }
 tasks.named('visitCollectionCompatibilitySeoulTest') { shouldRunAfter tasks.named('visitCollectionCompatibilityTest') }
+
+
+// Selected refresh/logout methods reuse the existing F13 actual-JPA source set; no new source set/JAR.
+tasks.register('prepareF13AuthSessionsOracle', Exec) {
+    dependsOn tasks.named('prepareF13AdminUserUpdateOracle')
+    inputs.file(rootProject.file('scripts/prepare_f13_legacy_oracle.py'))
+    outputs.files(
+            layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/entity/RefreshToken.java'),
+            layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/repository/RefreshTokenRepository.java'),
+            layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/dto/request/RefreshTokenRequestDto.java'),
+            layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/dto/response/RefreshTokenResponseDto.java'),
+            layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/exception/RefreshTokenExpiredException.java'),
+            layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/exception/RefreshTokenNotFoundException.java'),
+            layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/service/F13LegacyAuthSessionsService.java'),            rootProject.file('build/ci/f13-auth-sessions-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f13_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java').get().asFile,
+            rootProject.file('build/ci/f13-auth-sessions-oracle-sha256.txt'), '--auth-sessions'
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF13AuthSessionsOracle') }
+
+tasks.register('authSessionCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Compares selected refresh/logout actual JpaTM with the same owned twenty-four-table writer fixture.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'member.cleanup.fixture.receipt', rootProject.file('build/ci/member-cleanup-fixture-write.txt').absolutePath
+    systemProperty 'admin.user.update.fixture.receipt', rootProject.file('build/ci/admin-user-update-fixture-write.txt').absolutePath
+    systemProperty 'admin.user.update.oracle.receipt', rootProject.file('build/ci/f13-admin-update-oracle-sha256.txt').absolutePath
+    systemProperty 'auth.sessions.fixture.receipt', rootProject.file('build/ci/auth-sessions-fixture-write.txt').absolutePath
+    systemProperty 'auth.sessions.oracle.receipt', rootProject.file('build/ci/f13-auth-sessions-oracle-sha256.txt').absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
+        failOnNoMatchingTests = true
+    }
+    outputs.upToDateWhen { false }
+}
+
+// One existing method, not a second business matrix: original LocalDateTime/JPA UTC vs JDBC Calendar mapping.
+tasks.register('authSessionCompatibilitySeoulTest', Test) {
+    group = 'verification'
+    description = 'Compares selected refresh/logout actual JpaTM with the same owned twenty-four-table writer fixture.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'Asia/Seoul'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'member.cleanup.fixture.receipt', rootProject.file('build/ci/member-cleanup-fixture-write.txt').absolutePath
+    systemProperty 'admin.user.update.fixture.receipt', rootProject.file('build/ci/admin-user-update-fixture-write.txt').absolutePath
+    systemProperty 'admin.user.update.oracle.receipt', rootProject.file('build/ci/f13-admin-update-oracle-sha256.txt').absolutePath
+    systemProperty 'auth.sessions.fixture.receipt', rootProject.file('build/ci/auth-sessions-fixture-write.txt').absolutePath
+    systemProperty 'auth.sessions.oracle.receipt', rootProject.file('build/ci/f13-auth-sessions-oracle-sha256.txt').absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest.givenCurrentClaimsAndMicrosecondStoredExpiry__whenRotatingThenReplaying__thenPreserveCreatedAtAndOnlyChangeTheSelectedRefresh'
+        failOnNoMatchingTests = true
+    }
+    outputs.upToDateWhen { false }
+}

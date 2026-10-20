@@ -201,7 +201,105 @@ def extract_admin_update(repository, output, evidence):
     print('Verified selected original administrator update method and existing F13 JPA dependencies')
 
 
+
+# Auth-only opt-in. The default nickname/admin contracts and receipts above are unchanged.
+AUTH_SOURCE = 'f06a72a06bd26662c647bde780dfc7a27bf7349c'
+AUTH_EXPECTED = {'user-service/src/main/java/com/pawbridge/userservice/service/AuthServiceImpl.java': '2ebcd9eb54cae9e027b825d53e53f80187667994d009215f7c7de4703a527f38', 'user-service/src/main/java/com/pawbridge/userservice/entity/RefreshToken.java': '5e67e5c5384ca0e6608cdbe8bcf8781ef558d2d171d9cc4f67a0bcfc0f8cbda7', 'user-service/src/main/java/com/pawbridge/userservice/repository/RefreshTokenRepository.java': 'cdd0ea12bd6481df85259cdc36e2ffb830c565f1b139fe018406d23d64a1cc81', 'user-service/src/main/java/com/pawbridge/userservice/dto/request/RefreshTokenRequestDto.java': '0d407954139830bb51591a7e47c551e20d03a6e0e51389ab0f75fe90771a4fd5', 'user-service/src/main/java/com/pawbridge/userservice/dto/response/RefreshTokenResponseDto.java': 'ca24e0822744dc12eafee5a3a978adabda3864bd2b4133716c30e82cd90f7568', 'user-service/src/main/java/com/pawbridge/userservice/exception/RefreshTokenExpiredException.java': '0c6a15923aeaf93647f7f72ebb17dd59afa413ddda5c6acd2cd5f2e60ffa58f0', 'user-service/src/main/java/com/pawbridge/userservice/exception/RefreshTokenNotFoundException.java': '8870a55d365ecfe8da33ae5f92717699eeaaf4dc5d1ef9cdbf55759938bef2db', 'user-service/src/main/java/com/pawbridge/userservice/jwt/JwtProvider.java': '1b20a72f1c246fe66c177da93c7990eac9feeb486774af0a88c8e653a8f71015', 'user-service/src/main/java/com/pawbridge/userservice/repository/UserRepository.java': '09e803887a6386083bc50b06ebb2da5110ad8541bf7726c2440db3d843d2d915', 'user-service/src/main/java/com/pawbridge/userservice/entity/User.java': 'f2774b98a504ee58b166f251de938e0e6dd95b9e9f5e22e9474bf63f649de31e', 'user-service/src/main/java/com/pawbridge/userservice/entity/Role.java': '14eb5ed4e263777a06d6e127f650a78a03932c9d4d5020ae8f6939f756679c05', 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ApplicationException.java': 'cc92224c6cec111f3f008ff14da267154dc587987ce5f86be169e7ce9a1ea727', 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ErrorCode.java': 'd2fcd341dd3bf2f0e65a0a4a2d2ebf3885c0e0354926da46d83b784e22fa9e4b', 'user-service/src/main/java/com/pawbridge/userservice/exception/TokenInvalidException.java': '46d37e20819403edcc5267daa14299a8370232c00470a6e074e8a082cd08ea73', 'user-service/src/main/java/com/pawbridge/userservice/exception/UserNotFoundException.java': 'ddea3a2a8fb4d48cf31a719f6ee507c427df841d9d6f40778dceaa8a3bc747da'}
+AUTH_METHODS = {'refreshToken': 'b383484a062417539c3ca571366e86be1d9b8da4238a6f74fa03f57ef8ba8484', 'logout': '664ffb93edb40c7e07b3080ee546778f4a8c85c46e721959a85ea3397a330dbc'}
+AUTH_SHARED = {'user-service/src/main/java/com/pawbridge/userservice/jwt/JwtProvider.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/jwt/JwtProvider.java', 'user-service/src/main/java/com/pawbridge/userservice/repository/UserRepository.java': 'backend-app/boot/build/generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/repository/UserRepository.java', 'user-service/src/main/java/com/pawbridge/userservice/entity/User.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/entity/User.java', 'user-service/src/main/java/com/pawbridge/userservice/entity/Role.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/entity/Role.java', 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ApplicationException.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/exception/common/ApplicationException.java', 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ErrorCode.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/exception/common/ErrorCode.java', 'user-service/src/main/java/com/pawbridge/userservice/exception/TokenInvalidException.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/exception/TokenInvalidException.java', 'user-service/src/main/java/com/pawbridge/userservice/exception/UserNotFoundException.java': 'backend-app/boot/build/generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/exception/UserNotFoundException.java'}
+AUTH_OUTPUTS = ('com/pawbridge/userservice/entity/RefreshToken.java', 'com/pawbridge/userservice/repository/RefreshTokenRepository.java', 'com/pawbridge/userservice/dto/request/RefreshTokenRequestDto.java', 'com/pawbridge/userservice/dto/response/RefreshTokenResponseDto.java', 'com/pawbridge/userservice/exception/RefreshTokenExpiredException.java', 'com/pawbridge/userservice/exception/RefreshTokenNotFoundException.java', 'com/pawbridge/userservice/service/F13LegacyAuthSessionsService.java')
+
+AUTH_GENERATED = {'com/pawbridge/userservice/entity/RefreshToken.java': '5e67e5c5384ca0e6608cdbe8bcf8781ef558d2d171d9cc4f67a0bcfc0f8cbda7', 'com/pawbridge/userservice/repository/RefreshTokenRepository.java': 'cdd0ea12bd6481df85259cdc36e2ffb830c565f1b139fe018406d23d64a1cc81', 'com/pawbridge/userservice/dto/request/RefreshTokenRequestDto.java': '0d407954139830bb51591a7e47c551e20d03a6e0e51389ab0f75fe90771a4fd5', 'com/pawbridge/userservice/dto/response/RefreshTokenResponseDto.java': 'ca24e0822744dc12eafee5a3a978adabda3864bd2b4133716c30e82cd90f7568', 'com/pawbridge/userservice/exception/RefreshTokenExpiredException.java': '0c6a15923aeaf93647f7f72ebb17dd59afa413ddda5c6acd2cd5f2e60ffa58f0', 'com/pawbridge/userservice/exception/RefreshTokenNotFoundException.java': '8870a55d365ecfe8da33ae5f92717699eeaaf4dc5d1ef9cdbf55759938bef2db', 'com/pawbridge/userservice/service/F13LegacyAuthSessionsService.java': '8e97b88258ea2f4c51ba06744e74b534963fc0f96bfbce77fae42975f72be2bd'}
+
+def auth_sessions_wrapper(content):
+    source = content.decode('utf-8')
+    selected = []
+    anchors = (('refreshToken', '    @Override\n    @Transactional\n    public RefreshTokenResponseDto refreshToken('),
+               ('logout', '    @Override\n    @Transactional\n    public void logout('))
+    for name, anchor in anchors:
+        if source.count(anchor) != 1:
+            raise SystemExit('Fixed auth method boundary differs')
+        start = source.index(anchor)
+        # Include the original closing brace and exactly one real LF, without normalizing a method body.
+        end = source.index('\n    }\n', start + len(anchor)) + len('\n    }\n')
+        method = source[start:end]
+        if hashlib.sha256(method.encode()).hexdigest() != AUTH_METHODS[name]:
+            raise SystemExit('Fixed auth method/LF checksum differs')
+        selected.append(method)
+    header = '''package com.pawbridge.userservice.service;
+import com.pawbridge.userservice.dto.request.RefreshTokenRequestDto;
+import com.pawbridge.userservice.dto.response.RefreshTokenResponseDto;
+import com.pawbridge.userservice.entity.RefreshToken;
+import com.pawbridge.userservice.entity.User;
+import com.pawbridge.userservice.exception.RefreshTokenExpiredException;
+import com.pawbridge.userservice.exception.RefreshTokenNotFoundException;
+import com.pawbridge.userservice.exception.TokenInvalidException;
+import com.pawbridge.userservice.exception.UserNotFoundException;
+import com.pawbridge.userservice.jwt.JwtProvider;
+import com.pawbridge.userservice.repository.RefreshTokenRepository;
+import com.pawbridge.userservice.repository.UserRepository;
+import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
+import org.springframework.transaction.annotation.Transactional;
+@Transactional(readOnly = true)
+public class F13LegacyAuthSessionsService implements F13AuthSessionOperations {
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRepository userRepository;
+    private final JwtProvider jwtProvider;
+    public F13LegacyAuthSessionsService(RefreshTokenRepository refreshTokenRepository, UserRepository userRepository, JwtProvider jwtProvider) {
+        this.refreshTokenRepository = refreshTokenRepository; this.userRepository = userRepository; this.jwtProvider = jwtProvider;
+    }
+'''
+    return (header + '\n'.join(selected) + '''}
+interface F13AuthSessionOperations {
+    RefreshTokenResponseDto refreshToken(RefreshTokenRequestDto requestDto);
+    void logout(Long userId);
+}
+''').encode()
+
+
+def auth_sessions_receipt(outputs):
+    entries = ['source_sha=' + AUTH_SOURCE]
+    entries += [digest + '  source ' + path for path, digest in AUTH_EXPECTED.items()]
+    entries += [AUTH_EXPECTED[path] + '  shared-byte-identity ' + relative for path, relative in AUTH_SHARED.items()]
+    entries += [digest + '  verbatim-' + name + '-method' for name, digest in AUTH_METHODS.items()]
+    entries += [hashlib.sha256(content).hexdigest() + '  generated ' + relative for relative, content in outputs.items()]
+    return '\n'.join(entries) + '\n'
+
+
+def extract_auth_sessions(repository, output, evidence):
+    repository, output, evidence = [pathlib.Path(p).resolve() for p in (repository, output, evidence)]
+    if (output != repository / 'backend-app/boot/build/generated/sources/f13LegacyOracle/java'
+            or evidence != repository / 'backend-app/build/ci/f13-auth-sessions-oracle-sha256.txt'):
+        raise SystemExit('Refusing non-dedicated auth source/evidence output')
+    inputs = {}
+    for path, expected in AUTH_EXPECTED.items():
+        content = subprocess.check_output(['git', 'show', AUTH_SOURCE + ':' + path], cwd=repository)
+        if hashlib.sha256(content).hexdigest() != expected:
+            raise SystemExit('Auth immutable source differs')
+        inputs[path] = content
+    for path, relative in AUTH_SHARED.items():
+        shared = repository / relative
+        if (shared.is_symlink() or shared.resolve() != shared or not shared.is_file()
+                or shared.read_bytes() != inputs[path]):
+            raise SystemExit('Auth shared original bytes differ')
+    outputs = {relative: inputs[PREFIX + relative] for relative in AUTH_OUTPUTS[:-1]}
+    outputs[AUTH_OUTPUTS[-1]] = auth_sessions_wrapper(inputs[PREFIX + 'com/pawbridge/userservice/service/AuthServiceImpl.java'])
+    receipt = auth_sessions_receipt(outputs).encode()
+    pending = [(output / path, data) for path, data in outputs.items()] + [(evidence, receipt)]
+    for target, data in pending:
+        if target.is_symlink() or target.resolve() != target or (target.exists() and target.read_bytes() != data):
+            raise SystemExit('Refusing differing auth output/receipt before any write')
+    for target, data in pending:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    print('Verified selected auth methods and existing shared JPA/JWT sources; unrelated auth flows excluded')
+
+
 if __name__ == '__main__':
+    if len(sys.argv) == 5 and sys.argv[4] == '--auth-sessions':
+        extract_auth_sessions(*sys.argv[1:4])
+        raise SystemExit(0)
     if len(sys.argv) == 5 and sys.argv[4] == '--admin-update':
         extract_admin_update(*sys.argv[1:4])
         raise SystemExit(0)

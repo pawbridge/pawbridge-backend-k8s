@@ -26,7 +26,9 @@ public class ReadSecurityConfiguration {
     @Bean
     SecurityFilterChain postReadSecurity(HttpSecurity http, PostTokenAuthenticator tokens,
             @Value("${pawbridge.visits.enabled:false}") boolean visitsEnabled,
-            @Value("${pawbridge.visits.collection-enabled:false}") boolean collectionEnabled) throws Exception {
+            @Value("${pawbridge.visits.collection-enabled:false}") boolean collectionEnabled,
+            @Value("${pawbridge.auth.sessions-enabled:false}") boolean sessionsEnabled) throws Exception {
+
         var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
         var postDeletion = new AntPathRequestMatcher("/api/v1/posts/*", "DELETE");
         var postUpdate = new AntPathRequestMatcher("/api/v1/posts/*", "PUT");
@@ -59,6 +61,9 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "GET"),
                 new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/admin/users/search", "GET")));
         var userUpdate = new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "PUT");
+        var sessionEnabled=(org.springframework.security.web.util.matcher.RequestMatcher) request -> sessionsEnabled;
+        var sessionRefresh=new AndRequestMatcher(sessionEnabled,new AntPathRequestMatcher("/api/v1/auth/refresh","POST"));
+        var sessionLogout=new AndRequestMatcher(sessionEnabled,new AntPathRequestMatcher("/api/v1/auth/logout","POST"));
         var visitCollectionEnabled = (org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> visitsEnabled && collectionEnabled;
         var visitIdentity = new AndRequestMatcher(visitCollectionEnabled,
@@ -68,7 +73,7 @@ public class ReadSecurityConfiguration {
         var visitPeriod = new AndRequestMatcher(visitCollectionEnabled,
                 new AntPathRequestMatcher("/api/v1/admin/visits/stats/period", "GET"));
         var adminRoutes = new OrRequestMatcher(totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -85,6 +90,7 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/visits/today").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/comments/posts/read/{postId}").permitAll()
                         .requestMatchers(visitIdentity, visitCount).permitAll()
+                        .requestMatchers(sessionRefresh).permitAll()
                         .requestMatchers(adminRoutes).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())

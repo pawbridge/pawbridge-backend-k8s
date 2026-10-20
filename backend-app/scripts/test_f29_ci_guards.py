@@ -650,6 +650,57 @@ class MemberCleanupLateGuardTest(unittest.TestCase):
                 self.assertNotIn('private',str(failure.exception));self.assertTrue(failure.exception.__suppress_context__)
                 self.assertIsNone(failure.exception.__cause__)
 
+
+
+class AuthSessionsFixtureGuardTest(unittest.TestCase):
+    def test_given_changed_auth_source_receipt__when_preparing__then_reject_before_grant_snapshot_or_new_receipt(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(f29,'EVIDENCE',Path(directory).resolve()), \
+                patch.object(f29.f2,'require_hosted'), patch.object(f29,'admin_update_require_fixture',return_value=OWNER), \
+                patch.object(f29,'auth_sessions_require_oracle_receipt',side_effect=SystemExit('source mismatch')), \
+                patch.object(f29,'owned_sql') as sql, patch.object(f29,'member_database_snapshot') as snapshot:
+            with self.assertRaisesRegex(SystemExit,'source mismatch'): f29.auth_sessions_prepare()
+            sql.assert_not_called(); snapshot.assert_not_called(); self.assertFalse((Path(directory)/f29.AUTH_SESSIONS_RECEIPT).exists())
+
+    def test_given_owned_old_acl__when_extending_then_denying__then_old_strict_runs_once_and_identity_restores_exact_rights(self):
+        events=[]
+        with tempfile.TemporaryDirectory() as directory, patch.object(f29,'EVIDENCE',Path(directory).resolve()), \
+                patch.object(f29.f2,'require_hosted'), patch.object(f29,'admin_update_require_fixture',side_effect=lambda:events.append('old') or OWNER) as old, \
+                patch.object(f29,'auth_sessions_require_oracle_receipt',side_effect=lambda:events.append('source')), \
+                patch.object(f29,'auth_sessions_require_fixture',side_effect=lambda:events.append('new') or OWNER), \
+                patch.object(f29,'auth_sessions_require_identity',side_effect=lambda:events.append('identity') or OWNER), \
+                patch.object(f29,'member_database_snapshot',return_value={'all24':'same'}), \
+                patch.object(f29,'owned_sql',side_effect=lambda query='',input_text=None:events.append(input_text or query) or ''):
+            f29.auth_sessions_prepare()
+            self.assertEqual(f29.auth_sessions_fixture_proof(OWNER),(Path(directory)/f29.AUTH_SESSIONS_RECEIPT).read_text())
+            self.assertEqual(1,events.count('old')); self.assertLess(events.index('source'),next(i for i,e in enumerate(events) if 'GRANT ' in e))
+            old.reset_mock()
+            with self.assertRaisesRegex(RuntimeError,'original failure'):
+                with f29.auth_sessions_denied_privilege('rotate-write'): raise RuntimeError('original failure')
+            old.assert_not_called()
+            self.assertEqual('GRANT UPDATE(token) ON pawbridge_user.refresh_tokens TO pawbridge_f3_writer',events[-2])
+            self.assertEqual('new',events[-1]); self.assertIn('identity',events)
+
+
+
+    def test_given_auth_pg_failure_or_incomplete_acl__when_restoring__then_require_identity_revoke_only_seven_new_rights_and_revalidate_admin(self):
+        for identity_ok in (True,False):
+            with self.subTest(identity_ok=identity_ok), patch.object(f29.f2,'require_hosted'), \
+                    patch.object(f29,'auth_sessions_require_identity',return_value=OWNER,side_effect=None if identity_ok else SystemExit('owner mismatch')), \
+                    patch.object(f29,'auth_sessions_require_fixture',side_effect=AssertionError('new strict must not precede recovery')), \
+                    patch.object(f29,'member_database_snapshot',return_value={'all24':'unchanged'}) as snapshot, \
+                    patch.object(f29,'admin_update_require_fixture',return_value=OWNER) as old, patch.object(f29,'owned_sql') as sql:
+                if not identity_ok:
+                    with self.assertRaisesRegex(SystemExit,'owner mismatch'): f29.auth_sessions_restore()
+                    sql.assert_not_called(); snapshot.assert_not_called(); old.assert_not_called()
+                    continue
+                f29.auth_sessions_restore()
+                sql.assert_called_once_with(input_text='BEGIN;\n'+f29.AUTH_SESSIONS_REVOKES+'\nCOMMIT;\n')
+                old.assert_called_once_with(); self.assertEqual(2,snapshot.call_count)
+                self.assertEqual(2,f29.AUTH_SESSIONS_REVOKES.count('REVOKE '))
+                for forbidden in ('DELETE','SELECT(user_id)','nickname','UPDATE(role','UPDATE(care_reg_no','GRANT ','SEQUENCE','INSERT'):
+                    self.assertNotIn(forbidden,f29.AUTH_SESSIONS_REVOKES)
+
+
 if __name__ == '__main__':
     print('F29 fixture/XML guards: mocked resources; immutable inputs use read-only Git objects. No actual PG/JAR/SSE evidence.', flush=True)
     unittest.main()
