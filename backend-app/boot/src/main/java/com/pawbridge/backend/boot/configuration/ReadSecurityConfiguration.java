@@ -46,7 +46,8 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.store-direct-orders.enabled:false}") String storeDirectOrdersEnabledFlag,
             @Value("${pawbridge.animal-lost-search.enabled:false}") String animalLostSearchEnabledFlag,
             @Value("${pawbridge.store-carts.enabled:false}") String storeCartsEnabledFlag,
-            @Value("${pawbridge.store-order-administration.enabled:false}") String storeOrderAdministrationFlag) throws Exception {
+            @Value("${pawbridge.store-order-administration.enabled:false}") String storeOrderAdministrationFlag,
+            @Value("${pawbridge.animal-travel.enabled:false}") String animalTravelFlag) throws Exception {
 
         var storeOrderAdministrationEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(storeOrderAdministrationFlag);
@@ -54,6 +55,13 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/orders","GET"),
                 new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}","GET"),
                 new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}/delivery-status","PATCH")));
+        var animalTravelEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> "true".equalsIgnoreCase(animalTravelFlag) && "postgresql".equalsIgnoreCase(animalQueryBackend);
+        var animalTravelReading=new AndRequestMatcher(animalTravelEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/places/regions","GET"),
+                new AntPathRequestMatcher("/api/v1/places","GET"),
+                new AntPathRequestMatcher("/api/v1/places/{contentId}","GET")));
+
         var animalCommandsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(animalCommandsEnabledFlag);
         var animalCommandWriting=new AndRequestMatcher(animalCommandsEnabled,new OrRequestMatcher(
@@ -239,7 +247,7 @@ public class ReadSecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(storeOrderAdministrationRoutes).hasRole("ADMIN")
-                        .requestMatchers(animalLostSearchRoute, animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
+                        .requestMatchers(animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()

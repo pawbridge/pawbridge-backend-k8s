@@ -871,3 +871,10 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 주문 페이지를 먼저 조회하고 해당 페이지의 ID에만 품목을 한 번에 연결한다. 컬렉션 fetch에 페이지 제한을 적용하지 않으며, 응답 순서와 전체 건수는 원래 Page를 유지한다. 비어 있는 페이지는 품목 조회를 생략한다. User 권한 조회는 별도 JDBC이며, 주문 조회는 페이지 SQL·필요한 count SQL·품목 SQL로 제한한다.
 
 소유 P13의 새 회귀 1건은 수정 전 쿼리 상한 실패와 수정 후 성공으로 확인했다. 두 주문을 size100으로 조회할 때 Hibernate SQL2, 빈 첫 페이지 SQL1을 관측하고 품목·역순·total·15표 불변을 확인했다. 이 데이터의 count는 추론되므로 count SQL을 실제 실행했다는 근거로 확대하지 않는다. 기존 null 배송의 안전한500과 로그 차단은 유지한다.
+
+
+## 공개 여행 장소 조회
+
+`pawbridge.animal-travel.enabled=true`와 `pawbridge.animal-query.backend=postgresql`을 함께 지정할 때 `/api/v1/places/regions`, `/api/v1/places`, `/api/v1/places/{contentId}`의 세 GET만 활성화합니다. 기본 비활성이고 기존 reader JDBC·트랜잭션 관리자를 공유합니다. 지역·상세는 읽기 전용, 목록의 count와 page는 원문과 같이 같은 읽기 전용 REPEATABLE_READ 트랜잭션으로 조회합니다. 별도 pool·EMF·DDL은 추가하지 않습니다.
+
+원문 PostgreSQL의 여행 카탈로그 7개 테이블과 응답·가용 상태·이미지 이용 조건을 사용하며, 응답 중 TourAPI·R2·AI 호출을 하지 않습니다. 수집·스케줄러·갱신 API는 이 구성에 포함하지 않습니다. 새 합성 DB 검증은 SELECT 전용 reader와 `P14_PG_SETTINGS`를 사용하는 `OwnedPostgresqlAnimalTravelTest`로 분리합니다. 기존 수집기의 실행 소유권 인계와 실제 운영 활성화는 별도 미완료 항목입니다.
