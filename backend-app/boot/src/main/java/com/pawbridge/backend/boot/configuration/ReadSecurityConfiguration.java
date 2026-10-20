@@ -45,8 +45,15 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.animal-commands.enabled:false}") String animalCommandsEnabledFlag,
             @Value("${pawbridge.store-direct-orders.enabled:false}") String storeDirectOrdersEnabledFlag,
             @Value("${pawbridge.animal-lost-search.enabled:false}") String animalLostSearchEnabledFlag,
-            @Value("${pawbridge.store-carts.enabled:false}") String storeCartsEnabledFlag) throws Exception {
+            @Value("${pawbridge.store-carts.enabled:false}") String storeCartsEnabledFlag,
+            @Value("${pawbridge.store-order-administration.enabled:false}") String storeOrderAdministrationFlag) throws Exception {
 
+        var storeOrderAdministrationEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> "true".equalsIgnoreCase(storeOrderAdministrationFlag);
+        var storeOrderAdministrationRoutes=new AndRequestMatcher(storeOrderAdministrationEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/admin/orders","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}/delivery-status","PATCH")));
         var animalCommandsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(animalCommandsEnabledFlag);
         var animalCommandWriting=new AndRequestMatcher(animalCommandsEnabled,new OrRequestMatcher(
@@ -219,8 +226,8 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/approve","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
-        var adminRoutes = new OrRequestMatcher(adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var adminRoutes = new OrRequestMatcher(storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -231,6 +238,7 @@ public class ReadSecurityConfiguration {
                 .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(storeOrderAdministrationRoutes).hasRole("ADMIN")
                         .requestMatchers(animalLostSearchRoute, animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
