@@ -3,6 +3,7 @@ plugins {
 }
 
 dependencies {
+    implementation 'org.springframework.data:spring-data-commons'
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     implementation project(':user')
     implementation 'org.springframework:spring-web'

@@ -20,15 +20,26 @@ public final class UpdatePost {
     public PostDetails update(long postId, long authorId, String title, String content, List<PostUpload> files) {
         PostSnapshot previous=reader.findById(postId).orElseThrow(PostNotFoundException::new);
         PostOwnership.requireAuthor(previous.authorId(),authorId);
+        return update(previous,title,content,files);
+    }
+
+    /** The separately authorized admin route changes the post without an author ownership check. */
+    public PostDetails updateAsAdmin(long postId, String title, String content, List<PostUpload> files) {
+        PostSnapshot previous=reader.findById(postId).orElseThrow(PostNotFoundException::new);
+        return update(previous,title,content,files);
+    }
+
+    private PostDetails update(PostSnapshot previous, String title, String content, List<PostUpload> files) {
         List<String> imageUrls=null;
         // One empty multipart file still requests replacement; the uploader then returns an empty list.
         if(!files.isEmpty()) {
             remover.remove(previous.imageUrls());
             imageUrls=uploader.upload(files);
         }
-        String nickname=nickname(authorId);
+        String nickname=nickname(previous.authorId());
         // Reader, media and nickname I/O have finished before the short locking writer transaction.
-        PostSnapshot post=modification.update(postId,authorId,title,content,imageUrls);
+        // The stored author is post data, never the admin caller's identity. The writer still locks and rechecks it.
+        PostSnapshot post=modification.update(previous.postId(),previous.authorId(),title,content,imageUrls);
         return new PostDetails(post.postId(),post.authorId(),nickname,post.title(),post.content(),
                 post.boardType(),post.imageUrls(),post.createdAt(),post.updatedAt());
     }

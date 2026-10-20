@@ -553,3 +553,11 @@ logout은 인증된 사용자에게 속한 refresh 행을 먼저 선택하고 �
 ADMIN GET `/api/v1/admin/posts/stats/period`와 `/api/v1/admin/posts/stats/today`는 기존 reader와 Boot의 명시적 조립을 재사용한다. 기간 조회는 필수 ISO 날짜·최대366일·서울 날짜 경계와 삭제 제외를 보존하고, 이전 날 비교와 두 집계를 같은 읽기 전용 REPEATABLE_READ 트랜잭션에서 수행한다. 일자별 빈 구간을 새로 채우거나 게시판 결과의 정렬 순서를 만들지 않는다. 오늘 조회는 원문의 JVM 기본 날짜 경계를 사용하며 기간 조회와 같은 기준이라고 단정하지 않는다. 새 풀·스키마·운영 권한은 추가하지 않는다.
 
 고정 앱16개와 README 경로만 허용하는 `admin-post-statistics` CI는 공통 Java21 빌드·단위 검사, F2/F3/F4/F5/F7의 공통 fixture·권한 준비, 원문 컴파일, UTC4·Seoul1 및 소유 정리를 요구한다. 이 읽기 시험이 사용하지 않는 F8~F29의 DB 준비22단계와 과거28 JAR 여정은 명시적으로 생략하고 raw 실행·생략 결과를 감사한다. 원문 준비와 기존 full의 실행 내용은 유지하며 선택 결과를 full로 승격하지 않는다. 로컬 단위·HTTP·구조와 source 컴파일 성공은 실제 PostgreSQL 비교 성공과 구분한다. 운영 변경이나 배포를 수행하는 구성이 아니다.
+
+## 관리자 게시글 조회·수정·삭제
+
+ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`를 한 관리 흐름으로 조립한다. 목록은 원문의 Pageable/PageImpl 계약을 같은 Spring Data Commons 3.4.11로 재사용하고 application에는 순수 페이지 계약만 둔다. 기본20·최대2000·fallback·다중 정렬·전체 건수와 partial-page count 생략, 삭제 제외·9필드·이미지 JSON·닉네임을 보존한다. 단건은 기존 ReadPost를 재사용한다. 원문의 `/read`, `/search` 같은 비숫자 단건 값도 매핑에 포함되며 별도 새 API나 예외 경로를 만들지 않는다.
+
+관리자 PUT/DELETE는 명시적인 AsAdmin 진입점으로 작성자 검사를 생략한다. 개인 수정·삭제의 소유권 검사는 유지하며 실제 게시글 작성자 ID를 기존 writer·닉네임·payload에 사용한다. 기존 JDBC/locking SQL·TX·R2·Outbox·검색 정리를 재사용한다. 첨부의 부분 실패를 자동 보상하거나 외부 I/O와 DB를 새 단일 트랜잭션으로 묶지 않는다. 새 업무표·SQL·권한·풀은 추가하지 않는다.
+
+고정 앱32개와 README 경로에 한정한 `admin-post-management` CI는 공통 빌드·단위/HTTP·계층 검사, 기존 원문 준비와 실제 페이지 조회 PG11, 소유 정리를 요구한다. 과거28 JAR 여정과 무관39계약은 명시적으로 생략하며 scoped 결과를 full로 승격하지 않는다. 합집합의 관련65사례·실제계층 검사는 로컬에서 통과했다. 관리자 쓰기 전용 실제 PG 시험은 이번에 추가하지 않았고 변경되지 않은 F4/F5 인프라의 이전 검증을 재사용한다. 새 관리자 쓰기의 실제 DB/R2 통합은 운영 전 별도 확인 사항이며 현재 운영을 변경하거나 배포하는 구성이 아니다.

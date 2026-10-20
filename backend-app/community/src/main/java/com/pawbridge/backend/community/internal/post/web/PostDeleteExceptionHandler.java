@@ -12,7 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice(assignableTypes = PostDeleteController.class)
+@RestControllerAdvice(assignableTypes = {PostDeleteController.class, AdminPostDeleteController.class})
 public final class PostDeleteExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(PostDeleteExceptionHandler.class);
     private static final int MAX_LOGGED_CAUSES = 4;

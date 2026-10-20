@@ -19,6 +19,16 @@ class DeletePostTest {
     private final PostDeletion deletion = mock(PostDeletion.class);
     private final DeletePost useCase = new DeletePost(reader, media, deletion);
 
+    @Test
+    void given__another_authors_post__when__deleting_as_admin__then__retain_its_author_in_the_same_locking_mutation() {
+        PostSnapshot post = post(8L,"COMMUNICATION",List.of("first","first"));
+        when(reader.findById(42L)).thenReturn(Optional.of(post));
+        useCase.deleteAsAdmin(42L);
+        var order=inOrder(reader,media,deletion);
+        order.verify(reader).findById(42L);order.verify(media).remove(post.imageUrls());
+        order.verify(deletion).delete(42L,8L);order.verifyNoMoreInteractions();
+    }
+
     @ParameterizedTest
     @EnumSource(PostBoardType.class)
     void given__own_active_post_of_any_board__when__delete__then__read_media_and_write_occur_once_in_order(PostBoardType board) {

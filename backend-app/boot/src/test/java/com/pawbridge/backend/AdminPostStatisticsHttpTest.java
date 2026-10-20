@@ -120,7 +120,7 @@ class AdminPostStatisticsHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GET /api/v1/admin/posts/stats/period/extra", "POST /api/v1/admin/posts/stats/today", "GET /api/v1/admin/posts", "GET /api/v1/admin/posts/42"})
+    @ValueSource(strings = {"GET /api/v1/admin/posts/stats/period/extra", "POST /api/v1/admin/posts/stats/today"})
     void given__an_unported_neighbor_or_method__when__admin_requests__then__keep_default_denial(String wire) throws Exception {
         var parts = wire.split(" ", 2);
         mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))

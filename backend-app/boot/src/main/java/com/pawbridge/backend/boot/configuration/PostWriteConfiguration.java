@@ -6,6 +6,8 @@ import com.pawbridge.backend.community.internal.post.application.CreatePost;
 import com.pawbridge.backend.community.internal.post.application.UpdatePost;
 import com.pawbridge.backend.community.internal.post.web.PostUpdateController;
 import com.pawbridge.backend.community.internal.post.web.PostUpdateExceptionHandler;
+import com.pawbridge.backend.community.internal.post.web.AdminPostUpdateController;
+import com.pawbridge.backend.community.internal.post.web.AdminPostDeleteController;
 import com.pawbridge.backend.community.internal.post.web.PostMultipartExceptionHandler;
 import com.pawbridge.backend.community.internal.post.application.DeletePost;
 import com.pawbridge.backend.community.internal.post.application.PostDeletion;
@@ -124,6 +126,16 @@ public class PostWriteConfiguration {
 
     @Bean
     PostUpdateController postUpdateController(UpdatePost update) { return new PostUpdateController(update); }
+
+    @Bean
+    AdminPostUpdateController adminPostUpdateController(UpdatePost update) {
+        return new AdminPostUpdateController(update);
+    }
+
+    @Bean
+    AdminPostDeleteController adminPostDeleteController(DeletePost delete) {
+        return new AdminPostDeleteController(delete);
+    }
 
     @Bean
     PostUpdateExceptionHandler postUpdateExceptionHandler() { return new PostUpdateExceptionHandler(); }

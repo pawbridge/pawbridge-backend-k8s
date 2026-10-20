@@ -157,7 +157,7 @@ class PostSearchHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"GET /api/v1/posts", "GET /api/v1/posts/search/42", "GET /api/v1/posts/search/",
-            "GET /api/v1/posts/searching", "GET /api/posts/search", "GET /api/v1/admin/posts/search",
+            "GET /api/v1/posts/searching", "GET /api/posts/search",
             "HEAD /api/v1/posts/search", "OPTIONS /api/v1/posts/search", "POST /api/v1/posts/search", "PATCH /api/v1/posts/search"})
     void given__unexposed_method_or_adjacent_path__when__requesting__then__deny_without_search(String request) throws Exception {
         String[] parts = request.split(" ", 2);
