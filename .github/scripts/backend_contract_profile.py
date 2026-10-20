@@ -592,7 +592,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a3bc09a8d152aee086fa1
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalModuleReadConfiguration.java': 'c128e7efa1383ba076d6e5adc58ae0b4174a79b3096a47ecb4f86a278b9e6aaf',
  'backend-app/boot/src/test/java/com/pawbridge/backend/ShelterModuleConfigurationTest.java': 'a4861bcde1aa67aa60a94447a9a5adee224aedbb47a9cd7aecbb50a60e8dffa5',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/infrastructure/ModuleShelterLookup.java': 'ad8beab20388ea5088349ab318208278d0ed79c27dbc345ae1dff4ba23e46ef8',
- 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/ModuleShelterLookupTest.java': '606312f87828f9c889f51416037c717b4ab58dfdb66e9dca6ce78206e848fda9'}
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/ModuleShelterLookupTest.java': '2a9da4ad80b0cef65b29d0f6515d853a0920ec1967d8b8e5cbaeb38db6d48272'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',
