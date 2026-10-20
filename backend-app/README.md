@@ -604,6 +604,30 @@ Kafka 보상 소비/manualACK·재시도·processed 저장·정리 예약의 소
 
 선택 CI는 고정108 입력과 공통 빌드·단위/HTTP/구조, 기존 관리자 페이지 PG11·소유 정리를 요구한다.39계약·28JAR의 미실행과 새로운 User SQL/외부 연동의 미실증은 명시적으로 남기며 full 또는 운영 인계 성공으로 확대하지 않는다.
 
+## 실종·목격 제보
+
+`pawbridge.animal-reports.enabled`는 기본 false다. 선택 reader/writer의 실제 제보 조회·DML/행잠금·생성키 권한과 격리 요청을 검증한 뒤에만 명시 true로 활성화한다. false에서는 제보 빈과 보안 matcher를 만들지 않고5경로를 기본 거부한다. 이는 원문과 다른 기동 보호이며 기존 CI 최소계정의 권한을 임의 확장하지 않는다. 기동 성공은 제보 준비 완료가 아니며 이 gate 전에는 외부 라우팅을 인계하지 않는다.
+
+명시 활성화에서 공개 GET `/api/v1/reports`와 `/{reportId}`, JWT 본인 POST/PUT/DELETE를 조립한다. 기존 목록 필터·Page wire·상세22필드·소유권·soft-delete·사진/종류 변경 제한과 닉네임 fallback을 유지한다. reader/writer·TM·R2·User nickname 조회를 재사용한다. 원문 JPA의 int 범위를 넘는 offset은 읽기 TX 안·SQL 전에 같은 예외로 거부하며 공개 조회를 큰 OFFSET SQL로 넘기지 않는다.
+
+사진은 reports/images 경로를 사용하고 부분 업로드 실패는 앞서 올린 객체를 정리한다. INSERT 본문/saveAndFlush 상당 실패는 업로드를 정리하지만 proxy commit 실패는 원문처럼 별도 보상하지 않는다. soft-delete에서 사진을 지우거나 새 Outbox를 만들지 않는다. JPA preflush 응답의 이전 updatedAt을 보존한다. 이런 원문 동작을 새로운 보상 정책으로 대체하지 않았다.
+
+비작성 서브가 생산8/시험4·변경23메서드를 대조했다. 고유49사례는 분할 선택 성공 합집합이고 초과 offset 신규1은 RED→GREEN으로 SQL0을 확인했다. User와 함께 명시 조립을 합친 뒤 새 조립1·466class 계층 검사도 수행했다. 실제 PG 권한/SQL·JPA 감사시각/경합·R2/활성 JAR은 아직 미실행이며 코드 편입만으로 운영 인계를 완료했다고 표시하지 않는다. 고정130 선택 CI의 관리자 페이지 PG11은 제보 연동 시험이 아니다.
+
+
+## 홈 영상 관리·갱신
+
+ADMIN 목록/미리보기/등록/수정/게시/전체순서/재검사7경로는 원문의 board revision 행 잠금, 등록100/게시3 제한, 중복ID와 전체순서 집합 검증을 유지한다. 기존 공개 HomeVideo11필드를 재사용하고 공개 GET은 변경하지 않는다. 외부 metadata 조회는 원문처럼 TX 밖이며 갱신은 만료 정리 커밋→최대50개 조회→각 board 잠금 반영 순서다.
+
+`pawbridge.home-videos.management-enabled`는 기본 false다. 관리 true와 기존 canonical `pawbridge.jobs.refresh-enabled` 명시 true가 모두 있을 때만60초 뒤/1시간 주기 갱신을 조립한다. 기존 flag=false는 항상 거부하며 미지정도 후보에서는 off다. 원문 고정990은 canonical true/matchIfMissing=true였으므로 후보 기본 off는 알려진 활성화 차이다. 변경된 working 원문을 무조건 실행으로 본 초기 설명은 정정했고 원본 파일은 수정하지 않았다.
+
+비작성 서브가16파일·30시험메서드와 원문 관리15본문/저장소11/YouTube client4본문·URL 변환을 대조했다. 고유69사례는 분할 성공 합집합이다. User/Report와 합친 새 조립1·466class 검사는4초에 통과했다. 실제 PG 잠금/rollback·YouTube·예약 true의 실행/활성 종료·JAR은 미실행이며 운영 스케줄러 소유권이 인계된 상태가 아니다. 고정 코호트의 공통 시험과 관리자 페이지 PG11을 이 통합 검증으로 확대하지 않는다.
+
+
+## Community HTTP 편입 묶음
+
+제보와 홈 영상 관리25경로를 이미 편입한 User HTTP 위에 묶는다. 독립 검수한22개 업무/시험 파일을 재사용하고 App·Security·조립시험3경로를 병합했다. 이후 무조건 제보 노출을 막기 위해 ReportConfig/HTTP와 공동Security/AppTest4경로의 기본 비활성을 보완했다. User의 Google/보호소/활동 조립·인가와 기존 공개 홈 조회를 보존한다. 기존 고정108에 Community25−공통3을 더한130 입력으로 공통 단위/구조·기존 페이지 PG11·소유 정리를 실행한다. 선택 PG11은 제보/YouTube/예약 또는 실제 writer 권한 검증을 대신하지 않는다. 새 운영 권한·설정·데이터·스케줄러는 변경하지 않는다.
+
 
 ### Google 실패·경합 보완과 남은 실제 연동 검증
 
@@ -612,3 +636,10 @@ Kafka 보상 소비/manualACK·재시도·processed 저장·정리 예약의 소
 Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/유한 시도/잠금 전 조회 금지와 실패 전파를 보호한다. 실제 PostgreSQL23505 복구·동시 row lock·선택 writer의 SELECT/행잠금/DML 권한은 아직 검증하지 않았다. 현재 OAuth 웹 호출에는 outer TX가 없으며, 다른 refresh writer까지 직렬화되거나 모든 isolation에서 동일하다고 주장하지 않는다. Google 활성화 전 실제 DB/격리수준·브라우저 흐름을 확인해야 한다.
 
 오류 redirect에 기존 query가 있으면 두 번째 물음표가 붙는 결함도 URI builder로 보완했다. 새2 RED 실패→기존 포함7 GREEN, 기존 오류 문구·query 없는 응답·토큰 미기록을 유지했다. fragment 시험은 handler 경계이며 Boot의 fragment 거부 정책은 그대로다.
+
+
+### 제보·홈 관리의 활성화 전 권한 인수
+
+합성 CI 계정은 제보·홈 관리 전체를 지원하는 운영 계정이 아니다. Reader/Writer는 필수 외부 설정으로 선택되며, 기존 fixture 역할을 그대로 적용하면 새 조회·저장에 실패한다. 제보 기본 off와 홈 관리 기본 off를 유지하고 선택 계정의 실제 테이블/열·잠금·생성키 권한과 격리 요청·외부 연동을 확인하기 전 true/라우팅/예약 인계를 하지 않는다. 기존 strict 최소권한 계약을 느슨하게 만들거나 실제 GRANT를 실행하지 않았다.
+
+제보 기존활성 HTTP16과 비활성5경로의403·호출0, 기본off/명시true조립2의 실제23사례는 RED6→GREEN23/3XML/각5초로 검증하고 비작성 검수했다. 변경4파일/11메서드 전수 대조, 새 프로덕션 타입·architecture 반복은 없다. 이 결과는 실제 PG 권한/SQL·R2·활성 서버 검증이 아니다.

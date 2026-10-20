@@ -31,8 +31,18 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.auth.sessions-enabled:false}") boolean sessionsEnabled,
             @Value("${pawbridge.chat.enabled:${MEMBER_CHAT_ENABLED:false}}") boolean chatEnabledFlag,
             @Value("${pawbridge.shelter-membership.enabled:false}") boolean shelterMembershipEnabled,
-            @Value("${pawbridge.user-animal-activities.enabled:false}") boolean animalActivitiesEnabled) throws Exception {
+            @Value("${pawbridge.user-animal-activities.enabled:false}") boolean animalActivitiesEnabled,
+            @Value("${pawbridge.home-videos.management-enabled:false}") boolean videoManagementEnabled,
+            @Value("${pawbridge.animal-reports.enabled:false}") boolean reportsEnabledFlag) throws Exception {
 
+        var reportsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->reportsEnabledFlag;
+        var reportReading=new AndRequestMatcher(reportsEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/reports","GET"),
+                new AntPathRequestMatcher("/api/v1/reports/{reportId}","GET")));
+        var reportWriting=new AndRequestMatcher(reportsEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/reports","POST"),
+                new AntPathRequestMatcher("/api/v1/reports/{reportId}","PUT"),
+                new AntPathRequestMatcher("/api/v1/reports/{reportId}","DELETE")));
         var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
         var postDeletion = new AntPathRequestMatcher("/api/v1/posts/*", "DELETE");
         var postUpdate = new AntPathRequestMatcher("/api/v1/posts/*", "PUT");
@@ -90,6 +100,15 @@ public class ReadSecurityConfiguration {
                 new RegexRequestMatcher("^/api/v1/chats/[0-9a-fA-F-]{36}(?:/messages)?(?:\\?.*)?$","GET"),
                 new RegexRequestMatcher("^/api/v1/chats/[0-9a-fA-F-]{36}/read(?:\\?.*)?$","PUT"),
                 new RegexRequestMatcher("^/api/v1/chats/[0-9a-fA-F-]{36}/visibility(?:\\?.*)?$","DELETE")));
+        var homeVideoEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->videoManagementEnabled;
+        var homeVideoManagement=new AndRequestMatcher(homeVideoEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/admin/videos","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/videos/preview","POST"),
+                new AntPathRequestMatcher("/api/v1/admin/videos","POST"),
+                new AntPathRequestMatcher("/api/v1/admin/videos/{id}","PUT"),
+                new AntPathRequestMatcher("/api/v1/admin/videos/{id}/publication","PUT"),
+                new AntPathRequestMatcher("/api/v1/admin/videos/order","PUT"),
+                new AntPathRequestMatcher("/api/v1/admin/videos/{id}/recheck","POST")));
         var adminPostList = new AntPathRequestMatcher("/api/v1/admin/posts", "GET");
         var adminPostDetail = new AntPathRequestMatcher("/api/v1/admin/posts/{postId}", "GET");
         var adminPostUpdate = new AntPathRequestMatcher("/api/v1/admin/posts/{postId}", "PUT");
@@ -113,8 +132,8 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/approve","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
-        var adminRoutes = new OrRequestMatcher(shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var adminRoutes = new OrRequestMatcher(homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -125,6 +144,7 @@ public class ReadSecurityConfiguration {
                 .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/home/videos").permitAll()
