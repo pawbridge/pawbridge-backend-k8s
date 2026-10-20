@@ -139,6 +139,7 @@ class Inputs:
                 'size_in_bytes': None, 'digest': '',
                 'workflow_run': {'id': RUN, 'head_sha': HEAD, 'repository_id': 66, 'head_repository_id': 66}})
         self.commit = {'sha': SOURCE, 'tree': {'sha': TREE}, 'parents': [{'sha': BASE}, {'sha': HEAD}]}
+        self.head_commit = {'sha': HEAD, 'tree': {'sha': TREE}}
         self.file = None
         self.associated = [{'id': 77, 'number': 7}]
         self.archive_override = {}
@@ -168,6 +169,7 @@ class Inputs:
                 if item.get('size_in_bytes') is None: item['size_in_bytes'] = len(raw)
             return {'total_count': len(self.artifacts), 'artifacts': self.artifacts}
         if path == PREFIX + '/git/commits/' + SOURCE: return self.commit
+        if path == PREFIX + '/git/commits/' + HEAD: return self.head_commit
         if path == PREFIX + '/contents/' + proof.WORKFLOW + '?ref=' + SOURCE:
             return self.file if self.file is not None else {'type': 'file', 'encoding': 'base64',
                 'size': len(self.workflow), 'content': base64.b64encode(self.workflow).decode()}
@@ -211,6 +213,89 @@ class PostmergeProofTest(unittest.TestCase):
                 self.assertEqual(JAR, result['source_proof']['jar_sha256'])
                 self.assertEqual([10, 11, 12], data.archive_calls)
                 self.assertFalse(any('ls-remote' in args or 'fetch' in args for args in data.git_calls))
+
+    @contextlib.contextmanager
+    def cohort(self):
+        paths = ['backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java']
+        blobs = {path: ('bounded cohort blob ' + str(index)).encode()
+                 for index, path in enumerate(proof.profile.POST_READS_APP_HASHES)}
+        hashes = {path: hashlib.sha256(raw).hexdigest() for path, raw in blobs.items()}
+        with patch.dict(globals(), PATHS=paths), patch.dict(proof.profile.POST_READS_APP_HASHES, hashes, clear=True):
+            data = self.fixture()
+            name = 'Scoped User Community cohort with administrator page PostgreSQL contracts'
+            data.workflow = data.workflow.replace(b"|| 'Pilot' }}", ("|| matrix.profile == 'user-community-integration' && '" + name + "' || 'Pilot' }}").encode())
+            for step in ('Existing original and PG contracts', 'New F30 expiry PG gate'):
+                data.workflow = data.workflow.replace(('      - name: ' + step + '\n').encode(),
+                    ('      - name: ' + step + "\n        if: ${{ matrix.profile == 'full' }}\n").encode())
+            extra = ''.join('      - name: ' + step + "\n        if: ${{ matrix.profile == 'full' || matrix.profile == 'user-community-integration' }}\n        run: bounded-cohort\n"
+                            for step in ('Scoped shape', 'Scoped compiler', 'Scoped PostgreSQL'))
+            data.workflow = data.workflow.replace(b'      - name: Owned cleanup', extra.encode() + b'      - name: Owned cleanup')
+            data.jobs[1]['name'] = name
+            for step in data.jobs[1]['steps']:
+                if step['name'] != 'Owned cleanup': step['conclusion'] = 'skipped'
+            data.jobs[1]['steps'].extend({'name': step, 'status': 'completed', 'conclusion': 'success'}
+                for step in ('Scoped shape', 'Scoped compiler', 'Scoped PostgreSQL'))
+            ctx = dict(data.plan['identity'], post_reads_scope_verified=True)
+            data.plan = proof.profile.make_plan(ctx, paths, proof.profile.POST_READS, JAR)
+            required = {*data.plan['required_contracts'], 'owned_cleanup'}
+            steps = {key: dict(outcome='success' if key in required else 'skipped', conclusion='success' if key in required else 'skipped')
+                     for key in (*proof.profile.ALL_SMOKES, *data.plan['required_contracts'], *data.plan['skipped_contracts'], 'owned_cleanup')}
+            data.execution = proof.profile.audit_execution(data.plan, ctx, paths, proof.profile.POST_READS, JAR, steps)
+            data.members['full']['build/ci/contract-plan.txt'] = encoded(data.plan)
+            data.members['full']['build/ci/contract-execution.txt'] = encoded(data.execution)
+            data.artifacts[1]['name'] = 'backend-app-check-123-2-user-community-integration'
+            saved = json.loads(data.members['proof']['postmerge-proof.txt'])
+            saved.update(mode='execute', reason='pull-request-validation')
+            data.members['proof']['postmerge-proof.txt'] = encoded(saved)
+            original_git = data.git
+            def git(*args):
+                if args == ('diff', '--name-only', '--no-renames', '-z', proof.profile.POST_READS_BASE, 'HEAD', '--', 'backend-app'):
+                    return b'\0'.join(path.encode() for path in blobs) + b'\0'
+                if len(args) == 2 and args[0] == 'show' and args[1].startswith('HEAD:'):
+                    return blobs.get(args[1][5:], b'tampered')
+                return original_git(*args)
+            data.git = git
+            data.cohort_blobs = blobs
+            yield data
+
+    def test_given_same_tree_cohort_success__when_deciding__then_reuse_original_scoped_coverage_without_full_promotion(self):
+        with self.cohort() as data:
+            result = data.decide()
+            self.assertEqual('reused-scoped', result['mode'])
+            self.assertEqual('identical-tree-merged-pr-scoped', result['reason'])
+            self.assertEqual(proof.profile.POST_READS, result['source_proof']['profile'])
+            self.assertIn('scoped', result['source_proof']['artifact_ids'])
+            self.assertNotIn('full', result['source_proof']['artifact_ids'])
+            self.assertEqual(JAR, result['source_proof']['jar_sha256'])
+
+    def test_given_incomplete_or_forged_cohort_proof__when_deciding__then_execute_instead_of_reusing(self):
+        defects = ('head-tree', 'source-tree', 'scope-bytes', 'scope-boolean', 'job-failure', 'required-skip',
+                   'cleanup', 'invalid-skip', 'wrong-profile', 'plan-digest', 'jar', 'missing-artifact', 'reuse-chain')
+        for defect in defects:
+            with self.subTest(defect=defect), self.cohort() as data:
+                if defect == 'head-tree': data.head_commit['tree']['sha'] = '9' * 40
+                elif defect == 'source-tree': data.commit['tree']['sha'] = '9' * 40
+                elif defect == 'scope-bytes': data.cohort_blobs[next(iter(data.cohort_blobs))] += b'changed'
+                elif defect == 'job-failure': data.jobs[1]['conclusion'] = 'failure'
+                elif defect == 'required-skip': data.jobs[1]['steps'][-1]['conclusion'] = 'skipped'
+                elif defect in ('cleanup', 'invalid-skip'):
+                    key = 'owned_cleanup' if defect == 'cleanup' else data.plan['skipped_smokes'][0]
+                    data.execution['step_results'][key] = dict(outcome='skipped' if defect == 'cleanup' else 'success', conclusion='success')
+                    data.members['full']['build/ci/contract-execution.txt'] = encoded(data.execution)
+                elif defect == 'wrong-profile':
+                    data.plan['profile'] = proof.profile.FULL
+                    data.members['full']['build/ci/contract-plan.txt'] = encoded(data.plan)
+                elif defect == 'plan-digest':
+                    data.execution['plan_sha256'] = '0' * 64
+                    data.members['full']['build/ci/contract-execution.txt'] = encoded(data.execution)
+                elif defect == 'jar': data.members['full']['build/ci/boot-jar.sha256'] = b'0' * 64 + b'  boot/build/libs/pawbridge-backend-app.jar\n'
+                elif defect == 'missing-artifact': data.artifacts.pop(1)
+                elif defect == 'reuse-chain':
+                    saved = json.loads(data.members['proof']['postmerge-proof.txt']);saved.update(mode='reused-scoped', reason='identical-tree-merged-pr-scoped')
+                    data.members['proof']['postmerge-proof.txt'] = encoded(saved)
+                if defect == 'scope-boolean':
+                    with patch.object(proof.profile, 'verify_post_reads_inputs', return_value=1): self.execute(data)
+                else: self.execute(data)
 
     def test_given_any_pr_including_fork__when_deciding__then_execute_validation_without_api_or_token(self):
         data = self.fixture();data.env.update(GITHUB_EVENT_NAME='pull_request', GITHUB_REF='refs/pull/7/merge')
