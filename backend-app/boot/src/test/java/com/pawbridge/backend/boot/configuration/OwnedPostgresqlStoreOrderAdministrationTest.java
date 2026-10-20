@@ -183,6 +183,35 @@ class OwnedPostgresqlStoreOrderAdministrationTest {
     }
 
     @Test
+    void givenTwoPopulatedOrdersAndAnEmptyPage_whenListingAtMaximumPageSize_thenBatchItemsWithoutChangingPageOrderOrIssuingPerOrderQueries() {
+        http(pool,(mvc,context)->{
+            var factory=context.getBean("storeDirectOrderEntityManagerFactory",EntityManagerFactory.class);
+            var statistics=factory.unwrap(org.hibernate.SessionFactory.class).getStatistics();
+            boolean previous=statistics.isStatisticsEnabled();
+            statistics.setStatisticsEnabled(true);
+            try {
+                statistics.clear();
+                JsonNode page=send(mvc,"GET",ROOT+"?userId=910001&sortBy=id&sortOrder=desc&page=0&size=100",token(ADMIN_A),null,200);
+                check(page.path("size").asInt()==100&&page.path("totalElements").asLong()==2&&page.path("content").size()==2,
+                        "Batch loading must preserve the maximum page size, filtered total and both populated orders");
+                check(page.path("content").get(0).path("orderId").asLong()==ORDER_B
+                                &&page.path("content").get(1).path("orderId").asLong()==ORDER_A
+                                &&page.path("content").get(0).path("items").size()==1
+                                &&page.path("content").get(1).path("items").size()==1,
+                        "Collection fetching must preserve the original descending Page order and each purchase snapshot");
+                check(statistics.getPrepareStatementCount()==2,
+                        "An inferred-count two-order page must issue only its page query and one collection fetch, never a query per order");
+                statistics.clear();
+                JsonNode empty=send(mvc,"GET",ROOT+"?userId=999998&sortBy=id&size=100",token(ADMIN_A),null,200);
+                check(empty.path("content").isEmpty()&&empty.path("totalElements").asLong()==0
+                                &&statistics.getPrepareStatementCount()==1,
+                        "An empty first page must not issue a collection query or add an unnecessary count query");
+                check(fingerprint().equals(baseline),"Batched listing must leave every fixture table unchanged");
+            } finally {statistics.setStatisticsEnabled(previous);}
+        });
+    }
+
+    @Test
     void givenNullDeliveryOrMissingOrders_whenUpdatingOrReading_thenReturnSafe500AndOriginalMissingBoundariesWithFullRollbackAndNoPrivateLogs() {
         http(pool,(mvc,context)->{
             Map<String,Fingerprint> before=fingerprint();

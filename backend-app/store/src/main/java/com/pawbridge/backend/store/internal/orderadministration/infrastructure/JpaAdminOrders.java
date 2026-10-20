@@ -51,8 +51,14 @@ public final class JpaAdminOrders implements AdminOrders {
                 String pattern="%"+query.keyword().toLowerCase()+"%";
                 spec=spec.and((root,q,cb)->cb.or(cb.like(cb.lower(root.get("orderUuid")),pattern),cb.like(cb.lower(root.get("receiverName")),pattern)));
             }
-            var page=orders.findAll(spec,pageable).map(JpaAdminOrders::details);
-            return new Page(page.getContent(),page.getNumber(),page.getSize(),page.getTotalElements(),query.sortBy(),ascending);
+            var page=orders.findAll(spec,pageable);
+            if(page.hasContent()) {
+                // Fetch only this page's collections; pagination stays on the root-order query.
+                em.createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids",Order.class)
+                        .setParameter("ids",page.getContent().stream().map(Order::getId).toList()).getResultList();
+            }
+            var details=page.map(JpaAdminOrders::details);
+            return new Page(details.getContent(),details.getNumber(),details.getSize(),details.getTotalElements(),query.sortBy(),ascending);
         });
     }
     @Override public DirectOrders.OrderDetails get(long user,long orderId) {

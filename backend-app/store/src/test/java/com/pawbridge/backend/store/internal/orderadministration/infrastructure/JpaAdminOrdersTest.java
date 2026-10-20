@@ -12,6 +12,7 @@ import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.PersistenceException;
+import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.*;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -35,6 +36,7 @@ import org.springframework.transaction.support.*;
 class JpaAdminOrdersTest {
     final EntityManager em=mock(EntityManager.class);
     final OrderRepository orders=mock(OrderRepository.class);
+    final TypedQuery<Order> itemFetch=mock(TypedQuery.class);
     final StoreOrderAdministrators administrators=mock(StoreOrderAdministrators.class);
     final List<String> events=new ArrayList<>();
     final TransactionTemplate writes=new TransactionTemplate(new Manager("write")),reads=new TransactionTemplate(new Manager("read"));
@@ -55,6 +57,9 @@ class JpaAdminOrdersTest {
         when(administrators.currentForWrite(7)).thenAnswer(call->{active(false);events.add("actor:write");return actor;});
         doAnswer(call->{active(true);events.add("list");if(failure.equals("query"))throw problem();return new PageImpl<>(List.of(order),call.getArgument(1),1);})
                 .when(orders).findAll(any(Specification.class),any(org.springframework.data.domain.Pageable.class));
+        when(em.createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids",Order.class)).thenReturn(itemFetch);
+        when(itemFetch.setParameter(eq("ids"),any())).thenReturn(itemFetch);
+        when(itemFetch.getResultList()).thenAnswer(call->{active(true);events.add("batch");return List.of(order);});
         when(orders.findById(33L)).thenAnswer(call->{active(true);events.add("get");if(failure.equals("query"))throw problem();return Optional.of(order);});
         when(em.find(Order.class,33L,LockModeType.PESSIMISTIC_WRITE)).thenAnswer(call->{active(false);events.add("order-lock");if(failure.equals("query"))throw problem();return order;});
         doAnswer(call->{active(false);events.add("flush");if(order.getDeliveryStatus()==null || failure.equals("flush"))throw new PersistenceException("synthetic constraint failure");return null;}).when(em).flush();
@@ -90,7 +95,47 @@ class JpaAdminOrdersTest {
     void given__existing_root_scalar_sort__when__listing__then__original_repository_spec_and_page_metadata_inside_read_transaction(String property) {
         var input=new AdminOrders.Query(null,null,null,null,property,"ASC",0,20);var result=service.list(7,input);
         assertEquals(1,result.content().size());assertEquals(1,result.totalElements());assertEquals(20,result.size());assertEquals(0,result.number());assertEquals(property,result.sortBy());assertTrue(result.ascending());
-        verify(orders).findAll(any(Specification.class),eq(PageRequest.of(0,20,Sort.by(Sort.Direction.ASC,property))));verifyNoInteractions(em);assertEquals(List.of("begin:read","actor:read","list","map","commit:read"),events);
+        verify(orders).findAll(any(Specification.class),eq(PageRequest.of(0,20,Sort.by(Sort.Direction.ASC,property))));
+        verify(em).createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids",Order.class);
+        verify(itemFetch).setParameter("ids",List.of(33L));verify(itemFetch).getResultList();verifyNoMoreInteractions(em,itemFetch);
+        assertEquals(List.of("begin:read","actor:read","list","batch","map","commit:read"),events);
+    }
+    @Test void given__nonempty_page__when__batch_loading_items__then__preserve_original_order_metadata_and_snapshots() {
+        var second=Order.builder().userId(99L).orderUuid("second-uuid").totalAmount(1400L)
+                .receiverName("second receiver").receiverPhone("second phone").deliveryAddress("second address").build();
+        ReflectionTestUtils.setField(second,"id",22L);
+        second.getOrderItems().add(OrderItem.builder().order(second).productName("second product").skuCode("SECOND-SKU").price(700L).quantity(2).build());
+        var pageable=PageRequest.of(2,2,Sort.by(Sort.Direction.DESC,"id"));
+        doAnswer(call->{active(true);events.add("list");return new PageImpl<>(List.of(order,second),pageable,77);})
+                .when(orders).findAll(any(Specification.class),eq(pageable));
+        doAnswer(call->{active(true);events.add("batch");return List.of(second,order);}).when(itemFetch).getResultList();
+
+        var result=service.list(7,new AdminOrders.Query(null,null,null,null,"id","desc",2,2));
+
+        assertEquals(List.of(33L,22L),result.content().stream().map(item->item.orderId()).toList());
+        assertEquals(77,result.totalElements());assertEquals(2,result.number());assertEquals(2,result.size());assertEquals("id",result.sortBy());assertFalse(result.ascending());
+        assertEquals(9007199254740993L,result.content().getFirst().items().getFirst().price());
+        assertEquals("second product",result.content().getLast().items().getFirst().productName());assertEquals(2,result.content().getLast().items().getFirst().quantity());
+        verify(itemFetch).setParameter("ids",List.of(33L,22L));verify(itemFetch).getResultList();
+        verify(em).createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids",Order.class);verifyNoMoreInteractions(em,itemFetch);
+        assertEquals(List.of("begin:read","actor:read","list","batch","map","commit:read"),events);
+    }
+    @Test void given__empty_page__when__batch_loading_items__then__skip_fetch_and_preserve_metadata() {
+        var pageable=PageRequest.of(4,20,Sort.by(Sort.Direction.DESC,"id"));
+        doAnswer(call->{active(true);events.add("list");return new PageImpl<Order>(List.of(),pageable,77);})
+                .when(orders).findAll(any(Specification.class),eq(pageable));
+
+        var result=service.list(7,new AdminOrders.Query(null,null,null,null,"id","desc",4,20));
+
+        assertTrue(result.content().isEmpty());assertEquals(77,result.totalElements());assertEquals(4,result.number());assertEquals(20,result.size());
+        verifyNoInteractions(em,itemFetch);assertEquals(List.of("begin:read","actor:read","list","commit:read"),events);
+    }
+    @Test void given__batch_fetch_failure__when__listing__then__rollback_without_mapping_or_partial_response() {
+        doAnswer(call->{active(true);events.add("batch");throw problem();}).when(itemFetch).getResultList();
+
+        assertThrows(DataAccessResourceFailureException.class,()->service.list(7,query));
+
+        assertEquals(List.of("begin:read","actor:read","list","batch","rollback:read"),events);verify(order,never()).getOrderItems();
     }
     static Stream<Arguments> badQueries(){return Stream.concat(Stream.of("orderItems.price","orderItemsPrice","orderItems.order.orderItems.price","user.id","sum(totalAmount)","id DESC"," ",null)
             .map(sort->Arguments.of(new AdminOrders.Query(null,null,null,null,sort,"asc",0,20))),Stream.of(
