@@ -18,9 +18,15 @@ import org.springframework.web.client.RestClient;
 
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.user-animal-activities",name="enabled",havingValue="true",matchIfMissing=false)
+@Import(UserAnimalActivitiesModuleConfiguration.class)
 public class UserAnimalActivitiesConfiguration {
-    @Bean(destroyMethod="close") HttpClient userAnimalHttpClient(){return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
-    @Bean UserAnimalActivities.AnimalLookup userAnimalLookup(@Qualifier("userAnimalHttpClient") HttpClient client,@Value("${service.animal.url:}") String address){
+    public UserAnimalActivitiesConfiguration(@Value("${pawbridge.user-animal-activities.animal-backend:http}") String backend) {
+        if (!backend.equals("http") && !backend.equals("module")) throw new IllegalArgumentException("Unknown User Animal backend");
+    }
+    @Bean(destroyMethod="close") @ConditionalOnProperty(prefix="pawbridge.user-animal-activities",name="animal-backend",havingValue="http",matchIfMissing=true)
+    HttpClient userAnimalHttpClient(){return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
+    @Bean @ConditionalOnProperty(prefix="pawbridge.user-animal-activities",name="animal-backend",havingValue="http",matchIfMissing=true)
+    UserAnimalActivities.AnimalLookup userAnimalLookup(@Qualifier("userAnimalHttpClient") HttpClient client,@Value("${service.animal.url:}") String address){
         URI uri=URI.create(address);if(!uri.isAbsolute()||!("http".equals(uri.getScheme())||"https".equals(uri.getScheme()))||uri.getHost()==null||uri.getUserInfo()!=null||uri.getQuery()!=null||uri.getFragment()!=null||(!uri.getPath().isEmpty()&&!uri.getPath().equals("/")))throw new IllegalArgumentException("An explicit Animal HTTP origin is required");
         var requests=new JdkClientHttpRequestFactory(client);requests.setReadTimeout(Duration.ofSeconds(60));return new HttpUserAnimalLookup(RestClient.builder().baseUrl(uri.toString()).requestFactory(requests).build());
     }
@@ -29,4 +35,16 @@ public class UserAnimalActivitiesConfiguration {
     }
     @Bean UserAnimalActivitiesController userAnimalActivitiesController(UserAnimalActivities activities){return new UserAnimalActivitiesController(activities);}
     @Bean UserAnimalActivitiesExceptionHandler userAnimalActivitiesExceptionHandler(){return new UserAnimalActivitiesExceptionHandler();}
+}
+
+// Top-level and imported only through the enabled feature; no nested auto-registration.
+@Configuration(proxyBeanMethods=false)
+@ConditionalOnProperty(prefix="pawbridge.user-animal-activities",name="animal-backend",havingValue="module")
+@Import(AnimalModuleReadConfiguration.class)
+class UserAnimalActivitiesModuleConfiguration {
+    @Bean @DependsOn("animalModuleReads")
+    UserAnimalActivities.AnimalLookup moduleUserAnimalLookup(
+            @Qualifier("animalModuleReads") com.pawbridge.backend.animal.api.AnimalMemberReads animals) {
+        return new ModuleUserAnimalLookup(animals);
+    }
 }
