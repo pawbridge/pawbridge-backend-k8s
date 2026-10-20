@@ -161,8 +161,6 @@ class OwnedPostgresqlStoreMemberJpaTest {
         return Stream.of(
                 Arguments.of("skuPrice", false), Arguments.of("sku_price", false),
                 Arguments.of("sku.price", false), Arguments.of("sku.product.category.parent.name", false),
-                Arguments.of("sku.skuValues.optionValue.name", false),
-                Arguments.of("sku_skuValues_optionValue_name", false),
                 Arguments.of("sku.product.name", true), Arguments.of("sku.product.status", true),
                 Arguments.of("createdAt", false));
     }
@@ -171,16 +169,52 @@ class OwnedPostgresqlStoreMemberJpaTest {
         observed("wishlist JPA sort parity", () -> compare(true, MEMBER, request(0, 2, path, ignoreCase)));
     }
 
+    @ParameterizedTest(name = "establishedWishlistScalars[{index}]")
+    @ValueSource(strings = {"sku.createdAt", "sku.updatedAt", "sku.product.category.description",
+            "sku.product.category.createdAt", "sku.product.category.updatedAt"})
+    void givenEstablishedWishlistScalarPaths_whenReading_thenOriginalPageAndWireRemainCompatible(String path) {
+        observed("established wishlist scalar sort parity", () -> {
+            for (boolean ascending : List.of(true, false)) {
+                int originalBefore = legacySql.statements.get(), candidateBefore = candidateSql.statements.get();
+                // Several fixture scalar values are NULL ties: the caller explicitly supplies the tie-break.
+                var request = new StoreMemberReads.Request(0, 2, List.of(
+                        new StoreMemberReads.Order(path, ascending, false), new StoreMemberReads.Order("id", true, false)));
+                compare(true, MEMBER, request);
+                check(legacySql.statements.get() > originalBefore && candidateSql.statements.get() > candidateBefore,
+                        "Both original and candidate must execute each sort direction against PostgreSQL");
+            }
+        });
+    }
+
     static Stream<Arguments> orderSorts() {
         return Stream.of(
-                Arguments.of("orderItems.price", false), Arguments.of("orderItems_price", false),
-                Arguments.of("orderItems.productSKU.price", false), Arguments.of("orderItems_productSKU_price", false),
-                Arguments.of("orderItemsProductSKUPrice", false), Arguments.of("totalAmount", false),
+                Arguments.of("totalAmount", false),
                 Arguments.of("status", true), Arguments.of("deliveryAddress", true), Arguments.of("createdAt", false));
     }
     @ParameterizedTest(name = "orderSorts[{index}]") @MethodSource("orderSorts")
     void givenOriginalOrderPropertyPaths_whenReading_thenSnapshotsPageSortAndWireMatch(String path, boolean ignoreCase) {
         observed("order JPA sort parity", () -> compare(false, MEMBER, request(0, 2, path, ignoreCase)));
+    }
+
+    @ParameterizedTest(name = "boundedParentPage[{index}]") @ValueSource(booleans = {true, false})
+    void givenThreeParentsAndOneRequestedRow_whenReading_thenOnlyTheSelectedParentAndItsChildrenAreMaterialized(boolean wishlist) {
+        observed("bounded parent page before collection materialization", () -> {
+            var statistics = candidateEmf.unwrap(org.hibernate.SessionFactory.class).getStatistics();
+            boolean enabled = statistics.isStatisticsEnabled();
+            statistics.setStatisticsEnabled(true); statistics.clear();
+            try {
+                compare(wishlist, MEMBER, request(0, 1, "createdAt", false));
+                String type = wishlist
+                        ? "com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.Wishlist"
+                        : "com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.Order";
+                check(statistics.getEntityStatistics(type).getLoadCount() == 1,
+                        "A one-row page must materialize one selected parent rather than the whole member history");
+                check(candidateSql.boundedParents.get() > 0 && candidateSql.selectedGraphs.get() > 0
+                                && candidateSql.firstBoundedParent.get() > 0
+                                && candidateSql.firstBoundedParent.get() < candidateSql.firstSelectedGraph.get(),
+                        "A bounded parent SQL page must precede a member-scoped selected-ID collection fetch");
+            } finally { statistics.clear(); statistics.setStatisticsEnabled(enabled); }
+        });
     }
 
     @ParameterizedTest(name = "pageBoundaries[{index}]")
@@ -236,8 +270,16 @@ class OwnedPostgresqlStoreMemberJpaTest {
                     new StoreMemberReads.Order("createdAt", true, false)));
             String recursive = "sku.product.category." + "parent.".repeat(64) + "name";
             for (boolean wishlist : List.of(true, false)) {
-                var inputs = List.of(request(0, 2, recursive, false),
-                        request(0, 2, wishlist ? "orderItems.price" : "sku.price", false), tooMany);
+                var inputs = new ArrayList<>(List.of(request(0, 2, recursive, false),
+                        request(0, 2, wishlist ? "orderItems.price" : "sku.price", false), tooMany,
+                        request(0, 2001, "createdAt", false)));
+                var collections = wishlist
+                        ? List.of("sku.skuValues.optionValue.name", "sku_skuValues_optionValue_name")
+                        : List.of("orderItems.id", "orderItems.productName", "orderItems.skuCode", "orderItems.price",
+                                "orderItems.quantity", "orderItems.productSKU.id", "orderItems.productSKU.skuCode",
+                                "orderItems.productSKU.price", "orderItems_price", "orderItems_productSKU_price",
+                                "orderItemsProductSKUPrice");
+                collections.forEach(path -> inputs.add(request(0, 2, path, false)));
                 for (StoreMemberReads.Request input : inputs) {
                     RuntimeException rejected = null;
                     try { if (wishlist) guarded.wishlists(MEMBER, input); else guarded.orders(MEMBER, input); }
@@ -372,18 +414,27 @@ class OwnedPostgresqlStoreMemberJpaTest {
     private record Fingerprint(long count, String digest) { }
     private static final class SqlObservation implements StatementInspector {
         private final AtomicInteger statements = new AtomicInteger(), collections = new AtomicInteger();
+        private final AtomicInteger boundedParents = new AtomicInteger(), selectedGraphs = new AtomicInteger();
+        private final AtomicInteger firstBoundedParent = new AtomicInteger(), firstSelectedGraph = new AtomicInteger();
         private final AtomicBoolean limitedCollection = new AtomicBoolean();
         @Override public String inspect(String sql) {
-            statements.incrementAndGet();
+            int statement = statements.incrementAndGet();
             String normalized = sql.toLowerCase(Locale.ROOT);
             if (normalized.matches("(?s).*\\bjoin\\s+(?:pawbridge_store\\.)?(?:sku_values|order_items)\\b.*")) {
                 collections.incrementAndGet();
                 if (normalized.matches("(?s).*\\b(?:limit|offset)\\b.*") || normalized.matches("(?s).*\\bfetch\\s+(?:first|next)\\b.*"))
                     limitedCollection.set(true);
             }
+            boolean collection = normalized.matches("(?s).*\\bjoin\\s+(?:pawbridge_store\\.)?(?:sku_values|order_items)\\b.*");
+            boolean bounded = normalized.matches("(?s).*\\b(?:limit|offset)\\b.*")
+                    || normalized.matches("(?s).*\\bfetch\\s+(?:first|next)\\b.*");
+            if (!collection && bounded) { boundedParents.incrementAndGet(); firstBoundedParent.compareAndSet(0, statement); }
+            if (collection && normalized.matches("(?s).*\\bwhere\\b.*user_id.*\\bin\\s*\\(.*")) {
+                selectedGraphs.incrementAndGet(); firstSelectedGraph.compareAndSet(0, statement);
+            }
             return sql;
         }
-        void reset() { statements.set(0); collections.set(0); limitedCollection.set(false); }
+        void reset() { statements.set(0); collections.set(0); boundedParents.set(0); selectedGraphs.set(0); firstBoundedParent.set(0); firstSelectedGraph.set(0); limitedCollection.set(false); }
     }
     private record Settings(String jdbcUrl, String database, String username, String password, String marker) {
         static Settings load() throws Exception {

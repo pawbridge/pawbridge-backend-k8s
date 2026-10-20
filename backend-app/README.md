@@ -767,12 +767,12 @@ ADDED는 4회 시도 후 새 Animal TX에서 영수증을 재확인하고 필요
 
 ## Store 회원 목록의 원문 JPA 재사용
 
-명시 `pawbridge.user-store-mypage.enabled=true`와 `backend=module`일 때 주문·찜 목록은 원래 Store의 13개 model/enum/base와 repository2·DTO2를 패키지·import만 바꿔 재사용한다. 허용된 중첩·컬렉션·underscore/camel 정렬은 원래 Spring Data/Hibernate가 처리한다. 클라이언트가 재귀 Category.parent 경로로 쿼리를 증폭하지 못하도록 찜·주문별 유한한 정렬 속성 목록과 요청당 최대4개 정렬을 적용한다. 부모 카테고리는 명시한 한 단계만 허용하며, 목록 밖 속성·과도한 개수는 Store 읽기 트랜잭션과 SQL을 시작하기 전에 고정 오류로 거부한다. 이는 임의 정렬 경로 전체 호환에서 의도적으로 좁힌 보안 경계다. 기존 User Runtime 오류 응답과 기본 HTTP backend 경로는 유지한다. Cart는 기존 JDBC 읽기를 유지한다. 공개 Store API와 User 응답, HTTP 기본 경로는 유지한다.
+명시 `pawbridge.user-store-mypage.enabled=true`와 `backend=module`일 때 주문·찜 목록은 원래 Store의 model/enum/base13개와 DTO2개를 패키지·import만 바꿔 재사용한다. Repository2개는 ID 페이지 조회와 선택한 부모의 상세 graph 조회로 확장한다. 정렬은 이전 모듈 JDBC가 지원한 찜25·주문12 scalar 속성을 모두 보존하고, 찜에는 한 단계 부모 카테고리 id/name만 추가해 정확27/12개를 허용한다. underscore/camel alias는 기존 Spring Data 속성 해석을 사용한다. 재귀 경로와 컬렉션 정렬, 정렬5개 이상·size2000 초과는 Store 읽기 트랜잭션과 SQL 전에 고정 오류로 거부한다. 이번 PR 초기에 추가했던 컬렉션 정렬은 부모 페이지를 증폭하므로 의도적으로 제외한다. 기존 User Runtime 오류 응답·기본 HTTP backend·순수 Store API를 유지하고 Cart는 기존 JDBC 읽기를 사용한다.
 
 Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을 공유한다. 별도 명명 JpaTM의 RO/RR/5초 안에서 entity→DTO 변환까지 마친다. 전역 JPA/entity/repository 자동스캔, OSIV, schema 생성·변경·validate는 켜지 않는다. schema는 pawbridge_store, 물리 naming과 UTC를 고정하며 bootstrap JDBC metadata 조회도 끈다. 기존 reader JdbcTM과 writer pool은 다른 업무에서 그대로 유지한다.
 
-원문 EntityGraph의 collection fetch는 SQL LIMIT보다 메모리에서 부모 중복 제거·페이지 처리를 수행할 수 있다. 원문 동작 보존이며 메모리/성능 개선을 뜻하지 않는다. 새 임의 ID 정렬이나 자식 MIN/MAX 축약을 추가하지 않는다. 읽기5초 제한은 기존 모듈 경계이며 원문 무제한 실행과 동일하다고 주장하지 않는다.
+부모 ID의 closed projection만 먼저 SQL LIMIT/OFFSET으로 조회하고, 같은 RO/RR 트랜잭션에서 memberId와 선택 ID에 해당하는 graph만 가져온다. ID 페이지가 비면 graph를 조회하지 않으며, 부모 ID 페이지의 순서·total·Sort로 DTO를 조립한다. 선택 ID가 상세 결과에서 빠지면 부분 성공으로 반환하지 않는다. 새 임의 ID tie-break나 자식 MIN/MAX 정렬은 추가하지 않는다. 선택한 부모의 자식 전체는 여전히 로드하므로 고정 메모리 사용을 보장한다고 표현하지 않는다. 읽기5초 제한은 기존 모듈 경계이며 원문 무제한 실행과 구분한다.
 
-합성 PostgreSQL의 9개 원문 테이블 모양과 고정 데이터에서 별도 원문/후보 EMF를 비교했다. 실제 27사례는 중첩/컬렉션 정렬, 부모 페이지·count·Sort metadata·nullable·구매 snapshot, RO/RR와 SELECT-only 권한·읽기 불변·연결 반환을 포함한다. 기존 Store 전체 migration/결제/실제 운영 검증은 아니다. 원문17 Java는 compileTestJava의 고정 시험 입력이며 main/실행 JAR에 포함하지 않는다. 새 extractor/sourceSet/JAR HTTP 도구는 없다.
+합성 PostgreSQL의 9개 원문 테이블 모양과 고정 데이터에서 별도 원문/후보 EMF를 비교한다. 안전한 정렬·부모 페이지·count·Sort metadata·nullable·구매 snapshot, SQL 부모 페이지/선택 ID graph·SELECT-only 권한·읽기 불변·연결 반환을 보호한다. 최초 전체 graph 방식의 27사례와 이후 보안 회귀 근거는 별도 이력으로 보존하며, 새 2단계 방식의 성공은 해당 수정본의 실제 실행 결과로 판정한다. 기존 Store 전체 migration·결제·실제 운영 검증은 아니다. 원문17 Java는 compileTestJava의 고정 시험 입력이며 main/실행 JAR에 포함하지 않는다. 새 extractor/sourceSet/JAR HTTP 도구는 없다.
 
 `P7_PG_SETTINGS`의 제한된 파일로 전용 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreMemberJpaTest`만 선택한다. SQL resource는 새로 만든 marker 검증 DB에 한 번 적용하는 준비 자료이며 Java 시험은 SELECT만 수행한다. 0사례/skip은 실패이고 일반 CI는 이 owned 태그를 제외한다. 키·접속값·시험 산출물은 Git에 넣지 않는다.

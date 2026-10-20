@@ -619,9 +619,9 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '4508f42e09cb3f5425143
  'backend-app/boot/src/test/java/com/pawbridge/backend/OwnedPostgresqlFavoriteDeliveryTest.java': '90665a876b0e0bd0a1f903796deb4aff9c273d9b260225bff3cd7375812cf124',
  'backend-app/boot/src/test/resources/owned-postgresql/favorite-delivery-owned-schema.sql': 'c25986854e1959de0b6b081dfa23b7b095dbf3ebce074d8281852d63bba84c66',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreMemberJpaConfiguration.java': 'dc9f3ea13f390241c1583e5d356bdf8bc927d0201796c49d2f93503a482bfe01',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreMemberJpaTest.java': '81bcf35c364214a20cf409ef4d6a15c7675c4d5e89dbbea45ac04bb5c6b7eca8',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreMemberJpaTest.java': '850044232d88bb4a4cd4f9ab8ba002e23842db94d7c536bb37fa01f5a8bee0a1',
  'backend-app/boot/src/test/resources/owned-postgresql/store-member-jpa-owned-schema.sql': '143f6bc69b668d8544995be644980d0547a70e8272445ad43708484cc3dd1bef',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/JpaStoreMemberReads.java': 'c07f1e3142f530520b7294e7fcc2f9d3b2c5d738ec87f96d4101857f591e0744',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/JpaStoreMemberReads.java': '0f902611e840aea348a1880f41ab7879b7d3178aa3395ae3b89da71e6ca4c126',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/model/BaseEntity.java': '72a5189bbe1d23106b17934fcd848850b04015b1efb07528e34bea8ba005b0c8',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/model/Category.java': '1e588433b6ad4d83ea268269cb855f371db0259dfeec341693724aeb32c92077',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/model/DeliveryStatus.java': '526bd9758054bcd0f74abccce9a3c42393832012942a81449a75e820081aacdc',
@@ -637,9 +637,9 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '4508f42e09cb3f5425143
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/model/Wishlist.java': 'de73eff670755d48ad6761983f60d4cf39588e1cced672af8511e14f1513c703',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/projection/OrderResponse.java': 'b3b95e8cb69f38c81fa41b73fd93955851be9d7d5aa43c10f0af774de0267a2d',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/projection/WishlistResponse.java': 'ed32a1c39754f24a69e2c07cbd4f535f85787cd7d9575878460b14f65cb1c614',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/repository/MyOrderRepository.java': '41b916c70d7ca2e8ae6b497aeb687f9cae5603088b4e6d24dd53854860e1fe14',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/repository/MyWishlistRepository.java': '550d57bb2ea35fa390bf6929daa1c066221d67a20bfb6f819fd5f37ffb62f039',
- 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/memberread/infrastructure/JpaStoreMemberReadsTest.java': '642f0f12794911185118024d62fb7338e690b66a1330325af8d141a342e64cea'}
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/repository/MyOrderRepository.java': 'b626d77133fef223d1ac6b981e3c058e0d4cd0c821b1851f6f1e8fcdee205fc6',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/memberread/infrastructure/jpa/repository/MyWishlistRepository.java': '1a52a742fffbd8643b317b685c996cc0d8e075ed9acda51961a3b6f31a5b435b',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/memberread/infrastructure/JpaStoreMemberReadsTest.java': 'f816544526e899edf6a6530222d4d317f00b300bfb2e0057bcc94262f84aec3e'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
     '.github/scripts/test_backend_admin_post_reads_profile.py',

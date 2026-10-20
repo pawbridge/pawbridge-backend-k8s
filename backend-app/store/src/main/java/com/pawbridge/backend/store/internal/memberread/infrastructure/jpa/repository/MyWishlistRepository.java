@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * 위시리스트 Repository
@@ -17,11 +19,13 @@ import java.util.Optional;
 @Repository
 public interface MyWishlistRepository extends JpaRepository<Wishlist, Long> {
 
-    /**
-     * 사용자별 찜 목록 조회 (SKU, Product, Category fetch join)
-     */
+    interface IdOnly { Long getId(); }
+
+    Page<IdOnly> findIdsByUserId(Long userId, Pageable pageable);
+
+    /** 선택한 사용자·찜 ID의 전체 원문 graph 조회. 부모 페이지에는 collection graph를 적용하지 않는다. */
     @EntityGraph(attributePaths = {"sku", "sku.product", "sku.product.category", "sku.skuValues", "sku.skuValues.optionValue", "sku.skuValues.optionValue.optionGroup"})
-    Page<Wishlist> findByUserId(Long userId, Pageable pageable);
+    List<Wishlist> findByUserIdAndIdIn(Long userId, Collection<Long> ids);
 
     /**
      * 사용자별 찜 개수

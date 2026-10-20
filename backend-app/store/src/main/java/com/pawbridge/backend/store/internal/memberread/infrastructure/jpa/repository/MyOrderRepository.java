@@ -6,6 +6,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * 주문 Repository
@@ -14,15 +16,13 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface MyOrderRepository extends JpaRepository<Order, Long> {
 
-    /**
-     * 사용자별 주문 목록 조회 (OrderItems fetch join)
-     * - N+1 방지를 위해 @EntityGraph 사용
-     * @param userId 사용자 ID
-     * @param pageable 페이징 정보
-     * @return Page<Order>
-     */
+    interface IdOnly { Long getId(); }
+
+    Page<IdOnly> findIdsByUserId(Long userId, Pageable pageable);
+
+    /** 선택한 사용자·주문 ID의 전체 원문 graph 조회. 부모 페이지에는 collection graph를 적용하지 않는다. */
     @EntityGraph(attributePaths = {"orderItems", "orderItems.productSKU"})
-    Page<Order> findByUserId(Long userId, Pageable pageable);
+    List<Order> findByUserIdAndIdIn(Long userId, Collection<Long> ids);
 
     /**
      * 사용자별 주문 개수
