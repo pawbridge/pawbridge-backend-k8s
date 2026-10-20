@@ -67,6 +67,13 @@ class PawBridgeApplicationTest {
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(signupStatistics, "jdbc")).isSameAs(context.getBean("readJdbc"));
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(signupStatistics, "readOnlyTransaction")).isSameAs(context.getBean("readOnlyTransaction"));
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(signupStatistics, "clock")).isSameAs(context.getBean("readClock"));
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.adminupdate.application.AdminUserUpdate.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.adminupdate.web.AdminUserUpdateController.class)).hasSize(1);
+                    var adminUpdate = context.getBean(com.pawbridge.backend.user.internal.adminupdate.application.AdminUserUpdate.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(adminUpdate, "jdbc")).isSameAs(context.getBean("writeJdbc"));
+                    var adminUpdateTx = (org.springframework.transaction.support.TransactionTemplate)org.springframework.test.util.ReflectionTestUtils.getField(adminUpdate, "transaction");
+                    assertThat(adminUpdateTx.getTransactionManager()).isSameAs(context.getBean("writeTransactionManager"));
+                    assertThat(adminUpdateTx.getTimeout()).isEqualTo(15);
                     assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();

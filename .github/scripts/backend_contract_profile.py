@@ -133,6 +133,46 @@ SIGNUP_METHODS = (
     'givenCreatedAtSelectRevoked__whenDailyReadFailsThenRecovers__thenReturnConnectionAndKeepTheOwnedBaseline',
 )
 
+ADMIN_MEMBER_UPDATE = 'admin-member-update'
+ADMIN_BASE = '25bc27575f728f2e0bf710fc867fb067f2465255'
+ADMIN_APP_HASHES = {'backend-app/boot/build.gradle': '999bad00e323ad23ebea0663c76cdbeb7d3fa235d45869a3bb36313f7a30407f',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F13LegacyNicknameOracle.java': 'e5c368c21185f7431fc7f430010632ea4291deab7dce8a93ed58a8e2210f5f83',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminUserUpdateCompatibilityTest.java': '318062f5ca360e1eb936a1a1eb60ee6bc34532691041a47f7fe40705aea79d72',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '84a6d718dc9b263029df6679b534494531ab340d3d8dd5cf0a30ac7d139df2bf',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserUpdateConfiguration.java': 'e82fa1b05be1bafad428e28bfdd026ab56c85a457f37fb152e89a9348f0d651c',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '859dbd8468543cdb34a9782202559af20a108bf3b0c8745faac1ed758493976a',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AdminUserDeletionHttpTest.java': 'db91f530d0ba0b0f2476a80376ac5a2895a79e50b591213646bfb50d397921f5',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AdminUserDetailHttpTest.java': '5f18b88b647bde90b6c9a80ebace006b50796ba648c60abb594d9a8a5d04a720',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AdminUserUpdateHttpTest.java': '75cead442e63c18e19e70bb98a4aae521fbbf5af6cee252ec604e65eebe08d17',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': 'ec9c4f31b2c80fdadf478034c4d7eb54c485487ef0b7f91921303852f7c2131e',
+ 'backend-app/scripts/f29_ci.py': '3b37db2fa6d869aa6717320949d58a8f797613bdfacca1076d02226b10832e01',
+ 'backend-app/scripts/prepare_f13_legacy_oracle.py': 'ac87461ab2cfa68352fb354123ecc54ed72cd5de528c2af5e8b617345018bde9',
+ 'backend-app/scripts/test_f13_ci_guards.py': '9726f865ce057bc35a9c69d2530804caf479047e4d9fa88a639a3cf0e59a0520',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/adminupdate/application/AdminUserUpdate.java': '61b0496fd4ca1a16c67c0f3ac586c7da93d0290b0f6401fa5647b70707d75260',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/adminupdate/application/ShelterApprovalRequiredException.java': 'ec2364076accc202b1f17013869c443b8fed869d469a93a62af06e81f8faafd5',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/adminupdate/infrastructure/JdbcAdminUserUpdate.java': '293ff00530b02d9868c0be5efa43188e09820e87d7f13d692f3e71aba33c43d5',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/adminupdate/web/AdminUserUpdateController.java': '19e88eb6c09185bd0df2429effb119e624ef33b246a4c27c8912da54f7cb13b9',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/adminupdate/web/AdminUserUpdateExceptionHandler.java': 'b60e4ecd5b1b167c286fc31cb8ca13cb35ec2509d2ab2372f0637d7d10d7fef4',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/adminupdate/web/AdminUserUpdateRequest.java': '5ddca2b2059fa93287b1c8f40008edb06d51e9733d25cb780caf65dda766dc1d',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/adminupdate/infrastructure/JdbcAdminUserUpdateTest.java': '1a7beac0fa0b2e70665f7900a7054f3d08e665e397ef9877c15507b0e96ee06a'}
+ADMIN_APP_EXCEPTIONS = frozenset(ADMIN_APP_HASHES) | {'backend-app/README.md'}
+ADMIN_ALLOWED_PATHS = SIGNUP_ALLOWED_PATHS | frozenset(ADMIN_APP_HASHES) | {
+    '.github/scripts/test_backend_admin_member_update_profile.py',
+}
+ADMIN_REQUIRED_CONTRACTS = ('fixture_f4_shape', 'compile_admin_update', 'fixture_member_cleanup',
+                            'fixture_admin_update', 'pg_admin_update')
+ADMIN_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlAdminUserUpdateCompatibilityTest'
+ADMIN_METHOD_CASES = (
+    ('givenAnActualDirtyManagedUser__whenUpdatingAsAdmin__thenMatchTheOriginalMicrosecondAuditAndPreserveEveryOtherColumn', 3),
+    ('givenNoDirtyProperty__whenTheOriginalStillSaves__thenNeitherImplementationUpdatesTheRowOrAuditTimestamp', 2),
+    ('givenCompetingBusinessRejections__whenUpdating__thenPreserveMissingApprovalAndNicknamePrecedenceWithoutAnyMutation', 5),
+    ('givenAnExactNewColumnPrivilegeRevoked__whenUpdatingThenRestoring__thenRollbackTheWholeRowAndRecover', 2),
+    ('givenTheLookupHasLockedOneMember__whenAnIndependentConnectionAttemptsToChangeIt__thenObserveTheActualPgBlockUntilCommit', 2),
+    ('givenTwoDistinctLockedMembersPassTheAvailableCheck__whenTheirUniqueNicknameUpdatesRace__thenOneCommitAndOneSql23505RemainServerFailuresWithoutPartialRoleChanges', 2),
+)
+ADMIN_REPORT_CASES = tuple(method + '[' + str(index) + ']'
+                           for method, count in ADMIN_METHOD_CASES for index in range(1, count + 1))
+
 REPOSITORY = 'pawbridge/pawbridge-backend-k8s'
 PILOT_REF = 'ci/backend-contract-regression-scope'
 PILOT_BASE = '0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3'
@@ -252,6 +292,54 @@ def verify_signup_statistics_report(utc_directory, seoul_directory):
             raise ProfileBlocked('The signup PostgreSQL report is invalid.') from None
 
 
+def verify_admin_member_update_inputs(git_reader=None):
+    """Accept only the final reviewed application/compiler/fixture bytes on the signup parent."""
+    def read(*args):
+        return subprocess.run(['git', *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, check=True, timeout=8).stdout
+    git = git_reader if git_reader is not None else read
+    try:
+        if len(ADMIN_APP_HASHES) != 20:
+            return False
+        raw = git('diff', '--name-only', '--no-renames', '-z', ADMIN_BASE, 'HEAD', '--', 'backend-app')
+        if not isinstance(raw, bytes):
+            return False
+        paths = [value.decode('utf-8') for value in raw.split(b'\0') if value]
+        if len(paths) != len(set(paths)) or not set(paths).issubset(ADMIN_APP_EXCEPTIONS):
+            return False
+        for path, digest in ADMIN_APP_HASHES.items():
+            blob = git('show', 'HEAD:' + path)
+            if not isinstance(blob, bytes) or hashlib.sha256(blob).hexdigest() != digest:
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, TypeError):
+        return False
+
+
+def verify_admin_member_update_report(directory):
+    """Check all sixteen unique, source-pinned parameterized method/index labels."""
+    try:
+        directory = Path(directory)
+        reports = list(directory.glob('TEST-*.xml'))
+        if directory.is_symlink() or len(reports) != 1 or reports[0].is_symlink():
+            raise ProfileBlocked('The administrator update report is missing or redirected.')
+        suite = ET.parse(reports[0]).getroot()
+        cases = list(suite.iter('testcase'))
+        names = [case.attrib.get('name', '') for case in cases]
+        if (suite.tag != 'testsuite' or suite.attrib.get('name') != ADMIN_REPORT_CLASS
+                or int(suite.attrib.get('tests', -1)) != 16 or len(cases) != 16
+                or len(suite.findall('testcase')) != 16
+                or len(set(names)) != 16 or set(names) != set(ADMIN_REPORT_CASES)
+                or any(int(node.attrib.get(key, 0)) != 0 for node in suite.iter()
+                       for key in ('failures', 'errors', 'skipped', 'disabled'))
+                or any(node.tag in ('failure', 'error', 'skipped', 'disabled') for node in suite.iter())
+                or any(case.attrib.get('classname') != ADMIN_REPORT_CLASS or
+                       case.attrib.get('status', 'run') not in ('run', 'passed') for case in cases)):
+            raise ProfileBlocked('The administrator update cases did not all execute successfully.')
+    except (OSError, ValueError, TypeError, ET.ParseError):
+        raise ProfileBlocked('The administrator update report is invalid.') from None
+
+
 def verify_note_expiry_report(directory):
     try:
         directory = Path(directory)
@@ -280,7 +368,7 @@ def select_profiles(context, paths):
     if not isinstance(context, dict):
         raise ProfileBlocked('Profile context is invalid.')
     requested = context.get('requested_profile')
-    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS):
+    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE):
         raise ProfileBlocked('Requested profile is unknown.')
     if requested == FULL:
         return [FULL]
@@ -314,6 +402,16 @@ def select_profiles(context, paths):
         raise ProfileBlocked('The requested signup scope differs from its reviewed inputs.')
     if signup_scoped and requested in (None, '', SIGNUP_STATISTICS):
         return [SIGNUP_STATISTICS]
+    admin_scoped = (context.get('event_name') in ('pull_request', 'push')
+                    and context.get('repository') == REPOSITORY
+                    and context.get('head_repository') == REPOSITORY
+                    and (context.get('event_name') != 'push' or context.get('head_ref') == 'dev')
+                    and context.get('admin_member_update_scope_verified') is True
+                    and bool(paths) and set(paths).issubset(ADMIN_ALLOWED_PATHS))
+    if requested == ADMIN_MEMBER_UPDATE and not admin_scoped:
+        raise ProfileBlocked('The requested administrator update scope differs from its reviewed inputs.')
+    if admin_scoped and requested in (None, '', ADMIN_MEMBER_UPDATE):
+        return [ADMIN_MEMBER_UPDATE]
     eligible = (context.get('event_name') == 'pull_request'
                 and context.get('repository') == REPOSITORY
                 and context.get('head_repository') == REPOSITORY
@@ -328,6 +426,8 @@ def select_profiles(context, paths):
 
 
 def expected_smokes(profile):
+    if profile == ADMIN_MEMBER_UPDATE:
+        return ()
     if profile == SIGNUP_STATISTICS:
         return ()
     if profile == MEMBER_MANAGEMENT:
@@ -381,7 +481,8 @@ def make_plan(context, paths, profile, jar_sha256):
         'schema_version': 1, 'status': 'planned', 'profile': profile,
         'identity': identity, 'jar_sha256': jar_sha256,
         'changed_paths_sha256': hashlib.sha256(_encoded(paths)).hexdigest(),
-        'selection_reason': ('fixed-signup-inputs-and-scoped-postgresql' if profile == SIGNUP_STATISTICS else
+        'selection_reason': ('fixed-admin-update-inputs-and-scoped-postgresql' if profile == ADMIN_MEMBER_UPDATE else
+                             'fixed-signup-inputs-and-scoped-postgresql' if profile == SIGNUP_STATISTICS else
                              'fixed-member-inputs-and-scoped-postgresql' if profile == MEMBER_MANAGEMENT else
                              'fixed-f30-inputs-and-scoped-postgresql' if profile == NOTE_EXPIRY else
                              'fixed-f25-ci-only-pilot' if profile == PILOT else 'full-reference-or-default'),
@@ -394,6 +495,8 @@ def make_plan(context, paths, profile, jar_sha256):
         result['required_contracts'] = list(MEMBER_REQUIRED_CONTRACTS)
     elif profile == SIGNUP_STATISTICS:
         result['required_contracts'] = list(SIGNUP_REQUIRED_CONTRACTS)
+    elif profile == ADMIN_MEMBER_UPDATE:
+        result['required_contracts'] = list(ADMIN_REQUIRED_CONTRACTS)
     return result
 
 
@@ -478,6 +581,7 @@ def runtime_context():
         identity['note_expiry_scope_verified'] = verify_note_expiry_inputs()
         identity['member_management_scope_verified'] = verify_member_management_inputs()
         identity['signup_statistics_scope_verified'] = verify_signup_statistics_inputs()
+        identity['admin_member_update_scope_verified'] = verify_admin_member_update_inputs()
         return identity, _paths(paths)
     except (ImportError, KeyError, TypeError, AttributeError, OSError, UnicodeError, ValueError):
         raise ProfileBlocked('The verified runtime context could not be constructed.') from None
@@ -504,7 +608,7 @@ def _write_evidence(path, expected_name, value):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('plan', 'audit'), required=True)
-    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS), required=True)
+    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE), required=True)
     parser.add_argument('--jar', type=Path, required=True)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--execution', type=Path)

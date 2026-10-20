@@ -79,7 +79,7 @@ class AdminUserDeletionHttpTest {
             Arguments.of(new MemberCleanupUnavailableException(),503,"쪽지 정리가 완료되지 않았습니다. 회원 삭제를 다시 시도해 주세요."),
             Arguments.of(new DataAccessResourceFailureException("synthetic-private-query",new SQLException("synthetic-private-password")),500,"서버 에러!"));}
 
-    @ParameterizedTest @ValueSource(strings={"GET /api/v1/admin/users/8/extra","PUT /api/v1/admin/users/8","DELETE /api/v1/admin/users/8/extra","DELETE /internal/private-notes/members/8"})
+    @ParameterizedTest @ValueSource(strings={"GET /api/v1/admin/users/8/extra","PUT /api/v1/admin/users/8/extra","DELETE /api/v1/admin/users/8/extra","DELETE /internal/private-notes/members/8"})
     void given__an_unexposed_neighbor_or_internal_route__when__a_valid_admin_requests_it__then__keep_generic_default_deny(String wire) throws Exception {
         var parts=wire.split(" ",2);
         mvc.perform(request(HttpMethod.valueOf(parts[0]),parts[1]).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))

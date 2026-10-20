@@ -193,7 +193,8 @@ class MemberManagementProfileTest(unittest.TestCase):
                     patch.object(profile.Path, 'read_text', return_value=json.dumps(payload)), \
                     patch.object(profile, 'verify_note_expiry_inputs', return_value=False), \
                     patch.object(profile, 'verify_member_management_inputs', return_value=verified) as verify, \
-                    patch.object(profile, 'verify_signup_statistics_inputs', return_value=False):
+                    patch.object(profile, 'verify_signup_statistics_inputs', return_value=False), \
+                    patch.object(profile, 'verify_admin_member_update_inputs', return_value=False):
                 actual, paths = profile.runtime_context()
             verify.assert_called_once_with()
             self.assertIs(verified, actual['member_management_scope_verified'])

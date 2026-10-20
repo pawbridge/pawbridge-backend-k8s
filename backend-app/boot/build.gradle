@@ -321,6 +321,7 @@ tasks.named('compileCompatibilityTestJava') {
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlCommentUpdateCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
+        filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminUserUpdateCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
         filter.excludeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlVisitTodayCompatibilityTest'
@@ -985,5 +986,38 @@ tasks.register('signupStatisticsCompatibilitySeoulTest', Test) {
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('signupStatisticsCompatibilityTest')
+    outputs.upToDateWhen { false }
+}
+
+// Adds only the selected administrator method to the existing F13 source/compiler context.
+tasks.register('prepareF13AdminUserUpdateOracle', Exec) {
+    dependsOn tasks.named('prepareF13LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f13_legacy_oracle.py'))
+    outputs.file(layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/service/F13LegacyAdminUserUpdateService.java'))
+    outputs.file(layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/dto/request/AdminUserUpdateRequest.java'))
+    outputs.file(layout.buildDirectory.file('generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/shelter/ShelterApplicationException.java'))
+    outputs.file(rootProject.file('build/ci/f13-admin-update-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f13_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f13LegacyOracle/java').get().asFile,
+            rootProject.file('build/ci/f13-admin-update-oracle-sha256.txt'), '--admin-update'
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF13AdminUserUpdateOracle') }
+
+tasks.register('adminUserUpdateCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Uses the owned late User ACL and actual F13 JpaTM to compare administrator writes once in UTC.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    systemProperty 'member.cleanup.fixture.receipt', rootProject.file('build/ci/member-cleanup-fixture-write.txt').absolutePath
+    systemProperty 'admin.user.update.fixture.receipt', rootProject.file('build/ci/admin-user-update-fixture-write.txt').absolutePath
+    systemProperty 'admin.user.update.oracle.receipt', rootProject.file('build/ci/f13-admin-update-oracle-sha256.txt').absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAdminUserUpdateCompatibilityTest'
+        failOnNoMatchingTests = true
+    }
     outputs.upToDateWhen { false }
 }

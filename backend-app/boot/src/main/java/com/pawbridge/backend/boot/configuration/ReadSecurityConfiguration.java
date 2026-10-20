@@ -55,8 +55,9 @@ public class ReadSecurityConfiguration {
         var userDetail = new AndRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "GET"),
                 new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/admin/users/search", "GET")));
-        var adminRoutes = new OrRequestMatcher(totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail);
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail);
+        var userUpdate = new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "PUT");
+        var adminRoutes = new OrRequestMatcher(totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate);
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)

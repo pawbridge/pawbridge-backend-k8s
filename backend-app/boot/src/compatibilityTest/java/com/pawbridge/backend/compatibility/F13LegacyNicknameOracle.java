@@ -1,9 +1,11 @@
 package com.pawbridge.backend.compatibility;
 
 import com.pawbridge.userservice.dto.request.UpdateNicknameRequestDto;
+import com.pawbridge.userservice.dto.request.AdminUserUpdateRequest;
 import com.pawbridge.userservice.entity.User;
 import com.pawbridge.userservice.repository.UserRepository;
 import com.pawbridge.userservice.service.F13LegacyNicknameService;
+import com.pawbridge.userservice.service.F13LegacyAdminUserUpdateService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import java.lang.reflect.Proxy;
@@ -73,6 +75,18 @@ final class F13LegacyNicknameOracle implements AutoCloseable {
                                     afterRead.run();
                                     yield user;
                                 }
+                                case "findByIdForUpdate" -> {
+                                    reads.incrementAndGet();
+                                    var selected = UserRepository.class.getMethod("findByIdForUpdate", Long.class);
+                                    var lock = selected.getAnnotation(org.springframework.data.jpa.repository.Lock.class);
+                                    if (lock == null || lock.value() != jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                                        throw new IllegalStateException("Original administrator lookup lacks its pessimistic lock");
+                                    var users = em.createQuery(selected.getAnnotation(Query.class).value(), User.class)
+                                            .setParameter("id", args[0]).setLockMode(lock.value()).getResultList();
+                                    var user = users.stream().findFirst();
+                                    afterRead.run();
+                                    yield user;
+                                }
                                 case "existsByNickname" -> {
                                     duplicateQueries.incrementAndGet();
                                     boolean exists = em.createQuery(query, Boolean.class).setParameter("nickname", args[0]).getSingleResult();
@@ -89,6 +103,9 @@ final class F13LegacyNicknameOracle implements AutoCloseable {
             });
             context.registerBean(F13LegacyNicknameService.class,
                     () -> new F13LegacyNicknameService(context.getBean(UserRepository.class)));
+            context.registerBean(F13LegacyAdminUserUpdateService.class,
+                    () -> new F13LegacyAdminUserUpdateService(context.getBean(UserRepository.class)),
+                    definition -> definition.setLazyInit(true));
             context.register(LegacyJpa.class);
             context.refresh();
             service = context.getBean(F13LegacyNicknameService.class);
@@ -99,6 +116,13 @@ final class F13LegacyNicknameOracle implements AutoCloseable {
     void update(long id, String nickname) {
         verifyOwnership.run();
         service.updateNickname(id, new UpdateNicknameRequestDto(nickname));
+    }
+
+    void updateAsAdmin(long id, AdminUserUpdateRequest request) {
+        verifyOwnership.run();
+        var admin = context.getBean(F13LegacyAdminUserUpdateService.class);
+        if (!AopUtils.isCglibProxy(admin)) throw new IllegalStateException("Original administrator method lacks its transaction proxy");
+        admin.updateUserByAdmin(id, request);
     }
 
     @Override public void close() { context.close(); }
