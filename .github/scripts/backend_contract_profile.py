@@ -178,21 +178,22 @@ VISIT_COLLECTION = 'visit-collection'
 VISIT_BASE = 'd938003e464c1413b8c27071e3f07d85b4e25ed6'
 VISIT_APP_HASHES = {'backend-app/boot/build.gradle': 'e06453da8a4f23d3b939c1abccb5b17829579353267580fba64eec18f62d2ce8',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F16VisitCollectionOracle.java': '2cbd4d9067a00caa6bc4c94137936d8d68e880fdb9e1c513ed4282785090ab6b',
- 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlVisitCollectionCompatibilityTest.java': 'eeac62f9b62398a6dc13388771b12b6e77dff93809b5d513cb2920c28c9459c8',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlVisitCollectionCompatibilityTest.java': 'acd0d06225f49f1b5c1b65d16bdab727e75d643d91be53fabdf4c8607764d274',
  'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '1309aa9842a35a9ff349c48b944d131bf4e5944778d59224ef0f3e203f94e5cd',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '1db238567ec15f202c447b1f7d56c8275e75c348b6002342b8f38bbedf69858a',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/VisitCollectionConfiguration.java': '03d4c5e008994ad17c4c8811783fb4b4c8f49a6d9c119f058a02377e68363d9b',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/VisitCollectionConfiguration.java': 'fbae2dc5a9ff22773dbe843e4a83dc0c9e64e6492ecc942bfd36e521f55f0070',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '57759b237d2e20c8a5607c4567e2b1aa94354784ddf24222a5522a425288edbf',
  'backend-app/boot/src/test/java/com/pawbridge/backend/VisitCollectionConfigurationTest.java': '1fea63fbf550b05a2c94fd82feebf50a072cbbdc2a41ca0209f885ab63f36ecd',
  'backend-app/boot/src/test/java/com/pawbridge/backend/VisitCollectionHttpTest.java': '218956473015ef344af513a39c46f8c9e8123eb1f5d363b273dd98deab7fc4af',
- 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitCollection.java': 'f0a9d95ef4a40cba7e3649f391cbdf9fe049bb6ede19dc4493e7b6f81503ea92',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitCollection.java': '48598d589c7de9be16a6d68a66babd0a4f01d8ead306aaa9e1843eec5545f648',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionRejectedException.java': '8b180a43c9e2ad6708ca45733e6e7318c13629c41dc563a8edd9db014a06acd3',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionStore.java': 'fa43789205d6af3651400ac40245b0d621c3f75223ee16eb9d4be9d17086fbc8',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitIdentity.java': 'f82baafa315963d7667b7904390c030a42cbfb55d9ccc2d539c47a0586d74142',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/infrastructure/JdbcVisitCollection.java': 'd2e150dee0f6d316edc008934d1dbe4b500d255ba5c58f701580ce5cf1334284',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/infrastructure/JdbcVisitCollectionStore.java': 'c880cd0b01e48ca7bd499ea8b1166a73a1d5ff54b8c84b2cd0892f86d5ed2885',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/web/VisitCollectionController.java': '8cef77c073dd59e856eb88959a062ba1a5c5ba8f5c06fa114a6d5600dc18e013',
  'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/web/VisitCollectionExceptionHandler.java': '25b695f5d6721152e2db1fdb212f357718f3da167541554947eea9eb9a0405ad',
- 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionTest.java': '3ac79ed67d79d7f817f94610e3bf86d1e2b3d140d2e9f1873922e57cfd6aa1e9',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionTest.java': '60fe6146779d2690c54c3fea7dd4488a6918930281e2a71ed631b1606e547a40',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/visit/application/VisitIdentityTest.java': 'f1ca42cd42fe49519bdb5c9bcaf300768f7d4877cdca06028f42cc931d563c6e',
  'backend-app/scripts/f29_ci.py': 'bee3366d450ec82a462ea586221ac5812d76d6a96cc75f62e7f4c23596478151',
  'backend-app/scripts/prepare_f16_legacy_oracle.py': 'c315deaa411d3664830f0a3c3d038a0e8959654479998202dbcd9043f2dd44eb',
@@ -364,7 +365,7 @@ def verify_visit_collection_inputs(git_reader=None):
                               stderr=subprocess.PIPE, check=True, timeout=8).stdout
     git = git_reader if git_reader is not None else read
     try:
-        if len(VISIT_APP_HASHES) != 21:
+        if len(VISIT_APP_HASHES) != 22:
             return False
         raw = git('diff', '--name-only', '--no-renames', '-z', VISIT_BASE, 'HEAD', '--', 'backend-app')
         if not isinstance(raw, bytes):

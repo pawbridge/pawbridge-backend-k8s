@@ -1,5 +1,7 @@
 package com.pawbridge.backend.community.internal.visit.application;
 
+import com.pawbridge.backend.community.internal.visit.infrastructure.JdbcVisitCollection;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import java.time.*;
@@ -17,7 +19,7 @@ class VisitCollectionTest {
     VisitCollection service;
     @BeforeEach void setup() {
         when(manager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        service=new VisitCollection(repository,cookies,Clock.fixed(now,ZoneOffset.UTC),new TransactionTemplate(manager));
+        service=new JdbcVisitCollection(repository,cookies,Clock.fixed(now,ZoneOffset.UTC),new TransactionTemplate(manager));
     }
     @Test void givenMissingCookie_whenCount_thenConflictWithoutStorage() {
         assertThatThrownBy(() -> service.count(null)).isInstanceOf(VisitCollectionRejectedException.class);
@@ -38,7 +40,7 @@ class VisitCollectionTest {
         Clock changing=mock(Clock.class);
         Instant before=Instant.parse("2026-10-12T14:59:59Z");
         when(changing.instant()).thenReturn(before, before.plusSeconds(2));
-        var midnight=new VisitCollection(repository,cookies,changing,new TransactionTemplate(manager));
+        var midnight=new JdbcVisitCollection(repository,cookies,changing,new TransactionTemplate(manager));
         assertThatThrownBy(() -> midnight.count(cookies.initialize(null,before).value()))
                 .isInstanceOf(VisitCollectionRejectedException.class);
         verify(repository).lockDay(LocalDate.of(2026,10,12),false);
@@ -61,7 +63,7 @@ class VisitCollectionTest {
         verifyNoInteractions(repository);
     }
     @Test void givenMidnightGrace_whenCleanup_thenWaitUntilFiveMinutesAndKeepAggregates() {
-        var grace=new VisitCollection(repository,cookies,Clock.fixed(Instant.parse("2026-10-11T15:04:59Z"),ZoneOffset.UTC),new TransactionTemplate(manager));
+        var grace=new JdbcVisitCollection(repository,cookies,Clock.fixed(Instant.parse("2026-10-11T15:04:59Z"),ZoneOffset.UTC),new TransactionTemplate(manager));
         grace.cleanup();verifyNoInteractions(repository);
         when(repository.expiredDays(LocalDate.of(2026,10,12))).thenReturn(List.of(LocalDate.of(2026,10,11)));
         service.cleanup();

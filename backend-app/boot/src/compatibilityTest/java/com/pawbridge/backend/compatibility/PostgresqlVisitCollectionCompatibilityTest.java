@@ -1,5 +1,7 @@
 package com.pawbridge.backend.compatibility;
 
+import com.pawbridge.backend.community.internal.visit.infrastructure.JdbcVisitCollection;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
@@ -196,7 +198,7 @@ class PostgresqlVisitCollectionCompatibilityTest {
         final F16VisitCollectionOracle original;final VisitCollection candidate;final ObservingJdbc jdbc;
         Round(boolean source,HikariDataSource ds,Clock clock,Consumer<Boolean> afterLock){
             if(source){original=new F16VisitCollectionOracle(owner,clock,PostgresqlVisitCollectionCompatibilityTest.this::verifyOwnership,dataSource->new ObservingJdbc(dataSource,afterLock));jdbc=(ObservingJdbc)original.jdbc;candidate=null;}
-            else{original=null;jdbc=new ObservingJdbc(ds,afterLock);var tx=new TransactionTemplate(new JdbcTransactionManager(ds));tx.setTimeout(10);candidate=new VisitCollection(new JdbcVisitCollectionStore(jdbc),new VisitIdentity(F16VisitCollectionOracle.KEY),clock,tx);}
+            else{original=null;jdbc=new ObservingJdbc(ds,afterLock);var tx=new TransactionTemplate(new JdbcTransactionManager(ds));tx.setTimeout(10);candidate=new JdbcVisitCollection(new JdbcVisitCollectionStore(jdbc),new VisitIdentity(F16VisitCollectionOracle.KEY),clock,tx);}
         }
         void start(){if(original!=null)original.service.start();else candidate.start();}
         Object count(String value){if(original!=null)return original.service.count(value);return candidate.count(value);}

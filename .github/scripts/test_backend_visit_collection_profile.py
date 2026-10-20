@@ -77,16 +77,16 @@ class VisitCollectionProfileTest(unittest.TestCase):
             raise AssertionError('Unexpected synthetic Git operation')
         return Mock(side_effect=read), hashes
 
-    def test_given_twenty_one_frozen_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
+    def test_given_twenty_two_frozen_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.VISIT_BASE)
-        self.assertEqual(21, len(profile.VISIT_APP_HASHES))
-        self.assertEqual('a05ae3681b8194f905537422bceb7549d1b0674b132b9c2f47fb3af17e39fdd9', hashlib.sha256(json.dumps(sorted(profile.VISIT_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual(22, len(profile.VISIT_APP_HASHES))
+        self.assertEqual('04415e1c301151c87b4b6aa96beb8644313227d77fa5f18ac2f2e64186b9e884', hashlib.sha256(json.dumps(sorted(profile.VISIT_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.VISIT_APP_HASHES) | {'backend-app/README.md'}, profile.VISIT_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.VISIT_APP_HASHES)
         git, hashes = self.synthetic_git()
         with patch.object(profile, 'VISIT_APP_HASHES', hashes):
             self.assertIs(True, profile.verify_visit_collection_inputs(git_reader=git))
-        self.assertEqual(22, git.call_count)
+        self.assertEqual(23, git.call_count)
         for path in hashes:
             git.assert_any_call('show', 'HEAD:' + path)
 

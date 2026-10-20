@@ -1,5 +1,7 @@
 package com.pawbridge.backend.boot.configuration;
 
+import com.pawbridge.backend.community.internal.visit.infrastructure.JdbcVisitCollection;
+
 import com.pawbridge.backend.community.internal.visit.application.VisitCollection;
 import com.pawbridge.backend.community.internal.visit.application.VisitCollectionStore;
 import com.pawbridge.backend.community.internal.visit.application.VisitIdentity;
@@ -47,7 +49,7 @@ public class VisitCollectionConfiguration {
             @Qualifier("readClock") Clock clock) {
         var transaction = new TransactionTemplate(manager);
         transaction.setTimeout(10);
-        return new VisitCollection(store, identity, clock, transaction);
+        return new JdbcVisitCollection(store, identity, clock, transaction);
     }
     @Bean
     VisitCollectionController visitCollectionController(VisitCollection service, VisitIdentity identity,
