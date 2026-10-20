@@ -711,3 +711,14 @@ Store 공개 API/JDBC 최소30사례와 User 어댑터25사례, 새 Boot4/TestKi
 동일 reader/TM을 사용하고 보호소 discovery만 기존 RO/RR·5초를, 일반보호소/통계는 원문 RO/default isolation/timeout을 유지합니다. 새 풀/TM/analyzer/외부요청/예약을 추가하지 않습니다. 보호소 source56·새조립12/8초, 통계 source36·새조립7/7초와business578 검사가 통과했습니다. 성공시험은 반복하지 않았으며 실제PG집계/SQL·최소GRANT·격리/콜레이션/시간·실행JAR/운영활성화는 미검증입니다.
 
 User→Store 모듈 연결과 Animal 보호소/통계를 실제 함께 조립한 뒤, 변경된 조합의 기존 기본 App 시험 클래스8사례와 생산 컴파일·business592 검사를8초에 확인했습니다. 신규8계약으로 세지 않습니다. 원문 source/HTTP/전체 구조 시험은 반복하지 않았습니다. 고정 입력230 시험1은0.012초에 성공했습니다. 이는 실제 서비스·데이터베이스 실행 시험이 아닙니다.
+
+
+### Store 위시리스트 명령 편입
+
+`pawbridge.store-wishlist.enabled`는 기본 false입니다. 명시 활성화 시 정확 POST/DELETE `/api/v1/wishlists` 두 경로만 기존 JWT 인증에 연결하며 인증 principal의 회원 ID만 사용합니다. body/query/임의 X-User 헤더는 회원 ID로 신뢰하지 않습니다. 원래 소유권 검사가 없던 ID 삭제 HTTP는 등록하지 않습니다.
+
+별도 명시 `STORE_WISHLIST_DB_WRITER_USER`/`STORE_WISHLIST_DB_WRITER_PASSWORD`만 쓰는 max1/minIdle0 writer를 같은 검증된 DB URL에 조립하고 reader 계정 재사용을 거부합니다. pool close 소유권·query5/TX10초·Clock.systemDefaultZone을 명시합니다. 실제 비밀값/계정/GRANT는 변경하지 않습니다. 회원/SKU 중복 선검사·현재 상품/옵션 응답·JVM시간 auditing·원래 오류 순서를 보존합니다. 유일제약 없는 동시 중복 추가는 기존 한계/활성화 gate이며 무조건 안전하다고 주장하지 않습니다.
+
+source25사례·일반 독립검수와 새 합집합 Boot22사례·production compile/Business600 검사가8초에 성공했습니다. 원래 Boot22와 합집합22를44고유사례로 합산하지 않습니다. 위시리스트 source12 조립 단계에서 공통 App/보안/Storebuild 외 다른803부모파일과 source6을 보존했습니다. ID삭제 소유정책·실제PG/RETURNING/시간정밀도·writer 최소권한/identity sequence·commit/rollback·동시성·실제pool 종료는 미검증이며 활성화 전 확인해야 합니다. 운영·DB·결제/재고/Outbox/Redis·기존 데이터 변경은 없습니다.
+
+별도의 새 PG17.11 ARM64 컨테이너1에서 실제 SELECT/CTE·INSERT RETURNING·owner DELETE의 합성 SQL12사례가 psql 단일 세션으로 성공했습니다. networknone/포트0/hostmount0/volume0·tmpfs·512MiB/CPU1 한도였고 해당 컨테이너만 정상 종료·삭제했습니다. 이는 JDBC/ResultSet 매핑·최소권한·인가·rollback/동시성의 증거가 아니며, source SQL의 schema/placeholder를 합성 값으로 바꾼 구문·결과 형태 확인입니다. 기존 서비스·DB·자격증명을 사용하지 않았습니다.
