@@ -77,6 +77,31 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             capture_output=True, text=True, timeout=3,
         )
 
+    def test_given_owned_pg_task__when_selecting_settings__then_keep_explicit_path_and_class_owned_guards(self):
+        boot = (ROOT / 'backend-app/boot/build.gradle').read_text()
+        task = boot.split("tasks.register('ownedPostgresqlTest', Test) {", 1)[1]
+        guard = task.split('    doFirst {', 1)[1].split('    afterSuite {', 1)[0]
+        self.assertIn("System.getenv('PAWBRIDGE_OWNED_SETTINGS_ENV')", guard)
+        self.assertIn('settingsEnvironment ==~ /P[1-9][0-9]*_PG_SETTINGS/', guard)
+        self.assertIn('System.getenv(settingsEnvironment) : null', guard)
+        self.assertIn('settingsPath != null && !settingsPath.isBlank()', guard)
+        self.assertIn('selected.isAbsolute() && selected.normalize() == selected', guard)
+        self.assertIn('java.nio.file.Files.isRegularFile(selected, java.nio.file.LinkOption.NOFOLLOW_LINKS)', guard)
+        self.assertIn("throw new GradleException('An explicit owned PostgreSQL settings file is required')", guard)
+        self.assertIn("System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') != 'owned-fixture-only'", guard)
+        self.assertNotRegex(guard, r"System\.getenv\('P[1-9][0-9]*_PG_SETTINGS'\)")
+        self.assertNotIn('systemProperty', guard)
+        self.assertNotIn('environment(', guard)
+        self.assertIn("filter { failOnNoMatchingTests = true }", task)
+        self.assertIn('result.testCount == 0 || result.skippedTestCount > 0', task)
+        self.assertIn('outputs.upToDateWhen { false }', task)
+        for file, env in [('OwnedPostgresqlStoreOrderAdministrationTest.java', 'P13_PG_SETTINGS'),
+                          ('OwnedPostgresqlAnimalTravelTest.java', 'P14_PG_SETTINGS')]:
+            source = (ROOT / 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration' / file).read_text()
+            self.assertIn('System.getenv("' + env + '")', source)
+            self.assertNotIn('PAWBRIDGE_OWNED_SETTINGS_ENV', source)
+            self.assertNotIn('assumeTrue', source)
+
     def test_given_dev_pr_or_push__when_workflow_is_registered__then_always_create_a_result(self):
         header = WORKFLOW.read_text().split('\npermissions:', 1)[0]
         self.assertIn('  push:\n    branches: [dev]', header)
