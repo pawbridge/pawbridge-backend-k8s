@@ -32,7 +32,9 @@ public final class HttpStoreMyPage implements StoreMyPage {
                 return page(Objects.requireNonNull(client.get().uri(uri -> uri.path("/api/v1/mypage/wishlists")
                         .queryParam("userId", current).queryParam("page", request.page())
                         .queryParam("size", request.size()).queryParam("sort", request.sort()).build())
-                        .retrieve().body(new ParameterizedTypeReference<RemotePage<Wishlist>>() { })));
+                        .retrieve().onStatus(statusCode -> !statusCode.is2xxSuccessful(), (httpRequest, httpResponse) -> {
+                            throw new IllegalStateException("Store returned an unsuccessful HTTP response");
+                        }).body(new ParameterizedTypeReference<RemotePage<Wishlist>>() { })));
             } catch (Exception unavailable) {
                 throw new IllegalStateException("Store wishlist lookup failed", unavailable);
             }
@@ -47,7 +49,9 @@ public final class HttpStoreMyPage implements StoreMyPage {
                 return page(Objects.requireNonNull(client.get().uri(uri -> uri.path("/api/v1/mypage/orders")
                         .queryParam("userId", current).queryParam("page", request.page())
                         .queryParam("size", request.size()).queryParam("sort", request.sort()).build())
-                        .retrieve().body(new ParameterizedTypeReference<RemotePage<Purchase>>() { })));
+                        .retrieve().onStatus(statusCode -> !statusCode.is2xxSuccessful(), (httpRequest, httpResponse) -> {
+                            throw new IllegalStateException("Store returned an unsuccessful HTTP response");
+                        }).body(new ParameterizedTypeReference<RemotePage<Purchase>>() { })));
             } catch (Exception unavailable) {
                 throw new IllegalStateException("Store order lookup failed", unavailable);
             }
@@ -60,7 +64,9 @@ public final class HttpStoreMyPage implements StoreMyPage {
             profiles.require(current);
             try {
                 Cart cart = client.get().uri(uri -> uri.path("/api/v1/mypage/cart")
-                        .queryParam("userId", current).build()).retrieve().body(Cart.class);
+                        .queryParam("userId", current).build()).retrieve().onStatus(statusCode -> !statusCode.is2xxSuccessful(), (httpRequest, httpResponse) -> {
+                            throw new IllegalStateException("Store returned an unsuccessful HTTP response");
+                        }).body(Cart.class);
                 // The original service dereferences items for a non-null cart, so malformed items fail.
                 if (cart != null) cart.items().size();
                 return cart;

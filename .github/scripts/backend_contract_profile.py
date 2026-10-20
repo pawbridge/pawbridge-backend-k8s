@@ -471,7 +471,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/web/ShelterApplicationController.java': '1d3173c8942aacbe02782bc77286876dbeaf6b14b7f2f6e503e2a942c56c9b08',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/shelter/web/ShelterMembershipExceptionHandler.java': 'c109ab292033923fdc1d03884599ad0e11bcb208aed672e6530bbc9f2c7159c0',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/application/StoreMyPage.java': '4c35b5d47e2736c0be5c8b2f0558661a406d9396c05400065e7ff8d819577883',
- 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPage.java': '9b1d739faac157231880592b7425d8ae1c52ee7ec912e92e08d9133dd4fdf6c0',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPage.java': 'ab17852c0ed974049b6283a1c24602d63c68b388ba43c25139a08254992d96b6',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/web/StoreMyPageController.java': 'bc74232c2b27b38a25b33b81e4e84ab7a78a9ae5a31b8f9b90d49513bd5974fa',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/storemypage/web/StoreMyPageExceptionHandler.java': '142d96fb4089cdc4bc2163a204901b26d6b37fd8153791468a09459d4984e673',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/animalactivity/infrastructure/HttpUserAnimalLookupTest.java': '48b5088130a892d62cda8819860312c62babe89a90d3a70d3304c08570e76e63',
@@ -483,7 +483,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '36d3782a7965b54d97f1c
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/HttpShelterLookupTest.java': '280304494a1bbbaf3fd71d7a8441d4af639a058284974e664e48d605b0aafe3e',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/shelter/infrastructure/JdbcShelterMembershipTest.java': '8401c06ec852ab363745e08500ad78a22be546651c9d2b836844d6b52c4f1a9f',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPageTest.java': '2f36cb808f159f448809aecbb02282910cb55e5d40f7d729b0a943eaaeb5a09c',
- 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPageTransportTest.java': 'd26d44594d6777cd045887d315fd036e74a133fc5d1ebb4a5e1404ebbadcf243',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storemypage/infrastructure/HttpStoreMyPageTransportTest.java': 'd662499bc8cf42d2a62cfbd86d3967515ff6ee1e42fcecf96356cec4c7e5834b',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/storemypage/web/StoreMyPageControllerTest.java': '0757146f099d405f125d5666674eec33ee5bc9092df4237f9c1290b787a0c3a7'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {

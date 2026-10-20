@@ -652,3 +652,5 @@ Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/
 원문 `f06a72a06bd26662c647bde780dfc7a27bf7349c`의 회원 존재 확인 → 같은 읽기 TX 안 Store HTTP 순서를 유지하고, 기존 회원 프로필7열 조회와 기존 reader/TX를 재사용합니다. 원문의 exists 조회보다 넓은 기존 projection이며 응답으로 회원 정보를 내보내지 않습니다. 목록 Page/정렬/DTO·없는 장바구니204·없는 회원400·외부 오류500을 보존합니다. 예외 응답과 진단에는 외부 본문/인증값을 넣지 않습니다.
 
 후보 HTTP는 연결10초·읽기60초·redirect 금지입니다. 기존 읽기 TX의3초는 JDBC 예산이며 HTTP3초 제한이 아닙니다. 실제 Store 응답/Feign 전체 변형·reader 권한·DB 연결 수명·부하/고장 복구는 별도 활성화 전 검증이 필요합니다. 합성 loopback/단위·JWT/MVC·조립/구조 검증을 실제 Store·PG 검증으로 표현하지 않습니다. 이 PR로 원래 User/Store 실행기나 Kafka/CDC를 종료하지 않습니다.
+
+Store의 non-2xx 응답은 본문 변환 전에 세 조회에서 모두 거부합니다. 리다이렉트를 정상 Page나 없는 장바구니204로 받아들이지 않으며 Location도 따라가지 않습니다. 정상200/204와 기존4xx/5xx 실패는 유지합니다.
