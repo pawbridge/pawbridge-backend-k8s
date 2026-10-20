@@ -856,3 +856,12 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 소유 PG 검증은 `P12_PG_SETTINGS`와 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreCartOrderTest`를 사용한다. 별도 새 DB·제한 writer·표식을 확인한 fixture에만 적용한다. 기존 `P11_PG_SETTINGS` Cart 전용 최소권한은 유지한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다. ordinary CI는 owned 태그를 실행한 것으로 표시하지 않는다.
 
 공개 활성화 전에는 기존 Redis 미동기화 Cart 인계, 기존 Cart API·동기화 실행기와 새 실행기의 배타적 소유권, DB 권한과 라우팅을 별도로 확인해야 한다. 이 소스 편입은 기존 운영·Kafka/CDC·외부 결제나 데이터·복구 자료를 제어하지 않는다.
+
+
+## 관리자 주문 조회·배송 관리
+
+`pawbridge.store-order-administration.enabled=true`일 때 관리자 주문 목록·필터/상세 조회와 배송 상태 변경의 세 API만 등록합니다. 기본값은 비활성이며 `on` 등 별칭은 허용하지 않습니다. 기존 Store writer EMF·DataSource·트랜잭션과 auditing을 공유합니다. 관리자 구성만으로 개인 주문 조회, 장바구니 또는 결제 API를 활성화하지 않습니다.
+
+서명 검증된 관리자 JWT와 현재 DB의 정확한 `ROLE_ADMIN`을 모두 요구하며 삭제 대기·누락 계정은 거부합니다. 조회는 짧은 읽기 전용 트랜잭션, 변경은 같은 writer의 User 행 잠금 뒤 Order 행 잠금으로 실행합니다. 목록 크기는 1~100, 정렬은 명시된 Order의 scalar 필드로 제한합니다. 배송 변경은 주문의 결제 상태·금액·품목·재고·Outbox를 바꾸지 않습니다. 원문 계약인 단건 없음 404, 배송 변경 대상 없음 400, null 배송 상태의 500과 rollback을 유지합니다. null은 같은 쓰기 트랜잭션에서 현재 관리자와 주문을 확인한 뒤 DB 변경 전에 고정 오류로 거부해, DB 제약 오류에 수취 정보가 기록되는 경로를 막습니다.
+
+새 합성 DB 검증은 `P13_PG_SETTINGS`의 비공개 설정을 사용하는 `OwnedPostgresqlStoreOrderAdministrationTest`로 분리합니다. 이 소스 편입은 운영 활성화나 Payment·취소·환불·재입고 계약 완료가 아닙니다.
