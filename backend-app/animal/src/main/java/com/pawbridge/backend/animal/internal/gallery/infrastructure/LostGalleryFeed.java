@@ -130,6 +130,7 @@ public class LostGalleryFeed {
     static void validatePhoto(StoredPhoto photo) {
         if (photo.sha256() == null || !photo.sha256().matches("[a-f0-9]{64}")
                 || photo.key() == null || !photo.key().matches("apms/photos/[a-f0-9]{64}\\.(jpg|png|webp)")
+                || !photo.key().startsWith("apms/photos/" + photo.sha256() + ".")
                 || photo.bytes() <= 0 || photo.bytes() > 10 * 1024 * 1024
                 || photo.mime() == null || !List.of("image/jpeg", "image/png", "image/webp").contains(photo.mime()))
             throw new IllegalStateException("Invalid archived photo metadata");

@@ -55,6 +55,18 @@ class AnimalGalleryFeedConfigurationTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessage("Dedicated R2 signing configuration is required").hasNoCause();
     }
 
+    @Test void givenBlankRelativeOrUnnormalizedDirectory_whenConfiguring_thenRejectBeforeFilesystemMutation() throws Exception {
+        for(String directory:java.util.List.of("","   ","snapshots","./snapshots","/",Path.of("").toAbsolutePath().normalize().toString(),root.resolve("child/../snapshots").toString())) {
+            assertThatThrownBy(()->new AnimalGalleryFeedConfiguration("synthetic-internal",
+                    "https://synthetic.r2.cloudflarestorage.com","synthetic-access","synthetic-secret",directory))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessage("A local snapshot directory is required").hasNoCause();
+        }
+        assertThatCode(()->new AnimalGalleryFeedConfiguration("synthetic-internal",
+                "https://synthetic.r2.cloudflarestorage.com","synthetic-access","synthetic-secret",root.resolve("snapshots").toString()))
+                .doesNotThrowAnyException();
+        try(var entries=java.nio.file.Files.list(root)) {assertThat(entries.toList()).isEmpty();}
+    }
+
     @Test @SuppressWarnings("unchecked")
     void givenExplicitOfflineInputs_whenAssembling_thenReuseReaderSignExactGetAndReleaseDirectoryOwnership() throws Exception {
         DataSource source=mock(DataSource.class);var jdbc=new JdbcTemplate(source);jdbc.setQueryTimeout(3);

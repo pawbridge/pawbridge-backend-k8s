@@ -51,7 +51,13 @@ public class AnimalGalleryFeedConfiguration {
                 ||(!parsed.getPath().isEmpty()&&!"/".equals(parsed.getPath()))||access.isBlank()||secret.isBlank())
             throw new IllegalArgumentException("Dedicated R2 signing configuration is required");
         this.internalKey=internalKey;this.endpoint=parsed;this.access=access;this.secret=secret;
-        try {this.directory=Path.of(directory);} catch(RuntimeException invalid) {
+        try {
+            if(directory==null||directory.isBlank())throw new IllegalArgumentException();
+            Path selected=Path.of(directory);
+            if(!selected.isAbsolute()||!selected.normalize().equals(selected)||selected.getParent()==null
+                    ||selected.equals(Path.of("").toAbsolutePath().normalize()))throw new IllegalArgumentException();
+            this.directory=selected;
+        } catch(RuntimeException invalid) {
             throw new IllegalArgumentException("A local snapshot directory is required");
         }
     }

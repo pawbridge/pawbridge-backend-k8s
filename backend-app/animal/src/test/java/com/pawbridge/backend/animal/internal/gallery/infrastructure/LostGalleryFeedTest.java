@@ -138,6 +138,37 @@ class LostGalleryFeedTest {
     }
 
 
+    @Test
+    void givenObjectKeyWithAnotherDigest_whenReadingEitherFeed_thenRejectBeforeSigningOrPublishingAndCloseCursor() throws Exception {
+        var source=mock(javax.sql.DataSource.class);var connection=mock(java.sql.Connection.class);
+        var statement=mock(java.sql.PreparedStatement.class);var rows=mock(java.sql.ResultSet.class);
+        var conflict=mock(java.sql.PreparedStatement.class);var conflictRows=mock(java.sql.ResultSet.class);
+        when(source.getConnection()).thenReturn(connection);
+        when(connection.prepareStatement(LostGalleryFeed.SQL)).thenReturn(statement);
+        when(connection.prepareStatement(argThat(sql->sql!=null&&sql.startsWith("SELECT stored_sha256")))).thenReturn(conflict);
+        when(conflict.executeQuery()).thenReturn(conflictRows);when(statement.executeQuery()).thenReturn(rows);
+        when(rows.next()).thenReturn(true,false);when(rows.getLong("id")).thenReturn(1L);
+        when(rows.getLong("stored_bytes")).thenReturn(123L);when(rows.getString("content_type")).thenReturn("image/jpeg");
+        when(rows.getString("stored_sha256")).thenReturn(sha);
+        when(rows.getString("object_key")).thenReturn("apms/photos/"+"b".repeat(64)+".jpg");
+        when(rows.getString("species")).thenReturn("DOG");
+        var signed=new java.util.concurrent.atomic.AtomicInteger();var published=new java.util.concurrent.atomic.AtomicInteger();
+        var feed=new LostGalleryFeed(new org.springframework.jdbc.core.JdbcTemplate(source),mapper,
+                key->{signed.incrementAndGet();return signer().apply(key);},
+                org.springframework.transaction.support.TransactionOperations.withoutTransaction(),
+                org.springframework.transaction.support.TransactionOperations.withoutTransaction());
+        assertEquals("Invalid archived photo metadata",assertThrows(IllegalStateException.class,()->feed.snapshot(null)).getMessage());
+        when(rows.next()).thenReturn(true,false);
+        assertEquals("Invalid archived photo metadata",assertThrows(IllegalStateException.class,
+                ()->feed.streamEntries(entry->published.incrementAndGet())).getMessage());
+        assertEquals(0,signed.get());assertEquals(0,published.get());
+        verify(rows,times(2)).close();verify(statement,times(2)).close();
+        verify(connection,never()).getMetaData();
+        for(String extension:List.of("jpg","png","webp"))
+            assertDoesNotThrow(()->LostGalleryFeed.validatePhoto(new LostGalleryFeed.StoredPhoto(sha,"apms/photos/"+sha+"."+extension,123,
+                    extension.equals("jpg")?"image/jpeg":"image/"+extension)));
+    }
+
     private static org.springframework.transaction.support.TransactionOperations transaction(java.util.concurrent.atomic.AtomicBoolean active) {
         return new org.springframework.transaction.support.TransactionOperations() {
             @Override public <T> T execute(org.springframework.transaction.support.TransactionCallback<T> action) {
