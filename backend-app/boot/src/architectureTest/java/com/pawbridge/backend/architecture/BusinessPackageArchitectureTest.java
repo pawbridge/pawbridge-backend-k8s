@@ -56,12 +56,14 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
         assertTask(result, ":animal:compileJava", SUCCESS);
+        assertTask(result, ":store:compileJava", SUCCESS);
         assertCheckCompleted(result, task.equals("check") ? ":check" : task);
         assertCompiled("user", "internal.domain.UserStatus");
         assertCompiled("user", "internal.profile.domain.UserProfile");
         assertCompiled("user", "internal.profile.application.ProfileReader");
         assertCompiled("community", "internal.application.PostReader");
         assertCompiled("animal", "internal.application.AnimalReader");
+        assertCompiled("store", "internal.application.StoreReader");
     }
 
     @Test
@@ -218,7 +220,9 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
             "user, com.pawbridge.backend.user.api.UserLookup",
             "community, com.pawbridge.backend.user.api.UserLookup",
             "animal, java.sql.Connection",
-            "animal, com.pawbridge.backend.animal.api.AnimalLookup"
+            "animal, com.pawbridge.backend.animal.api.AnimalLookup",
+            "store, java.sql.Connection",
+            "store, com.pawbridge.backend.store.api.StoreLookup"
     })
     void givenDomainReferencesTechnologyOrApi_whenCheck_thenRejectsDomainRule(String module, String target)
             throws IOException {
@@ -317,5 +321,35 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
         assertPackageRejected(result, "APPLICATION_DEPENDENCY",
                 "com.pawbridge.backend.animal.internal.infrastructure.AnimalStore");
         assertCompiled("animal", "internal.application.TechnicalApplication");
+    }
+
+    @Test
+    void givenStoreApiLeaksOwnInternalType_whenStoreCheck_thenRejectsApiSignatureRule() throws IOException {
+        javaSource("store", "api.LeakyContract", """
+                public interface LeakyContract {
+                    com.pawbridge.backend.store.internal.domain.StoreName name();
+                }
+                """);
+
+        BuildResult result = runner(":store:check").buildAndFail();
+
+        assertPackageRejected(result, "API_SIGNATURE", "com.pawbridge.backend.store.internal.domain.StoreName");
+        assertCompiled("store", "api.LeakyContract");
+    }
+
+    @Test
+    void givenStoreApplicationReferencesInfrastructure_whenStoreCheck_thenRejectsApplicationRule() throws IOException {
+        javaSource("store", "internal.infrastructure.StoreStore", "public class StoreStore {}");
+        javaSource("store", "internal.application.TechnicalApplication", """
+                public class TechnicalApplication {
+                    com.pawbridge.backend.store.internal.infrastructure.StoreStore dependency;
+                }
+                """);
+
+        BuildResult result = runner(":store:check").buildAndFail();
+
+        assertPackageRejected(result, "APPLICATION_DEPENDENCY",
+                "com.pawbridge.backend.store.internal.infrastructure.StoreStore");
+        assertCompiled("store", "internal.application.TechnicalApplication");
     }
 }

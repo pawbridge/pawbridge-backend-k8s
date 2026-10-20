@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 abstract class BusinessBuildFixture {
-    static final List<String> MODULES = List.of("boot", "user", "community", "animal");
+    static final List<String> MODULES = List.of("boot", "user", "community", "animal", "store");
 
     @TempDir
     static Path testKitDirectory;
@@ -40,7 +40,7 @@ abstract class BusinessBuildFixture {
         fixture = Files.createDirectory(temporaryDirectory.resolve("backend-app"));
         write("settings.gradle", """
                 rootProject.name = 'pawbridge-backend-app'
-                include 'boot', 'user', 'community', 'animal'
+                include 'boot', 'user', 'community', 'animal', 'store'
                 """);
         write("gradle.properties", """
                 org.gradle.jvmargs=-Xmx192m -Dfile.encoding=UTF-8
@@ -75,6 +75,7 @@ abstract class BusinessBuildFixture {
                     implementation project(':user')
                     implementation project(':community')
                     implementation project(':animal')
+                    implementation project(':store')
                 }
                 """);
 
@@ -85,7 +86,7 @@ abstract class BusinessBuildFixture {
         Files.copy(guard, fixture.resolve("gradle/architecture.gradle"));
         // Apply the actual business module scripts and production guard entry. The
         // boot fixture is a plain Java consumer so it cannot recursively run TestKit.
-        for (String module : List.of("user", "community", "animal")) {
+        for (String module : List.of("user", "community", "animal", "store")) {
             Files.createDirectories(fixture.resolve(module));
             Files.copy(productionBuild.resolve(module + "/build.gradle"),
                     fixture.resolve(module + "/build.gradle"));
@@ -127,6 +128,19 @@ abstract class BusinessBuildFixture {
                 public class AnimalReader {
                     private final com.pawbridge.backend.animal.internal.domain.AnimalName name =
                         new com.pawbridge.backend.animal.internal.domain.AnimalName("PawBridge");
+                    public String breed() { return name.value(); }
+                }
+                """);
+        javaSource("store", "api.StoreLookup", """
+                public interface StoreLookup { String breed(long storeId); }
+                """);
+        javaSource("store", "internal.domain.StoreName", """
+                public record StoreName(String value) {}
+                """);
+        javaSource("store", "internal.application.StoreReader", """
+                public class StoreReader {
+                    private final com.pawbridge.backend.store.internal.domain.StoreName name =
+                        new com.pawbridge.backend.store.internal.domain.StoreName("PawBridge");
                     public String breed() { return name.value(); }
                 }
                 """);
@@ -238,6 +252,7 @@ abstract class BusinessBuildFixture {
         assertTask(result, ":user:compileJava", SUCCESS);
         assertTask(result, ":community:compileJava", SUCCESS);
         assertTask(result, ":animal:compileJava", SUCCESS);
+        assertTask(result, ":store:compileJava", SUCCESS);
         assertTask(result, ":verifyBusinessPackages", FAILED);
         String violationPrefix = "Business package violation: [" + rule + "] ";
         assertTrue(result.getOutput().lines().anyMatch(line -> {
