@@ -53,6 +53,8 @@ jobs:
                   ".github/scripts/ci_branch_policy.py",
                   ".github/scripts/backend_contract_profile.py",
                   ".github/scripts/test_backend_contract_profile.py",
+                  ".github/scripts/backend_postmerge_proof.py",
+                  ".github/scripts/test_backend_postmerge_proof.py",
               }
               for path in paths
           )
@@ -71,9 +73,50 @@ jobs:
           PY
 
 
-  package:
+  proof:
+    name: Resolve postmerge full evidence
     needs: selection
     if: ${{ needs.selection.outputs.selected == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      mode: ${{ steps.proof.outputs.mode }}
+    steps:
+      - name: Check out the exact candidate for evidence selection
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Test the bounded postmerge decision without network or application resources
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_backend_postmerge_proof.py'
+
+      - name: Decide full validation or reference one reviewed PR full
+        id: proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PULL_REQUEST_BASE_REF: ${{ github.base_ref }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B .github/scripts/backend_postmerge_proof.py --output build/ci/postmerge-proof.txt >> "$GITHUB_OUTPUT"
+
+      - name: Preserve the decision separately from original test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-app-postmerge-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/ci/postmerge-proof.txt
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+  package:
+    needs: [selection, proof]
+    if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'full' }}
     name: Build the shared Java 21 candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -126,6 +169,8 @@ jobs:
           mkdir -p build/ci
           {
             printf 'source_sha=%s\n' "$(git rev-parse HEAD)"
+            printf 'workflow_sha=%s\n' "$GITHUB_WORKFLOW_SHA"
+            printf 'workflow_ref=%s\n' "$GITHUB_WORKFLOW_REF"
             printf 'runner_image_os=%s\n' "${ImageOS:-unknown}"
             printf 'runner_image_version=%s\n' "${ImageVersion:-unknown}"
             printf 'runner_architecture=%s\n' "$(uname -m)"
@@ -174,8 +219,8 @@ jobs:
           retention-days: 7
 
   check:
-    needs: [selection, package]
-    if: ${{ needs.selection.outputs.selected == 'true' }}
+    needs: [selection, proof, package]
+    if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'full' }}
     name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || 'F25 six-smoke pilot with the same candidate JAR' }}
     strategy:
       fail-fast: false
@@ -301,6 +346,8 @@ jobs:
           mkdir -p build/ci
           {
             printf 'source_sha=%s\n' "$(git rev-parse HEAD)"
+            printf 'workflow_sha=%s\n' "$GITHUB_WORKFLOW_SHA"
+            printf 'workflow_ref=%s\n' "$GITHUB_WORKFLOW_REF"
             printf 'runner_image_os=%s\n' "${ImageOS:-unknown}"
             printf 'runner_image_version=%s\n' "${ImageVersion:-unknown}"
             printf 'runner_architecture=%s\n' "$(uname -m)"
@@ -1515,7 +1562,7 @@ jobs:
 
   ci-result:
     name: Backend app CI result
-    needs: [selection, package, check]
+    needs: [selection, proof, package, check]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -1526,10 +1573,12 @@ jobs:
           MODULE_SELECTED: ${{ needs.selection.outputs.selected }}
           MODULE_RESULT: ${{ needs.check.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          PROOF_RESULT: ${{ needs.proof.result }}
+          PROOF_MODE: ${{ needs.proof.outputs.mode }}
         run: |
           set -euo pipefail
           test "$SELECTION_RESULT" = success
-          case "$MODULE_SELECTED:$PACKAGE_RESULT:$MODULE_RESULT" in
-            true:success:success|false:skipped:skipped) ;;
+          case "$MODULE_SELECTED:$PROOF_RESULT:$PROOF_MODE:$PACKAGE_RESULT:$MODULE_RESULT" in
+            true:success:full:success:success|true:success:reused-full:skipped:skipped|false:skipped::skipped:skipped) ;;
             *) printf 'Backend app checks failed or were unexpectedly skipped\n' >&2; exit 1 ;;
           esac

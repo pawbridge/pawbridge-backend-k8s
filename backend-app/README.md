@@ -457,3 +457,18 @@ CI는 기존 F29 원문/JpaTM·18표 소유 fixture를 재사용하여 UTC expir
 동일 클래스의 기존 F29 26사례와 Seoul 1사례에서는 expiry tag를 제외한다.
 실제 활성 작업의 FK 잠금→context close→정상 잠금 해제→commit/연결 반환→pool 종료를 확인한다.
 이 증거는 실행 JAR의 강제 취소나 운영 예약 인수 완료를 뜻하지 않는다. 새 HTTP/JAR 여정은 복제하지 않는다.
+
+
+## 병합 후 동일 코드의 전체 검증 인수
+
+PR에서는 기존 package와 full 검증을 실행한다. dev push의 `proof` job은 새 package보다 먼저, 방금 병합한 같은 저장소 PR의 **검사된 전체 Git tree**와 현재 dev가 같은지 판정한다. 첫 범위는 push 직전 base와 head를 두 부모로 가진 단일 merge commit이며 squash/rebase·여러 PR·다른 tree는 기존 full을 실행한다. 브랜치명이나 PR head SHA만 같다고 재사용하지 않는다.
+
+`backend_postmerge_proof.py`는 실제 완료된 원본 backend-app run/attempt의 package·full·최종 결과, 현재 workflow에 대응하는 실제 성공 단계, 원본 full plan/실행/cleanup 증거, producer와 consumer의 JAR SHA·source/tree·workflow 정체성을 연결한다. 27개 JAR receipt만으로 전체 PG 등 다른 단계의 성공을 대신하지 않는다. 원본 성공 후 24시간을 넘거나 자료가 없고 만료·모순·조회 실패가 있으면 full로 돌아간다. 원본 PR에서 실제 사용한 workflow와 현재 dev를 비교하므로 PR 자체의 CI 코드 변경을 금지하는 규칙은 아니다.
+
+통과한 dev 실행은 별도 `backend-app-postmerge-proof-<run>-<attempt>`의 `postmerge-proof.txt`에 `reused-full`과 원본 실행을 기록하고 새 package/full은 실행하지 않는다. 과거 XML·fixture·토큰·receipt를 새 시험 결과로 복제하거나 JAR을 다시 빌드해 과거 SHA와 비교하지 않는다. 새 merge SHA와 검사 당시 synthetic SHA는 다를 수 있으며 전체 tree로 결속한다. 다른 필수 CI와 이미지 발행 차단은 유지한다.
+
+최종 `Backend app CI result`는 선택·판정이 성공하고 **full+package/check 성공**, 또는 **검증된 reused-full+package/check의 예상된 생략**만 허용한다. 판정 실패·빈 mode·예상 밖 생략은 성공이 아니다. 읽기 권한과 현재 실행 토큰은 판정 job에 한정하며 새 secret이나 쓰기 권한을 요구하지 않는다.
+
+이 방식은 같은 코드에 대한 기존 검증을 인수한다. 새 runner/JDK·외부 의존성을 다시 시험했다는 의미가 아니며 원본 환경·검증 시각을 보존한다. 실제 제거한 중복 실행과 병합 후 소요를 측정하고 PR 자체의 full 소요 또는 전체 개발시간 단축과 구분한다. 재사용에 문제가 있으면 CI 수정/revert로 기존 full 경로로 돌아가며 앱·DB·배포를 되돌리지 않는다.
+
+판정과 최종 gate는 `.github/scripts/test_backend_postmerge_proof.py`와 `test_backend_app_ci_policy.py`에서 합성 Git/API 응답·임시 파일·실제 gate 실행으로 검증한다. 실제 hosted full·병합 후 재사용 성공은 해당 실행 증거가 있어야 선언한다.

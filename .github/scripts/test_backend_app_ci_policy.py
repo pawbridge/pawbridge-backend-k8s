@@ -58,12 +58,15 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         value = output.getvalue()
         return value if raw else value.splitlines()[0] + '\n'
 
-    def gate(self, selection='success', selected='true', check='success', package=None):
+    def gate(self, selection='success', selected='true', check='success', package=None,
+             proof=None, mode=None):
         return subprocess.run(
             ['bash', '-euc', self.script('ci-result')],
             env={'PATH': os.environ.get('PATH', ''), 'SELECTION_RESULT': selection,
                  'MODULE_SELECTED': selected, 'MODULE_RESULT': check,
-                 'PACKAGE_RESULT': package if package is not None else ('skipped' if selected == 'false' else 'success')},
+                 'PACKAGE_RESULT': package if package is not None else ('skipped' if selected == 'false' else 'success'),
+                 'PROOF_RESULT': proof if proof is not None else ('skipped' if selected == 'false' else 'success'),
+                 'PROOF_MODE': mode if mode is not None else ('' if selected == 'false' else 'full')},
             capture_output=True, text=True, timeout=3,
         )
 
@@ -82,7 +85,9 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                      '.github/scripts/test_backend_app_ci_policy.py',
                      '.github/scripts/ci_branch_policy.py',
                      '.github/scripts/backend_contract_profile.py',
-                     '.github/scripts/test_backend_contract_profile.py'):
+                     '.github/scripts/test_backend_contract_profile.py',
+                     '.github/scripts/backend_postmerge_proof.py',
+                     '.github/scripts/test_backend_postmerge_proof.py'):
             with self.subTest(path=path):
                 self.assertEqual('selected=true\n', self.select([path]))
 
@@ -133,14 +138,16 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('PULL_REQUEST_BASE_REF: ${{ github.base_ref }}', selection)
         self.assertIn('PUSH_BEFORE_SHA: ${{ github.event.before }}', selection)
         check = self.job('check')
-        self.assertIn('needs: [selection, package]', check)
-        self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' }}", check)
+        self.assertIn('needs: [selection, proof, package]', check)
+        self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'full' }}", check)
         gate = self.job('ci-result')
-        self.assertIn('needs: [selection, package, check]', gate)
+        self.assertIn('needs: [selection, proof, package, check]', gate)
         self.assertIn('SELECTION_RESULT: ${{ needs.selection.result }}', gate)
         self.assertIn('MODULE_SELECTED: ${{ needs.selection.outputs.selected }}', gate)
         self.assertIn('MODULE_RESULT: ${{ needs.check.result }}', gate)
         self.assertIn('PACKAGE_RESULT: ${{ needs.package.result }}', gate)
+        self.assertIn('PROOF_RESULT: ${{ needs.proof.result }}', gate)
+        self.assertIn('PROOF_MODE: ${{ needs.proof.outputs.mode }}', gate)
 
     def test_given_application_checks_are_selected__when_running__then_preserve_the_full_runtime_contract(self):
         check = self.job('check')
@@ -233,6 +240,71 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertLess(check.index('id: owned_cleanup'), check.index('--mode audit'))
         for path in ('.github/scripts/backend_contract_profile.py', '.github/scripts/ci_branch_policy.py'):
             self.assertIn('            ' + path + '\n', check)
+
+
+
+    def test_given_verified_reuse__when_gating__then_accept_only_two_expected_skips(self):
+        valid = dict(selected='true', proof='success', mode='reused-full',
+                     package='skipped', check='skipped')
+        actual = self.gate(**valid)
+        self.assertEqual(0, actual.returncode, actual.stderr)
+        for key, values in {
+            'proof': ('failure', 'cancelled', 'skipped', ''),
+            'mode': ('', 'reuse', 'full'),
+            'package': ('success', 'failure', 'cancelled', ''),
+            'check': ('success', 'failure', 'cancelled', ''),
+        }.items():
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    self.assertNotEqual(0, self.gate(**dict(valid, **{key: value})).returncode)
+
+    def test_given_unknown_or_failed_proof__when_gating__then_do_not_accept_full_success(self):
+        for proof, mode in (('failure', 'full'), ('cancelled', 'full'),
+                            ('skipped', 'full'), ('', 'full'),
+                            ('success', ''), ('success', 'reused-full'),
+                            ('success', 'FULL')):
+            with self.subTest(proof=proof, mode=mode):
+                self.assertNotEqual(0, self.gate(proof=proof, mode=mode).returncode)
+        for proof, mode in (('success', ''), ('skipped', 'full'), ('skipped', 'reused-full')):
+            with self.subTest(unselected=True, proof=proof, mode=mode):
+                self.assertNotEqual(0, self.gate(selected='false', package='skipped',
+                    check='skipped', proof=proof, mode=mode).returncode)
+
+    def test_given_proof_stage__when_wiring__then_decide_before_any_new_package_with_read_only_permissions(self):
+        text = WORKFLOW.read_text()
+        proof, package, check = self.job('proof'), self.job('package'), self.job('check')
+        self.assertLess(text.index('  proof:\n'), text.index('  package:\n'))
+        self.assertIn('needs: [selection, proof]', package)
+        for stage in (package, check):
+            self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'full' }}", stage)
+        self.assertIn('permissions:\n      contents: read\n      actions: read\n      pull-requests: read', proof)
+        self.assertIn('persist-credentials: false', proof)
+        self.assertIn('fetch-depth: 0', proof)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', proof)
+        self.assertIn('PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}', proof)
+        self.assertIn('PULL_REQUEST_BASE_REF: ${{ github.base_ref }}', proof)
+        self.assertIn('PUSH_BEFORE_SHA: ${{ github.event.before }}', proof)
+        self.assertIn('mode: ${{ steps.proof.outputs.mode }}', proof)
+        self.assertIn("python3 -B -m unittest discover -s .github/scripts -p 'test_backend_postmerge_proof.py'", proof)
+        self.assertIn('backend_postmerge_proof.py --output build/ci/postmerge-proof.txt >> "$GITHUB_OUTPUT"', proof)
+        self.assertIn('name: backend-app-postmerge-proof-${{ github.run_id }}-${{ github.run_attempt }}', proof)
+        self.assertIn('path: build/ci/postmerge-proof.txt', proof)
+        self.assertIn('if-no-files-found: error', proof)
+        self.assertIn('if: always()', proof)
+        for forbidden in ('setup-java@', 'gradlew', 'docker ', 'secrets.', ': write', 'continue-on-error'):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, proof)
+        for stage in (self.job('selection'), package, check, self.job('ci-result')):
+            self.assertNotIn('GH_TOKEN:', stage)
+            self.assertNotIn('actions: read', stage)
+            self.assertNotIn('pull-requests: read', stage)
+
+    def test_given_original_runtime_evidence__when_preserving__then_bind_actual_workflow_identity(self):
+        for name in ('package', 'check'):
+            with self.subTest(job=name):
+                stage = self.job(name)
+                self.assertIn('printf \'workflow_sha=%s\\n\' "$GITHUB_WORKFLOW_SHA"', stage)
+                self.assertIn('printf \'workflow_ref=%s\\n\' "$GITHUB_WORKFLOW_REF"', stage)
 
 
 if __name__ == '__main__':
