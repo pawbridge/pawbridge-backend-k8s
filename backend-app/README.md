@@ -807,3 +807,5 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을
 자동 MAN 번호는 실제 쓰기 TX와 명시 READ_COMMITTED 메타데이터가 있을 때만 생성한다. 날짜를 한 번 캡처하고 날짜별 PostgreSQL transaction advisory lock SQL을 실행한 다음 별도 statement로 정확한 6자리 suffix MAX를 읽는다. 중간 행 삭제 후 현존 최대값을 재사용하지 않고 999999를 초과하는 번호는 거부한다. 잠금과 MAX를 한 SQL/CTE로 합치지 않는다. 명시 제공 공고번호는 원문상 고유 식별자가 아니므로 기존 허용을 유지한다. 모든 번호의 전역 UNIQUE, 비협력 writer·임의 제공번호와의 경합, 삭제된 최고번호의 영구 재사용 금지를 보장하는 계약은 아니다.
 
 이번 수정의 단일 오프라인 호출 10초에서 코어 단위 59사례와 신규 동시성 PG3·영향 기존 PG2가 모두 통과했다. 서로 다른 ADMIN/SHELTER와 실제 두 PG PID의 잠금 대기를 관찰해 동시 상태·설명 보존과 동시 자동번호의 분리를 검증했고 중간 번호 삭제도 재현 후 회복했다. 3개 신규 계약은 기존 코드에서 먼저 RED였다. 다른 성공 PG/JAR와 전체19사례를 반복 실행한 결과가 아니다. 시험은 pool 한도를 임시2로 늘린 뒤 worker 종료가 확인됐을 때만1로 복귀하고 정확한 소유 행을 정리한다. worker 종료가 불확실하면 후속 시험·행 삭제·pool close를 거부해 근거를 보존하며 실패 경로의 전체 자원 정상 종료까지 주장하지 않는다. 이 시험과 mock TX metadata 단위 검증은 운영 또는 실제 AI 검증이 아니다.
+
+READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수준 기대값 한 곳을 같은 RC 계약으로 맞췄다. REQUIRED·기본 timeout·writer 연결·readOnly 단언은 유지했다. 해당 구성 클래스12사례를 별도7초 호출로 통과했고 PG·업무 단위·JAR를 반복하지 않았다. 고정 CI 입력은 이 구성 시험까지 실제 source hash로 결속한다.

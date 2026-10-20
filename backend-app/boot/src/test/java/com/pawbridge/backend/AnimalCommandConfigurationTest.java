@@ -86,7 +86,7 @@ class AnimalCommandConfigurationTest {
                     var writes = (TransactionTemplate) ReflectionTestUtils.getField(service, "writes");
                     assertThat(writes.getTransactionManager()).isSameAs(manager);
                     assertThat(writes.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
-                    assertThat(writes.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
+                    assertThat(writes.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED);
                     assertThat(writes.getTimeout()).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT);
                     assertThat(writes.isReadOnly()).isFalse();
                     var actorJdbc = (JdbcTemplate) ReflectionTestUtils.getField(context.getBean(AnimalCommandActors.class), "jdbc");

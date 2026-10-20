@@ -674,7 +674,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '0d41ae4462ccb677b569d
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/command/web/AnimalCommandExceptionHandlerTest.java': '74fb1982ecae92d07b336e91df77bae3172e2b69702523c7041196e4a9576b59',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalCommandConfiguration.java': '1d3e845ad03e1e050019c18338611137541ea2ae8337e72f7ee03f0e754c60bc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalSearchConfiguration.java': '863279eadf0e6ba717f816007f2aacb6ebed2ccb8ce9edd051b61bd863779e8c',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalCommandConfigurationTest.java': '32b45b01ce3be27e1a6ac7c58b099feeb314dc5677b00b019d1d85b66acd35dc',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalCommandConfigurationTest.java': '61c8decf949d90baa7efb75461402f8587fd2695c19cb9567a8a0784b18cc570',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalCommandDisabledHttpTest.java': 'fd46357abd4644f764282f59306279f9902db36d94016aac5cf417c62b99ffbb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlAnimalCommandTest.java': 'd029ee360f565a8b5ca830897a4d5090e78b50e18b99434eaacd95ae55d607fc',
  'backend-app/boot/src/test/resources/owned-postgresql/animal-command-owned-schema.sql': '2446bce3ebe26c621babb14915753b0bc2f70a7a20cc8d64f5f5c319ad52241c',
