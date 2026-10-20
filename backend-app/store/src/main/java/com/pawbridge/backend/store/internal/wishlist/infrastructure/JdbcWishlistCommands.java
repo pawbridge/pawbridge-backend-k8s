@@ -79,12 +79,9 @@ public final class JdbcWishlistCommands implements WishlistCommands {
 
     @Override public void removeById(long currentMemberId,long wishlistId) {
         write.executeWithoutResult(status -> {
-            Map<String,Object> params=Map.of("member",currentMemberId,"id",wishlistId);
-            List<Long> ids=jdbc.query("SELECT id FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",params,(rs,n)->rs.getLong("id"));
-            // Wrong owner and missing ID are indistinguishable. Original bare-ID deletion is intentionally not copied.
-            if(ids.isEmpty()) throw new IllegalArgumentException("찜을 찾을 수 없습니다: "+wishlistId);
-            int deleted=jdbc.update("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",params);
-            if(deleted!=1) throw new IllegalStateException("Wishlist changed during deletion");
+            // One atomic owner check. Missing, wrong-owner and repeated/concurrent deletes are the same no-op.
+            jdbc.update("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",
+                    Map.of("member",currentMemberId,"id",wishlistId));
         });
     }
 }

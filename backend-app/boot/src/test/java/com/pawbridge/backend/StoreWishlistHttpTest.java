@@ -45,7 +45,23 @@ class StoreWishlistHttpTest {
         mvc.perform(request).andExpect(status().isUnauthorized());verifyNoInteractions(commands);
     }
 
-    @ParameterizedTest @CsvSource({"GET,/api/v1/wishlists","PUT,/api/v1/wishlists","PATCH,/api/v1/wishlists","DELETE,/api/v1/wishlists/33","POST,/api/v1/wishlists/33","DELETE,/api/v1/wishlists/33/extra","POST,/api/wishlists"})
+    @ParameterizedTest @ValueSource(strings={"ROLE_USER","ROLE_ADMIN"})
+    void given__verified_member__when__deleting_wishlist_id__then__use_principal_and_return_no_content(String role) throws Exception {
+        mvc.perform(delete("/api/v1/wishlists/33").header("Authorization","Bearer "+F3TestInputs.token(7,role))
+                .header("X-User-Id","99").header("X-User-Role","ROLE_ADMIN").param("userId","99")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"userId\":99}"))
+                .andExpect(status().isNoContent()).andExpect(header().doesNotExist("Set-Cookie"));
+        verify(commands).removeById(7,33);verifyNoMoreInteractions(commands);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"missing","invalid"})
+    void given__no_valid_jwt__when__deleting_wishlist_id_with_forged_headers__then__reject_before_command(String token) throws Exception {
+        var request=delete("/api/v1/wishlists/33").header("X-User-Id","99").header("X-User-Role","ROLE_ADMIN");
+        if(token.equals("invalid")) request.header("Authorization","Bearer invalid-token");
+        mvc.perform(request).andExpect(status().isUnauthorized());verifyNoInteractions(commands);
+    }
+
+    @ParameterizedTest @CsvSource({"GET,/api/v1/wishlists","PUT,/api/v1/wishlists","PATCH,/api/v1/wishlists","POST,/api/v1/wishlists/33","GET,/api/v1/wishlists/33","PUT,/api/v1/wishlists/33","PATCH,/api/v1/wishlists/33","DELETE,/api/v1/wishlists/33/extra","DELETE,/api/wishlists/33","POST,/api/wishlists"})
     void given__verified_admin__when__attempting_unported_neighbors__then__deny_without_command(String method,String path) throws Exception {
         mvc.perform(request(HttpMethod.valueOf(method),path).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
                 .andExpect(status().isForbidden());verifyNoInteractions(commands);
@@ -57,6 +73,12 @@ class StoreWishlistHttpTest {
 class StoreWishlistDisabledHttpTest {
     @Autowired MockMvc mvc;
     @MockitoBean WishlistCommands commands;
+    @org.junit.jupiter.api.Test
+    void given__no_explicit_flag__when__deleting_wishlist_id__then__deny_before_application() throws Exception {
+        mvc.perform(delete("/api/v1/wishlists/33").header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
+                .andExpect(status().isForbidden());verifyNoInteractions(commands);
+    }
+
     @ParameterizedTest @ValueSource(strings={"POST","DELETE"})
     void given__no_explicit_flag__when__verified_admin_commands_exact_routes__then__deny_before_application(String method) throws Exception {
         mvc.perform(request(HttpMethod.valueOf(method),"/api/v1/wishlists").param("skuId","80")

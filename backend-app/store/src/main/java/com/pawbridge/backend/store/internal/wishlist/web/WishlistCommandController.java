@@ -6,6 +6,7 @@ import org.springframework.security.authentication.AuthenticationCredentialsNotF
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,7 +29,12 @@ public final class WishlistCommandController {
         return ResponseEntity.noContent().build();
     }
 
-    // No DELETE /{wishlistId}: Root must accept the owner-scoped replacement before exposing it.
+    @DeleteMapping("/api/v1/wishlists/{wishlistId}")
+    public ResponseEntity<Void> removeById(@AuthenticationPrincipal Long current,@PathVariable("wishlistId") long wishlistId) {
+        commands.removeById(current(current),wishlistId);
+        return ResponseEntity.noContent().build();
+    }
+
     private static long current(Long member) {
         if(member==null) throw new AuthenticationCredentialsNotFoundException("An authenticated member is required");
         return member;

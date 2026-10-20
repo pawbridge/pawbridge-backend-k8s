@@ -157,6 +157,8 @@ public final class JdbcStoreMemberReads implements StoreMemberReads {
     private static final Map<String,SortColumn> WISHLIST_SORT=Map.ofEntries(
             entry("id","w.id",false),entry("userId","w.user_id",false),entry("createdAt","w.created_at",false),entry("updatedAt","w.updated_at",false),
             entry("sku.id","s.id",false),entry("sku.skuCode","s.sku_code",true),entry("sku.price","s.price",false),entry("sku.stockQuantity","s.stock_quantity",false),
+            // Original PropertyPath aliases for the existing scalar sku.price; retain the caller's Page sort metadata.
+            entry("skuPrice","s.price",false),entry("sku_price","s.price",false),
             entry("sku.createdAt","s.created_at",false),entry("sku.updatedAt","s.updated_at",false),
             entry("sku.product.id","p.id",false),entry("sku.product.name","p.name",true),entry("sku.product.description","p.description",true),
             entry("sku.product.imageUrl","p.image_url",true),entry("sku.product.status","p.status",false),entry("sku.product.viewCount","p.view_count",false),

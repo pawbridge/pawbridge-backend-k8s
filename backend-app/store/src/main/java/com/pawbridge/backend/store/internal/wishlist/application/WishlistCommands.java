@@ -9,6 +9,6 @@ public interface WishlistCommands {
                  String productImageUrl,Long price,Map<String,String> options,LocalDateTime createdAt) { }
     Added add(long currentMemberId,Long skuId);
     void removeByMemberAndSku(long currentMemberId,long skuId);
-    /** Prepared owner-scoped replacement only; no HTTP handler is supplied until Root accepts the policy change. */
+    /** Owner-scoped and idempotent; the caller supplies the authenticated member identity. */
     void removeById(long currentMemberId,long wishlistId);
 }
