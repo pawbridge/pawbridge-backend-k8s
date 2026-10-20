@@ -820,3 +820,14 @@ READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수�
 로컬 합성 PG 시험은 소유 marker와 제한 writer를 검증한 전용 `P9_PG_SETTINGS` 파일로 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlDirectOrderTest`만 선택한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다. ordinary test에서 owned PG 태그는 제외된다. 동일 상품 동시 구매·실제 행 잠금·전체 롤백·감사 시각/스냅샷·정확한 cleanup은 합성 환경의 근거이며 운영 검증이 아니다.
 
 운영 활성화에는 새 실행기의 DB 권한·라우팅·이벤트 소비자 및 기존 Store 실행기와의 소유권 인계가 별도로 필요하다. 현재 운영·Kafka/CDC·장바구니·결제·복구 자료는 이 변경으로 제어하지 않는다.
+
+
+## 새 사진 기반 실종동물 후보 검색 편입
+
+`pawbridge.animal-lost-search.enabled=true`에서만 공개 multipart `POST /api/v1/animals/lost-candidates`를 조립한다. 기본값과 `on` 별칭은 비활성이다. `lost-search.python-url`이 `python-ai-service.url`보다 우선하며 서버 내부 키는 `python-ai-service.internal-api-key`에서 런타임에 주입한다. 사용자 헤더를 내부 키로 사용하거나 응답·키·원격 오류 본문을 로그에 남기지 않는다.
+
+Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는다. 최대20개 후보를 검증한 뒤, SELECT 전용 reader의 짧은 읽기 전용 JPA 트랜잭션에서 현재 동물의 종·상태와 보호소 정보를 다시 조회한다. 원격 순서·중복 첫 evidence·기존 공개 DTO를 보존하며 내부 유사도 점수는 공개하지 않는다. 사진5MiB/추론 동시1 제한과 원문 오류·Retry-After·permit 복귀를 유지한다.
+
+공개 활성화 전에는 기존 Gateway admission 계약(실제 요청 전체6MiB, 동시2, 인스턴스당 분당30회, 전체50초, 외부 인증·내부 키 헤더 제거)을 별도로 인계해야 한다. 서비스의5MiB 검사와 permit1은 multipart 파싱 전 메모리·전송 제한의 대체물이 아니다. 이 구성의 로컬 합성 성공만으로 공개 운영 준비 완료라고 판단하지 않는다.
+
+`P10_PG_SETTINGS`의 소유 marker·SELECT 전용 계정을 검증한 경우에만 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalLostSearchTest`를 선택한다. 이 시험은 새 합성 동물과 임시127.0.0.1 Python 응답 대역을 사용하고 Animal/Shelter 전체 행 불변을 확인한다. 실제 AI 품질·R2·운영 검증은 포함하지 않는다. 비밀설정·데이터·로그·실행 JAR는 Git에 넣지 않는다.

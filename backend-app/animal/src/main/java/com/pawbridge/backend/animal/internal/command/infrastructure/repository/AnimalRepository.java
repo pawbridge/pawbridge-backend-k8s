@@ -19,4 +19,7 @@ public interface AnimalRepository extends JpaRepository<Animal, Long> {
     @Query(value = "SELECT COALESCE(MAX(CAST(substring(apms_notice_no FROM :pattern) AS integer)), 0) "
             + "FROM pawbridge_animal.animals WHERE apms_notice_no LIKE :prefix", nativeQuery = true)
     int findMaxManualNoticeSuffix(@Param("prefix") String prefix, @Param("pattern") String pattern);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"shelter"})
+    java.util.List<Animal> findWithShelterByIdIn(java.util.List<Long> ids);
 }
