@@ -541,4 +541,431 @@ class PostgresqlNoteSendCompatibilityTest {
   while(!queue.isEmpty()&&seen.size()<32){var value=queue.removeFirst();if(!seen.add(value))continue;if(value instanceof PSQLException p&&"23514".equals(p.getSQLState())&&p.getServerErrorMessage()!=null&&"f30_owned_expiry_rejection".equals(p.getServerErrorMessage().getConstraint()))found=true;if(value.getCause()!=null)queue.add(value.getCause());if(value instanceof SQLException s&&s.getNextException()!=null)queue.add(s.getNextException());}
   assertThat(found).as("The actual owned deferred constraint, not an arbitrary commit exception, rejected both managers").isTrue();
  }
+
+ // Late, separately selected member-cleanup contract. Existing F29/F30 methods/hooks are unchanged.
+ private final AtomicInteger successfulMemberCases=new AtomicInteger();
+ @org.junit.jupiter.api.extension.RegisterExtension
+ final org.junit.jupiter.api.extension.TestWatcher memberCompletion=new org.junit.jupiter.api.extension.TestWatcher(){
+  @Override public void testSuccessful(org.junit.jupiter.api.extension.ExtensionContext context){
+   String receipt=System.getProperty("member.cleanup.fixture.receipt");
+   if(receipt!=null&&!receipt.isBlank()&&context.getTags().contains("member-cleanup")
+      &&!context.getRequiredTestMethod().getName().equals("givenAllMemberCasesSucceededAndOwnedRowsRestored__whenRefreshingOnlyThreeUsedPrincipalsLast__thenKeepTheActualIssuerRolesSixHundredSecondsAndAllOtherCredentials"))
+    successfulMemberCases.incrementAndGet();
+  }
+ };
+ private static final List<UUID> CLEANUP_NOTES=java.util.stream.IntStream.rangeClosed(1,5).mapToObj(
+         n->UUID.fromString(String.format(Locale.ROOT,"f3101000-0000-0000-0000-%012d",n))).toList();
+ private static final List<UUID> CLEANUP_REQUESTS=java.util.stream.IntStream.rangeClosed(11,13).mapToObj(
+         n->UUID.fromString(String.format(Locale.ROOT,"f3101000-0000-0000-0000-%012d",n))).toList();
+ private static final List<UUID> CLEANUP_ROOMS=java.util.stream.IntStream.rangeClosed(21,23).mapToObj(
+         n->UUID.fromString(String.format(Locale.ROOT,"f3101000-0000-0000-0000-%012d",n))).toList();
+ private static final List<UUID> CLEANUP_CHAT_REQUESTS=java.util.stream.IntStream.rangeClosed(31,33).mapToObj(
+         n->UUID.fromString(String.format(Locale.ROOT,"f3101000-0000-0000-0000-%012d",n))).toList();
+
+ @Test @Tag("member-cleanup")
+ void givenCommittedPendingAndInstalledChatWithBothNoteDirections__whenBothDeleteTheMember__thenKeepOnlyTheExactCounterpartFkDeltaAcrossTwentyFourTables()throws Exception{
+  JsonNode reference=null;
+  for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,false)){
+   String before=memberSnapshot();round.delete();returned();round.assertCallbacks();
+   assertMemberDelta(before,true);
+   assertThat(round.contacts()).containsExactly(CALLER);
+   assertThat(round.pendingChecks).isOne();
+   if(source)assertThat(round.source.chatCalls()).isOne();
+   JsonNode after=json(memberSnapshot());if(reference==null)reference=after;else assertThat(after.equals(reference)).as("Original/candidate exact raw24 delta without private row rendering").isTrue();
+   RuntimeException missing=failure(round::delete);
+   assertThat(source?missing instanceof com.pawbridge.userservice.exception.UserNotFoundException:
+           missing instanceof com.pawbridge.backend.user.internal.profile.application.UserNotFoundException).isTrue();
+   assertThat(json(memberSnapshot()).equals(after)).isTrue();
+  }
+ }
+
+ @Test @Tag("member-cleanup")
+ void givenAnOwnedLateChatUpdateRejection__whenBothHaveAlreadyChangedNotes__thenRollbackCommunityButKeepCommittedPendingAndRetryWithoutChangingItsTimestamp()throws Exception{
+  for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,true)){
+   String before=memberSnapshot();String pendingStart=singleText("SELECT started_at::text FROM pawbridge_user.contact_deletions WHERE user_id="+CALLER);
+   try(var rejection=memberCommitRejection("chat",false)){
+    RuntimeException failure=failure(round::delete);assertMemberFailureFamily(failure,source,503);
+    requireMemberOwnedCause(round.communityFailure(),"member_cleanup_chat_rejection");
+    assertThat(memberSnapshot().equals(before)).isTrue();assertThat(round.callbacks).isEmpty();
+   }
+   assertThat(singleText("SELECT started_at::text FROM pawbridge_user.contact_deletions WHERE user_id="+CALLER)).isEqualTo(pendingStart);
+   round.delete();round.assertCallbacks();assertMemberDelta(before,true);
+  }
+ }
+
+ @ParameterizedTest @ValueSource(strings={"chat-update","user-delete","nickname"}) @Tag("member-cleanup")
+ void givenAnExactOwnedCandidatePrivilegeDenial__whenDeleting__thenRetainTheCorrectCommittedPhaseAndRestoreBeforeRetry(String denied)throws Exception{
+  try(var round=new MemberCleanupRound(false,true)){
+   String before=memberSnapshot();
+   try(var ignored=memberDeniedPrivilege(denied)){
+    RuntimeException failure=failure(round::delete);
+    assertMemberFailureFamily(failure,false,denied.equals("user-delete")?500:503);
+    if(denied.equals("user-delete")){assertMemberDelta(before,false);round.assertCallbacks();}
+    else {assertThat(memberSnapshot().equals(before)).isTrue();assertThat(round.callbacks).isEmpty();}
+   }
+   // A retry starts from the actual observed state; never pretend the earlier Community commit rolled back.
+   round.callbacks.clear();round.delete();round.assertCallbacks();assertMemberDelta(before,true);
+  }
+ }
+
+ @ParameterizedTest @ValueSource(strings={"community","user"}) @Tag("member-cleanup")
+ void givenAnOwnedDeferredCommitConstraint__whenTheActualManagersCommitEachPhase__thenCompareTheActualSafeFailureFamilyAndRetainRetryablePending(String phase)throws Exception{
+  for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,true)){
+   String before=memberSnapshot();
+   try(var ignored=memberCommitRejection(phase,true)){
+    RuntimeException failure=failure(round::delete);
+    requireMemberOwnedCause(phase.equals("community")?round.communityFailure():failure,"member_cleanup_"+phase+"_rejection");
+    assertMemberFailureFamily(failure,source,phase.equals("community")?503:500);
+    if(phase.equals("community")){assertThat(memberSnapshot().equals(before)).isTrue();assertThat(round.callbacks).isEmpty();}
+    else {assertMemberDelta(before,false);round.assertCallbacks();}
+   }
+   round.callbacks.clear();round.delete();round.assertCallbacks();assertMemberDelta(before,true);
+  }
+ }
+
+ @Test @Tag("member-cleanup") @Timeout(30)
+ void givenAnOwnedNoteRowLock__whenBothWithdrawAfterPendingCommit__thenObserveActualPgLockWaitAndReleaseTheConnectionsBeforeFinalUserDeletion()throws Exception{
+  for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,false);Connection blocker=admin()){
+   blocker.setAutoCommit(false);try(var statement=blocker.prepareStatement("SELECT note_id FROM pawbridge_community.private_notes WHERE note_id=? FOR UPDATE")){
+    statement.setObject(1,CLEANUP_NOTES.getFirst());statement.executeQuery().close();
+   }
+   var worker=Executors.newSingleThreadExecutor();Future<?> task=null;
+   try{
+    task=worker.submit(round::delete);awaitBlocked(source?"f29-original-note-send":"f29-note-send-writer");
+    assertThat(scalar("SELECT count(*) FROM pawbridge_user.contact_deletions WHERE user_id="+CALLER)).isOne();
+    assertThat(scalar("SELECT count(*) FROM pawbridge_user.users WHERE user_id="+CALLER)).isOne();
+    assertThat(round.callbacks).isEmpty();blocker.commit();task.get(10,TimeUnit.SECONDS);
+    round.assertCallbacks();assertThat(round.pendingChecks).isOne();
+   }finally{blocker.rollback();if(task!=null&&!task.isDone())task.cancel(true);worker.shutdownNow();assertThat(worker.awaitTermination(5,TimeUnit.SECONDS)).isTrue();}
+   returned();
+  }
+ }
+
+ @Test @Tag("member-cleanup")
+ void givenOwnedUserMissingBeforeTheFinalLookup__whenBothStartTheFinalPhase__thenKeepBothFinalLookupNoOpsSeparateFromPostLoadStaleFailure()throws Exception{
+  for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,true)){
+   String before=memberSnapshot();round.afterCommunity=()->{
+    try{execute("BEGIN; DELETE FROM pawbridge_user.favorites WHERE user_id="+CALLER+"; DELETE FROM pawbridge_user.users WHERE user_id="+CALLER+"; COMMIT;");}
+    catch(SQLException failure){throw new IllegalStateException("Owned stale-user preparation failed");}
+   };
+   round.delete();round.assertCallbacks();assertMemberDelta(before,true);returned();
+   if(!source){assertThat(round.candidateFinalLookupRows).isZero();assertThat(round.candidateFinalDeleteRows).isEqualTo(-1);}
+  }
+ }
+
+ @Test @Tag("member-cleanup") @Timeout(30)
+ void givenUserLoadedBeforeAnIndependentOwnedDelete__whenBothAttemptTheFinalDelete__thenReturn500AndRollbackWhilePreservingTheAlreadyCommittedCommunityCleanup()throws Exception{
+  for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,true)){
+   // Valid child-free users must not acquire FK locks before deleteById/findById and hide the race.
+   execute("BEGIN; DELETE FROM pawbridge_user.favorites WHERE user_id="+CALLER+"; DELETE FROM pawbridge_user.refresh_tokens WHERE user_id="+CALLER+"; DELETE FROM pawbridge_user.shelter_applications WHERE user_id="+CALLER+"; COMMIT;");
+   String before=memberSnapshot();var externalDeletes=new AtomicInteger();var completion=new AtomicInteger(-1);
+   Runnable disappear=()->{
+    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+    assertThat(TransactionSynchronizationManager.isSynchronizationActive()).isTrue();
+    round.assertCallbacks();assertThat(round.pendingChecks).isOne();
+    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization(){
+     @Override public void afterCompletion(int status){assertThat(completion.compareAndSet(-1,status)).isTrue();}
+    });
+    try{
+     requireMemberIdentity();
+     for(String table:List.of("favorites","refresh_tokens","shelter_applications"))assertThat(scalar("SELECT count(*) FROM pawbridge_user."+table+" WHERE user_id="+CALLER)).isZero();
+     try(Connection outside=admin()){
+      outside.setAutoCommit(false);
+      try{
+       try(var statement=outside.createStatement()){statement.execute("SET LOCAL lock_timeout='2s'; SET LOCAL statement_timeout='3s'");}
+       try(var statement=outside.prepareStatement("DELETE FROM pawbridge_user.users WHERE user_id=?")){statement.setLong(1,CALLER);assertThat(statement.executeUpdate()).isOne();}
+       outside.commit();externalDeletes.incrementAndGet();
+      }finally{outside.rollback();}
+     }
+     assertThat(scalar("SELECT count(*) FROM pawbridge_user.users WHERE user_id="+CALLER)).isZero();
+    }catch(SQLException failure){throw new IllegalStateException("Owned independent user deletion failed");}
+   };
+   if(source)round.source.afterManagedUserLoaded(CALLER,disappear);else round.afterCandidateFinalLookup=disappear;
+   RuntimeException failure=failure(round::delete);
+   if(source){
+    requireManagedUserStaleCause(failure);assertThat(round.source.loadedUserHookCalls()).isOne();
+   }else{
+    assertThat(failure instanceof org.springframework.dao.OptimisticLockingFailureException).as("A real post-lookup zero-row delete is an optimistic failure, not a successful no-op").isTrue();
+    assertThat(round.candidateFinalLookupRows).isOne();assertThat(round.candidateFinalLookupHookCalls).isOne();assertThat(round.candidateFinalDeleteRows).isZero();
+   }
+   assertMemberFailureFamily(failure,source,500);assertThat(completion.get()).isEqualTo(TransactionSynchronization.STATUS_ROLLED_BACK);
+   assertThat(externalDeletes.get()).isOne();round.assertCallbacks();assertThat(round.contacts()).containsExactly(CALLER);
+   assertMemberDelta(before,true);returned();
+  }
+ }
+
+ @Test @Tag("member-cleanup")
+ void givenRuntimeOnlyInTheActualCommittedCleanupHint__whenBothDelete__thenKeepCommittedVisibilityAndCompleteTheFinalUserPhase()throws Exception{
+  for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,false)){
+   String before=memberSnapshot();round.throwHint=true;round.delete();round.assertCallbacks();assertMemberDelta(before,true);returned();
+  }
+ }
+
+ @Test @Tag("member-cleanup") @Order(Integer.MAX_VALUE)
+ void givenAllMemberCasesSucceededAndOwnedRowsRestored__whenRefreshingOnlyThreeUsedPrincipalsLast__thenKeepTheActualIssuerRolesSixHundredSecondsAndAllOtherCredentials()throws Exception{
+  requireMemberFixture();returned();assertThat(successfulMemberCases.get()).isEqualTo(11);reserveMemberKeys();String before=memberSnapshot();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_user.users WHERE user_id IN(9973001,9983001,9983002)")).isZero();
+  String run=runOwner();Path path=Path.of(F3PostgresqlFixture.required("F3_TEST_TOKENS_PATH")).toAbsolutePath().normalize();
+  assertThat(path).isEqualTo(Path.of(F3PostgresqlFixture.required("RUNNER_TEMP")).toAbsolutePath().normalize().resolve("f3-tokens-"+run+".json"));
+  boolean create=!Files.exists(path,LinkOption.NOFOLLOW_LINKS);
+  if(create){
+   assertThat(System.getenv("CONTRACT_PROFILE")).isEqualTo("member-management");
+   Path parent=path.getParent();assertThat(Files.isSymbolicLink(parent)).isFalse();assertThat(Files.isDirectory(parent,LinkOption.NOFOLLOW_LINKS)).isTrue();assertThat(parent.toRealPath()).isEqualTo(parent);
+  }else{
+   assertThat(Files.isSymbolicLink(path)).isFalse();assertThat(Files.isRegularFile(path)).isTrue();assertThat(path.toRealPath()).isEqualTo(path);
+   assertThat(Files.getPosixFilePermissions(path)).isEqualTo(PosixFilePermissions.fromString("rw-------"));
+  }
+  var mapper=new ObjectMapper();Map<String,String> tokens=create?new LinkedHashMap<>():new LinkedHashMap<>(mapper.readValue(Files.readString(path),new TypeReference<Map<String,String>>(){}));var prior=Map.copyOf(tokens);
+  var ids=new LinkedHashMap<String,Long>();ids.put("F19_ADMIN",9_973_001L);ids.put("F29_CALLER",9_983_001L);ids.put("F29_OTHER",9_983_002L);
+  if(!create)assertThat(tokens.keySet()).containsAll(ids.keySet());String secret=F3PostgresqlFixture.required("F3_TEST_JWT_SECRET");
+  var key=Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));var issuer=new JwtProvider(secret,600_000,600_000);
+  for(var entry:ids.entrySet()){
+   long id=entry.getValue();Role role=entry.getKey().equals("F19_ADMIN")?Role.ROLE_ADMIN:Role.ROLE_USER;
+   var user=User.builder().userId(id).email("member-cleanup-token-"+id+"@fixture.invalid").name("Cleanup synthetic").nickname("Cleanuptoken"+id).provider("GOOGLE").role(role).build();
+   String token=issuer.createAccessToken(user);assertThat(new PostTokenAuthenticator(key).authenticate("Bearer "+token)).isEqualTo(id);
+   var claims=Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();assertThat(claims.get("role",String.class)).isEqualTo(role.name());
+   assertThat(claims.getExpiration().getTime()-claims.getIssuedAt().getTime()).isEqualTo(600_000L);tokens.put(entry.getKey(),token);
+  }
+  for(var entry:prior.entrySet())if(!ids.containsKey(entry.getKey()))assertThat(Objects.equals(tokens.get(entry.getKey()),entry.getValue())).as("Unused earlier credentials are unchanged without parsing or rendering them").isTrue();
+  assertThat(tokens.keySet()).containsExactlyInAnyOrderElementsOf(create?ids.keySet():prior.keySet());
+  assertThat(memberSnapshot().equals(before)).as("Token preparation does not create User rows or change any of24 tables").isTrue();returned();
+  if(create){
+   try(var output=Files.newByteChannel(path,Set.of(StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE),PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))){
+    var bytes=java.nio.ByteBuffer.wrap(mapper.writeValueAsString(tokens).getBytes(StandardCharsets.UTF_8));while(bytes.hasRemaining())output.write(bytes);
+   }
+  }else Files.writeString(path,mapper.writeValueAsString(tokens),StandardOpenOption.WRITE,StandardOpenOption.TRUNCATE_EXISTING,LinkOption.NOFOLLOW_LINKS);
+  assertThat(Files.isSymbolicLink(path)).isFalse();assertThat(path.toRealPath()).isEqualTo(path);assertThat(Files.getPosixFilePermissions(path)).isEqualTo(PosixFilePermissions.fromString("rw-------"));
+ }
+
+ private final class MemberCleanupRound implements AutoCloseable{
+  final String protectedBaseline;final boolean isSource;
+  final List<String> callbacks=new CopyOnWriteArrayList<>();final List<Long> memberContacts=new CopyOnWriteArrayList<>();
+  F29LegacyNoteSendOracle.LegacyMemberCleanup source;
+  com.pawbridge.backend.user.internal.deletion.application.UserDeletion candidateDeletion;
+  volatile Runnable afterCommunity=()->{};volatile Runnable afterCandidateFinalLookup;volatile RuntimeException communityFailure;volatile boolean throwHint;
+  int candidateFinalDeleteRows=-1,candidateFinalLookupRows=-1,candidateFinalLookupHookCalls;
+  volatile int pendingChecks;boolean reserved;
+  MemberCleanupRound(boolean isSource,boolean priorPending)throws Exception{
+   this.isSource=isSource;requireMemberFixture();returned();protectedBaseline=memberSnapshot();reserveMemberKeys();reserved=true;
+   try{
+    seedMemberCleanup(priorPending);
+    if(isSource)source=original.memberCleanup(owner,reader,this::pendingVisible,()->afterCommunity.run(),this::committed);
+    else{
+     var manager=new JdbcTransactionManager(writer);var userTx=new TransactionTemplate(manager);userTx.setTimeout(15);
+     var communityTx=new TransactionTemplate(manager);communityTx.setTimeout(15);
+     var readManager=new JdbcTransactionManager(reader);readManager.setEnforceReadOnly(true);
+     var readTx=new TransactionTemplate(readManager);readTx.setReadOnly(true);readTx.setTimeout(3);
+     var query=new JdbcContactMemberQuery(new JdbcTemplate(reader),readTx);
+     ContactMemberQuery members=id->{memberContacts.add(id);assertThat(TransactionSynchronizationManager.hasResource(writer)).isTrue();
+      try{return query.get(id);}finally{assertThat(TransactionSynchronizationManager.hasResource(reader)).isFalse();assertThat(reader.getHikariPoolMXBean().getActiveConnections()).isZero();assertThat(writer.getHikariPoolMXBean().getActiveConnections()).isOne();}};
+     var store=new com.pawbridge.backend.community.internal.note.infrastructure.JdbcContactMemberCleanupStore(writeJdbc,communityTx,id->{committed("close:"+id);committed("resyncAll");});
+     var cleanup=new com.pawbridge.backend.community.internal.note.application.CleanupContactMember(members,store);
+     var userJdbc=(org.springframework.jdbc.core.JdbcOperations)java.lang.reflect.Proxy.newProxyInstance(
+      org.springframework.jdbc.core.JdbcOperations.class.getClassLoader(),new Class<?>[]{org.springframework.jdbc.core.JdbcOperations.class},(proxy,method,args)->{
+       boolean finalDelete=method.getName().equals("update")&&args!=null&&args.length>0&&"DELETE FROM pawbridge_user.users WHERE user_id=?".equals(args[0]);
+       boolean finalLookup=method.getName().equals("query")&&args!=null&&args.length>0&&"SELECT user_id FROM pawbridge_user.users WHERE user_id=?".equals(args[0]);
+       Object result;try{result=method.invoke(writeJdbc,args);}catch(java.lang.reflect.InvocationTargetException failure){throw failure.getCause();}
+       if(finalLookup){
+        var loaded=(List<?>)result;candidateFinalLookupRows=loaded.size();
+        if(afterCandidateFinalLookup!=null){assertThat(loaded.size()).isOne();assertThat(Objects.equals(loaded.getFirst(),CALLER)).isTrue();var action=afterCandidateFinalLookup;afterCandidateFinalLookup=null;candidateFinalLookupHookCalls++;action.run();}
+       }
+       if(finalDelete)candidateFinalDeleteRows=(Integer)result;return result;
+      });
+     candidateDeletion=new com.pawbridge.backend.user.internal.deletion.infrastructure.JdbcUserDeletion(userJdbc,userTx,id->{
+      assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();assertThat(writer.getHikariPoolMXBean().getActiveConnections()).isZero();pendingVisible();
+      try{cleanup.remove(id);}catch(RuntimeException failure){communityFailure=failure;throw failure;}afterCommunity.run();
+     });
+    }
+   }catch(Exception|Error failure){try{close();}catch(Exception suppressed){failure.addSuppressed(suppressed);}throw failure;}
+  }
+  void delete(){if(isSource)source.delete(CALLER);else candidateDeletion.delete(CALLER);}
+  List<Long> contacts(){return isSource?source.contactIds():List.copyOf(memberContacts);}
+  RuntimeException communityFailure(){return isSource?source.communityFailure():communityFailure;}
+  void pendingVisible(){
+   assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+   try{
+    assertThat(scalar("SELECT count(*) FROM pawbridge_user.users u JOIN pawbridge_user.contact_deletions p ON p.user_id=u.user_id WHERE u.user_id="+CALLER)).as("Independent connection sees committed pending before Community starts").isOne();
+    assertThat(reader.getHikariPoolMXBean().getActiveConnections()).isZero();assertThat(writer.getHikariPoolMXBean().getActiveConnections()).isZero();pendingChecks++;
+   }catch(SQLException failure){throw new IllegalStateException("Owned pending visibility read failed");}
+  }
+  void committed(String event){
+   // afterCommit may still bind Spring resources; independently visible rows are the evidence.
+   try{assertThat(scalar("SELECT count(*) FROM pawbridge_user.users WHERE user_id="+CALLER)).isOne();
+    assertThat(scalar("SELECT count(*) FROM pawbridge_user.contact_deletions WHERE user_id="+CALLER)).isOne();
+    assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_note_members WHERE member_id="+CALLER)).isZero();
+    assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_room_members WHERE member_id="+CALLER)).isZero();
+   }catch(SQLException failure){throw new IllegalStateException("Owned independent commit visibility read failed");}
+   callbacks.add(event);if(throwHint&&event.equals("resyncAll"))throw new IllegalStateException("synthetic postcommit cleanup hint");
+  }
+  void assertCallbacks(){assertThat(callbacks).containsExactly("close:"+CALLER,"resyncAll");}
+  @Override public void close()throws Exception{
+   try{if(source!=null){assertThat(source.userResourceBound()).isFalse();source.close();source=null;}}
+   finally{if(reserved){try{cleanupMemberKeys();assertThat(memberSnapshot().equals(protectedBaseline)).as("Owned cleanup restores all24 rows including unrelated orphans/requests").isTrue();}finally{reserved=false;}}}
+  }
+ }
+
+ private void reserveMemberKeys()throws Exception{
+  String ns=memberIds();
+  for(UUID id:CLEANUP_NOTES)assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_notes WHERE note_id='"+id+"' OR reply_to='"+id+"'")).isZero();
+  for(UUID id:CLEANUP_REQUESTS)assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_note_requests WHERE request_id='"+id+"'")).isZero();
+  for(UUID id:CLEANUP_ROOMS){assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_rooms WHERE room_id='"+id+"'")).isZero();assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_requests WHERE room_id='"+id+"'")).isZero();}
+  for(UUID id:CLEANUP_CHAT_REQUESTS)assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_requests WHERE request_id='"+id+"'")).isZero();
+  for(String pair:List.of("favorites:favorite_id","refresh_tokens:refresh_token_id","shelter_applications:id")){var bits=pair.split(":");assertThat(scalar("SELECT count(*) FROM pawbridge_user."+bits[0]+" WHERE "+bits[1]+" IN("+ns+")")).isZero();}
+  for(String table:List.of("favorites","refresh_tokens","shelter_applications"))assertThat(scalar("SELECT count(*) FROM pawbridge_user."+table+" WHERE user_id IN("+ns+")")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_room_members WHERE member_id IN("+ns+")")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_rooms WHERE first_member_id IN("+ns+") OR second_member_id IN("+ns+")")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_messages WHERE sender_id IN("+ns+")")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_requests WHERE sender_id IN("+ns+")")).isZero();
+ }
+ private String memberIds(){return NAMESPACE.stream().sorted().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));}
+ private String singleText(String sql)throws SQLException{try(var c=admin();var st=c.createStatement();var r=st.executeQuery(sql)){assertThat(r.next()).isTrue();return r.getString(1);}}
+ private void seedMemberCleanup(boolean priorPending)throws Exception{
+  StringBuilder sql=new StringBuilder("BEGIN;");
+  for(long id:NAMESPACE){sql.append("INSERT INTO pawbridge_user.users(user_id,email,name,nickname,provider,role) VALUES(").append(id).append(",'member-cleanup-").append(id).append("@fixture.invalid','Cleanup fixture','Cleanup").append(id).append("','GOOGLE','ROLE_USER');");sql.append("INSERT INTO pawbridge_community.private_note_members(member_id) VALUES(").append(id).append(");");}
+  for(long id:List.of(CALLER,TARGET)){
+   sql.append("INSERT INTO pawbridge_user.favorites(favorite_id,user_id,animal_id,created_at) VALUES(").append(id).append(',').append(id).append(",1,'2032-02-29 15:00:00.123456');");
+   sql.append("INSERT INTO pawbridge_user.refresh_tokens(refresh_token_id,user_id,token,created_at,expires_at) VALUES(").append(id).append(',').append(id).append(",'member-cleanup-").append(id).append("','2032-02-29 15:00:00.123456','2033-02-28 15:00:00.123456');");
+   sql.append("INSERT INTO pawbridge_user.shelter_applications(id,user_id,shelter_name,status,requested_at) VALUES(").append(id).append(',').append(id).append(",'Synthetic','PENDING','2032-02-29 15:00:00.123456');");
+  }
+  if(priorPending)sql.append("INSERT INTO pawbridge_user.contact_deletions(user_id,started_at) VALUES(").append(CALLER).append(",'2032-02-29T15:00:00.123456Z');");
+  for(int i=0;i<5;i++){
+   long from=i==1?TARGET:i==4?OTHER:i==3?TARGET:CALLER;long to=i==1?CALLER:(i==2||i==3)?OTHER:TARGET;
+   sql.append("INSERT INTO pawbridge_community.private_notes(note_id,sender_id,recipient_id,body,reply_to,context_type,context_id,created_at,expires_at) VALUES('").append(CLEANUP_NOTES.get(i)).append("',").append(from).append(',').append(to).append(",'cleanup-note-").append(i).append("',").append(i==4?"'"+CLEANUP_NOTES.get(2)+"'":"NULL").append(",'POST',123,'").append(FIRST).append("','").append(EXPIRY).append("');");
+   if(i!=3){sql.append(memberMailbox(CALLER,CLEANUP_NOTES.get(i),i==1?"INBOX":"SENT"));if(i==0)sql.append(memberMailbox(TARGET,CLEANUP_NOTES.get(i),"INBOX"));if(i==1)sql.append(memberMailbox(TARGET,CLEANUP_NOTES.get(i),"SENT"));if(i==4){/* caller mailbox is deliberately absent on an unrelated reply. */}}
+  }
+  // Remove the fixture-only caller mailbox on the unrelated child, retaining the other member's copy.
+  sql.append("DELETE FROM pawbridge_community.private_note_mailboxes WHERE member_id=").append(CALLER).append(" AND note_id='").append(CLEANUP_NOTES.get(4)).append("';").append(memberMailbox(OTHER,CLEANUP_NOTES.get(4),"SENT"));
+  for(int i=0;i<3;i++)sql.append("INSERT INTO pawbridge_community.private_note_requests(sender_id,request_id,request_hash,note_id,created_at) VALUES(").append(i==0?CALLER:i==1?TARGET:OTHER).append(",'").append(CLEANUP_REQUESTS.get(i)).append("','").append("a".repeat(64)).append("','").append(CLEANUP_NOTES.get(i==2?2:0)).append("','").append(FIRST).append("');");
+  sql.append("INSERT INTO pawbridge_community.private_note_blocks(member_id,blocked_id,created_at) VALUES(").append(CALLER).append(',').append(TARGET).append(",'").append(FIRST).append("'),(").append(OTHER).append(',').append(CALLER).append(",'").append(FIRST).append("');");
+  for(int i=0;i<3;i++){
+   long first=i==2?TARGET:CALLER,second=i==2?OTHER:TARGET;
+   sql.append("INSERT INTO pawbridge_community.member_chat_rooms(room_id,first_member_id,second_member_id,latest_sequence) VALUES('").append(CLEANUP_ROOMS.get(i)).append("',").append(first).append(',').append(i==1?"NULL":Long.toString(second)).append(",2);");
+   sql.append(chatMembership(CLEANUP_ROOMS.get(i),first));if(i!=1)sql.append(chatMembership(CLEANUP_ROOMS.get(i),second));
+   sql.append("INSERT INTO pawbridge_community.member_chat_messages(room_id,sequence,sender_id,body,created_at,expires_at) VALUES('").append(CLEANUP_ROOMS.get(i)).append("',1,").append(first).append(",'cleanup-chat','").append(FIRST).append("','").append(EXPIRY).append("');");
+   sql.append("INSERT INTO pawbridge_community.member_chat_requests(sender_id,request_id,request_hash,room_id,sequence,created_at) VALUES(").append(i==0?CALLER:i==1?OTHER:TARGET).append(",'").append(CLEANUP_CHAT_REQUESTS.get(i)).append("','").append("b".repeat(64)).append("','").append(CLEANUP_ROOMS.get(i)).append("',1,'").append(FIRST).append("');");
+  }
+  sql.append("COMMIT;");execute(sql.toString());
+ }
+ private String memberMailbox(long id,UUID note,String direction){return "INSERT INTO pawbridge_community.private_note_mailboxes(member_id,note_id,direction,created_at) VALUES("+id+",'"+note+"','"+direction+"','"+FIRST+"');";}
+ private String chatMembership(UUID room,long id){return "INSERT INTO pawbridge_community.member_chat_room_members(room_id,member_id,read_through,hidden_through) VALUES('"+room+"',"+id+",0,-1);";}
+
+ private void assertMemberDelta(String before,boolean finalUser)throws Exception{
+  var expected=(ObjectNode)json(before).deepCopy();String caller=Long.toString(CALLER);Set<String> affected=Set.of(CLEANUP_NOTES.get(0).toString(),CLEANUP_NOTES.get(1).toString(),CLEANUP_NOTES.get(2).toString());String orphan=CLEANUP_NOTES.get(2).toString();String lastRoom=CLEANUP_ROOMS.get(1).toString();
+  memberRemove(expected,"members",r->r.get("member_id").asText().equals(caller));memberRemove(expected,"mailboxes",r->r.get("member_id").asText().equals(caller));
+  memberRemove(expected,"blocks",r->r.get("member_id").asText().equals(caller)||r.get("blocked_id").asText().equals(caller));
+  memberRemove(expected,"private_note_requests",r->r.get("sender_id").asText().equals(caller));
+  for(var row:expected.get("private_note_requests")){var r=(ObjectNode)row;if(affected.contains(r.path("note_id").asText()))r.putNull("request_hash");if(r.path("note_id").asText().equals(orphan))r.putNull("note_id");}
+  memberRemove(expected,"private_notes",r->r.get("note_id").asText().equals(orphan));
+  for(var row:expected.get("private_notes")){var r=(ObjectNode)row;if(affected.contains(r.get("note_id").asText())){if(r.path("sender_id").asText().equals(caller))r.putNull("sender_id");if(r.path("recipient_id").asText().equals(caller))r.putNull("recipient_id");r.putNull("context_type");r.putNull("context_id");}if(r.path("reply_to").asText().equals(orphan))r.putNull("reply_to");}
+  memberRemove(expected,"chat_members",r->r.get("member_id").asText().equals(caller));memberRemove(expected,"chat_requests",r->r.get("sender_id").asText().equals(caller));
+  memberRemove(expected,"chat_messages",r->r.get("room_id").asText().equals(lastRoom));for(var row:expected.get("chat_messages")){var r=(ObjectNode)row;if(r.path("sender_id").asText().equals(caller))r.putNull("sender_id");}
+  memberRemove(expected,"chat_rooms",r->r.get("room_id").asText().equals(lastRoom));for(var row:expected.get("chat_rooms")){var r=(ObjectNode)row;for(String field:List.of("first_member_id","second_member_id"))if(r.path(field).asText().equals(caller))r.putNull(field);}
+  if(finalUser){for(String table:List.of("users","favorites","refresh_tokens","shelter_applications","pending"))memberRemove(expected,table,r->r.get("user_id").asText().equals(caller));}
+  assertThat(json(memberSnapshot()).equals(expected)).as("Exact fixed24-table deletion delta; counterpart/private data is not rendered").isTrue();
+ }
+ private void memberRemove(ObjectNode state,String key,java.util.function.Predicate<JsonNode> predicate){var out=new ObjectMapper().createArrayNode();for(var row:state.get(key))if(!predicate.test(row))out.add(row);state.set(key,out);}
+
+ private AutoCloseable memberDeniedPrivilege(String kind)throws Exception{
+  requireMemberFixture();String clause= switch(kind){case "chat-update"->"UPDATE(sender_id) ON pawbridge_community.member_chat_messages";case "user-delete"->"DELETE ON pawbridge_user.users";case "nickname"->"SELECT(nickname) ON pawbridge_user.users";default->throw new IllegalArgumentException("Unknown owned member privilege case");};
+  String role=kind.equals("nickname")?"pawbridge_f2_reader":"pawbridge_f3_writer";
+  assertThat(scalar("SELECT "+(kind.equals("user-delete")?"has_table_privilege('"+role+"','pawbridge_user.users','DELETE')":"has_column_privilege('"+role+"','"+(kind.equals("nickname")?"pawbridge_user.users":"pawbridge_community.member_chat_messages")+"','"+(kind.equals("nickname")?"nickname":"sender_id")+"','"+(kind.equals("nickname")?"SELECT":"UPDATE")+"')")+"::int")).isOne();
+  execute("REVOKE "+clause+" FROM "+role);
+  return ()->{requireMemberIdentity();execute("GRANT "+clause+" TO "+role);requireMemberFixture();};
+ }
+ private AutoCloseable memberCommitRejection(String phase,boolean deferred)throws Exception{
+  requireMemberFixture();String name="member_cleanup_"+phase+"_rejection";String relation=phase.equals("user")?"pawbridge_user.users":phase.equals("chat")?"pawbridge_community.member_chat_messages":"pawbridge_community.private_note_members";
+  String predicate=phase.equals("chat")?"OLD.sender_id="+CALLER:phase.equals("user")?"OLD.user_id="+CALLER:"OLD.member_id="+CALLER;
+  assertThat(scalar("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='pawbridge_community' AND p.proname='"+name+"'")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pg_trigger WHERE tgrelid='"+relation+"'::regclass AND tgname='"+name+"'")).isZero();
+  execute("CREATE FUNCTION pawbridge_community."+name+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514',CONSTRAINT='"+name+"',MESSAGE='owned member cleanup rejection'; END $$");boolean installed=false;
+  try{execute((deferred?"CREATE CONSTRAINT TRIGGER ":"CREATE TRIGGER ")+name+" AFTER "+(phase.equals("chat")?"UPDATE":"DELETE")+" ON "+relation+(deferred?" DEFERRABLE INITIALLY DEFERRED":"")+" FOR EACH ROW WHEN ("+predicate+") EXECUTE FUNCTION pawbridge_community."+name+"()");installed=true;}
+  finally{if(!installed){requireMemberIdentity();execute("DROP FUNCTION pawbridge_community."+name+"()");}}
+  return ()->{requireMemberIdentity();try{execute("DROP TRIGGER "+name+" ON "+relation);}finally{execute("DROP FUNCTION pawbridge_community."+name+"()");}};
+ }
+ private void requireMemberOwnedCause(Throwable failure,String name){
+  assertThat(failure!=null).isTrue();var seen=Collections.newSetFromMap(new IdentityHashMap<Throwable,Boolean>());var queue=new ArrayDeque<Throwable>();queue.add(failure);boolean found=false;
+  while(!queue.isEmpty()&&seen.size()<32){var e=queue.removeFirst();if(!seen.add(e))continue;if(e instanceof PSQLException p&&"23514".equals(p.getSQLState())&&p.getServerErrorMessage()!=null&&name.equals(p.getServerErrorMessage().getConstraint()))found=true;if(e.getCause()!=null)queue.add(e.getCause());if(e instanceof SQLException sql&&sql.getNextException()!=null)queue.add(sql.getNextException());}
+  assertThat(found).as("Actual failure must contain exactly the owned23514 constraint; details are not printed").isTrue();
+ }
+ private void requireManagedUserStaleCause(Throwable failure){
+  var seen=Collections.newSetFromMap(new IdentityHashMap<Throwable,Boolean>());var queue=new ArrayDeque<Throwable>();queue.add(failure);boolean found=false;
+  while(!queue.isEmpty()&&seen.size()<32){var item=queue.removeFirst();if(!seen.add(item))continue;
+   if(item instanceof org.hibernate.StaleObjectStateException stale&&com.pawbridge.userservice.entity.User.class.getName().equals(stale.getEntityName())&&Objects.equals(stale.getIdentifier(),CALLER))found=true;
+   if(item.getCause()!=null)queue.add(item.getCause());if(item instanceof SQLException sql&&sql.getNextException()!=null)queue.add(sql.getNextException());
+  }
+  assertThat(found).as("Actual managed User flush must identify the owned row as stale, without rendering failure details").isTrue();
+ }
+ private void assertMemberFailureFamily(RuntimeException failure,boolean source,int status)throws Exception{
+  org.springframework.http.ResponseEntity<?> response;
+  if(source){var log=(ch.qos.logback.classic.Logger)org.slf4j.LoggerFactory.getLogger(com.pawbridge.userservice.exception.common.GlobalExceptionRestAdvice.class);var prior=log.getLevel();log.setLevel(ch.qos.logback.classic.Level.OFF);try{var advice=new com.pawbridge.userservice.exception.common.GlobalExceptionRestAdvice();response=failure instanceof ResponseStatusException e?advice.responseStatus(e):failure instanceof DataAccessException e?advice.dbException(e):advice.serverException(failure);}finally{log.setLevel(prior);}}
+  else{var advice=new com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionExceptionHandler();response=failure instanceof com.pawbridge.backend.user.internal.deletion.application.MemberCleanupUnavailableException e?advice.cleanupUnavailable(e):advice.unexpected(failure);}
+  var wire=new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(response.getBody()));assertThat(response.getStatusCode().value()).isEqualTo(status);assertThat(wire.size()).isEqualTo(3);assertThat(wire.get("code").asInt()).isEqualTo(status);assertThat(wire.get("message").asText()).isEqualTo(status==503?"쪽지 정리가 완료되지 않았습니다. 회원 삭제를 다시 시도해 주세요.":"서버 에러!");assertThat(wire.get("data").isNull()).isTrue();
+ }
+    private String memberSnapshot()throws SQLException{
+        String[][]tables={
+            {"private_notes","pawbridge_community.private_notes","note_id"},{"mailboxes","pawbridge_community.private_note_mailboxes","member_id,note_id"},
+            {"pending","pawbridge_user.contact_deletions","user_id"},{"members","pawbridge_community.private_note_members","member_id"},{"blocks","pawbridge_community.private_note_blocks","member_id,blocked_id"},
+            {"visits","pawbridge_community.daily_visit_count","visit_date"},{"videos","pawbridge_community.home_videos","id"},{"board","pawbridge_community.home_video_board","id"},
+            {"users","pawbridge_user.users","user_id"},{"favorites","pawbridge_user.favorites","favorite_id"},{"posts","pawbridge_community.posts","post_id"},{"comments","pawbridge_community.comments","comment_id"},
+            {"f4comments","pawbridge_f4_fixture.comments","comment_id"},{"notes","pawbridge_f4_fixture.private_notes","note_id"},{"outbox","pawbridge_community.outbox_events","outbox_id"},{"search","pawbridge_community.post_search_documents","post_id"},
+            {"private_note_requests","pawbridge_community.private_note_requests","sender_id,request_id"},{"animal_reports","pawbridge_community.animal_reports","report_id"},{"refresh_tokens","pawbridge_user.refresh_tokens","refresh_token_id"},{"shelter_applications","pawbridge_user.shelter_applications","id"},{"chat_rooms","pawbridge_community.member_chat_rooms","room_id"},{"chat_members","pawbridge_community.member_chat_room_members","room_id,member_id"},{"chat_messages","pawbridge_community.member_chat_messages","room_id,sequence"},{"chat_requests","pawbridge_community.member_chat_requests","sender_id,request_id"}};
+        assertThat(tables.length).isEqualTo(24);var sql=new StringBuilder("SELECT json_build_object(");
+        for(int index=0;index<tables.length;index++){if(index>0)sql.append(',');String[]t=tables[index];sql.append("'").append(t[0]).append("',(SELECT COALESCE(json_agg(r ORDER BY ").append(t[2]).append("),'[]'::json) FROM ").append(t[1]).append(" r)");}
+        sql.append(")::text");try(Connection c=admin();var s=c.createStatement();var rows=s.executeQuery(sql.toString())){assertThat(rows.next()).isTrue();String result=rows.getString(1);assertThat(json(result).size()).isEqualTo(24);return result;}
+    }
+
+ private void requireMemberIdentity()throws SQLException{
+  verifyOwnership();Path path=receiptProperty("member.cleanup.fixture.receipt","member-cleanup-fixture-write.txt");
+  assertThat(path.getParent()).isEqualTo(receiptProperty("f29.fixture.receipt","f29-fixture-write.txt").getParent());
+  receipt(path,"owner="+runOwner()+"\n"+MEMBER_PROOF);
+  // Only the late member-cleanup tag reaches this method; ordinary F29/F30 need no new property.
+  Path oracleReceipt=receiptProperty("member.cleanup.oracle.receipt","member-cleanup-oracle-sha256.txt");
+  assertThat(oracleReceipt.getParent()).isEqualTo(path.getParent());
+  try{
+   assertThat(Files.isSymbolicLink(oracleReceipt)).isFalse();assertThat(Files.isRegularFile(oracleReceipt)).isTrue();assertThat(oracleReceipt.toRealPath()).isEqualTo(oracleReceipt);
+   var sha=java.security.MessageDigest.getInstance("SHA-256");var hex=java.util.HexFormat.of();byte[] raw=Files.readAllBytes(oracleReceipt);
+   assertThat(hex.formatHex(sha.digest(raw))).as("Pinned member source receipt identity").isEqualTo("df12ad2ab091706dd0e28762acec7825a1d345d4948f5805b128e3e52f367c9a");
+   var lines=new String(raw,StandardCharsets.UTF_8).lines().toList();assertThat(lines.getFirst()).isEqualTo("source_sha="+SOURCE);
+   for(var expected:Map.of("source",40,"shared-byte-identity",22,"generated",6,"base-F29-receipt",1).entrySet())
+    assertThat(lines.stream().filter(line->line.contains("  "+expected.getKey()+" ")).count()).isEqualTo(expected.getValue().longValue());
+   Path base=oracleReceipt.resolveSibling("f29-oracle-sha256.txt");assertThat(Files.isSymbolicLink(base)).isFalse();assertThat(base.toRealPath()).isEqualTo(base);
+   byte[] baseRaw=Files.readAllBytes(base);assertThat(lines).contains(hex.formatHex(sha.digest(baseRaw))+"  base-F29-receipt backend-app/build/ci/f29-oracle-sha256.txt");
+   var baseLines=new String(baseRaw,StandardCharsets.UTF_8).lines().toList();assertThat(baseLines.stream().filter(line->line.contains("  generated ")).count()).isEqualTo(3);assertThat(baseLines.stream().filter(line->line.contains("  shared-adapted-identity ")).count()).isEqualTo(1);
+   Path app=oracleReceipt.getParent().getParent().getParent(),repository=app.getParent();
+   Path output=app.resolve("boot/build/generated/sources/f29LegacyOracle/java");
+   var pattern=java.util.regex.Pattern.compile("([0-9a-f]{64})  (shared-byte-identity|shared-adapted-identity|generated) (.+)");
+   for(String line:java.util.stream.Stream.concat(lines.stream(),baseLines.stream()).toList()){
+    var match=pattern.matcher(line);if(!match.matches())continue;Path relative=Path.of(match.group(3));assertThat(relative.isAbsolute()).isFalse();assertThat(relative.normalize()).isEqualTo(relative);
+    Path root=match.group(2).equals("generated")?output:repository,artifact=root.resolve(relative).normalize();assertThat(artifact.startsWith(root)).isTrue();
+    assertThat(Files.isSymbolicLink(artifact)).isFalse();assertThat(Files.isRegularFile(artifact)).isTrue();assertThat(artifact.toRealPath()).isEqualTo(artifact);
+    assertThat(hex.formatHex(sha.digest(Files.readAllBytes(artifact)))).as("Member oracle artifact identity without rendering private bytes").isEqualTo(match.group(1));
+   }
+  }catch(java.io.IOException|java.security.NoSuchAlgorithmException failure){throw new IllegalStateException("Member cleanup oracle evidence cannot be verified");}
+ }
+ private static final String MEMBER_PROOF="source_sha=f06a72a06bd26662c647bde780dfc7a27bf7349c\nfixture=F29 plus User deletion and installed-chat cleanup\nnew_business_ddl=0\nsynthetic_tables_added=6\nsynthetic_identity_sequences_added=2\nnew_schema=0\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\ncf93ed908b18f63f59832cd0fe5bcf500ccf9e4c39972deeda5de446c4dd953d  member-ddl-fragment-0\neb3fe612fe9d4aff8372539b0d59e1da4c34266036ce88f1ed0ba51b88f5e139  member-ddl-fragment-1\nb705222e7a9c9a6964628c937cff63470e1dd30103b27111ae3c5d94d284e1ec  member-ddl-fragment-2\n7afb8a3d992eba1258d61a610a418133f56766e9def3eb2e105c584bedcd2fdb  member-ddl-fragment-3\n5604c03964f051343785c2d30f9bf20022d6a0c867152b6175168c4f5ea81754  member-exact-grants\n";
+ private void requireMemberFixture()throws SQLException{
+  requireMemberIdentity();
+  for(String relation:List.of("pawbridge_user.refresh_tokens","pawbridge_user.shelter_applications","pawbridge_community.member_chat_rooms","pawbridge_community.member_chat_room_members","pawbridge_community.member_chat_messages","pawbridge_community.member_chat_requests"))assertThat(scalar("SELECT (to_regclass('"+relation+"') IS NOT NULL)::int")).isOne();
+  assertThat(scalar("SELECT (has_table_privilege('pawbridge_f3_writer','pawbridge_user.users','DELETE') AND has_column_privilege('pawbridge_f3_writer','pawbridge_user.users','user_id','UPDATE') AND has_column_privilege('pawbridge_f3_writer','pawbridge_user.contact_deletions','user_id','INSERT') AND has_table_privilege('pawbridge_f3_writer','pawbridge_community.private_note_members','DELETE') AND has_column_privilege('pawbridge_f3_writer','pawbridge_community.private_notes','recipient_id','SELECT') AND has_column_privilege('pawbridge_f3_writer','pawbridge_community.private_notes','context_type','UPDATE') AND has_column_privilege('pawbridge_f3_writer','pawbridge_community.private_notes','context_id','UPDATE') AND has_column_privilege('pawbridge_f3_writer','pawbridge_community.private_note_requests','request_hash','UPDATE') AND has_column_privilege('pawbridge_f3_writer','pawbridge_community.member_chat_messages','sender_id','UPDATE') AND has_column_privilege('pawbridge_f2_reader','pawbridge_user.users','nickname','SELECT'))::int")).isOne();
+  for(String relation:List.of("pawbridge_user.favorites","pawbridge_user.refresh_tokens","pawbridge_user.shelter_applications"))assertThat(scalar("SELECT (has_column_privilege('pawbridge_f3_writer','"+relation+"','user_id','SELECT') AND has_table_privilege('pawbridge_f3_writer','"+relation+"','DELETE'))::int")).isOne();
+  for(String relation:List.of("pawbridge_user.refresh_tokens","pawbridge_user.shelter_applications"))assertThat(scalar("SELECT (SELECT bool_and(NOT has_column_privilege('pawbridge_f2_reader','"+relation+"',column_name,'SELECT,INSERT,UPDATE,REFERENCES')) FROM information_schema.columns WHERE table_schema='pawbridge_user' AND table_name='"+relation.split("\\.")[1]+"')::int")).isOne();
+ }
+ private void cleanupMemberKeys()throws Exception{
+  requireMemberIdentity();returned();String ns=memberIds(),ownNotes=uuidList(CLEANUP_NOTES),ownRooms=uuidList(CLEANUP_ROOMS),ownRequests=uuidList(CLEANUP_REQUESTS),ownChat=uuidList(CLEANUP_CHAT_REQUESTS);
+  // Reobserve all reserved keys even after an ACK loss; never infer rollback from a thrown response.
+  assertThat(scalar("SELECT count(*) FROM pawbridge_user.users WHERE user_id IN("+ns+") AND (email<>'member-cleanup-'||user_id||'@fixture.invalid' OR nickname<>'Cleanup'||user_id)")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_notes WHERE note_id IN("+ownNotes+") AND body NOT LIKE 'cleanup-note-%'")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_notes WHERE (sender_id IN("+ns+") OR recipient_id IN("+ns+") OR reply_to IN("+ownNotes+")) AND note_id NOT IN("+ownNotes+")")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_note_mailboxes WHERE (note_id IN("+ownNotes+") AND member_id NOT IN("+ns+")) OR (member_id IN("+ns+") AND note_id NOT IN("+ownNotes+"))")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_note_requests WHERE (sender_id IN("+ns+") OR note_id IN("+ownNotes+")) AND NOT(sender_id IN("+ns+") AND request_id IN("+ownRequests+"))")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.private_note_blocks WHERE (member_id IN("+ns+") OR blocked_id IN("+ns+")) AND NOT(member_id IN("+ns+") AND blocked_id IN("+ns+"))")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_room_members WHERE (room_id IN("+ownRooms+") AND member_id NOT IN("+ns+")) OR (member_id IN("+ns+") AND room_id NOT IN("+ownRooms+"))")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_rooms WHERE (first_member_id IN("+ns+") OR second_member_id IN("+ns+")) AND room_id NOT IN("+ownRooms+")")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_messages WHERE (sender_id IN("+ns+") AND room_id NOT IN("+ownRooms+")) OR (room_id IN("+ownRooms+") AND (sequence<>1 OR body<>'cleanup-chat' OR (sender_id IS NOT NULL AND sender_id NOT IN("+ns+"))))")).isZero();
+  assertThat(scalar("SELECT count(*) FROM pawbridge_community.member_chat_requests WHERE (sender_id IN("+ns+") OR room_id IN("+ownRooms+")) AND NOT(sender_id IN("+ns+") AND request_id IN("+ownChat+"))")).isZero();
+  for(String pair:List.of("favorites:favorite_id","refresh_tokens:refresh_token_id","shelter_applications:id")){var bits=pair.split(":");assertThat(scalar("SELECT count(*) FROM pawbridge_user."+bits[0]+" WHERE user_id IN("+ns+") AND "+bits[1]+" NOT IN("+ns+")")).isZero();}
+  // Exact keys only. Do not rely on participant/sender IDs after source SET NULL has removed them.
+  execute("BEGIN; DELETE FROM pawbridge_community.private_note_requests WHERE sender_id IN("+ns+") AND request_id IN("+ownRequests+"); DELETE FROM pawbridge_community.private_note_mailboxes WHERE member_id IN("+ns+") AND note_id IN("+ownNotes+"); DELETE FROM pawbridge_community.private_notes WHERE note_id IN("+ownNotes+"); DELETE FROM pawbridge_community.private_note_blocks WHERE member_id IN("+ns+") AND blocked_id IN("+ns+"); DELETE FROM pawbridge_community.member_chat_requests WHERE sender_id IN("+ns+") AND request_id IN("+ownChat+"); DELETE FROM pawbridge_community.member_chat_room_members WHERE room_id IN("+ownRooms+") AND member_id IN("+ns+"); DELETE FROM pawbridge_community.member_chat_rooms WHERE room_id IN("+ownRooms+"); DELETE FROM pawbridge_community.private_note_members WHERE member_id IN("+ns+"); DELETE FROM pawbridge_user.favorites WHERE user_id IN("+ns+") AND favorite_id IN("+ns+"); DELETE FROM pawbridge_user.refresh_tokens WHERE user_id IN("+ns+") AND refresh_token_id IN("+ns+"); DELETE FROM pawbridge_user.shelter_applications WHERE user_id IN("+ns+") AND id IN("+ns+"); DELETE FROM pawbridge_user.contact_deletions WHERE user_id IN("+ns+"); DELETE FROM pawbridge_user.users WHERE user_id IN("+ns+"); COMMIT;");
+ }
+
 }

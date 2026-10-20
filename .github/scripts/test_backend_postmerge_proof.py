@@ -288,29 +288,43 @@ class PostmergeProofTest(unittest.TestCase):
                          (b"matrix.profile == 'full' &&", b"matrix.profile != 'note-expiry' &&"),
                          (b"|| 'Pilot' }}", b"|| matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
                          (b"|| 'Pilot' }}", b"|| matrix.profile == 'note-expiry' && 'Scoped' || matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
-                         (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile == 'note-expiry' || always() }}")):
+                         (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile == 'note-expiry' || always() }}"),
+                         (b"|| 'Pilot' }}", b"|| matrix.profile == 'member-management' && 'Member' || matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
+                         (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile != 'note-expiry' && always() }}")):
             data = self.fixture();data.workflow = WORKFLOW.replace(old, new)
             self.execute(data)
 
-    def test_given_known_three_arm_recipe__when_reusing_full__then_exclude_only_scoped_steps_and_keep_non_scoped_gates(self):
-        data = self.fixture()
-        data.workflow = WORKFLOW.replace(b"|| 'Pilot' }}",
-            b"|| matrix.profile == 'note-expiry' && 'Note expiry PostgreSQL' || 'Pilot' }}").replace(
-            b'        run: existing-f30-pg',
-            b"        if: ${{ matrix.profile != 'note-expiry' }}\n        run: existing-f30-pg").replace(
-            b'      - name: Packaged contracts',
-            b"      - name: Scoped expiry only\n        if: ${{ matrix.profile == 'note-expiry' }}\n        run: scoped-expiry\n      - name: Packaged contracts")
-        legacy = proof.workflow_contract(WORKFLOW)
-        current = proof.workflow_contract(data.workflow)
-        self.assertEqual(legacy, current)
-        data.jobs[1]['steps'].append({'name': 'Scoped expiry only',
-            'status': 'completed', 'conclusion': 'skipped'})
-        self.assertEqual('reused-full', data.decide()['mode'])
-        # The != condition remains mandatory for original full evidence.
-        for step in data.jobs[1]['steps']:
-            if step['name'] == 'New F30 expiry PG gate':
-                step['conclusion'] = 'skipped'
-        self.execute(data, 'missing-or-skipped-validation-step')
+    def test_given_known_scoped_recipes__when_reusing_full__then_omit_only_scope_shape_but_require_expiry_and_member_pg(self):
+        for member_arm in (False, True):
+            with self.subTest(member_arm=member_arm):
+                data = self.fixture()
+                expression = b"|| matrix.profile == 'note-expiry' && 'Note expiry PostgreSQL' || "
+                if member_arm:
+                    expression += b"matrix.profile == 'member-management' && 'Member management' || "
+                expression += b"'Pilot' }}"
+                data.workflow = WORKFLOW.replace(b"|| 'Pilot' }}", expression).replace(
+                    b"        if: ${{ matrix.profile == 'full' }}",
+                    b"        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}").replace(
+                    b'      - name: Packaged contracts',
+                    b"      - name: Scoped shape only\n        if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}\n        run: scoped-shape\n"
+                    b"      - name: Late member PG\n        if: ${{ matrix.profile != 'note-expiry' }}\n        run: member-pg\n"
+                    b'      - name: Packaged contracts')
+                contract = proof.workflow_contract(data.workflow)
+                self.assertNotIn('Scoped shape only', contract['check'][1])
+                self.assertIn('New F30 expiry PG gate', contract['check'][1])
+                self.assertIn('Late member PG', contract['check'][1])
+                data.jobs[1]['steps'].extend([
+                    {'name': 'Scoped shape only', 'status': 'completed', 'conclusion': 'skipped'},
+                    {'name': 'Late member PG', 'status': 'completed', 'conclusion': 'success'}])
+                self.assertEqual('reused-full', data.decide()['mode'])
+                successful = copy.deepcopy(data.jobs)
+                for name in ('New F30 expiry PG gate', 'Late member PG'):
+                    data.jobs = copy.deepcopy(successful)
+                    for step in data.jobs[1]['steps']:
+                        if step['name'] == name:
+                            step['conclusion'] = 'skipped'
+                    self.execute(data, 'missing-or-skipped-validation-step')
+
 
     def test_given_expired_future_or_out_of_order_success__when_deciding__then_fallback(self):
         for instant in ('2026-10-19T02:59:59Z', '2026-10-20T03:00:01Z', None):
@@ -378,29 +392,32 @@ class PostmergeProofTest(unittest.TestCase):
             data.members['full']['build/ci/contract-execution.txt'] = encoded(execution)
             self.execute(data)
 
-    def test_given_execute_receipt_with_scoped_source_plan_or_execution__when_deciding__then_never_promote_it_to_full(self):
-        paths = ['backend-app/community/src/main/java/com/pawbridge/backend/community/internal/note/infrastructure/JdbcNoteExpiry.java']
+    def test_given_execute_receipt_with_either_scoped_plan_or_execution__when_deciding__then_never_promote_it_to_full(self):
+        paths = ['backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java']
         with patch.dict(globals(), PATHS=paths):
-            for defect in ('plan', 'execution', 'both'):
-                with self.subTest(defect=defect):
-                    data = self.fixture()
-                    context = dict(data.plan['identity'], note_expiry_scope_verified=True)
-                    plan = proof.profile.make_plan(context, paths, proof.profile.NOTE_EXPIRY, JAR)
-                    steps = {name: {'outcome': 'skipped', 'conclusion': 'skipped'}
-                             for name in proof.profile.ALL_SMOKES}
-                    steps.update({name: {'outcome': 'success', 'conclusion': 'success'}
-                                  for name in ('fixture_f4_shape', 'pg_note_expiry', 'owned_cleanup')})
-                    execution = proof.profile.audit_execution(plan, context, paths,
-                        proof.profile.NOTE_EXPIRY, JAR, steps)
-                    saved = json.loads(data.members['proof']['postmerge-proof.txt'])
-                    saved.update(mode='execute', reason='pull-request-validation')
-                    data.members['proof']['postmerge-proof.txt'] = encoded(saved)
-                    if defect in ('plan', 'both'):
-                        data.members['full']['build/ci/contract-plan.txt'] = encoded(plan)
-                    if defect in ('execution', 'both'):
-                        data.members['full']['build/ci/contract-execution.txt'] = encoded(execution)
-                    self.execute(data, 'source-full-execution-differs' if defect == 'execution'
-                                 else 'source-full-plan-differs')
+            for mode in (proof.profile.NOTE_EXPIRY, proof.profile.MEMBER_MANAGEMENT):
+                for defect in ('plan', 'execution', 'both'):
+                    with self.subTest(mode=mode, defect=defect):
+                        data = self.fixture()
+                        flag = ('note_expiry_scope_verified' if mode == proof.profile.NOTE_EXPIRY
+                                else 'member_management_scope_verified')
+                        context = dict(data.plan['identity'], **{flag: True})
+                        plan = proof.profile.make_plan(context, paths, mode, JAR)
+                        required = {*plan['required_smokes'], *plan['required_contracts'], 'owned_cleanup'}
+                        steps = {name: {'outcome': 'success' if name in required else 'skipped',
+                                        'conclusion': 'success' if name in required else 'skipped'}
+                                 for name in (*proof.profile.ALL_SMOKES, *plan['required_contracts'], 'owned_cleanup')}
+                        execution = proof.profile.audit_execution(plan, context, paths, mode, JAR, steps)
+                        saved = json.loads(data.members['proof']['postmerge-proof.txt'])
+                        saved.update(mode='execute', reason='pull-request-validation')
+                        data.members['proof']['postmerge-proof.txt'] = encoded(saved)
+                        if defect in ('plan', 'both'):
+                            data.members['full']['build/ci/contract-plan.txt'] = encoded(plan)
+                        if defect in ('execution', 'both'):
+                            data.members['full']['build/ci/contract-execution.txt'] = encoded(execution)
+                        self.execute(data, 'source-full-execution-differs' if defect == 'execution'
+                                     else 'source-full-plan-differs')
+
 
     def test_given_api_unavailability_or_malformed_document__when_deciding__then_execute_without_private_error_content(self):
         data = self.fixture()

@@ -558,7 +558,150 @@ import org.springframework.web.bind.annotation.*;
             path.write_bytes(content)
     print('Verified F29 full22/shared14; selected wrappers3 and receipt; runtime not started')
 
+
+# Explicit late opt-in: default F29/F30 full22, outputs3 and receipt remain unchanged.
+MEMBER_RAW = ('user-service/src/main/java/com/pawbridge/userservice/contact/ContactMemberDeletion.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/contact/CommunityContactClient.java',
+ 'community-service/src/main/java/com/pawbridge/communityservice/chat/MemberChatModels.java',
+ 'community-service/src/main/java/com/pawbridge/communityservice/chat/MemberChatRepository.java',
+ 'community-service/src/main/java/com/pawbridge/communityservice/chat/MemberChatDataLifecycle.java')
+MEMBER_SHARED = {'user-service/src/main/java/com/pawbridge/userservice/entity/Role.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/entity/Role.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/entity/User.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/entity/User.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/UserNotFoundException.java': 'backend-app/boot/build/generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/exception/UserNotFoundException.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ApplicationException.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/exception/common/ApplicationException.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ErrorCode.java': 'backend-app/boot/build/generated/sources/f3LegacyOracle/java/com/pawbridge/userservice/exception/common/ErrorCode.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/common/GlobalExceptionRestAdvice.java': 'backend-app/boot/build/generated/sources/f14LegacyOracle/java/com/pawbridge/userservice/exception/common/GlobalExceptionRestAdvice.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/persistence/PostgresqlRollbackCharsetViolation.java': 'backend-app/boot/build/generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/persistence/PostgresqlRollbackCharsetViolation.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/repository/UserRepository.java': 'backend-app/boot/build/generated/sources/f13LegacyOracle/java/com/pawbridge/userservice/repository/UserRepository.java',
+ 'user-service/src/main/java/com/pawbridge/userservice/util/ResponseDTO.java': 'backend-app/boot/build/generated/sources/f14LegacyOracle/java/com/pawbridge/userservice/util/ResponseDTO.java'}
+MEMBER_INPUTS = {'community-service/src/main/java/com/pawbridge/communityservice/chat/MemberChatDataLifecycle.java': '7e83ebf5667a3d92371ac5bf2269195163e17b8e35a5130a408348410507a512',
+ 'community-service/src/main/java/com/pawbridge/communityservice/chat/MemberChatModels.java': '4910f09e9b64cbc24ded0a089df7efef46d8a46acec1677554b08f096a221a72',
+ 'community-service/src/main/java/com/pawbridge/communityservice/chat/MemberChatRepository.java': '942116aac4ae0699dd683dfd3ea13811158f8ead1e4fe3332a325de2f34c882d',
+ 'community-service/src/migration/resources/db/postgresql/V10__member_chat.sql': '7afb8a3d992eba1258d61a610a418133f56766e9def3eb2e105c584bedcd2fdb',
+ 'user-service/src/main/java/com/pawbridge/userservice/contact/CommunityContactClient.java': '91aedc9424a072bf0e3399deac0f325ec17714d442fc8e938b73bc1fc924311e',
+ 'user-service/src/main/java/com/pawbridge/userservice/contact/ContactMemberDeletion.java': 'b099a74a9f394581df50ff5092ad36bc73d1fe890546a35abf8e09e25f640e77',
+ 'user-service/src/main/java/com/pawbridge/userservice/entity/Role.java': '14eb5ed4e263777a06d6e127f650a78a03932c9d4d5020ae8f6939f756679c05',
+ 'user-service/src/main/java/com/pawbridge/userservice/entity/User.java': 'f2774b98a504ee58b166f251de938e0e6dd95b9e9f5e22e9474bf63f649de31e',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/UserNotFoundException.java': 'ddea3a2a8fb4d48cf31a719f6ee507c427df841d9d6f40778dceaa8a3bc747da',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ApplicationException.java': 'cc92224c6cec111f3f008ff14da267154dc587987ce5f86be169e7ce9a1ea727',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/common/ErrorCode.java': 'd2fcd341dd3bf2f0e65a0a4a2d2ebf3885c0e0354926da46d83b784e22fa9e4b',
+ 'user-service/src/main/java/com/pawbridge/userservice/exception/common/GlobalExceptionRestAdvice.java': '572380180b5eeae7ff1f5cd81819ae0a2eed1b0f99beb279d333b56d0ea3f97b',
+ 'user-service/src/main/java/com/pawbridge/userservice/persistence/PostgresqlRollbackCharsetViolation.java': '09ab66f94a5b980549a2153db799c00e6dbc11943b76c0af2cd64f1ef0995891',
+ 'user-service/src/main/java/com/pawbridge/userservice/repository/UserRepository.java': '09e803887a6386083bc50b06ebb2da5110ad8541bf7726c2440db3d843d2d915',
+ 'user-service/src/main/java/com/pawbridge/userservice/util/ResponseDTO.java': '107b22c2ac80290b8b61165fb2f8c35d7bf4a2c9b700e0a7f1a60b0501707fd3',
+ 'user-service/src/migration/resources/db/postgresql/V1__user_schema.sql': '5b6c50062231952e625e56a7577c41b03d7d5a10041380d4b2ada960ef7449a1',
+ 'user-service/src/migration/resources/db/postgresql/V2__rollback_charset_compatibility.sql': '2921e2a7b10c640ef24955902e38d649e5485af7df8656b10638ccf5f79521b8',
+ 'user-service/src/migration/resources/db/postgresql/V3__private_note_deletion_coordination.sql': '6ff3b954f5c16406a787229ee03b77e8e3fc4e562969782c1f32b9a2dae9bce1'}
+MEMBER_UNITS = [{'end_delimiter': '\n    }\n',
+  'sha256': '94e701269262c2ae4d0d7ee79f4648ae3d21bce3d639665366ed37f228ae5fc5',
+  'signature': '    public void withdraw(long userId) {',
+  'source': 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteService.java',
+  'start_anchor': '    public void withdraw(long userId) {'},
+ {'end_delimiter': '\n    }\n',
+  'sha256': '9667ffbd6c876303de0f5b02929aed4ab5dc3d4ce50c737e464e62d292379bbf',
+  'signature': '    private ContactMember lookup(long userId) {',
+  'source': 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteService.java',
+  'start_anchor': '    private ContactMember lookup(long userId) {'},
+ {'end_delimiter': '\n    }\n',
+  'sha256': 'd05eecaca914fd6b267439710d57fc313e6c77d303fd64f1b3589b64de12aecc',
+  'signature': '    private static ResponseStatusException memberLookupUnavailable() {',
+  'source': 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteService.java',
+  'start_anchor': '    private static ResponseStatusException memberLookupUnavailable() {'},
+ {'end_delimiter': '\n    }\n',
+  'sha256': '700eb05797bbc27e4c3b531baae655d696c7b55d2d7afc8247c972f68f0a389f',
+  'signature': '    private static void afterCommit(Runnable action) {',
+  'source': 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteService.java',
+  'start_anchor': '    private static void afterCommit(Runnable action) {'},
+ {'end_delimiter': '\n    }\n',
+  'sha256': '18d4ee2172744a8cfb5711f2d4b21fbc9c8e5052ad14f6be91f0b2866603f031',
+  'signature': '    private static void requireId(long userId) {',
+  'source': 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteService.java',
+  'start_anchor': '    private static void requireId(long userId) {'},
+ {'end_delimiter': '\n    }\n',
+  'sha256': '6a0d213030b2d6481724b2a74ebf6b3c4ea1d40a80be03e927efe77b416d4dad',
+  'signature': '    private static ResponseStatusException error(HttpStatus status, String message) {',
+  'source': 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteService.java',
+  'start_anchor': '    private static ResponseStatusException error(HttpStatus status, String message) {'}]
+MEMBER_EVIDENCE = 'backend-app/build/ci/member-cleanup-oracle-sha256.txt'
+MEMBER_WRAPPER = 'com/pawbridge/communityservice/contact/F29LegacyMemberCleanupService.java'
+
+
+def extract_member_cleanup(repository, output, evidence):
+    """Only the tagged late PG task consumes these additional raw types/withdraw wrapper."""
+    repository = pathlib.Path(repository).resolve()
+    output, evidence = (pathlib.Path(p).absolute() for p in (output, evidence))
+    if output != repository / OUTPUT_ROOT or evidence != repository / MEMBER_EVIDENCE:
+        raise SystemExit('Refusing non-dedicated member-cleanup output/receipt')
+    require_plain_path(output, 'member cleanup output')
+    require_plain_path(evidence, 'member cleanup receipt')
+    source, entries = {}, []
+    for path, digest in {**EXPECTED, **MEMBER_INPUTS}.items():
+        raw = subprocess.check_output(['git', 'show', SOURCE + ':' + path], cwd=repository)
+        if sha256(raw) != digest:
+            raise SystemExit('Member cleanup fixed source checksum differs: ' + path)
+        source[path] = raw
+        entries.append(digest + '  source ' + path)
+    for path, relative in {**SHARED, **MEMBER_SHARED}.items():
+        target = repository / relative
+        require_plain_path(target, 'member cleanup raw shared input')
+        if not target.is_file() or target.read_bytes() != source[path]:
+            raise SystemExit('Member cleanup shared raw bytes differ: ' + path)
+        entries.append(sha256(source[path]) + '  shared-byte-identity ' + relative)
+    # prepareF29LegacyOracle is a hard task prerequisite. Require, never synthesize,
+    # its three existing outputs/receipt here; the ordinary receipt stays byte-identical.
+    base_receipt = repository / EVIDENCE_PATH
+    require_plain_path(base_receipt, 'base F29 receipt')
+    if not base_receipt.is_file():
+        raise SystemExit('Member cleanup requires the existing F29 source receipt')
+    base_text = base_receipt.read_text()
+    for path in EXPECTED:
+        if (EXPECTED[path] + '  source ' + path + '\n') not in base_text:
+            raise SystemExit('Member cleanup base source receipt is incomplete')
+    for relative in OUTPUTS:
+        target = output / relative
+        require_plain_path(target, 'base F29 generated output')
+        if not target.is_file() or (sha256(target.read_bytes()) + '  generated ' + relative + '\n') not in base_text:
+            raise SystemExit('Member cleanup base generated bytes/receipt differ')
+    entries.append(sha256(base_receipt.read_bytes()) + '  base-F29-receipt ' + EVIDENCE_PATH)
+    methods = [checked_method(source[SERVICE].decode('utf-8'), unit) for unit in MEMBER_UNITS]
+    logger = checked_literal(source[SERVICE].decode('utf-8'), SERVICE_LOGGER).replace(
+            'PrivateNoteService.class', '"com.pawbridge.communityservice.contact.PrivateNoteService"')
+    wrapper = 'package com.pawbridge.communityservice.contact;\nimport com.pawbridge.communityservice.client.UserServiceClient;\nimport com.pawbridge.communityservice.contact.PrivateNoteModels.ContactMember;\nimport com.pawbridge.communityservice.chat.MemberChatModels.Withdrawn;\nimport feign.FeignException;\nimport org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;\nimport org.springframework.context.ApplicationEventPublisher;\nimport org.springframework.http.HttpStatus;\nimport org.springframework.transaction.support.TransactionOperations;\nimport org.springframework.transaction.support.TransactionSynchronization;\nimport org.springframework.transaction.support.TransactionSynchronizationManager;\nimport org.springframework.web.server.ResponseStatusException;\n/** Only six exact original methods; HTTP/Gateway, other note APIs and scheduling are not registered. */\npublic final class F29LegacyMemberCleanupService {\n' + logger + '    private final PrivateNoteRepository privateNoteRepository;\n    private final UserServiceClient userServiceClient;\n    private final TransactionOperations transactions;\n    private final PrivateNoteStream privateNoteStream;\n    private final ApplicationEventPublisher events;\n    public F29LegacyMemberCleanupService(PrivateNoteRepository repository, UserServiceClient client,\n            TransactionOperations transaction, PrivateNoteStream stream, ApplicationEventPublisher events) {\n        this.privateNoteRepository = repository;\n        this.userServiceClient = client;\n        this.transactions = transaction;\n        this.privateNoteStream = stream;\n        this.events = events;\n    }\n' + '\n'.join(methods) + '}\n'
+    generated = {path.split('/src/main/java/', 1)[1]: source[path] for path in MEMBER_RAW}
+    generated[MEMBER_WRAPPER] = wrapper.encode()
+    for relative in generated:
+        package, name = relative.rsplit('/', 1)
+        for other in (repository / 'backend-app/boot').glob('**/*.java'):
+            if other == output / relative:
+                continue
+            text = other.read_text()
+            if ('package ' + package.replace('/', '.') + ';') in text and re.search(
+                    r'\b(?:class|interface|record|enum)\s+' + re.escape(name[:-5]) + r'\b', text):
+                raise SystemExit('Refusing duplicate member cleanup FQN')
+    for unit in MEMBER_UNITS:
+        entries.append(unit['sha256'] + '  wrapper-method ' + unit['signature'].strip())
+    entries += ['wiring: raw User ContactMemberDeletion and raw chat lifecycle/models/repository, six exact withdraw methods only',
+                'wiring: source User actual JpaTM and inherited SimpleJpaRepository deleteById/flush are test-owned wiring; not whole UserService or remote HTTP',
+                'wiring: synchronous Spring EventListener under the same original Community JpaTM; no scheduled processor/Redis/stream resource starts',
+                'scope: default F29/F30 closure22/generated3/evidence are unchanged; member cleanup is late opt-in only']
+    for relative, raw in generated.items():
+        entries.append(sha256(raw) + '  generated ' + relative)
+    pending = [(output / relative, raw) for relative, raw in generated.items()]
+    pending.append((evidence, ('source_sha=' + SOURCE + '\n' + '\n'.join(entries) + '\n').encode()))
+    # Refuse ALL generated/source/receipt conflicts before any mkdir or write.
+    for target, raw in pending:
+        require_plain_path(target, 'member cleanup output or receipt')
+        if target.exists() and (not target.is_file() or target.read_bytes() != raw):
+            raise SystemExit('Refusing differing member cleanup output or receipt')
+    for target, raw in pending:
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(raw)
+
 if __name__ == '__main__':
-    if len(sys.argv) != 4:
-        raise SystemExit('F29 needs repository, generated source directory and evidence')
-    extract(*sys.argv[1:])
+    if len(sys.argv) == 5 and sys.argv[1] == '--member-cleanup':
+        extract_member_cleanup(*sys.argv[2:])
+    elif len(sys.argv) == 4:
+        extract(*sys.argv[1:])
+    else:
+        raise SystemExit('F29 needs [--member-cleanup] repository, generated source directory and evidence')

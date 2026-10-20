@@ -611,7 +611,246 @@ def smoke():
     return run(sys.modules[__name__])
 
 
+
+# Late member-cleanup fixture extension only: ordinary prepare/results/smoke stay unchanged.
+MEMBER_RECEIPT = 'member-cleanup-fixture-write.txt'
+MEMBER_TABLES = (
+    ('refresh_tokens','pawbridge_user.refresh_tokens','refresh_token_id'),
+    ('shelter_applications','pawbridge_user.shelter_applications','id'),
+    ('chat_rooms','pawbridge_community.member_chat_rooms','room_id'),
+    ('chat_members','pawbridge_community.member_chat_room_members','room_id,member_id'),
+    ('chat_messages','pawbridge_community.member_chat_messages','room_id,sequence'),
+    ('chat_requests','pawbridge_community.member_chat_requests','sender_id,request_id'),
+)
+MEMBER_FRAGMENTS = ('cf93ed908b18f63f59832cd0fe5bcf500ccf9e4c39972deeda5de446c4dd953d', 'eb3fe612fe9d4aff8372539b0d59e1da4c34266036ce88f1ed0ba51b88f5e139', 'b705222e7a9c9a6964628c937cff63470e1dd30103b27111ae3c5d94d284e1ec', '7afb8a3d992eba1258d61a610a418133f56766e9def3eb2e105c584bedcd2fdb')
+MEMBER_GRANTS = """GRANT SELECT(user_id),UPDATE(user_id),DELETE ON pawbridge_user.users TO pawbridge_f3_writer;
+GRANT INSERT(user_id) ON pawbridge_user.contact_deletions TO pawbridge_f3_writer;
+GRANT SELECT(user_id),DELETE ON pawbridge_user.favorites,pawbridge_user.refresh_tokens,pawbridge_user.shelter_applications TO pawbridge_f3_writer;
+GRANT DELETE ON pawbridge_community.private_note_members TO pawbridge_f3_writer;
+GRANT SELECT(recipient_id),UPDATE(context_type,context_id) ON pawbridge_community.private_notes TO pawbridge_f3_writer;
+GRANT UPDATE(request_hash) ON pawbridge_community.private_note_requests TO pawbridge_f3_writer;
+GRANT SELECT(member_id,room_id),DELETE ON pawbridge_community.member_chat_room_members TO pawbridge_f3_writer;
+GRANT SELECT(sender_id),DELETE ON pawbridge_community.member_chat_requests TO pawbridge_f3_writer;
+GRANT SELECT(sender_id),UPDATE(sender_id) ON pawbridge_community.member_chat_messages TO pawbridge_f3_writer;
+GRANT SELECT(room_id,first_member_id,second_member_id),UPDATE(first_member_id,second_member_id),DELETE ON pawbridge_community.member_chat_rooms TO pawbridge_f3_writer;
+"""
+
+
+def member_fixture_proof(owner):
+    return ('owner=' + owner + '\nsource_sha=' + SOURCE + '\n'
+            'fixture=F29 plus User deletion and installed-chat cleanup\n'
+            'new_business_ddl=0\nsynthetic_tables_added=6\nsynthetic_identity_sequences_added=2\n'
+            'new_schema=0\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\n'
+            + ''.join(digest + '  member-ddl-fragment-' + str(i) + '\n'
+                      for i, digest in enumerate(MEMBER_FRAGMENTS))
+            + hashlib.sha256(MEMBER_GRANTS.encode()).hexdigest() + '  member-exact-grants\n')
+
+
+def member_require_oracle_receipt():
+    # Canonical source40/raw-shared22/generated6 receipt, independent of owner/ACL denial.
+    # Its immutable bytes also bind the unchanged original F29 source22/generated3 receipt.
+    try:
+        extra = EVIDENCE / 'member-cleanup-oracle-sha256.txt'
+        if extra.is_symlink() or extra.resolve() != extra or not extra.is_file():
+            raise ValueError('receipt path')
+        raw = extra.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != 'df12ad2ab091706dd0e28762acec7825a1d345d4948f5805b128e3e52f367c9a':
+            raise ValueError('receipt identity')
+        lines = raw.decode('utf-8').splitlines()
+        if lines[0] != 'source_sha=' + SOURCE or any(
+                sum('  ' + kind + ' ' in line for line in lines) != count
+                for kind, count in (('source', 40), ('shared-byte-identity', 22), ('generated', 6), ('base-F29-receipt', 1))):
+            raise ValueError('receipt inventory')
+        base = EVIDENCE / 'f29-oracle-sha256.txt'
+        if base.is_symlink() or base.resolve() != base or not base.is_file():
+            raise ValueError('base receipt path')
+        base_raw = base.read_bytes()
+        if hashlib.sha256(base_raw).hexdigest() + '  base-F29-receipt ' + oracle.EVIDENCE_PATH not in lines:
+            raise ValueError('base receipt identity')
+        base_lines = base_raw.decode('utf-8').splitlines()
+        if sum('  generated ' in line for line in base_lines) != 3 or sum('  shared-adapted-identity ' in line for line in base_lines) != 1:
+            raise ValueError('base artifact inventory')
+        output = ROOT / 'boot/build/generated/sources/f29LegacyOracle/java'
+        for line in lines + base_lines:
+            match = re.fullmatch(r'([0-9a-f]{64})  (shared-byte-identity|shared-adapted-identity|generated) (.+)', line)
+            if match is None:
+                continue
+            digest, kind, relative = match.groups()
+            relative = Path(relative)
+            if relative.is_absolute() or '..' in relative.parts:
+                raise ValueError('artifact path')
+            artifact = (output if kind == 'generated' else ROOT.parent) / relative
+            if artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file() or hashlib.sha256(artifact.read_bytes()).hexdigest() != digest:
+                raise ValueError('artifact identity')
+    except (OSError, UnicodeError, ValueError, IndexError):
+        raise SystemExit('Member cleanup oracle receipt or source artifacts differ') from None
+
+
+def member_require_identity():
+    # Safe even while deliberately denying User/read or cleanup writer columns.
+    owner = f2.require_hosted()
+    require_prior_receipts(owner)  # marker-only chain, not User-seven/full ACL
+    f21.check_receipt(EVIDENCE / 'f29-fixture-write.txt', fixture_proof(owner))
+    f21.check_receipt(EVIDENCE / MEMBER_RECEIPT, member_fixture_proof(owner))
+    member_require_oracle_receipt()
+    return owner
+
+
+def member_verified_ddl():
+    inputs = {}
+    for path in ('user-service/src/migration/resources/db/postgresql/V1__user_schema.sql','user-service/src/migration/resources/db/postgresql/V2__rollback_charset_compatibility.sql','community-service/src/migration/resources/db/postgresql/V10__member_chat.sql'):
+        raw = subprocess.check_output(['git', 'show', SOURCE + ':' + path], cwd=ROOT.parent, stderr=subprocess.PIPE)
+        if hashlib.sha256(raw).hexdigest() != oracle.MEMBER_INPUTS.get(path):
+            raise SystemExit('Member cleanup original DDL source differs')
+        inputs[path] = raw.decode('utf-8')
+    user = inputs['user-service/src/migration/resources/db/postgresql/V1__user_schema.sql']; charset = inputs['user-service/src/migration/resources/db/postgresql/V2__rollback_charset_compatibility.sql']
+    parts = [user[user.index('CREATE TABLE refresh_tokens ('):user.index('CREATE TABLE shelter_applications (')],
+             user[user.index('CREATE TABLE shelter_applications ('):]]
+    start = charset.index('ALTER TABLE refresh_tokens ')
+    parts.append(charset[start:charset.index('\n\n', start) + 1])
+    parts.append(inputs['community-service/src/migration/resources/db/postgresql/V10__member_chat.sql'])
+    if tuple(hashlib.sha256(p.encode()).hexdigest() for p in parts) != MEMBER_FRAGMENTS:
+        raise SystemExit('Member cleanup four original LF fragments differ')
+    result=[]
+    for part in parts:
+        for name in ('refresh_tokens','shelter_applications'):
+            part=part.replace('CREATE TABLE '+name,'CREATE TABLE pawbridge_user.'+name).replace(
+                'ALTER TABLE '+name,'ALTER TABLE pawbridge_user.'+name).replace('ON '+name+' ','ON pawbridge_user.'+name+' ')
+        result.append(part)
+    return 'BEGIN;\n' + '\n'.join(result) + '\n' + MEMBER_GRANTS + 'COMMIT;\n'
+
+
+def member_database_snapshot():
+    # Full raw values/order for original18 + new6; no fallback to earlier strict/snapshot.
+    member_require_identity()
+    tables=SNAPSHOT_TABLES + MEMBER_TABLES
+    fields=[f4.literal(key)+',(SELECT COALESCE(json_agg(r ORDER BY '+order+"),'[]'::json) FROM "+relation+' r)'
+            for key,relation,order in tables]
+    value=json.loads(owned_sql('SELECT json_build_object('+','.join(fields)+')'))
+    if not isinstance(value,dict) or set(value)!={t[0] for t in tables} or any(not isinstance(v,list) for v in value.values()):
+        raise SystemExit('Member cleanup requires exactly twenty-four raw tables')
+    return value
+
+
+def member_require_fixture():
+    owner=member_require_identity()
+    # Initial DDL is hash-pinned and all six relations must be absent before creation.
+    # Recheck complete column inventory, owner, PK/FK/index counts and exact app ACL.
+    inventory={
+      'refresh_tokens':(('refresh_token_id','created_at','expires_at','token','user_id'),3,2,0),
+      'shelter_applications':(('id','user_id','shelter_name','status','requested_at','reviewed_by','reviewed_at','review_note','care_reg_no'),2,4,0),
+      'member_chat_rooms':(('room_id','first_member_id','second_member_id','latest_sequence'),3,2,0),
+      'member_chat_room_members':(('room_id','member_id','read_through','hidden_through'),3,2,1),
+      'member_chat_messages':(('room_id','sequence','sender_id','body','context_type','context_id','created_at','expires_at'),5,2,1),
+      'member_chat_requests':(('sender_id','request_id','request_hash','room_id','sequence','created_at'),1,2,0),
+    }
+    selects={'refresh_tokens':('user_id',),'shelter_applications':('user_id',),'member_chat_rooms':('room_id','first_member_id','second_member_id'),
+             'member_chat_room_members':('member_id','room_id'),'member_chat_messages':('sender_id',),'member_chat_requests':('sender_id',)}
+    updates={'member_chat_rooms':('first_member_id','second_member_id'),'member_chat_messages':('sender_id',)}
+    deletes=set(inventory)-{'member_chat_messages'}
+    for _,relation,_ in MEMBER_TABLES:
+        table=relation.split('.')[1];columns,constraints,indexes,fks=inventory[table]
+        expected='ARRAY['+','.join(f4.literal(c) for c in columns)+']::text[]'
+        sql="SELECT (SELECT array_agg(attname::text ORDER BY attnum)="+expected+" FROM pg_attribute WHERE attrelid='"+relation+"'::regclass AND attnum>0 AND NOT attisdropped) AND (SELECT relkind='r' AND relpersistence='p' AND pg_get_userbyid(relowner)='postgres' FROM pg_class WHERE oid='"+relation+"'::regclass) AND (SELECT count(*)="+str(constraints)+" AND bool_and(convalidated AND NOT condeferrable) AND count(*) FILTER(WHERE contype='p')=1 AND count(*) FILTER(WHERE contype='f')="+str(fks)+" FROM pg_constraint WHERE conrelid='"+relation+"'::regclass) AND (SELECT count(*)="+str(indexes)+" AND bool_and(indisvalid AND indisready) FROM pg_index WHERE indrelid='"+relation+"'::regclass)"
+        if owned_sql(sql)!='t':raise SystemExit('Member cleanup new table inventory/owner/constraints/indexes differs')
+        for mode,allowed in [('SELECT',selects[table]),('INSERT',()),('UPDATE',updates.get(table,())) ,('REFERENCES',())]:
+            predicate='column_name IN ('+','.join(f4.literal(c) for c in allowed)+')' if allowed else 'false'
+            sql="SELECT bool_and(has_column_privilege('pawbridge_f3_writer','"+relation+"',column_name,'"+mode+"')=("+predicate+")) FROM information_schema.columns WHERE table_schema='"+relation.split('.')[0]+"' AND table_name='"+table+"'"
+            if owned_sql(sql)!='t':raise SystemExit('Member cleanup new-table writer column ACL differs')
+        sql="SELECT NOT has_table_privilege('pawbridge_f2_reader','"+relation+"','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AND NOT has_table_privilege('pawbridge_f3_writer','"+relation+"','SELECT,INSERT,UPDATE,TRUNCATE,REFERENCES,TRIGGER') AND has_table_privilege('pawbridge_f3_writer','"+relation+"','DELETE')="+str(table in deletes).lower()+" AND (SELECT bool_and(NOT has_column_privilege('pawbridge_f2_reader','"+relation+"',column_name,'SELECT,INSERT,UPDATE,REFERENCES')) FROM information_schema.columns WHERE table_schema='"+relation.split('.')[0]+"' AND table_name='"+table+"')"
+        if owned_sql(sql)!='t':raise SystemExit('Member cleanup reader/table ACL differs')
+    for relation,field in [('pawbridge_user.refresh_tokens','refresh_token_id'),('pawbridge_user.shelter_applications','id')]:
+        if owned_sql("SELECT pg_get_serial_sequence('"+relation+"','"+field+"') IS NOT NULL AND NOT has_sequence_privilege('pawbridge_f2_reader',pg_get_serial_sequence('"+relation+"','"+field+"'),'USAGE,SELECT,UPDATE') AND NOT has_sequence_privilege('pawbridge_f3_writer',pg_get_serial_sequence('"+relation+"','"+field+"'),'USAGE,SELECT,UPDATE')")!='t':raise SystemExit('Member cleanup identity requires zero app sequence ACL')
+    # Preserve inherited nickname writes/readers; grant only cleanup deltas, never a User-wide SELECT.
+    changed_acl={
+      'pawbridge_user.users':(('user_id','nickname'),(),('user_id','nickname','updated_at'),True),
+      'pawbridge_user.favorites':(('user_id',),(),(),True),
+      'pawbridge_user.contact_deletions':((),('user_id',),(),False),
+      'pawbridge_community.private_note_members':(('member_id',),('member_id',),('member_id',),True),
+      NOTES:(('note_id','expires_at','sender_id','recipient_id'),('note_id','sender_id','recipient_id','body','reply_to','context_type','context_id','created_at','expires_at'),('note_id','context_type','context_id'),True),
+      REQUESTS:(('sender_id','request_id','request_hash','note_id','created_at'),('sender_id','request_id','request_hash','note_id','created_at'),('request_hash',),False),
+    }
+    for relation,(read,create,change,delete) in changed_acl.items():
+        schema,table=relation.split('.')
+        for mode,columns in [('SELECT',read),('INSERT',create),('UPDATE',change),('REFERENCES',())]:
+            allowed='column_name IN ('+','.join(f4.literal(c) for c in columns)+')' if columns else 'false'
+            query="SELECT bool_and(has_column_privilege('pawbridge_f3_writer','"+relation+"',column_name,'"+mode+"')=("+allowed+")) FROM information_schema.columns WHERE table_schema='"+schema+"' AND table_name='"+table+"'"
+            if owned_sql(query)!='t':raise SystemExit('Member cleanup exact inherited-plus-delta writer columns differ')
+        query="SELECT NOT has_table_privilege('pawbridge_f3_writer','"+relation+"','SELECT,INSERT,UPDATE,TRUNCATE,REFERENCES,TRIGGER') AND has_table_privilege('pawbridge_f3_writer','"+relation+"','DELETE')="+str(delete).lower()
+        if owned_sql(query)!='t':raise SystemExit('Member cleanup exact inherited-plus-delta writer table rights differ')
+    require_reports_fixture()  # Unchanged relation-only checker, never old F29 global strict.
+    return owner
+
+
+def member_cleanup_prepare():
+    f2.require_hosted()
+    owner=require_fixture()  # The final old F29 strict call: before new privileges/relations.
+    member_require_oracle_receipt()  # Reject missing/changed source evidence before any DDL/GRANT.
+    target=EVIDENCE/MEMBER_RECEIPT
+    f21.check_receipt(target,member_fixture_proof(owner),allow_missing=True)
+    if target.exists():raise SystemExit('Refusing an existing member cleanup receipt')
+    ddl=member_verified_ddl()
+    for _,relation,_ in MEMBER_TABLES:
+        if owned_sql('SELECT to_regclass('+f4.literal(relation)+') IS NULL')!='t':raise SystemExit('Refusing existing member cleanup relation')
+    for relation in ('pawbridge_user.refresh_tokens_refresh_token_id_seq','pawbridge_user.shelter_applications_id_seq'):
+        if owned_sql('SELECT to_regclass('+f4.literal(relation)+') IS NULL')!='t':raise SystemExit('Refusing existing member cleanup sequence')
+    before=database_snapshot()
+    owned_sql(input_text=ddl)
+    with target.open('x') as out:out.write(member_fixture_proof(owner))
+    member_require_fixture()
+    if member_database_snapshot()!=dict(before,**{key:[] for key,_,_ in MEMBER_TABLES}):raise SystemExit('Member cleanup extension changed prior rows')
+
+# Late runtime only: never re-enter the pre-extension F29 strict/18-table smoke.
+@contextmanager
+def member_denied_privilege(kind):
+    clauses = {'chat-update': 'UPDATE(sender_id) ON pawbridge_community.member_chat_messages',
+               'user-delete': 'DELETE ON pawbridge_user.users'}
+    if kind not in clauses:
+        raise SystemExit('Unknown member cleanup privilege case')
+    member_require_fixture()
+    clause = clauses[kind]
+    # Include a failed/lost REVOKE acknowledgement in the restoration boundary.
+    try:
+        owned_sql('REVOKE ' + clause + ' FROM pawbridge_f3_writer')
+        yield
+    finally:
+        member_require_identity()  # Marker/receipt identity only while ACL is intentionally absent.
+        owned_sql('GRANT ' + clause + ' TO pawbridge_f3_writer')
+        member_require_fixture()
+
+
+def member_require_runtime_results():
+    member_require_identity()
+    folder = ROOT / 'boot/build/test-results/memberCleanupCompatibilityTest'
+    paths = list(folder.glob('TEST-*.xml'))
+    if len(paths) != 1 or paths[0].is_symlink() or paths[0].resolve() != paths[0]:
+        raise SystemExit('Member cleanup requires its one exact completed PG XML')
+    try:
+        suite = ET.parse(paths[0]).getroot()
+        cases = suite.findall('testcase')
+        if (suite.tag != 'testsuite' or suite.get('name') != PG_CLASS
+                or paths[0].name != 'TEST-' + PG_CLASS + '.xml'
+                or int(suite.get('tests', '-1')) != 12 or len(cases) != 12
+                or len(list(suite.iter('testcase'))) != 12 or int(suite.get('disabled', '0')) != 0
+                or any(int(suite.get(k, '-1')) != 0 for k in ('failures', 'errors', 'skipped'))
+                or any(c.get('classname') != PG_CLASS or not c.get('name') for c in cases)
+                or len({c.get('name') for c in cases}) != 12
+                or any(c.get('status') not in (None, 'run', 'passed')
+                       or c.get('result') not in (None, 'completed', 'passed', 'success') for c in cases)
+                or any(node.tag in ('failure', 'error', 'skipped') for node in suite.iter())):
+            raise ValueError()
+    except (OSError, ET.ParseError, ValueError, TypeError):
+        raise SystemExit('Member cleanup PG XML is incomplete, skipped or unsuccessful') from None
+
+
+def member_cleanup_smoke():
+    f2.require_hosted()
+    import sys
+    from f29_stream_probe import run_member_cleanup
+    return run_member_cleanup(sys.modules[__name__])
+
+
 if __name__ == "__main__":
     import sys
     f2.require_hosted()
-    {"prepare": prepare, "results": verify_results, "smoke": smoke}[sys.argv[1]]()
+    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke}[sys.argv[1]]()

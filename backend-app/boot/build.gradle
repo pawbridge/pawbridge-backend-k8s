@@ -855,7 +855,7 @@ tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF29L
 tasks.register('noteSendCompatibilityTest', Test) {
     testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
     classpath = sourceSets.compatibilityTest.runtimeClasspath
-    useJUnitPlatform { excludeTags 'note-expiry' }
+    useJUnitPlatform { excludeTags 'note-expiry', 'member-cleanup' }
     systemProperty 'user.timezone', 'UTC'
     systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
@@ -873,7 +873,7 @@ tasks.register('noteSendCompatibilityTest', Test) {
 tasks.register('noteSendCompatibilitySeoulTest', Test) {
     testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
     classpath = sourceSets.compatibilityTest.runtimeClasspath
-    useJUnitPlatform { excludeTags 'note-expiry' }
+    useJUnitPlatform { excludeTags 'note-expiry', 'member-cleanup' }
     systemProperty 'user.timezone', 'Asia/Seoul'
     systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
@@ -902,5 +902,40 @@ tasks.register('noteExpiryCompatibilityTest', Test) {
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('noteSendCompatibilityTest')
+    outputs.upToDateWhen { false }
+}
+
+// Additional compatibility source only; ordinary F29 source22/output3 receipt stays unchanged.
+// Required at compilation because the same existing PG class contains the tagged methods.
+tasks.register('prepareMemberCleanupLegacyOracle', Exec) {
+    dependsOn tasks.named('prepareF29LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f29_legacy_oracle.py'))
+    outputs.file(rootProject.file('build/ci/member-cleanup-oracle-sha256.txt'))
+    workingDir rootProject.projectDir
+    commandLine 'python3', rootProject.file('scripts/prepare_f29_legacy_oracle.py').absolutePath,
+            '--member-cleanup', rootProject.projectDir.parentFile.absolutePath,
+            layout.buildDirectory.dir('generated/sources/f29LegacyOracle/java').get().asFile.absolutePath,
+            rootProject.file('build/ci/member-cleanup-oracle-sha256.txt').absolutePath
+    outputs.upToDateWhen { false }
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareMemberCleanupLegacyOracle') }
+
+// Late fixture extension must run after complete F29/F30 evidence; no new JAR journey or Seoul task.
+tasks.register('memberCleanupCompatibilityTest', Test) {
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'member-cleanup' }
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
+        systemProperty "${stage}.fixture.receipt", rootProject.file("build/ci/${stage}-fixture-write.txt").absolutePath
+    }
+    systemProperty 'member.cleanup.fixture.receipt', rootProject.file('build/ci/member-cleanup-fixture-write.txt').absolutePath
+    systemProperty 'member.cleanup.oracle.receipt', rootProject.file('build/ci/member-cleanup-oracle-sha256.txt').absolutePath
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteExpiryCompatibilityTest')
     outputs.upToDateWhen { false }
 }

@@ -35,7 +35,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertTrue(marker in body, 'Required workflow script is missing: ' + name)
         return textwrap.dedent(body.split(marker, 1)[1])
 
-    def select(self, paths, *, pilot=False, raw=False):
+    def select(self, paths, *, pilot=False, raw=False, note=False, member=False):
         script = self.script('selection')
         marker = 'python3 - <<\'PY\' >> "$GITHUB_OUTPUT"\n'
         self.assertIn(marker, script)
@@ -53,6 +53,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                     patch.object(sys, 'path', list(sys.path)), \
                     patch.object(ci_branch_policy, 'validate_event', return_value='pull_request'), \
                     patch.object(ci_branch_policy, 'changed_paths', return_value=paths), \
+                    patch.object(backend_contract_profile, 'verify_note_expiry_inputs', return_value=note), \
+                    patch.object(backend_contract_profile, 'verify_member_management_inputs', return_value=member), \
                     contextlib.redirect_stdout(output):
                 exec(compile(program, str(WORKFLOW), 'exec'), {})
         value = output.getvalue()
@@ -86,6 +88,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                      '.github/scripts/ci_branch_policy.py',
                      '.github/scripts/backend_contract_profile.py',
                      '.github/scripts/test_backend_contract_profile.py',
+                     '.github/scripts/test_backend_note_expiry_profile.py',
+                     '.github/scripts/test_backend_member_management_profile.py',
                      '.github/scripts/backend_postmerge_proof.py',
                      '.github/scripts/test_backend_postmerge_proof.py'):
             with self.subTest(path=path):
@@ -208,46 +212,49 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('if: always()', evidence)
         self.assertIn('TEST-*.xml', evidence)
 
-    def test_given_runtime_stage_conditions__when_selecting_pilot__then_only_the_six_smokes_can_be_skipped(self):
+    def test_given_runtime_stage_conditions__when_selecting_profiles__then_execute_exact_known_jars_and_report_every_skip(self):
         check = self.job('check')
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)
         found, conditional = [], []
-        selected = {mode: [] for mode in (backend_contract_profile.FULL,
-                    backend_contract_profile.PILOT, backend_contract_profile.NOTE_EXPIRY)}
+        modes = (backend_contract_profile.FULL, backend_contract_profile.PILOT,
+                 backend_contract_profile.NOTE_EXPIRY, backend_contract_profile.MEMBER_MANAGEMENT)
+        selected = {mode: [] for mode in modes}
+        wanted_conditions = {
+            "${{ matrix.profile == 'full' }}": {backend_contract_profile.FULL},
+            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}":
+                {backend_contract_profile.FULL, backend_contract_profile.PILOT},
+            "${{ matrix.profile != 'note-expiry' }}":
+                {backend_contract_profile.FULL, backend_contract_profile.PILOT, backend_contract_profile.MEMBER_MANAGEMENT},
+        }
         allowed_conditions = {'Remove only the owned disposable fixture',
                               'Reject missing, failed or falsely skipped runtime contracts',
                               'Preserve tests and bounded runtime evidence',
-                              'Preserve the verified executable JAR'}
+                              'Preserve the verified executable JAR',
+                              'Verify late member cleanup runtime controls without resources',
+                              'Add pinned User and installed chat tables only after fixed source preparation and F30 evidence'}
         for part in parts[1:]:
             name = part.splitlines()[0].removeprefix('      - name: ')
             smoke = re.findall(r'^\s*(?:run: )?python3 scripts/(f[0-9]+)_ci.py smoke\s*$', part, re.MULTILINE)
-            if smoke:
-                self.assertEqual(1, len(smoke))
-                key = 'jar_' + smoke[0]
+            member = re.findall(r'^\s*(?:run: )?python3 scripts/f29_ci.py member-cleanup-smoke\s*$', part, re.MULTILINE)
+            if smoke or member:
+                self.assertEqual(1, len(smoke) + len(member))
+                key = 'jar_f31' if member else 'jar_' + smoke[0]
                 found.append(key)
                 self.assertIn('        id: ' + key + '\n', part)
-                if '        if:' in part:
-                    condition = re.findall(r'^        if: (.+)$', part, re.MULTILINE)
-                    self.assertEqual(1, len(condition))
-                    if condition[0] == "${{ matrix.profile == 'full' }}":
-                        conditional.append(key)
-                    else:
-                        self.assertEqual("${{ matrix.profile != 'note-expiry' }}", condition[0])
-                    for mode in selected:
-                        if (condition[0] == "${{ matrix.profile == 'full' }}" and mode == backend_contract_profile.FULL
-                                or condition[0] == "${{ matrix.profile != 'note-expiry' }}" and mode != backend_contract_profile.NOTE_EXPIRY):
-                            selected[mode].append(key)
-                else:
-                    self.fail('Every old JAR must declare its selected coverage.')
-            elif '        if:' in part:
-                if name not in allowed_conditions:
-                    self.assertTrue(name.startswith('Compare ') or name.startswith('Require exact F')
-                                    or name == 'Prepare only the owned F4 dependent table shape for scoped expiry')
+                conditions = re.findall(r'^        if: (.+)$', part, re.MULTILINE)
+                self.assertEqual(1, len(conditions), 'Every JAR must declare its selected coverage.')
+                self.assertIn(conditions[0], wanted_conditions)
+                if conditions[0] == "${{ matrix.profile == 'full' }}":
+                    conditional.append(key)
+                for mode in wanted_conditions[conditions[0]]:
+                    selected[mode].append(key)
+            elif '        if:' in part and name not in allowed_conditions:
+                self.assertTrue(name.startswith('Compare ') or name.startswith('Require exact F')
+                                or name == 'Prepare only the owned F4 dependent table shape for scoped expiry')
         self.assertEqual(list(backend_contract_profile.ALL_SMOKES), found)
         self.assertEqual(list(backend_contract_profile.PILOT_SKIPS), conditional)
         for mode, actual in selected.items():
             self.assertEqual(list(backend_contract_profile.expected_smokes(mode)), actual)
-        self.assertIn('id: owned_cleanup', check)
         audit = check.split('      - name: Reject missing, failed or falsely skipped runtime contracts', 1)[1]
         audit = audit.split('      - name:', 1)[0]
         self.assertIn('if: always()', audit)
@@ -256,6 +263,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertLess(check.index('id: owned_cleanup'), check.index('--mode audit'))
         for path in ('.github/scripts/backend_contract_profile.py', '.github/scripts/ci_branch_policy.py'):
             self.assertIn('            ' + path + '\n', check)
+
 
 
 
@@ -281,7 +289,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             if re.search(r'run: python3 scripts/f[0-9]+_ci.py prepare\n', part):
                 self.assertNotIn('        if:', part)
         shape = next(part for part in parts if 'id: fixture_f4_shape\n' in part)
-        self.assertIn("if: ${{ matrix.profile == 'note-expiry' }}", shape)
+        self.assertIn("if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}", shape)
         self.assertIn('python3 scripts/f4_ci.py prepare-shape', shape)
         self.assertLess(check.index('id: jar_f3\n'), check.index('id: fixture_f4_shape\n'))
         self.assertLess(check.index('id: fixture_f4_shape\n'), check.index('id: jar_f4\n'))
@@ -291,6 +299,30 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('verify_note_expiry_report', pg)
         self.assertIn('note_expiry_scope_verified', self.job('selection'))
         self.assertIn('verify_note_expiry_inputs()', self.job('selection'))
+
+    def test_given_verified_member_scope__when_wiring__then_keep_expiry_before_fixture_pg_and_the_nine_request_runtime(self):
+        actual = self.select(['.github/workflows/backend-app-check.yml'], member=True, raw=True)
+        self.assertEqual({'selected': 'true', 'profiles': '["member-management"]'},
+                         dict(line.split('=', 1) for line in actual.splitlines()))
+        check = self.job('check')
+        self.assertLess(check.index('id: pg_note_expiry'), check.index('id: fixture_member_cleanup'))
+        self.assertLess(check.index('id: fixture_member_cleanup'), check.index('id: pg_member_cleanup'))
+        self.assertLess(check.index('id: pg_member_cleanup'), check.index('id: jar_f31'))
+        self.assertLess(check.index('id: jar_f31'), check.index('id: owned_cleanup'))
+        parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)[1:]
+        for key, command in (
+                ('fixture_member_cleanup', 'python3 scripts/f29_ci.py member-cleanup-prepare'),
+                ('pg_member_cleanup', ':boot:memberCleanupCompatibilityTest'),
+                ('jar_f31', 'python3 scripts/f29_ci.py member-cleanup-smoke')):
+            step = next(part for part in parts if 'id: ' + key + '\n' in part)
+            self.assertIn("if: ${{ matrix.profile != 'note-expiry' }}", step)
+            self.assertIn(command, step)
+        pg = next(part for part in parts if 'id: pg_member_cleanup\n' in part)
+        self.assertIn('f29_ci.member_require_runtime_results()', pg)
+        self.assertIn('member_management_scope_verified', self.job('selection'))
+        self.assertIn('verify_member_management_inputs()', self.job('selection'))
+        self.assertIn("result['request_checks'] == result['delete_checks'] + result['get_checks'] == 9", check)
+        self.assertIn("result['child_log_evidence'] == 'safe-copied'", check)
 
     def test_given_unknown_or_failed_proof__when_gating__then_do_not_accept_full_success(self):
         for proof, mode in (('failure', 'full'), ('cancelled', 'full'),

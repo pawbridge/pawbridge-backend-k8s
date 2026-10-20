@@ -37,7 +37,9 @@ FULL_MEMBERS = PACKAGE_MEMBERS + ('build/ci/contract-plan.txt', 'build/ci/contra
 ALLOWED_STEP_CONDITIONS = {'always()', "${{ matrix.profile == 'full' }}",
                            "${{ success() && matrix.profile == 'full' }}",
                            "${{ matrix.profile == 'note-expiry' }}",
-                           "${{ matrix.profile != 'note-expiry' }}"}
+                           "${{ matrix.profile != 'note-expiry' }}",
+                           "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}",
+                           "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"}
 
 
 class Unavailable(ValueError):
@@ -220,7 +222,7 @@ def workflow_contract(raw):
         require(name is not None and 'continue-on-error' not in body, 'unknown-workflow')
         name = name.group(1)
         if key == 'check':
-            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?'[^']+' \}\}", name)
+            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?'[^']+' \}\}", name)
             require(expression is not None, 'unknown-workflow')
             name = expression.group(1)
         require('${{' not in name, 'unknown-workflow')
@@ -233,7 +235,8 @@ def workflow_contract(raw):
                     'unknown-workflow-condition')
             # This verifier still accepts only an actually executed full profile.
             # A scoped-only preparation is not part of that full execution.
-            if condition != ["${{ matrix.profile == 'note-expiry' }}"]:
+            if condition not in (["${{ matrix.profile == 'note-expiry' }}"],
+                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"]):
                 steps.append(step.group(1))
         require(bool(steps) and len(steps) == len(set(steps)), 'unknown-workflow')
         result[key] = (name, steps)

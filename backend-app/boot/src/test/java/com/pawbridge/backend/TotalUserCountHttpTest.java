@@ -144,7 +144,7 @@ class TotalUserCountHttpTest {
             "POST /api/v1/admin/users/stats/total-users", "PUT /api/v1/admin/users/stats/total-users",
             "DELETE /api/v1/admin/users/stats/total-users", "GET /api/v1/admin/users/stats/total-users/",
             "GET /api/admin/users/stats/total-users", "GET /api/v1/admin/users", "GET /api/v1/admin/users/stats/active-users",
-            "DELETE /api/v1/admin/users/8"})
+            "DELETE /api/v1/admin/users/8/extra"})
     void given__unexposed_admin_neighbor_or_method__when__requesting_with_a_valid_admin_token__then__retain_generic_403_before_queries(String request) throws Exception {
         String[] parts = request.split(" ", 2);
 

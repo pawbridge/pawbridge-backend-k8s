@@ -1,4 +1,4 @@
-"""F29 fixture/XML controls only; no guard has been executed at private handoff.
+"""F29 fixture/XML controls; added member issuer guards inspect Java source only.
 
 The eventual unit run mocks SQL and subprocess boundaries. Pinned source input loading
 uses read-only Git objects, not legacy working-tree paths. These guards do not prove
@@ -41,6 +41,10 @@ MINIMAL_CHECKOUT_INPUTS = tuple('backend-app/scripts/f' + str(stage) + '_ci.py' 
     'backend-app/scripts/f13_fixture.sql', 'backend-app/scripts/f14_fixture.sql',
     'backend-app/scripts/f15_fixture.sql', 'backend-app/scripts/f16_fixture.sql',
     'backend-app/scripts/f17_fixture.sql')
+
+MEMBER_PG_SOURCE = ('backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/'
+                    'PostgresqlNoteSendCompatibilityTest.java')
+MINIMAL_CHECKOUT_INPUTS += (MEMBER_PG_SOURCE,)
 
 
 def pinned_sources():
@@ -475,6 +479,176 @@ class F29FixtureGuardTest(unittest.TestCase):
                     with self.assertRaises(SystemExit): f29.verify_results()
                 self.assertFalse((root / 'build/ci/f29-results.json').exists())
 
+
+
+
+class MemberCleanupLateGuardTest(unittest.TestCase):
+    """Changed late source/fixture controls only; mock SQL never proves PG or managers."""
+    @staticmethod
+    def sources():
+        result={}
+        for source,expected in {**oracle.EXPECTED,**oracle.MEMBER_INPUTS}.items():
+            raw=READ_ONLY_GIT(['git','show',oracle.SOURCE+':'+source],cwd=f29.ROOT.parent,stderr=subprocess.PIPE)
+            if hashlib.sha256(raw).hexdigest()!=expected:raise AssertionError('Fixed member source input differs')
+            result[source]=raw
+        return result
+
+    @staticmethod
+    def inputs(directory,sources,canonical=False):
+        repository=Path(directory).resolve();root=repository/'backend-app'
+        oracle_evidence(root,sources)
+        for source,relative in oracle.MEMBER_SHARED.items():
+            target=repository/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(sources[source])
+        if canonical:
+            # Only temporary controlled files: produce the actual immutable receipt rather than
+            # accepting the old test's deliberately synthetic output-identity placeholders.
+            for relative in oracle.OUTPUTS:(repository/oracle.OUTPUT_ROOT/relative).unlink()
+            (repository/oracle.EVIDENCE_PATH).unlink()
+            with patch.object(oracle.subprocess,'check_output',side_effect=source_git(sources)):
+                oracle.extract(repository,repository/oracle.OUTPUT_ROOT,repository/oracle.EVIDENCE_PATH)
+                oracle.extract_member_cleanup(repository,repository/oracle.OUTPUT_ROOT,repository/oracle.MEMBER_EVIDENCE)
+        return repository,repository/oracle.OUTPUT_ROOT,repository/oracle.MEMBER_EVIDENCE
+
+    def test_given_last_member_issuer__when_checking_optional_file_creation__then_only_selected_scope_can_create_private_owned_tokens(self):
+        # Source-wiring regression only: this does not execute Java or prove filesystem/PG behavior.
+        source=(Path(__file__).resolve().parents[2]/MEMBER_PG_SOURCE).read_text()
+        start=source.index(' void givenAllMemberCasesSucceededAndOwnedRowsRestored__whenRefreshingOnlyThreeUsedPrincipalsLast__')
+        method=source[start:source.index('\n private final class MemberCleanupRound',start)]
+        expected_path='assertThat(path).isEqualTo(Path.of(F3PostgresqlFixture.required("RUNNER_TEMP")).toAbsolutePath().normalize().resolve("f3-tokens-"+run+".json"));'
+        create_branch=method[method.index('  if(create){'):method.index('  }else{')]
+        self.assertIn('requireMemberFixture();returned();assertThat(successfulMemberCases.get()).isEqualTo(11)',method)
+        self.assertLess(method.index('String before=memberSnapshot();'),method.index(expected_path))
+        self.assertIn('boolean create=!Files.exists(path,LinkOption.NOFOLLOW_LINKS);',method)
+        self.assertIn('assertThat(System.getenv("CONTRACT_PROFILE")).isEqualTo("member-management");',create_branch)
+        self.assertIn('assertThat(Files.isSymbolicLink(parent)).isFalse()',create_branch)
+        self.assertIn('assertThat(Files.isDirectory(parent,LinkOption.NOFOLLOW_LINKS)).isTrue()',create_branch)
+        self.assertIn('assertThat(parent.toRealPath()).isEqualTo(parent)',create_branch)
+        self.assertIn('Files.newByteChannel(path,Set.of(StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE),PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))',method)
+        self.assertNotIn('Files.createDirectories',method)
+        self.assertNotIn('Files.setPosixFilePermissions',method)
+        self.assertLess(method.index('memberSnapshot().equals(before)'),method.index('Files.newByteChannel'))
+
+    def test_given_existing_member_token_file__when_checking_final_issuer__then_keep_prior_keys_roles_and_full_file_safety(self):
+        source=(Path(__file__).resolve().parents[2]/MEMBER_PG_SOURCE).read_text()
+        start=source.index(' void givenAllMemberCasesSucceededAndOwnedRowsRestored__whenRefreshingOnlyThreeUsedPrincipalsLast__')
+        method=source[start:source.index('\n private final class MemberCleanupRound',start)]
+        existing=method[method.index('  }else{'):method.index('  var mapper=')]
+        for check in ('Files.isSymbolicLink(path)', 'Files.isRegularFile(path)', 'path.toRealPath()',
+                      'Files.getPosixFilePermissions(path)'):
+            self.assertIn(check,existing)
+        self.assertIn('if(!create)assertThat(tokens.keySet()).containsAll(ids.keySet())',method)
+        self.assertIn('ids.put("F19_ADMIN",9_973_001L);ids.put("F29_CALLER",9_983_001L);ids.put("F29_OTHER",9_983_002L)',method)
+        self.assertIn('entry.getKey().equals("F19_ADMIN")?Role.ROLE_ADMIN:Role.ROLE_USER',method)
+        self.assertIn('new JwtProvider(secret,600_000,600_000)',method)
+        self.assertIn('claims.getExpiration().getTime()-claims.getIssuedAt().getTime()).isEqualTo(600_000L)',method)
+        self.assertIn('Objects.equals(tokens.get(entry.getKey()),entry.getValue())',method)
+        self.assertIn('containsExactlyInAnyOrderElementsOf(create?ids.keySet():prior.keySet())',method)
+        self.assertIn('Files.writeString(path,mapper.writeValueAsString(tokens),StandardOpenOption.WRITE,StandardOpenOption.TRUNCATE_EXISTING,LinkOption.NOFOLLOW_LINKS)',method)
+
+    def test_given_fixed_shared_inputs__when_explicitly_extending_member_source__then_add_only_raw5_wrapper1_and_keep_default_generated3_receipt_bytes(self):
+        sources=self.sources()
+        with tempfile.TemporaryDirectory() as directory:
+            repository,output,evidence=self.inputs(directory,sources)
+            before={(output/p): (output/p).read_bytes() for p in oracle.OUTPUTS}
+            base=(repository/oracle.EVIDENCE_PATH).read_bytes()
+            with patch.object(oracle.subprocess,'check_output',side_effect=source_git(sources)):
+                oracle.extract_member_cleanup(repository,output,evidence)
+                oracle.extract_member_cleanup(repository,output,evidence)
+            self.assertEqual(base,(repository/oracle.EVIDENCE_PATH).read_bytes())
+            for p,raw in before.items():self.assertEqual(raw,p.read_bytes())
+            for source in oracle.MEMBER_RAW:self.assertEqual(sources[source],(output/source.split('/src/main/java/',1)[1]).read_bytes())
+            wrapper=(output/oracle.MEMBER_WRAPPER).read_text()
+            for unit in oracle.MEMBER_UNITS:self.assertIn(oracle.checked_method(sources[oracle.SERVICE].decode(),unit),wrapper)
+            self.assertEqual(6,len([p for p in output.rglob('*.java') if p not in before]))
+            self.assertIn('base-F29-receipt',evidence.read_text())
+
+    def test_given_source_shared_receipt_or_fqn_conflict__when_extending_member_source__then_refuse_every_new_write(self):
+        original=self.sources()
+        for defect in ('source','shared','receipt','fqn'):
+            with self.subTest(defect=defect),tempfile.TemporaryDirectory() as directory:
+                sources=dict(original);repository,output,evidence=self.inputs(directory,sources)
+                if defect=='source':sources[oracle.MEMBER_RAW[0]]=b'tampered'
+                elif defect=='shared':(repository/next(iter(oracle.MEMBER_SHARED.values()))).write_bytes(b'tampered')
+                elif defect=='receipt':evidence.parent.mkdir(parents=True,exist_ok=True);evidence.write_text('foreign receipt')
+                else:
+                    other=repository/'backend-app/boot/src/compatibilityTest/java/Conflict.java';other.parent.mkdir(parents=True,exist_ok=True)
+                    other.write_text('package com.pawbridge.communityservice.contact; class F29LegacyMemberCleanupService {}')
+                with patch.object(oracle.subprocess,'check_output',side_effect=source_git(sources)):
+                    with self.assertRaises(SystemExit):oracle.extract_member_cleanup(repository,output,evidence)
+                self.assertEqual(3,len(list(output.rglob('*.java'))))
+                self.assertFalse((output/oracle.MEMBER_WRAPPER).exists())
+
+    def test_given_exact_member_ddl_fragments__when_qualifying__then_only_six_tables_and_minimal_cleanup_grants_are_assembled_without_running_sql(self):
+        sources=self.sources()
+        with patch.object(f29.subprocess,'check_output',side_effect=source_git(sources)),patch.object(f29,'owned_sql') as sql:
+            ddl=f29.member_verified_ddl()
+        sql.assert_not_called();self.assertTrue(ddl.startswith('BEGIN;'));self.assertTrue(ddl.endswith('COMMIT;\n'))
+        self.assertEqual(6,ddl.count('CREATE TABLE '));self.assertIn('ON DELETE CASCADE',ddl)
+        self.assertIn('ck_rollback_charset_refresh_tokens',ddl);self.assertIn('WHERE status = \'PENDING\'',ddl)
+        self.assertIn('UPDATE(user_id)',ddl);self.assertIn('UPDATE(context_type,context_id)',ddl)
+        self.assertNotIn('GRANT ALL',ddl);self.assertNotIn('GRANT USAGE',ddl);self.assertNotIn('CREATE SCHEMA',ddl)
+        self.assertNotIn('CREATE TABLE pawbridge_user.outbox_events',ddl)
+
+    def test_given_user_acl_is_intentionally_denied__when_checking_member_identity__then_use_hosted_marker_only_receipts_and_never_old_acl_owner(self):
+        sources=self.sources()
+        with tempfile.TemporaryDirectory() as directory:
+            repository,_,evidence=self.inputs(directory,sources,canonical=True)
+            root=repository/'backend-app'
+            with patch.object(f29,'ROOT',root),patch.object(f29,'EVIDENCE',evidence.parent),patch.object(f29.f2,'require_hosted',return_value=OWNER),patch.object(f29,'require_prior_receipts') as prior,patch.object(f29.f28,'require_owner') as old,patch.object(f29.f21,'check_receipt') as receipt,patch.object(f29,'owned_sql') as sql:
+                self.assertEqual(OWNER,f29.member_require_identity())
+            prior.assert_called_once_with(OWNER);old.assert_not_called();sql.assert_not_called()
+            self.assertEqual([evidence.parent/'f29-fixture-write.txt',evidence.parent/f29.MEMBER_RECEIPT],[call.args[0] for call in receipt.call_args_list])
+
+    def test_given_missing_changed_redirected_oracle_or_changed_artifacts__when_checking_member_identity__then_reject_without_sql_or_private_output(self):
+        sources=self.sources()
+        for defect in ('missing','source','shared','generated','base','base-generated','adapted','redirected'):
+            with self.subTest(defect=defect),tempfile.TemporaryDirectory() as directory:
+                repository,output,evidence=self.inputs(directory,sources,canonical=True)
+                if defect=='missing':evidence.unlink()
+                elif defect=='source':evidence.write_bytes(evidence.read_bytes().replace(f29.SOURCE.encode(),b'0'*40,1))
+                elif defect=='shared':(repository/next(iter(oracle.MEMBER_SHARED.values()))).write_bytes(b'private source mutation')
+                elif defect=='generated':(output/oracle.MEMBER_WRAPPER).write_bytes(b'private generated mutation')
+                elif defect=='base':(repository/oracle.EVIDENCE_PATH).write_bytes(b'private base receipt mutation')
+                elif defect=='base-generated':(output/oracle.OUTPUTS[0]).write_bytes(b'private base generated mutation')
+                elif defect=='adapted':(repository/oracle.F18_ADAPTED_PATH).write_bytes(b'private adapted mutation')
+                else:
+                    content=evidence.read_bytes();evidence.unlink();alias=evidence.with_name('alias-member-oracle');alias.write_bytes(content);evidence.symlink_to(alias)
+                with patch.object(f29,'ROOT',repository/'backend-app'),patch.object(f29,'EVIDENCE',evidence.parent),patch.object(f29.f2,'require_hosted',return_value=OWNER),patch.object(f29,'require_prior_receipts'),patch.object(f29.f21,'check_receipt'),patch.object(f29,'owned_sql') as sql:
+                    with self.assertRaisesRegex(SystemExit,'Member cleanup oracle receipt or source artifacts differ') as failure:
+                        f29.member_require_identity()
+                self.assertNotIn('private',str(failure.exception));self.assertTrue(failure.exception.__suppress_context__)
+                self.assertIsNone(failure.exception.__cause__);sql.assert_not_called()
+
+    def test_given_complete_old_fixture__when_late_member_prepare_runs__then_old_strict_once_precedes_only_atomic_extension_and_new24_checks(self):
+        sources=self.sources();events=[]
+        with tempfile.TemporaryDirectory() as directory:
+            repository,_,extra=self.inputs(directory,sources,canonical=True)
+            evidence=extra.parent;before={key:[] for key,_,_ in f29.SNAPSHOT_TABLES}
+            validate=f29.member_require_oracle_receipt
+            def validate_evidence():
+                validate();events.append('oracle')
+            with patch.object(f29,'ROOT',repository/'backend-app'),patch.object(f29.f2,'require_hosted',return_value=OWNER),patch.object(f29,'require_fixture',side_effect=lambda:events.append('old') or OWNER),patch.object(f29,'EVIDENCE',evidence),patch.object(f29,'member_require_oracle_receipt',side_effect=validate_evidence),patch.object(f29.subprocess,'check_output',side_effect=source_git(sources)),patch.object(f29,'owned_sql',side_effect=lambda query='',**kw:events.append('write' if 'input_text' in kw else 'absence') or 't'),patch.object(f29,'database_snapshot',return_value=before),patch.object(f29,'member_require_fixture',side_effect=lambda:events.append('new') or OWNER),patch.object(f29,'member_database_snapshot',return_value=dict(before,**{key:[] for key,_,_ in f29.MEMBER_TABLES})):
+                f29.member_cleanup_prepare()
+            self.assertEqual(['old','oracle'],events[:2]);self.assertEqual(1,events.count('old'));self.assertEqual(1,events.count('write'))
+            self.assertLess(events.index('write'),events.index('new'))
+            self.assertEqual(f29.member_fixture_proof(OWNER),(evidence/f29.MEMBER_RECEIPT).read_text())
+
+    def test_given_missing_or_changed_oracle_evidence__when_preparing_member_cleanup__then_reject_before_any_ddl_or_grant(self):
+        sources=self.sources()
+        for defect in ('missing','receipt','generated'):
+            with self.subTest(defect=defect),tempfile.TemporaryDirectory() as directory:
+                repository,output,evidence=self.inputs(directory,sources,canonical=True)
+                if defect=='missing':evidence.unlink()
+                elif defect=='receipt':evidence.write_bytes(b'private receipt mutation')
+                else:(output/oracle.MEMBER_WRAPPER).write_bytes(b'private generated mutation')
+                with patch.object(f29,'ROOT',repository/'backend-app'),patch.object(f29,'EVIDENCE',evidence.parent),patch.object(f29.f2,'require_hosted',return_value=OWNER),patch.object(f29,'require_fixture',return_value=OWNER) as old,patch.object(f29,'require_prior_receipts'),patch.object(f29.f21,'check_receipt'),patch.object(f29,'member_verified_ddl',return_value='BEGIN;\nCOMMIT;\n') as ddl,patch.object(f29,'database_snapshot',return_value={}) as snapshot,patch.object(f29,'member_require_fixture',side_effect=f29.member_require_identity),patch.object(f29,'owned_sql',return_value='t') as sql:
+                    with self.assertRaisesRegex(SystemExit,'Member cleanup oracle receipt or source artifacts differ') as failure:
+                        f29.member_cleanup_prepare()
+                self.assertEqual([], [call for call in sql.call_args_list if 'input_text' in call.kwargs])
+                sql.assert_not_called();ddl.assert_not_called();snapshot.assert_not_called();old.assert_called_once_with()
+                self.assertFalse((evidence.parent/f29.MEMBER_RECEIPT).exists())
+                self.assertNotIn('private',str(failure.exception));self.assertTrue(failure.exception.__suppress_context__)
+                self.assertIsNone(failure.exception.__cause__)
 
 if __name__ == '__main__':
     print('F29 fixture/XML guards: mocked resources; immutable inputs use read-only Git objects. No actual PG/JAR/SSE evidence.', flush=True)

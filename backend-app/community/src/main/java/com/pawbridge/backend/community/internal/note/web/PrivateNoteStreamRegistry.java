@@ -175,6 +175,14 @@ public final class PrivateNoteStreamRegistry implements NoteChangeHints, NoteDel
         memberConnections(memberId).forEach(registration -> enqueue(() -> send(registration, "resync", null)));
     }
 
+    public void closeMember(long memberId) {
+        memberConnections(memberId).forEach(this::requestCompletion);
+    }
+
+    public void resyncAll() {
+        allConnections().forEach(registration -> enqueue(() -> send(registration, "resync", null)));
+    }
+
     @Override
     public void publish(long memberId, NoteNotifications.Notification notification) {
         memberConnections(memberId).forEach(registration -> enqueue(() -> send(registration, "note", notification)));

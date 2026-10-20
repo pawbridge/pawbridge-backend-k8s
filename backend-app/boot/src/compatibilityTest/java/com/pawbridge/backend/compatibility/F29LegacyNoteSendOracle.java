@@ -169,4 +169,150 @@ final class F29LegacyNoteSendOracle implements AutoCloseable {
         catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new IllegalStateException("Original user boundary did not terminate"); }
         finally { context.close(); }
     }
+
+    /** Late member-cleanup only. Reuses this Community JpaTM/datasource/User thread;
+     * adds the distinct original User JpaTM (User schema), never a new app pool. */
+    LegacyMemberCleanup memberCleanup(F3PostgresqlFixture fixture, DataSource reader,
+            Runnable pendingVisible, Runnable afterCommunity, java.util.function.Consumer<String> committed) {
+        return new LegacyMemberCleanup(fixture, reader, pendingVisible, afterCommunity, committed);
+    }
+
+    final class LegacyMemberCleanup implements AutoCloseable {
+        private final AnnotationConfigApplicationContext userContext = new AnnotationConfigApplicationContext();
+        private final AnnotationConfigApplicationContext eventContext = new AnnotationConfigApplicationContext();
+        private final DataSource userDataSource;
+        private final com.pawbridge.userservice.contact.ContactMemberDeletion deletion;
+        private final List<Long> observedContacts = new CopyOnWriteArrayList<>();
+        private final AtomicInteger chatCalls = new AtomicInteger();
+        private RuntimeException communityFailure;
+        private Long loadedUserHookId;
+        private Runnable loadedUserHook;
+        private final AtomicInteger loadedUserHookCalls = new AtomicInteger();
+
+        LegacyMemberCleanup(F3PostgresqlFixture fixture, DataSource reader, Runnable pendingVisible,
+                Runnable afterCommunity, java.util.function.Consumer<String> committed) {
+            userDataSource = new AbstractDataSource() {
+                @Override public Connection getConnection() throws SQLException {
+                    Connection connection = fixture.admin();
+                    try (var statement = connection.createStatement()) {
+                        statement.execute("SET statement_timeout='18s'; SET lock_timeout='10s'; SET application_name='member-cleanup-source-user'");
+                    } catch (SQLException | RuntimeException failure) { connection.close(); throw failure; }
+                    return connection;
+                }
+                @Override public Connection getConnection(String user, String password) throws SQLException {
+                    throw new SQLException("Only the owned User reference datasource is permitted");
+                }
+            };
+            try {
+                userContext.getEnvironment().getPropertySources().addFirst(new MapPropertySource("member-cleanup-user-jpa", Map.of(
+                        "spring.jpa.hibernate.ddl-auto", "none", "spring.jpa.open-in-view", "false",
+                        "spring.jpa.properties.hibernate.default_schema", "pawbridge_user",
+                        "spring.jpa.properties.hibernate.jdbc.time_zone", "UTC")));
+                userContext.registerBean("dataSource", DataSource.class, () -> userDataSource);
+                userContext.register(F19LegacyTotalUserCountOracle.LegacyJpa.class);
+                userContext.refresh();
+                var userManager = userContext.getBean(PlatformTransactionManager.class);
+                assertThat(userManager).isInstanceOf(JpaTransactionManager.class);
+                assertThat(((JpaTransactionManager)userManager).getDataSource()).isSameAs(userDataSource);
+                var entityManager = org.springframework.orm.jpa.SharedEntityManagerCreator.createSharedEntityManager(
+                        userContext.getBean(jakarta.persistence.EntityManagerFactory.class));
+                // The real inherited find/delete/flush remain in place; only this optional post-find observation is injected.
+                var observedEntityManager = (jakarta.persistence.EntityManager)java.lang.reflect.Proxy.newProxyInstance(
+                        jakarta.persistence.EntityManager.class.getClassLoader(),
+                        new Class<?>[]{jakarta.persistence.EntityManager.class}, (proxy, method, args) -> {
+                            Object result;
+                            try { result=method.invoke(entityManager,args); }
+                            catch(java.lang.reflect.InvocationTargetException failure){throw failure.getCause();}
+                            if(loadedUserHook!=null && method.getName().equals("find") && args!=null && args.length>=2
+                                    && args[0]==com.pawbridge.userservice.entity.User.class
+                                    && java.util.Objects.equals(args[1],loadedUserHookId) && result!=null){
+                                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
+                                assertThat(TransactionSynchronizationManager.hasResource(userDataSource)).isTrue();
+                                assertThat(entityManager.contains(result)).isTrue();
+                                var action=loadedUserHook;loadedUserHook=null;loadedUserHookCalls.incrementAndGet();action.run();
+                            }
+                            return result;
+                        });
+                var inherited = new org.springframework.data.jpa.repository.support.SimpleJpaRepository<
+                        com.pawbridge.userservice.entity.User, Long>(com.pawbridge.userservice.entity.User.class, observedEntityManager);
+                // Narrow only the two actually called inherited operations; no repository query bootstrap/mock delete.
+                var repository = (com.pawbridge.userservice.repository.UserRepository)java.lang.reflect.Proxy.newProxyInstance(
+                        com.pawbridge.userservice.repository.UserRepository.class.getClassLoader(),
+                        new Class<?>[]{com.pawbridge.userservice.repository.UserRepository.class}, (proxy, method, args) -> {
+                            if (method.getName().equals("deleteById") && method.getParameterCount()==1) {
+                                inherited.deleteById((Long)args[0]); return null;
+                            }
+                            if (method.getName().equals("flush") && method.getParameterCount()==0) {
+                                inherited.flush(); return null;
+                            }
+                            throw new UnsupportedOperationException("Unselected original User repository operation");
+                        });
+                var jdbc = new JdbcTemplate(referenceDataSource);
+                var sourceChat = new com.pawbridge.communityservice.chat.MemberChatRepository(jdbc) {
+                    @Override public void withdraw(long id) {
+                        assertThat(TransactionSynchronizationManager.hasResource(referenceDataSource)).isTrue();
+                        assertThat(TransactionSynchronizationManager.hasResource(userDataSource)).isFalse();
+                        chatCalls.incrementAndGet();
+                        super.withdraw(id);
+                    }
+                };
+                eventContext.registerBean(com.pawbridge.communityservice.chat.MemberChatDataLifecycle.class,
+                        () -> new com.pawbridge.communityservice.chat.MemberChatDataLifecycle(
+                                sourceChat, Clock.systemUTC(), manager, false));
+                // @EventListener is synchronous; no @EnableScheduling/bean scan/Redis transport is registered.
+                eventContext.refresh();
+                var sourceContacts = new com.pawbridge.userservice.contact.ContactMemberQuery(new JdbcTemplate(reader));
+                UserServiceClient client = mock(UserServiceClient.class);
+                when(client.getContactMember(anyLong())).thenAnswer(invocation -> {
+                    assertThat(TransactionSynchronizationManager.hasResource(referenceDataSource)).isTrue();
+                    assertThat(TransactionSynchronizationManager.hasResource(userDataSource)).isFalse();
+                    long id=invocation.getArgument(0,Long.class);observedContacts.add(id);
+                    var task=userThread.submit(() -> {
+                        assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                        try {
+                            var member=sourceContacts.get(id);
+                            return new PrivateNoteModels.ContactMember(member.userId(),member.nickname(),member.active(),member.deletionPending());
+                        } finally {
+                            assertThat(TransactionSynchronizationManager.hasResource(reader)).isFalse();
+                            assertThat(((com.zaxxer.hikari.HikariDataSource)reader).getHikariPoolMXBean().getActiveConnections()).isZero();
+                        }
+                    });
+                    try {return task.get(5,TimeUnit.SECONDS);}
+                    catch(ExecutionException failure){if(failure.getCause() instanceof Error error)throw error;throw unavailable();}
+                    catch(InterruptedException failure){task.cancel(true);Thread.currentThread().interrupt();throw unavailable();}
+                    catch(java.util.concurrent.TimeoutException failure){task.cancel(true);throw unavailable();}
+                });
+                var stream=mock(PrivateNoteStream.class);
+                doAnswer(invocation->{committed.accept("close:"+invocation.getArgument(0,Long.class));return null;})
+                        .when(stream).close(anyLong());
+                doAnswer(invocation->{committed.accept("resyncAll");return null;}).when(stream).resyncAll();
+                var tx=new TransactionTemplate(manager);tx.setTimeout(15);
+                var withdrawal=new com.pawbridge.communityservice.contact.F29LegacyMemberCleanupService(
+                        new PrivateNoteRepository(jdbc),client,tx,stream,eventContext);
+                var boundary=mock(com.pawbridge.userservice.contact.CommunityContactClient.class);
+                doAnswer(invocation->{
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                    assertThat(TransactionSynchronizationManager.hasResource(userDataSource)).isFalse();
+                    assertThat(TransactionSynchronizationManager.hasResource(referenceDataSource)).isFalse();
+                    pendingVisible.run();
+                    try {withdrawal.withdraw(invocation.getArgument(0,Long.class));}
+                    catch(RuntimeException failure){communityFailure=failure;throw failure;}
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                    afterCommunity.run();return null;
+                }).when(boundary).removeMailboxes(anyLong());
+                deletion=new com.pawbridge.userservice.contact.ContactMemberDeletion(
+                        new JdbcTemplate(userDataSource),boundary,repository,userManager);
+            } catch(RuntimeException|Error failure) {eventContext.close();userContext.close();throw failure;}
+        }
+
+        void delete(long id){deletion.delete(id);}
+        void afterManagedUserLoaded(long id,Runnable action){loadedUserHookId=id;loadedUserHook=java.util.Objects.requireNonNull(action);}
+        int loadedUserHookCalls(){return loadedUserHookCalls.get();}
+        List<Long> contactIds(){return List.copyOf(observedContacts);}
+        int chatCalls(){return chatCalls.get();}
+        RuntimeException communityFailure(){return communityFailure;}
+        boolean userResourceBound(){return TransactionSynchronizationManager.hasResource(userDataSource);}
+        @Override public void close(){eventContext.close();userContext.close();}
+    }
+
 }
