@@ -2,6 +2,8 @@ package com.pawbridge.backend;
 
 import com.pawbridge.backend.boot.configuration.ReadConfiguration;
 import com.pawbridge.backend.boot.configuration.MemberChatConfiguration;
+import com.pawbridge.backend.boot.configuration.GoogleOAuthConfiguration;
+import com.pawbridge.backend.boot.configuration.AdminUserDirectoryConfiguration;
 import com.pawbridge.backend.boot.configuration.AdminPostStatisticsConfiguration;
 import com.pawbridge.backend.boot.configuration.AdminPostReadConfiguration;
 import com.pawbridge.backend.boot.configuration.ReadDatabaseSettings;
@@ -47,8 +49,9 @@ import org.springframework.context.annotation.Import;
         UserDetailsServiceAutoConfiguration.class,
         org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration.class,
         org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration.class,
-        org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration.class})
-@Import({MemberChatConfiguration.class, ReadConfiguration.class, AdminPostReadConfiguration.class, AdminPostStatisticsConfiguration.class, PostWriteConfiguration.class, CommentWriteConfiguration.class, UserProfileConfiguration.class, UserNicknameConfiguration.class, FavoriteStatusConfiguration.class, HomeVideoReadConfiguration.class, VisitReadConfiguration.class, VisitCollectionConfiguration.class, NoteRecipientReadConfiguration.class, NoteBlockStatusReadConfiguration.class, TotalUserCountReadConfiguration.class, SignupStatisticsReadConfiguration.class, AdminUserUpdateConfiguration.class, AuthSessionConfiguration.class, NoteBlockListReadConfiguration.class, NoteNotificationsReadConfiguration.class, PrivateNoteReadConfiguration.class, PrivateNoteListConfiguration.class, NoteBlockRemoveConfiguration.class, NoteBlockCreateConfiguration.class, NoteReadStreamConfiguration.class, NoteFavoriteConfiguration.class, NoteDeletionConfiguration.class, NoteSendConfiguration.class, NoteExpiryConfiguration.class, MemberCleanupConfiguration.class})
+        org.springframework.boot.autoconfigure.data.redis.RedisReactiveAutoConfiguration.class,
+        org.springframework.boot.autoconfigure.security.oauth2.client.servlet.OAuth2ClientAutoConfiguration.class})
+@Import({com.pawbridge.backend.boot.configuration.UserAnimalActivitiesConfiguration.class, com.pawbridge.backend.boot.configuration.ShelterMembershipConfiguration.class, AdminUserDirectoryConfiguration.class, GoogleOAuthConfiguration.class, MemberChatConfiguration.class, ReadConfiguration.class, AdminPostReadConfiguration.class, AdminPostStatisticsConfiguration.class, PostWriteConfiguration.class, CommentWriteConfiguration.class, UserProfileConfiguration.class, UserNicknameConfiguration.class, FavoriteStatusConfiguration.class, HomeVideoReadConfiguration.class, VisitReadConfiguration.class, VisitCollectionConfiguration.class, NoteRecipientReadConfiguration.class, NoteBlockStatusReadConfiguration.class, TotalUserCountReadConfiguration.class, SignupStatisticsReadConfiguration.class, AdminUserUpdateConfiguration.class, AuthSessionConfiguration.class, NoteBlockListReadConfiguration.class, NoteNotificationsReadConfiguration.class, PrivateNoteReadConfiguration.class, PrivateNoteListConfiguration.class, NoteBlockRemoveConfiguration.class, NoteBlockCreateConfiguration.class, NoteReadStreamConfiguration.class, NoteFavoriteConfiguration.class, NoteDeletionConfiguration.class, NoteSendConfiguration.class, NoteExpiryConfiguration.class, MemberCleanupConfiguration.class})
 public class PawBridgeApplication {
     public static void main(String[] args) {
         // Validate explicit inputs before Spring can open a listener or a database connection.

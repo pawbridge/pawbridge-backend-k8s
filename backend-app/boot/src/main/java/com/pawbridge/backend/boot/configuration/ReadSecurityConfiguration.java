@@ -29,7 +29,9 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.visits.enabled:false}") boolean visitsEnabled,
             @Value("${pawbridge.visits.collection-enabled:false}") boolean collectionEnabled,
             @Value("${pawbridge.auth.sessions-enabled:false}") boolean sessionsEnabled,
-            @Value("${pawbridge.chat.enabled:${MEMBER_CHAT_ENABLED:false}}") boolean chatEnabledFlag) throws Exception {
+            @Value("${pawbridge.chat.enabled:${MEMBER_CHAT_ENABLED:false}}") boolean chatEnabledFlag,
+            @Value("${pawbridge.shelter-membership.enabled:false}") boolean shelterMembershipEnabled,
+            @Value("${pawbridge.user-animal-activities.enabled:false}") boolean animalActivitiesEnabled) throws Exception {
 
         var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
         var postDeletion = new AntPathRequestMatcher("/api/v1/posts/*", "DELETE");
@@ -62,6 +64,9 @@ public class ReadSecurityConfiguration {
         var userDetail = new AndRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "GET"),
                 new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/admin/users/search", "GET")));
+        var userDirectory = new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/admin/users", "GET"),
+                new AntPathRequestMatcher("/api/v1/admin/users/search", "GET"));
         var userUpdate = new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "PUT");
         var sessionEnabled=(org.springframework.security.web.util.matcher.RequestMatcher) request -> sessionsEnabled;
         var sessionRefresh=new AndRequestMatcher(sessionEnabled,new AntPathRequestMatcher("/api/v1/auth/refresh","POST"));
@@ -91,8 +96,25 @@ public class ReadSecurityConfiguration {
         var adminPostDelete = new AntPathRequestMatcher("/api/v1/admin/posts/{postId}", "DELETE");
         var postStatsToday = new AntPathRequestMatcher("/api/v1/admin/posts/stats/today", "GET");
         var postStatsPeriod = new AntPathRequestMatcher("/api/v1/admin/posts/stats/period", "GET");
-        var adminRoutes = new OrRequestMatcher(adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var animalActivities=(org.springframework.security.web.util.matcher.RequestMatcher)request -> animalActivitiesEnabled;
+        var userAnimalActivities=new AndRequestMatcher(animalActivities,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/favorites/{animalId}","POST"),
+                new AntPathRequestMatcher("/api/v1/favorites/{animalId}","DELETE"),
+                new AntPathRequestMatcher("/api/v1/users/me/favorite-animals","GET"),
+                new AntPathRequestMatcher("/api/v1/users/me/registered-animals","GET")));
+        var shelterEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->shelterMembershipEnabled;
+        var shelterOwn=new AndRequestMatcher(shelterEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/users/me/shelter-applications","GET"),
+                new AntPathRequestMatcher("/api/v1/users/me/shelter-applications","POST")));
+        var shelterAdmin=new AndRequestMatcher(shelterEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/stats","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/approve","POST"),
+                new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
+                new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
+        var adminRoutes = new OrRequestMatcher(shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)

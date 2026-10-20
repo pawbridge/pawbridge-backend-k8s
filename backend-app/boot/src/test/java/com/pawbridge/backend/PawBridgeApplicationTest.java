@@ -61,6 +61,10 @@ class PawBridgeApplicationTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.web.AdminUserDetailController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.directory.web.AdminUserDirectoryController.class)).hasSize(1);
+                    var directory=context.getBean(com.pawbridge.backend.user.internal.directory.application.UserDirectoryQuery.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(directory,"jdbc")).isSameAs(context.getBean("readJdbc"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(directory,"readOnlyTransaction")).isSameAs(context.getBean("readOnlyTransaction"));
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.application.SignupStatisticsQuery.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.SignupStatisticsController.class)).hasSize(1);
                     var signupStatistics = context.getBean(com.pawbridge.backend.user.internal.statistics.application.SignupStatisticsQuery.class);
@@ -74,6 +78,8 @@ class PawBridgeApplicationTest {
                     var adminUpdateTx = (org.springframework.transaction.support.TransactionTemplate)org.springframework.test.util.ReflectionTestUtils.getField(adminUpdate, "transaction");
                     assertThat(adminUpdateTx.getTransactionManager()).isSameAs(context.getBean("writeTransactionManager"));
                     assertThat(adminUpdateTx.getTimeout()).isEqualTo(15);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.shelter.application.ShelterMembership.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.session.application.AuthSessions.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostReadController.class)).hasSize(1);

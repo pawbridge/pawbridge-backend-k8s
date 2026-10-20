@@ -3,11 +3,16 @@ plugins {
 }
 
 dependencies {
+    implementation 'org.springframework.security:spring-security-oauth2-client'
+    implementation 'org.springframework.security:spring-security-web'
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
     implementation 'org.springframework:spring-jdbc'
     implementation 'org.springframework:spring-tx'
     implementation 'org.springframework:spring-web'
     implementation 'org.springframework:spring-webmvc'
+    implementation 'org.springframework.data:spring-data-commons'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     compileOnly 'jakarta.servlet:jakarta.servlet-api'
     implementation 'jakarta.validation:jakarta.validation-api'
     implementation 'org.postgresql:postgresql'
@@ -19,5 +24,5 @@ dependencies {
 
     testImplementation 'org.mockito:mockito-core'
     testImplementation 'ch.qos.logback:logback-classic'
-    testRuntimeOnly 'jakarta.servlet:jakarta.servlet-api'
+    testImplementation 'jakarta.servlet:jakarta.servlet-api'
 }
