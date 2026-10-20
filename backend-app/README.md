@@ -809,3 +809,14 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을
 이번 수정의 단일 오프라인 호출 10초에서 코어 단위 59사례와 신규 동시성 PG3·영향 기존 PG2가 모두 통과했다. 서로 다른 ADMIN/SHELTER와 실제 두 PG PID의 잠금 대기를 관찰해 동시 상태·설명 보존과 동시 자동번호의 분리를 검증했고 중간 번호 삭제도 재현 후 회복했다. 3개 신규 계약은 기존 코드에서 먼저 RED였다. 다른 성공 PG/JAR와 전체19사례를 반복 실행한 결과가 아니다. 시험은 pool 한도를 임시2로 늘린 뒤 worker 종료가 확인됐을 때만1로 복귀하고 정확한 소유 행을 정리한다. worker 종료가 불확실하면 후속 시험·행 삭제·pool close를 거부해 근거를 보존하며 실패 경로의 전체 자원 정상 종료까지 주장하지 않는다. 이 시험과 mock TX metadata 단위 검증은 운영 또는 실제 AI 검증이 아니다.
 
 READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수준 기대값 한 곳을 같은 RC 계약으로 맞췄다. REQUIRED·기본 timeout·writer 연결·readOnly 단언은 유지했다. 해당 구성 클래스12사례를 별도7초 호출로 통과했고 PG·업무 단위·JAR를 반복하지 않았다. 고정 CI 입력은 이 구성 시험까지 실제 source hash로 결속한다.
+
+
+## 바로구매와 본인 주문 상세 편입
+
+`pawbridge.store-direct-orders.enabled=true`에서만 `POST /api/v1/orders/direct`와 `GET /api/v1/orders/{orderId}`를 조립한다. 기본값과 `on` 별칭은 비활성이다. 검증된 JWT 회원 ID를 사용하고 현재 회원·삭제 대기를 확인한다. 주문·상품/SKU 잠금·전체 SKU Outbox·PostgreSQL 검색 반영은 같은 writer JPA 트랜잭션에 참여한다. 주문 상세는 같은 한정 persistence unit의 별도 읽기 전용 트랜잭션에서 조회한다. 기존 MyPage reader는 그대로 유지한다.
+
+기존 주문 응답과 구매 당시 상품명·가격·수량 스냅샷을 보존한다. 수량/금액 overflow는400, 기존 재고/상품 상태 오류는500이며 rollback charset CHECK에 한정한 원문400/C007도 유지한다. overflow·검색·Outbox·주문 저장 실패 시 재고까지 함께 롤백한다. 재요청은 새 주문이며 멱등키나 PENDING 자동 만료를 추가하지 않았다. 장바구니·Payment 및 외부 결제는 이 편입에 포함하지 않는다.
+
+로컬 합성 PG 시험은 소유 marker와 제한 writer를 검증한 전용 `P9_PG_SETTINGS` 파일로 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlDirectOrderTest`만 선택한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다. ordinary test에서 owned PG 태그는 제외된다. 동일 상품 동시 구매·실제 행 잠금·전체 롤백·감사 시각/스냅샷·정확한 cleanup은 합성 환경의 근거이며 운영 검증이 아니다.
+
+운영 활성화에는 새 실행기의 DB 권한·라우팅·이벤트 소비자 및 기존 Store 실행기와의 소유권 인계가 별도로 필요하다. 현재 운영·Kafka/CDC·장바구니·결제·복구 자료는 이 변경으로 제어하지 않는다.
