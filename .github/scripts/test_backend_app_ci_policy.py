@@ -66,7 +66,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                  'MODULE_SELECTED': selected, 'MODULE_RESULT': check,
                  'PACKAGE_RESULT': package if package is not None else ('skipped' if selected == 'false' else 'success'),
                  'PROOF_RESULT': proof if proof is not None else ('skipped' if selected == 'false' else 'success'),
-                 'PROOF_MODE': mode if mode is not None else ('' if selected == 'false' else 'full')},
+                 'PROOF_MODE': mode if mode is not None else ('' if selected == 'false' else 'execute')},
             capture_output=True, text=True, timeout=3,
         )
 
@@ -139,7 +139,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('PUSH_BEFORE_SHA: ${{ github.event.before }}', selection)
         check = self.job('check')
         self.assertIn('needs: [selection, proof, package]', check)
-        self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'full' }}", check)
+        self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", check)
         gate = self.job('ci-result')
         self.assertIn('needs: [selection, proof, package, check]', gate)
         self.assertIn('SELECTION_RESULT: ${{ needs.selection.result }}', gate)
@@ -212,6 +212,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         check = self.job('check')
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)
         found, conditional = [], []
+        selected = {mode: [] for mode in (backend_contract_profile.FULL,
+                    backend_contract_profile.PILOT, backend_contract_profile.NOTE_EXPIRY)}
         allowed_conditions = {'Remove only the owned disposable fixture',
                               'Reject missing, failed or falsely skipped runtime contracts',
                               'Preserve tests and bounded runtime evidence',
@@ -225,12 +227,26 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 found.append(key)
                 self.assertIn('        id: ' + key + '\n', part)
                 if '        if:' in part:
-                    conditional.append(key)
-                    self.assertIn("        if: ${{ matrix.profile == 'full' }}", part)
+                    condition = re.findall(r'^        if: (.+)$', part, re.MULTILINE)
+                    self.assertEqual(1, len(condition))
+                    if condition[0] == "${{ matrix.profile == 'full' }}":
+                        conditional.append(key)
+                    else:
+                        self.assertEqual("${{ matrix.profile != 'note-expiry' }}", condition[0])
+                    for mode in selected:
+                        if (condition[0] == "${{ matrix.profile == 'full' }}" and mode == backend_contract_profile.FULL
+                                or condition[0] == "${{ matrix.profile != 'note-expiry' }}" and mode != backend_contract_profile.NOTE_EXPIRY):
+                            selected[mode].append(key)
+                else:
+                    self.fail('Every old JAR must declare its selected coverage.')
             elif '        if:' in part:
-                self.assertIn(name, allowed_conditions)
+                if name not in allowed_conditions:
+                    self.assertTrue(name.startswith('Compare ') or name.startswith('Require exact F')
+                                    or name == 'Prepare only the owned F4 dependent table shape for scoped expiry')
         self.assertEqual(list(backend_contract_profile.ALL_SMOKES), found)
         self.assertEqual(list(backend_contract_profile.PILOT_SKIPS), conditional)
+        for mode, actual in selected.items():
+            self.assertEqual(list(backend_contract_profile.expected_smokes(mode)), actual)
         self.assertIn('id: owned_cleanup', check)
         audit = check.split('      - name: Reject missing, failed or falsely skipped runtime contracts', 1)[1]
         audit = audit.split('      - name:', 1)[0]
@@ -258,6 +274,24 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 with self.subTest(key=key, value=value):
                     self.assertNotEqual(0, self.gate(**dict(valid, **{key: value})).returncode)
 
+    def test_given_scoped_expiry__when_wiring__then_keep_preparation_pg_and_cleanup_with_explicit_noncoverage(self):
+        check = self.job('check')
+        parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)[1:]
+        for part in parts:
+            if re.search(r'run: python3 scripts/f[0-9]+_ci.py prepare\n', part):
+                self.assertNotIn('        if:', part)
+        shape = next(part for part in parts if 'id: fixture_f4_shape\n' in part)
+        self.assertIn("if: ${{ matrix.profile == 'note-expiry' }}", shape)
+        self.assertIn('python3 scripts/f4_ci.py prepare-shape', shape)
+        self.assertLess(check.index('id: jar_f3\n'), check.index('id: fixture_f4_shape\n'))
+        self.assertLess(check.index('id: fixture_f4_shape\n'), check.index('id: jar_f4\n'))
+        pg = next(part for part in parts if 'id: pg_note_expiry\n' in part)
+        self.assertNotIn('        if:', pg)
+        self.assertIn(':boot:noteExpiryCompatibilityTest', pg)
+        self.assertIn('verify_note_expiry_report', pg)
+        self.assertIn('note_expiry_scope_verified', self.job('selection'))
+        self.assertIn('verify_note_expiry_inputs()', self.job('selection'))
+
     def test_given_unknown_or_failed_proof__when_gating__then_do_not_accept_full_success(self):
         for proof, mode in (('failure', 'full'), ('cancelled', 'full'),
                             ('skipped', 'full'), ('', 'full'),
@@ -276,7 +310,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertLess(text.index('  proof:\n'), text.index('  package:\n'))
         self.assertIn('needs: [selection, proof]', package)
         for stage in (package, check):
-            self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'full' }}", stage)
+            self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", stage)
         self.assertIn('permissions:\n      contents: read\n      actions: read\n      pull-requests: read', proof)
         self.assertIn('persist-credentials: false', proof)
         self.assertIn('fetch-depth: 0', proof)

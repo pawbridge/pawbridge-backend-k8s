@@ -461,14 +461,22 @@ CI는 기존 F29 원문/JpaTM·18표 소유 fixture를 재사용하여 UTC expir
 
 ## 병합 후 동일 코드의 전체 검증 인수
 
-PR에서는 기존 package와 full 검증을 실행한다. dev push의 `proof` job은 새 package보다 먼저, 방금 병합한 같은 저장소 PR의 **검사된 전체 Git tree**와 현재 dev가 같은지 판정한다. 첫 범위는 push 직전 base와 head를 두 부모로 가진 단일 merge commit이며 squash/rebase·여러 PR·다른 tree는 기존 full을 실행한다. 브랜치명이나 PR head SHA만 같다고 재사용하지 않는다.
+PR에서는 package와 선택된 계약 검증을 실행한다. 미분류 변경의 기본값은 full이다. dev push의 `proof` job은 새 package보다 먼저, 방금 병합한 같은 저장소 PR의 **검사된 전체 Git tree**와 현재 dev가 같은지 판정한다. 첫 범위는 push 직전 base와 head를 두 부모로 가진 단일 merge commit이며 squash/rebase·여러 PR·다른 tree는 현재 선택된 계약을 새로 실행한다. 브랜치명이나 PR head SHA만 같다고 재사용하지 않는다.
 
-`backend_postmerge_proof.py`는 실제 완료된 원본 backend-app run/attempt의 package·full·최종 결과, 현재 workflow에 대응하는 실제 성공 단계, 원본 full plan/실행/cleanup 증거, producer와 consumer의 JAR SHA·source/tree·workflow 정체성을 연결한다. 27개 JAR receipt만으로 전체 PG 등 다른 단계의 성공을 대신하지 않는다. 원본 성공 후 24시간을 넘거나 자료가 없고 만료·모순·조회 실패가 있으면 full로 돌아간다. 원본 PR에서 실제 사용한 workflow와 현재 dev를 비교하므로 PR 자체의 CI 코드 변경을 금지하는 규칙은 아니다.
+`backend_postmerge_proof.py`는 실제 완료된 원본 backend-app run/attempt의 package·full·최종 결과, 현재 workflow에 대응하는 실제 성공 단계, 원본 full plan/실행/cleanup 증거, producer와 consumer의 JAR SHA·source/tree·workflow 정체성을 연결한다. 27개 JAR receipt만으로 전체 PG 등 다른 단계의 성공을 대신하지 않는다. 원본 성공 후 24시간을 넘거나 자료가 없고 만료·모순·조회 실패가 있으면 현재 선택된 검증을 새로 실행한다. 원본 PR에서 실제 사용한 workflow와 현재 dev를 비교하므로 PR 자체의 CI 코드 변경을 금지하는 규칙은 아니다.
 
 통과한 dev 실행은 별도 `backend-app-postmerge-proof-<run>-<attempt>`의 `postmerge-proof.txt`에 `reused-full`과 원본 실행을 기록하고 새 package/full은 실행하지 않는다. 과거 XML·fixture·토큰·receipt를 새 시험 결과로 복제하거나 JAR을 다시 빌드해 과거 SHA와 비교하지 않는다. 새 merge SHA와 검사 당시 synthetic SHA는 다를 수 있으며 전체 tree로 결속한다. 다른 필수 CI와 이미지 발행 차단은 유지한다.
 
-최종 `Backend app CI result`는 선택·판정이 성공하고 **full+package/check 성공**, 또는 **검증된 reused-full+package/check의 예상된 생략**만 허용한다. 판정 실패·빈 mode·예상 밖 생략은 성공이 아니다. 읽기 권한과 현재 실행 토큰은 판정 job에 한정하며 새 secret이나 쓰기 권한을 요구하지 않는다.
+최종 `Backend app CI result`는 선택·판정이 성공하고 **execute+package/check 성공**, 또는 **검증된 reused-full+package/check의 예상된 생략**만 허용한다. execute는 현재 선택한 검증을 새로 실행한다는 뜻이며 full coverage를 주장하지 않는다. 판정 실패·빈 mode·예상 밖 생략은 성공이 아니다. 읽기 권한과 현재 실행 토큰은 판정 job에 한정하며 새 secret이나 쓰기 권한을 요구하지 않는다.
 
 이 방식은 같은 코드에 대한 기존 검증을 인수한다. 새 runner/JDK·외부 의존성을 다시 시험했다는 의미가 아니며 원본 환경·검증 시각을 보존한다. 실제 제거한 중복 실행과 병합 후 소요를 측정하고 PR 자체의 full 소요 또는 전체 개발시간 단축과 구분한다. 재사용에 문제가 있으면 CI 수정/revert로 기존 full 경로로 돌아가며 앱·DB·배포를 되돌리지 않는다.
 
 판정과 최종 gate는 `.github/scripts/test_backend_postmerge_proof.py`와 `test_backend_app_ci_policy.py`에서 합성 Git/API 응답·임시 파일·실제 gate 실행으로 검증한다. 실제 hosted full·병합 후 재사용 성공은 해당 실행 증거가 있어야 선언한다.
+
+## 쪽지 만료 계약의 선택 검증
+
+`note-expiry`는 실제 전체 검증을 통과한 `a35ee31ba700093c97fa9c0864d6a8677e5fae78`의 애플리케이션·테스트·Gradle·리소스·준비 도구 입력을 고정한다. README와 별도 검수한 F4 두 파일만 달라질 수 있으며 F4 두 파일은 내용 해시도 고정한다. 현재 이벤트의 변경 경로도 F30와 연결 CI 범위에 속해야 한다. 다른 앱·인증·트랜잭션·시험·도구 변경이나 입력 확인 실패는 full로 돌아간다. 브랜치 이름만으로 생략하지 않는다.
+
+전체 일반 단위·구조 검사와 실행 JAR 빌드는 유지한다. 기존 schema/소유권/최소 ACL/원문 지문 준비를 같은 순서로 수행하고 F4의 두 FK 보조표만 원래 위치에서 준비한다. 과거 JAR27 및 관계없는 PG 여정은 명시적으로 미실행이다. 새 소유 fixture에서 F30의 정확한 PG6과 실제 활성 scheduler의 트랜잭션·정상 종료 계약을 다시 검증하고 항상 소유 정리를 실행한다. 준비된 과거 업무 행 이력이 full과 같다는 주장은 하지 않는다.
+
+`contract-plan.txt`와 `contract-execution.txt`는 `profile=note-expiry`, 미실행 JAR27, 필수 F4 shape/PG/cleanup의 실제 결과를 기록한다. PG XML은 정확한 클래스·6메서드·실행 개수와 숨은 실패/오류/skip/disabled까지 검사한다. 이 scoped 성공은 full 성공이나 full 증거 재사용으로 승격하지 않는다. dev 병합 뒤에도 scoped 경로는 새로 실행한다. 소요 시간은 실제 hosted 실행 후에만 보고한다.

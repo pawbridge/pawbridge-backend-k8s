@@ -186,27 +186,34 @@ class PostmergeProofTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         return Inputs(directory.name)
 
-    def full(self, data, reason=None):
+    def execute(self, data, reason=None):
         result = data.decide()
-        self.assertEqual('full', result['mode'])
+        self.assertEqual('execute', result['mode'])
         self.assertNotIn('source_proof', result)
         self.assertNotIn('PRIVATE', json.dumps(result))
         if reason is not None: self.assertEqual(reason, result['reason'])
         return result
 
     def test_given_successful_same_tree_single_merge_and_empty_run_pr_list__when_deciding__then_reuse_only_original_proof_and_jar(self):
-        data = self.fixture();result = data.decide()
-        self.assertEqual('reused-full', result['mode'])
-        self.assertEqual(SOURCE, result['source_proof']['source_sha'])
-        self.assertEqual(MERGE, result['identity']['source_sha'])
-        self.assertEqual(JAR, result['source_proof']['jar_sha256'])
-        self.assertEqual([10, 11, 12], data.archive_calls)
-        self.assertFalse(any('ls-remote' in args or 'fetch' in args for args in data.git_calls))
+        for mode, reason in (('full', 'pull-request-full'),
+                             ('execute', 'pull-request-validation')):
+            with self.subTest(mode=mode):
+                data = self.fixture()
+                saved = json.loads(data.members['proof']['postmerge-proof.txt'])
+                saved.update(mode=mode, reason=reason)
+                data.members['proof']['postmerge-proof.txt'] = encoded(saved)
+                result = data.decide()
+                self.assertEqual('reused-full', result['mode'])
+                self.assertEqual(SOURCE, result['source_proof']['source_sha'])
+                self.assertEqual(MERGE, result['identity']['source_sha'])
+                self.assertEqual(JAR, result['source_proof']['jar_sha256'])
+                self.assertEqual([10, 11, 12], data.archive_calls)
+                self.assertFalse(any('ls-remote' in args or 'fetch' in args for args in data.git_calls))
 
-    def test_given_any_pr_including_fork__when_deciding__then_keep_full_without_api_or_token(self):
+    def test_given_any_pr_including_fork__when_deciding__then_execute_validation_without_api_or_token(self):
         data = self.fixture();data.env.update(GITHUB_EVENT_NAME='pull_request', GITHUB_REF='refs/pull/7/merge')
         data.env.pop('GH_TOKEN');data.payload = {'pull_request': {'head': {'repo': {'full_name': 'fork/repo'}}}}
-        self.full(data, 'pull-request-full');self.assertEqual([], data.api_calls)
+        self.execute(data, 'pull-request-validation');self.assertEqual([], data.api_calls)
 
     def test_given_invalid_push_context_or_checkout__when_deciding__then_fallback_before_api(self):
         for defect in ('before', 'after', 'forced', 'branch', 'event'):
@@ -217,13 +224,13 @@ class PostmergeProofTest(unittest.TestCase):
                 elif defect == 'forced': data.payload['forced'] = True
                 elif defect == 'branch': data.env['GITHUB_REF'] = 'refs/heads/main'
                 else: data.env['GITHUB_EVENT_NAME'] = 'workflow_dispatch'
-                self.full(data);self.assertEqual([], data.api_calls)
+                self.execute(data);self.assertEqual([], data.api_calls)
 
     def test_given_nonstandard_parent_graph_or_multiple_associated_prs__when_deciding__then_fallback(self):
         for parents in (HEAD, HEAD + ' ' + BASE, BASE + ' ' + HEAD + ' ' + SOURCE):
-            data = self.fixture();data.parents = parents;self.full(data, 'not-one-two-parent-merge')
+            data = self.fixture();data.parents = parents;self.execute(data, 'not-one-two-parent-merge')
         data = self.fixture();data.associated.append({'id': 78, 'number': 8})
-        self.full(data, 'not-one-associated-pr')
+        self.execute(data, 'not-one-associated-pr')
 
     def test_given_wrong_merged_pr_head_repository_or_target__when_deciding__then_fallback(self):
         for defect in ('not-merged', 'merge-sha', 'head', 'fork', 'target'):
@@ -234,16 +241,16 @@ class PostmergeProofTest(unittest.TestCase):
                 elif defect == 'head': data.pr['head']['sha'] = SOURCE
                 elif defect == 'fork': data.pr['head']['repo']['full_name'] = 'fork/repo'
                 else: data.pr['base']['ref'] = 'main'
-                self.full(data)
+                self.execute(data)
 
     def test_given_newest_run_failed_or_cancelled__when_an_older_green_exists__then_never_fall_back_to_the_old_green(self):
         for conclusion in ('failure', 'cancelled', None):
             data = self.fixture();data.runs = [dict(data.run, id=124, conclusion=conclusion), data.run]
-            self.full(data, 'latest-source-run-not-successful');self.assertEqual([], data.archive_calls)
+            self.execute(data, 'latest-source-run-not-successful');self.assertEqual([], data.archive_calls)
 
     def test_given_rerun_started_between_list_and_detail__when_deciding__then_fallback(self):
         data = self.fixture();data.detail = dict(data.run, run_attempt=3, status='in_progress', conclusion=None)
-        self.full(data, 'source-run-changed')
+        self.execute(data, 'source-run-changed')
         data = self.fixture();read = data.json;lookups = []
         def rerun_after_artifacts(path):
             if path == PREFIX + '/actions/runs/123':
@@ -251,13 +258,13 @@ class PostmergeProofTest(unittest.TestCase):
                 if len(lookups) == 2: return dict(data.run, run_attempt=3, status='in_progress', conclusion=None)
             return read(path)
         with patch.object(data, 'json', side_effect=rerun_after_artifacts):
-            self.full(data, 'source-run-changed')
+            self.execute(data, 'source-run-changed')
         self.assertEqual(2, len(lookups))
 
     def test_given_wrong_source_run_identity_or_present_pr_association__when_deciding__then_fallback(self):
         for key, value in (('event', 'push'), ('head_sha', MERGE), ('path', 'another.yml'),
                            ('pull_requests', [{'number': 8}]), ('pull_requests', [{'number': 7}, None])):
-            data = self.fixture();data.run[key] = value;self.full(data)
+            data = self.fixture();data.run[key] = value;self.execute(data)
 
     def test_given_missing_failed_duplicate_or_skipped_source_job__when_deciding__then_fallback(self):
         for defect in ('missing', 'failed', 'duplicate', 'wrong-attempt'):
@@ -266,48 +273,76 @@ class PostmergeProofTest(unittest.TestCase):
             elif defect == 'failed': data.jobs[0]['conclusion'] = 'failure'
             elif defect == 'duplicate': data.jobs.append(dict(data.jobs[0], id=99))
             else: data.jobs[0]['run_attempt'] = 1
-            self.full(data)
+            self.execute(data)
 
     def test_given_unchanged_twenty_seven_jar_manifest_but_missing_or_skipped_f30_pg__when_deciding__then_fallback(self):
         for defect in ('missing', 'skipped'):
             data = self.fixture();steps = data.jobs[1]['steps']
             if defect == 'missing': del steps[1]
             else: steps[1]['conclusion'] = 'skipped'
-            self.full(data, 'missing-or-skipped-validation-step')
+            self.execute(data, 'missing-or-skipped-validation-step')
 
     def test_given_unknown_step_condition_or_continue_on_error__when_interpreting_current_recipe__then_fallback(self):
         for old, new in ((b'if: always()', b'if: secrets.unknown'),
-                         (b'run: existing-full-pg', b'continue-on-error: true\n        run: existing-full-pg')):
+                         (b'run: existing-full-pg', b'continue-on-error: true\n        run: existing-full-pg'),
+                         (b"matrix.profile == 'full' &&", b"matrix.profile != 'note-expiry' &&"),
+                         (b"|| 'Pilot' }}", b"|| matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
+                         (b"|| 'Pilot' }}", b"|| matrix.profile == 'note-expiry' && 'Scoped' || matrix.profile == 'other' && 'Other' || 'Pilot' }}"),
+                         (b"if: ${{ matrix.profile == 'full' }}", b"if: ${{ matrix.profile == 'note-expiry' || always() }}")):
             data = self.fixture();data.workflow = WORKFLOW.replace(old, new)
-            self.full(data)
+            self.execute(data)
+
+    def test_given_known_three_arm_recipe__when_reusing_full__then_exclude_only_scoped_steps_and_keep_non_scoped_gates(self):
+        data = self.fixture()
+        data.workflow = WORKFLOW.replace(b"|| 'Pilot' }}",
+            b"|| matrix.profile == 'note-expiry' && 'Note expiry PostgreSQL' || 'Pilot' }}").replace(
+            b'        run: existing-f30-pg',
+            b"        if: ${{ matrix.profile != 'note-expiry' }}\n        run: existing-f30-pg").replace(
+            b'      - name: Packaged contracts',
+            b"      - name: Scoped expiry only\n        if: ${{ matrix.profile == 'note-expiry' }}\n        run: scoped-expiry\n      - name: Packaged contracts")
+        legacy = proof.workflow_contract(WORKFLOW)
+        current = proof.workflow_contract(data.workflow)
+        self.assertEqual(legacy, current)
+        data.jobs[1]['steps'].append({'name': 'Scoped expiry only',
+            'status': 'completed', 'conclusion': 'skipped'})
+        self.assertEqual('reused-full', data.decide()['mode'])
+        # The != condition remains mandatory for original full evidence.
+        for step in data.jobs[1]['steps']:
+            if step['name'] == 'New F30 expiry PG gate':
+                step['conclusion'] = 'skipped'
+        self.execute(data, 'missing-or-skipped-validation-step')
 
     def test_given_expired_future_or_out_of_order_success__when_deciding__then_fallback(self):
         for instant in ('2026-10-19T02:59:59Z', '2026-10-20T03:00:01Z', None):
             data = self.fixture();data.jobs[2]['completed_at'] = instant
-            self.full(data)
+            self.execute(data)
         data = self.fixture();data.pr['merged_at'] = '2026-10-20T01:00:00Z'
-        self.full(data, 'source-proof-expired-or-unordered')
+        self.execute(data, 'source-proof-expired-or-unordered')
         data = self.fixture();data.run['updated_at'] = '2026-10-20T03:00:01Z'
-        self.full(data, 'source-proof-expired-or-unordered')
+        self.execute(data, 'source-proof-expired-or-unordered')
 
     def test_given_receipt_from_another_source_tree_or_attempt_or_reuse_chain__when_deciding__then_fallback(self):
-        for defect in ('tree', 'source-parent', 'extra-source-parent', 'attempt', 'chain', 'version'):
+        for defect in ('tree', 'source-parent', 'extra-source-parent', 'attempt', 'chain',
+                       'new-mode-old-reason', 'old-mode-new-reason', 'unknown-mode', 'version'):
             data = self.fixture();saved = json.loads(data.members['proof']['postmerge-proof.txt'])
             if defect == 'tree': saved['identity']['tree_sha'] = BASE
             elif defect == 'source-parent': data.commit['parents'].reverse()
             elif defect == 'extra-source-parent': data.commit['parents'].append(None)
             elif defect == 'attempt': saved['identity']['run_attempt'] = '1'
             elif defect == 'chain': saved.update(mode='reused-full', reason='identical-tree-merged-pr-full')
+            elif defect == 'new-mode-old-reason': saved['mode'] = 'execute'
+            elif defect == 'old-mode-new-reason': saved['reason'] = 'pull-request-validation'
+            elif defect == 'unknown-mode': saved.update(mode='scoped', reason='pull-request-validation')
             else: saved['schema_version'] = True
             data.members['proof']['postmerge-proof.txt'] = encoded(saved)
-            self.full(data)
+            self.execute(data)
 
     def test_given_different_executed_workflow_bytes_or_ref__when_deciding__then_fallback(self):
         data = self.fixture();data.file = {'type': 'file', 'encoding': 'base64',
             'size': 4, 'content': base64.b64encode(b'old!').decode()}
-        self.full(data, 'source-workflow-differs')
+        self.execute(data, 'source-workflow-differs')
         data = self.fixture();data.env['GITHUB_WORKFLOW_REF'] = 'fork/other.yml@refs/heads/dev'
-        self.full(data, 'workflow-ref-differs')
+        self.execute(data, 'workflow-ref-differs')
 
     def test_given_missing_expired_duplicate_or_corrupt_artifact__when_deciding__then_fallback(self):
         for defect in ('missing', 'expired', 'duplicate', 'digest', 'zip', 'run', 'head', 'repository', 'size'):
@@ -321,7 +356,7 @@ class PostmergeProofTest(unittest.TestCase):
             elif defect == 'head': data.artifacts[0]['workflow_run']['head_sha'] = SOURCE
             elif defect == 'repository': data.artifacts[0]['workflow_run']['repository_id'] = 67
             else: data.artifacts[0]['size_in_bytes'] = 33
-            self.full(data)
+            self.execute(data)
 
     def test_given_mismatched_runtime_metadata_or_jar_producer__when_deciding__then_fallback(self):
         for defect in ('source', 'workflow', 'duplicate-meta', 'jar'):
@@ -330,7 +365,7 @@ class PostmergeProofTest(unittest.TestCase):
             elif defect == 'source': members['build/ci/runtime-metadata.txt'] = members['build/ci/runtime-metadata.txt'].replace(SOURCE.encode(), HEAD.encode(), 1)
             elif defect == 'workflow': members['build/ci/runtime-metadata.txt'] = b'source_sha=' + SOURCE.encode() + b'\n'
             else: members['build/ci/runtime-metadata.txt'] += b'source_sha=' + SOURCE.encode() + b'\n'
-            self.full(data)
+            self.execute(data)
 
     def test_given_wrong_plan_or_execution_or_masked_cleanup__when_deciding__then_fallback(self):
         for defect in ('plan', 'execution', 'cleanup', 'unknown-stage'):
@@ -341,12 +376,36 @@ class PostmergeProofTest(unittest.TestCase):
             else: execution['step_results']['jar_f30'] = {'outcome': 'success', 'conclusion': 'success'}
             data.members['full']['build/ci/contract-plan.txt'] = encoded(plan)
             data.members['full']['build/ci/contract-execution.txt'] = encoded(execution)
-            self.full(data)
+            self.execute(data)
 
-    def test_given_api_unavailability_or_malformed_document__when_deciding__then_keep_full_without_private_error_content(self):
+    def test_given_execute_receipt_with_scoped_source_plan_or_execution__when_deciding__then_never_promote_it_to_full(self):
+        paths = ['backend-app/community/src/main/java/com/pawbridge/backend/community/internal/note/infrastructure/JdbcNoteExpiry.java']
+        with patch.dict(globals(), PATHS=paths):
+            for defect in ('plan', 'execution', 'both'):
+                with self.subTest(defect=defect):
+                    data = self.fixture()
+                    context = dict(data.plan['identity'], note_expiry_scope_verified=True)
+                    plan = proof.profile.make_plan(context, paths, proof.profile.NOTE_EXPIRY, JAR)
+                    steps = {name: {'outcome': 'skipped', 'conclusion': 'skipped'}
+                             for name in proof.profile.ALL_SMOKES}
+                    steps.update({name: {'outcome': 'success', 'conclusion': 'success'}
+                                  for name in ('fixture_f4_shape', 'pg_note_expiry', 'owned_cleanup')})
+                    execution = proof.profile.audit_execution(plan, context, paths,
+                        proof.profile.NOTE_EXPIRY, JAR, steps)
+                    saved = json.loads(data.members['proof']['postmerge-proof.txt'])
+                    saved.update(mode='execute', reason='pull-request-validation')
+                    data.members['proof']['postmerge-proof.txt'] = encoded(saved)
+                    if defect in ('plan', 'both'):
+                        data.members['full']['build/ci/contract-plan.txt'] = encoded(plan)
+                    if defect in ('execution', 'both'):
+                        data.members['full']['build/ci/contract-execution.txt'] = encoded(execution)
+                    self.execute(data, 'source-full-execution-differs' if defect == 'execution'
+                                 else 'source-full-plan-differs')
+
+    def test_given_api_unavailability_or_malformed_document__when_deciding__then_execute_without_private_error_content(self):
         data = self.fixture()
         with patch.object(data, 'json', side_effect=proof.Unavailable('api-unavailable')):
-            self.full(data, 'api-unavailable')
+            self.execute(data, 'api-unavailable')
         with self.assertRaises(proof.Unavailable): proof.document(b'{"token":1,"token":2}')
         with self.assertRaises(proof.Unavailable): proof.document(b'{"value":NaN}')
 
@@ -409,7 +468,7 @@ class PostmergeProofTest(unittest.TestCase):
     def test_given_fixed_destination__when_writing__then_preserve_exclusive_bytes_and_refuse_redirect_or_other_path(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(proof.Path, 'cwd', return_value=Path(directory).resolve()):
             target = Path(directory).resolve() / proof.OUTPUT
-            proof.write_proof(proof.OUTPUT, {'mode': 'full'})
+            proof.write_proof(proof.OUTPUT, {'mode': 'execute'})
             before = target.read_bytes()
             with self.assertRaises(ValueError): proof.write_proof(proof.OUTPUT, {'mode': 'reused-full'})
             self.assertEqual(before, target.read_bytes())
@@ -418,7 +477,7 @@ class PostmergeProofTest(unittest.TestCase):
             with self.assertRaises(ValueError): proof.write_proof(proof.OUTPUT, {})
 
     def test_given_cli_decision_or_internal_failure__when_running__then_emit_only_mode_or_fixed_error_without_claiming_success(self):
-        for mode in ('full', 'reused-full'):
+        for mode in ('execute', 'reused-full'):
             output = io.StringIO()
             with patch.object(proof, 'destination'), patch.object(proof, 'decide', return_value={'mode': mode}), patch.object(proof, 'write_proof') as write, contextlib.redirect_stdout(output):
                 self.assertEqual(0, proof.main(['--output', str(proof.OUTPUT)]))

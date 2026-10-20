@@ -14,6 +14,11 @@ import f3_ci as f3
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 EVIDENCE = ROOT / 'build/ci'
 MARKER = 'pawbridge-f4-ci-only-v1'
+BUSINESS_SUPPORT_TABLES_SQL = (
+    'CREATE TABLE pawbridge_f4_fixture.comments(comment_id BIGINT PRIMARY KEY,'
+    'post_id BIGINT REFERENCES pawbridge_community.posts(post_id)); '
+    'CREATE TABLE pawbridge_f4_fixture.private_notes(note_id BIGINT PRIMARY KEY,'
+    'post_id BIGINT REFERENCES pawbridge_community.posts(post_id))')
 
 
 def require_fixture():
@@ -131,16 +136,19 @@ def start_ready_children(jar, app_env, base_env, owner, bucket, prefix,
                 raise
 
 
+def prepare_business_shape():
+    # Run at the original F4 smoke position, after F3's FK-sensitive truncation.
+    require_fixture()
+    f3.sql(BUSINESS_SUPPORT_TABLES_SQL)
+
+
 def prepare_business_rows():
     # Called only after both owned listeners are ready, and after unchanged F3 smoke.
     f3.sql('TRUNCATE pawbridge_community.post_search_documents,pawbridge_community.outbox_events,'
            'pawbridge_community.posts,pawbridge_user.users; '
            "INSERT INTO pawbridge_user.users VALUES(42,'합성작성자'); "
            "SELECT setval('pawbridge_community.posts_post_id_seq',100000,true); "
-           'CREATE TABLE pawbridge_f4_fixture.comments(comment_id BIGINT PRIMARY KEY,'
-           'post_id BIGINT REFERENCES pawbridge_community.posts(post_id)); '
-           'CREATE TABLE pawbridge_f4_fixture.private_notes(note_id BIGINT PRIMARY KEY,'
-           'post_id BIGINT REFERENCES pawbridge_community.posts(post_id))')
+           + BUSINESS_SUPPORT_TABLES_SQL)
 
 
 def smoke():
@@ -357,4 +365,5 @@ def cleanup():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'smoke': smoke, 'cleanup': cleanup}[sys.argv[1]]()
+    {'prepare': prepare, 'prepare-shape': prepare_business_shape,
+     'smoke': smoke, 'cleanup': cleanup}[sys.argv[1]]()
