@@ -141,8 +141,8 @@ class AdminPostReadsProfileTest(unittest.TestCase):
 
     def test_given_frozen_cohort_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.POST_READS_BASE)
-        self.assertEqual(437, len(profile.POST_READS_APP_HASHES))
-        self.assertEqual('6545f1d918fd811bc68232e61486d9b253fe5d08402ba63862b3a43e611d3d56', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual(460, len(profile.POST_READS_APP_HASHES))
+        self.assertEqual('c98deb38b59282854185c3cce57f5f67927c30c29d0c49f674f6271dac849cba', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.POST_READS_APP_HASHES) | {'backend-app/README.md'}, profile.POST_READS_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.POST_READS_APP_HASHES)
         self.assertEqual(profile.POST_READS_WORKFLOW_SHA256, hashlib.sha256(
@@ -156,8 +156,8 @@ class AdminPostReadsProfileTest(unittest.TestCase):
             git.assert_any_call('show', 'HEAD:' + path)
 
     def test_given_identical_reviewed_guard_inputs__when_only_the_fixed_cohort_is_selected__then_reference_only_selftests(self):
-        self.assertEqual(39460539409, profile.ARCHITECTURE_SELFTEST_REFERENCE_RUN)
-        self.assertEqual('ed6ee7b8f9637e3b79249e8740619440c7b984ab', profile.ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
+        self.assertEqual(39481336774, profile.ARCHITECTURE_SELFTEST_REFERENCE_RUN)
+        self.assertEqual('217cb7a3d9a61e6d8de5eacc893c97a762b1d193', profile.ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
         self.assertEqual(16, len(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES))
         blobs = {path: ('fixed guard input ' + str(i)).encode()
                  for i, path in enumerate(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES)}

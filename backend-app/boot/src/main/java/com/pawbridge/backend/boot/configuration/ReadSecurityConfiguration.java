@@ -43,6 +43,7 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.animal-query.backend:}") String animalQueryBackend,
             @Value("${pawbridge.animal-statistics.enabled:false}") boolean animalStatisticsEnabledFlag,
             @Value("${pawbridge.animal-commands.enabled:false}") String animalCommandsEnabledFlag,
+            @Value("${pawbridge.shelter-commands.enabled:false}") String shelterCommandsFlag,
             @Value("${pawbridge.store-direct-orders.enabled:false}") String storeDirectOrdersEnabledFlag,
             @Value("${pawbridge.animal-lost-search.enabled:false}") String animalLostSearchEnabledFlag,
             @Value("${pawbridge.store-carts.enabled:false}") String storeCartsEnabledFlag,
@@ -61,6 +62,14 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/places/regions","GET"),
                 new AntPathRequestMatcher("/api/v1/places","GET"),
                 new AntPathRequestMatcher("/api/v1/places/{contentId}","GET")));
+
+        var shelterCommandsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> "true".equalsIgnoreCase(shelterCommandsFlag);
+        var shelterCommandAdmin=new AndRequestMatcher(shelterCommandsEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/shelters","POST"),
+                new AntPathRequestMatcher("/api/v1/shelters/{id}","DELETE")));
+        var shelterCommandUpdate=new AndRequestMatcher(shelterCommandsEnabled,
+                new AntPathRequestMatcher("/api/v1/shelters/{id}","PUT"));
 
         var animalCommandsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(animalCommandsEnabledFlag);
@@ -234,8 +243,8 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/approve","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
-        var adminRoutes = new OrRequestMatcher(storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var adminRoutes = new OrRequestMatcher(shelterCommandAdmin, storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)

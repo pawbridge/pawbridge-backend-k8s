@@ -55,7 +55,14 @@ public class ShelterMembershipConfiguration {
 @Import(AnimalModuleReadConfiguration.class)
 class ShelterMembershipModuleConfiguration {
     @Bean ShelterMembership.ShelterLookup moduleShelterLookup(
-            @Qualifier("animalModuleReads") com.pawbridge.backend.animal.api.AnimalShelterReads animals) {
-        return new ModuleShelterLookup(animals);
+            @Qualifier("animalModuleReads") com.pawbridge.backend.animal.api.AnimalShelterReads animals,
+            @Qualifier("writeJdbc") JdbcTemplate jdbc,
+            @Qualifier("writeDataSource") org.springframework.beans.factory.ObjectProvider<javax.sql.DataSource> sources,
+            @Value("${pawbridge.shelter-commands.enabled:false}") String shelterCommands) {
+        if (!"true".equalsIgnoreCase(shelterCommands)) return new ModuleShelterLookup(animals);
+        javax.sql.DataSource source=sources.getObject();
+        if (jdbc.getDataSource() != source)
+            throw new IllegalArgumentException("Shelter membership module requires the shared writer data source");
+        return new ModuleShelterLookup(new com.pawbridge.backend.animal.internal.shelter.infrastructure.MembershipLockedAnimalShelterReads(animals,jdbc));
     }
 }
