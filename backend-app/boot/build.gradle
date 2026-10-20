@@ -541,6 +541,7 @@ tasks.register('totalUserCountCompatibilityTest', Test) {
     description = 'Checks F19 administrator total count and original HTTP envelopes in UTC.'
     testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
     classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform { excludeTags 'signup-statistics' }
     systemProperty 'user.timezone', 'UTC'
     systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     filter {
@@ -937,5 +938,52 @@ tasks.register('memberCleanupCompatibilityTest', Test) {
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('noteExpiryCompatibilityTest')
+    outputs.upToDateWhen { false }
+}
+
+
+// Additional source units only: original F19 count/controller bytes and receipt stay unchanged.
+tasks.register('prepareF19SignupStatisticsOracle', Exec) {
+    dependsOn tasks.named('prepareF19LegacyOracle')
+    inputs.file(rootProject.file('scripts/prepare_f19_legacy_oracle.py'))
+    outputs.file(layout.buildDirectory.file('generated/sources/f19LegacyOracle/java/com/pawbridge/userservice/service/F19LegacySignupStatisticsService.java'))
+    outputs.file(layout.buildDirectory.file('generated/sources/f19LegacyOracle/java/com/pawbridge/userservice/dto/response/SignupPeriodsResponse.java'))
+    outputs.file(rootProject.layout.buildDirectory.file('ci/f19-signup-statistics-oracle-sha256.txt'))
+    commandLine 'python3', rootProject.file('scripts/prepare_f19_legacy_oracle.py'),
+            rootProject.projectDir.parentFile,
+            layout.buildDirectory.dir('generated/sources/f19LegacyOracle/java').get().asFile,
+            rootProject.layout.buildDirectory.file('ci/f19-signup-statistics-oracle-sha256.txt').get().asFile,
+            '--signup-statistics'
+}
+tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF19SignupStatisticsOracle') }
+
+tasks.register('signupStatisticsCompatibilityTest', Test) {
+    group = 'verification'
+    description = 'Reuses the owned F19 reader and actual JPQL/JpaTM for three signup statistics contracts.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'signup-statistics' }
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlTotalUserCountCompatibilityTest'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('totalUserCountCompatibilityTest')
+    outputs.upToDateWhen { false }
+}
+tasks.register('signupStatisticsCompatibilitySeoulTest', Test) {
+    group = 'verification'
+    description = 'Repeats only the UTC-stored +9-hour microsecond grouping boundary in Seoul.'
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'signup-statistics' }
+    systemProperty 'user.timezone', 'Asia/Seoul'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlTotalUserCountCompatibilityTest.givenUtcKstMicrosecondBoundariesNullAndAGap__whenDailyQueriesRunInEitherZone__thenMatchOriginalJpqlWithoutFillingOrReordering'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('signupStatisticsCompatibilityTest')
     outputs.upToDateWhen { false }
 }

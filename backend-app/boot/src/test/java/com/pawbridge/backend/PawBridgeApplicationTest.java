@@ -61,6 +61,12 @@ class PawBridgeApplicationTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.profile.web.AdminUserDetailController.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.application.SignupStatisticsQuery.class)).hasSize(1);
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.statistics.web.SignupStatisticsController.class)).hasSize(1);
+                    var signupStatistics = context.getBean(com.pawbridge.backend.user.internal.statistics.application.SignupStatisticsQuery.class);
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(signupStatistics, "jdbc")).isSameAs(context.getBean("readJdbc"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(signupStatistics, "readOnlyTransaction")).isSameAs(context.getBean("readOnlyTransaction"));
+                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(signupStatistics, "clock")).isSameAs(context.getBean("readClock"));
                     assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(org.springframework.scheduling.TaskScheduler.class)).isEmpty();

@@ -505,10 +505,18 @@ Community 실패는 pending을 보존하고503을 반환한다. Community가 커
 
 ADMIN GET `/api/v1/admin/users/{userId}`는 기존 `UserProfileQuery`와 같은 read-only 조회 bean을 소비한다. 기존 회원7필드와 성공200/부재400/예외500 응답을 재사용하고 새 SQL·열 권한·pool·TM·schema를 추가하지 않는다. pending 행을 임의로 제외하거나 비밀번호 등 다른 필드를 반환하지 않는다.
 
-서명된 ADMIN 권한을 경로 바인딩/조회보다 먼저 확인하며 X-User 헤더나 query의 userId로 대상을 바꾸지 않는다. 아직 편입하지 않은 `/users/search`는 이 단건 matcher에서 제외하고 목록·검색·통계·PUT의 기본 거부를 유지한다. 기존 관리자 DELETE는 그대로다.
+서명된 ADMIN 권한을 경로 바인딩/조회보다 먼저 확인하며 X-User 헤더나 query의 userId로 대상을 바꾸지 않는다. 아직 편입하지 않은 `/users/search`는 이 단건 matcher에서 제외하고 목록·검색·나머지 통계·PUT의 기본 거부를 유지한다. 기존 관리자 DELETE는 그대로다.
 
 이 변화의 가장 가까운 보호는 실제 MVC의 JWT·대상 바인딩·7필드/오류·인접 경로와 명시 조립 시험이다. 기존 F12의 변경 없는7열 SQL/실제 PG 근거를 재사용하고 API마다 별도 PG fixture·JAR 여정을 복제하지 않는다. 새 기능의 실제 Git 기준/hosted CI/병합은 해당 PR 실행 근거와 구분한다.
 
 ### 회원 관리 계약 선택 검증
 
 `member-management`는 검수한 회원관리 앱·시험·준비 코드의 고정 SHA가 일치하는 같은 저장소 PR/dev push에만 선택한다. 공통 모듈 빌드·단위/구조 검사와 동일 JAR을 유지하고, F4 보조표 준비 → 기존 쪽지 만료 PG6 → 회원 fixture → 회원 PG12 → 관리자 삭제 HTTP9/SSE/실패 후 재시도 → 소유 정리를 실행한다. 관계없는 과거 JAR27과 PG 회귀는 `skipped`로 남기며 이 결과를 전체 회귀나 full 재사용 증거로 승격하지 않는다. 고정 범위를 벗어나면 기존 full 경로로 돌아간다.
+
+## 관리자 가입통계
+
+ADMIN GET `/api/v1/admin/users/stats/daily-signups?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`는 nullable UTC 저장 `created_at`에 9시간을 더한 날짜를 양끝 포함 집계하고 정렬한다. 빈 날짜를 채우지 않으며 역순 구간은 원문처럼 빈 결과다. GET `/api/v1/admin/users/stats/signup-periods`는 Seoul 오늘을 한 번 구하고 한 read-only 트랜잭션 안에서 오늘·최근7일·최근30일·이번달을 네 번 조회한 뒤 각 구간의 빠진 날을0으로 채운다. 네 결과가 하나의 snapshot이라고 가정하지 않는다.
+
+기존 reader/Clock/열 권한·응답 envelope·ADMIN 선행 인가를 재사용하며 새 schema/권한/pool은 없다. 필수 날짜 누락400과 원문의 날짜 변환 Runtime500을 구분한다. 기존 F19 JAR의 음성 경로는 이제 미편입 `/api/v1/admin/users/stats/daily-signups/extra`로 옮기고6요청·역할·복구·DB/S3 불변 검증은 유지한다.
+
+private 앱 준비에서 단위·실제 JWT MVC·조립·기존 회원수 회귀5XML52건을 확인했다. 원문/후보 날짜 SQL과 중간 commit 가시성 비교는 기존 F19 자료를 확장한 UTC3·Seoul 경계1의 별도 PG gate이며 새 JAR 여정은 추가하지 않는다. 이 기록은 private 준비 근거다. 실제 feature head의 PG/hosted CI·병합 결과는 해당 run 산출물로 확인하며, local compile이나 모의 journey를 실제 PG/JAR 성공으로 세지 않는다.

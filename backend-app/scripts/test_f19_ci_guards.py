@@ -306,7 +306,7 @@ class F19GuardTest(unittest.TestCase):
             self.assertEqual(2, result['shutdown_pools']); self.assertEqual(0, result['remaining_application_connections'])
             self.assertEqual('Bearer private-user-token', requests[1][1]['headers']['Authorization'])
             self.assertEqual('ROLE_ADMIN', requests[1][1]['headers']['X-User-Role'])
-            self.assertNotIn('Authorization', requests[4][1]['headers']); self.assertEqual(f19.ADJACENT, requests[5][0])
+            self.assertNotIn('Authorization', requests[4][1]['headers']); self.assertEqual('/api/v1/admin/users/stats/daily-signups/extra', requests[5][0])
             self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
             self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
             self.assertNotIn('expected_count', result); self.assertNotIn('data', result)

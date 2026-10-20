@@ -101,6 +101,38 @@ MEMBER_ALLOWED_PATHS = NOTE_ALLOWED_PATHS | frozenset(MEMBER_APP_HASHES) | {
 MEMBER_REQUIRED_CONTRACTS = ('fixture_f4_shape', 'pg_note_expiry',
                              'fixture_member_cleanup', 'pg_member_cleanup')
 
+SIGNUP_STATISTICS = 'signup-statistics'
+SIGNUP_BASE = 'b59ddfbda475959bd9465e8dde709ad1cd2ca6c7'
+SIGNUP_APP_HASHES = {'backend-app/boot/build.gradle': '770ef8ea7e734151d3e9140ed9751384fcba1fe0ea468ae202556e4ab22ec137',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F19LegacyTotalUserCountOracle.java': '22e0f852e8437667789e7d585d6f3412b1a10b1dd993cb9a2bf5ca8d13e6546a',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlTotalUserCountCompatibilityTest.java': '698de2e2062363bea9a09fc98d56a05a8c81ecd3e9a673c2e585d40727c70e76',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '5a9ba0a71baed672b6cc10fa0c8f6b0699f2669f7d51624109a833eb277742be',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'df687fe8c7dfde0756e64e94e662795ec6ef963ca238b9ff20e4d76752c050c4',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/SignupStatisticsReadConfiguration.java': '5d026112ae6e35fddc5ad1d73ceecefeafcdbd5fa960cd8ef95df386abd2f902',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': 'ae51c29980f457a4cc2caf308fd992718ad3c596587547c935997eb3a318308a',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/SignupStatisticsHttpTest.java': 'af58979f7bb8c295def751e309622211f5039cec5ab92f216e941df64d5988b8',
+ 'backend-app/scripts/f19_ci.py': '4f5adad5f9780828694b30c36ce28939a10499876747c5c203bc0a5db26c6cf0',
+ 'backend-app/scripts/prepare_f19_legacy_oracle.py': '5f4cd169b38e878a740fe66ff0f9a122470f6751c2533c3373763a21c102b938',
+ 'backend-app/scripts/test_f19_ci_guards.py': '0d7962ac3f3a62f555d222557188673056cef9d300fa0d77b293f334121a96b5',
+ 'backend-app/user/build.gradle': 'ee4e5b8a7fe9692f32bd8ec3c01edfa743d438255b0a379ae05f8e17af082cb1',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/statistics/application/SignupStatisticsQuery.java': '4070aef3286cdcf371c240a5378e85d8a0165896ec66c4a45ccf5a56f1757cd2',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/statistics/infrastructure/JdbcSignupStatisticsQuery.java': 'fed5c6173625763a8080f0605a87cb20f4331f00ba2f4f6b96ad66c9a42e6d8e',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/statistics/web/SignupStatisticsController.java': 'de5da00281eb44bfd72e9ae9312a105fef308632b984e2cdf8a8124c68b75ea4',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/statistics/web/TotalUserCountExceptionHandler.java': '758540248a0d1cc8175fbbaa6fac7731606393a9b16deee40214eba64eed68df',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/statistics/infrastructure/JdbcSignupStatisticsQueryTest.java': 'd0b3c2904ef9f3344d8d3c1e85646cc9b156ee18266fc72942dbdfa0621ae803',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/statistics/web/TotalUserCountExceptionHandlerTest.java': '7a521bfdf59e6bc2a87562a0b09b4356f66e3016c37afa2a3696f8106ca4e382'}
+SIGNUP_APP_EXCEPTIONS = frozenset(SIGNUP_APP_HASHES) | {'backend-app/README.md'}
+SIGNUP_ALLOWED_PATHS = MEMBER_ALLOWED_PATHS | frozenset(SIGNUP_APP_HASHES) | {
+    '.github/scripts/test_backend_signup_statistics_profile.py',
+}
+SIGNUP_REQUIRED_CONTRACTS = ('fixture_f4_shape', 'pg_signup_statistics')
+SIGNUP_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlTotalUserCountCompatibilityTest'
+SIGNUP_METHODS = (
+    'givenUtcKstMicrosecondBoundariesNullAndAGap__whenDailyQueriesRunInEitherZone__thenMatchOriginalJpqlWithoutFillingOrReordering',
+    'givenACommitAfterTheFirstPeriodQuery__whenFourQueriesShareReadCommitted__thenMatchOriginalRangesZeroFillAndLaterVisibility',
+    'givenCreatedAtSelectRevoked__whenDailyReadFailsThenRecovers__thenReturnConnectionAndKeepTheOwnedBaseline',
+)
+
 REPOSITORY = 'pawbridge/pawbridge-backend-k8s'
 PILOT_REF = 'ci/backend-contract-regression-scope'
 PILOT_BASE = '0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3'
@@ -172,6 +204,54 @@ def verify_member_management_inputs(git_reader=None):
         return False
 
 
+def verify_signup_statistics_inputs(git_reader=None):
+    """Read pinned Git objects; unreviewed changes or incomplete source pins stay full."""
+    def read(*args):
+        return subprocess.run(['git', *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, check=True, timeout=8).stdout
+    git = git_reader if git_reader is not None else read
+    try:
+        if len(SIGNUP_APP_HASHES) != 18:
+            return False
+        raw = git('diff', '--name-only', '--no-renames', '-z', SIGNUP_BASE, 'HEAD', '--', 'backend-app')
+        if not isinstance(raw, bytes):
+            return False
+        paths = [value.decode('utf-8') for value in raw.split(b'\0') if value]
+        if len(paths) != len(set(paths)) or not set(paths).issubset(SIGNUP_APP_EXCEPTIONS):
+            return False
+        for path, digest in SIGNUP_APP_HASHES.items():
+            blob = git('show', 'HEAD:' + path)
+            if not isinstance(blob, bytes) or hashlib.sha256(blob).hexdigest() != digest:
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, TypeError):
+        return False
+
+
+def verify_signup_statistics_report(utc_directory, seoul_directory):
+    """Require the three tagged UTC cases and only the same boundary case in Seoul."""
+    for directory, methods in ((utc_directory, SIGNUP_METHODS), (seoul_directory, SIGNUP_METHODS[:1])):
+        try:
+            directory = Path(directory)
+            reports = list(directory.glob('TEST-*.xml'))
+            if directory.is_symlink() or len(reports) != 1 or reports[0].is_symlink():
+                raise ProfileBlocked('The signup PostgreSQL report is missing or redirected.')
+            suite = ET.parse(reports[0]).getroot()
+            cases = list(suite.iter('testcase'))
+            names = [case.attrib.get('name', '').removesuffix('()') for case in cases]
+            if (suite.tag != 'testsuite' or suite.attrib.get('name') != SIGNUP_REPORT_CLASS
+                    or int(suite.attrib.get('tests', -1)) != len(cases) or len(cases) != len(methods)
+                    or len(set(names)) != len(methods) or set(names) != set(methods)
+                    or any(int(node.attrib.get(key, 0)) != 0 for node in suite.iter()
+                           for key in ('failures', 'errors', 'skipped', 'disabled'))
+                    or any(node.tag in ('failure', 'error', 'skipped', 'disabled') for node in suite.iter())
+                    or any(case.attrib.get('classname') != SIGNUP_REPORT_CLASS or
+                           case.attrib.get('status', 'run') not in ('run', 'passed') for case in cases)):
+                raise ProfileBlocked('The signup PostgreSQL cases did not all execute successfully.')
+        except (OSError, ValueError, TypeError, ET.ParseError):
+            raise ProfileBlocked('The signup PostgreSQL report is invalid.') from None
+
+
 def verify_note_expiry_report(directory):
     try:
         directory = Path(directory)
@@ -200,7 +280,7 @@ def select_profiles(context, paths):
     if not isinstance(context, dict):
         raise ProfileBlocked('Profile context is invalid.')
     requested = context.get('requested_profile')
-    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT):
+    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS):
         raise ProfileBlocked('Requested profile is unknown.')
     if requested == FULL:
         return [FULL]
@@ -224,6 +304,16 @@ def select_profiles(context, paths):
         raise ProfileBlocked('The requested member scope differs from its reviewed inputs.')
     if member_scoped and requested in (None, '', MEMBER_MANAGEMENT):
         return [MEMBER_MANAGEMENT]
+    signup_scoped = (context.get('event_name') in ('pull_request', 'push')
+                     and context.get('repository') == REPOSITORY
+                     and context.get('head_repository') == REPOSITORY
+                     and (context.get('event_name') != 'push' or context.get('head_ref') == 'dev')
+                     and context.get('signup_statistics_scope_verified') is True
+                     and bool(paths) and set(paths).issubset(SIGNUP_ALLOWED_PATHS))
+    if requested == SIGNUP_STATISTICS and not signup_scoped:
+        raise ProfileBlocked('The requested signup scope differs from its reviewed inputs.')
+    if signup_scoped and requested in (None, '', SIGNUP_STATISTICS):
+        return [SIGNUP_STATISTICS]
     eligible = (context.get('event_name') == 'pull_request'
                 and context.get('repository') == REPOSITORY
                 and context.get('head_repository') == REPOSITORY
@@ -238,6 +328,8 @@ def select_profiles(context, paths):
 
 
 def expected_smokes(profile):
+    if profile == SIGNUP_STATISTICS:
+        return ()
     if profile == MEMBER_MANAGEMENT:
         return ('jar_f31',)
     if profile == NOTE_EXPIRY:
@@ -289,7 +381,8 @@ def make_plan(context, paths, profile, jar_sha256):
         'schema_version': 1, 'status': 'planned', 'profile': profile,
         'identity': identity, 'jar_sha256': jar_sha256,
         'changed_paths_sha256': hashlib.sha256(_encoded(paths)).hexdigest(),
-        'selection_reason': ('fixed-member-inputs-and-scoped-postgresql' if profile == MEMBER_MANAGEMENT else
+        'selection_reason': ('fixed-signup-inputs-and-scoped-postgresql' if profile == SIGNUP_STATISTICS else
+                             'fixed-member-inputs-and-scoped-postgresql' if profile == MEMBER_MANAGEMENT else
                              'fixed-f30-inputs-and-scoped-postgresql' if profile == NOTE_EXPIRY else
                              'fixed-f25-ci-only-pilot' if profile == PILOT else 'full-reference-or-default'),
         'required_smokes': list(required),
@@ -299,6 +392,8 @@ def make_plan(context, paths, profile, jar_sha256):
         result['required_contracts'] = ['fixture_f4_shape', 'pg_note_expiry']
     elif profile == MEMBER_MANAGEMENT:
         result['required_contracts'] = list(MEMBER_REQUIRED_CONTRACTS)
+    elif profile == SIGNUP_STATISTICS:
+        result['required_contracts'] = list(SIGNUP_REQUIRED_CONTRACTS)
     return result
 
 
@@ -382,6 +477,7 @@ def runtime_context():
         identity = _identity(context)
         identity['note_expiry_scope_verified'] = verify_note_expiry_inputs()
         identity['member_management_scope_verified'] = verify_member_management_inputs()
+        identity['signup_statistics_scope_verified'] = verify_signup_statistics_inputs()
         return identity, _paths(paths)
     except (ImportError, KeyError, TypeError, AttributeError, OSError, UnicodeError, ValueError):
         raise ProfileBlocked('The verified runtime context could not be constructed.') from None
@@ -408,7 +504,7 @@ def _write_evidence(path, expected_name, value):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('plan', 'audit'), required=True)
-    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT), required=True)
+    parser.add_argument('--profile', choices=(FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS), required=True)
     parser.add_argument('--jar', type=Path, required=True)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--execution', type=Path)

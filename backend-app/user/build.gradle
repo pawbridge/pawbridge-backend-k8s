@@ -8,6 +8,7 @@ dependencies {
     implementation 'org.springframework:spring-tx'
     implementation 'org.springframework:spring-web'
     implementation 'org.springframework:spring-webmvc'
+    compileOnly 'jakarta.servlet:jakarta.servlet-api'
     implementation 'jakarta.validation:jakarta.validation-api'
     implementation 'org.postgresql:postgresql'
     implementation 'org.springframework.security:spring-security-core'
@@ -15,4 +16,5 @@ dependencies {
 
     testImplementation 'org.mockito:mockito-core'
     testImplementation 'ch.qos.logback:logback-classic'
+    testRuntimeOnly 'jakarta.servlet:jakarta.servlet-api'
 }
