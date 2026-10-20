@@ -1,7 +1,8 @@
-"""Mock-only F4 listener orchestration tests: no sockets, JVM, Docker or real children."""
+"""Mock-only F4 startup/shape tests: no sockets, JVM, Docker or real children."""
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,90 @@ from unittest.mock import Mock, patch
 import f4_ci as f4
 
 ORIGINAL_STOP = f4.f3.stop_owned_child
+
+
+class F4ShapePreparationTest(unittest.TestCase):
+    TABLES_SQL = (
+        'CREATE TABLE pawbridge_f4_fixture.comments(comment_id BIGINT PRIMARY KEY,'
+        'post_id BIGINT REFERENCES pawbridge_community.posts(post_id)); '
+        'CREATE TABLE pawbridge_f4_fixture.private_notes(note_id BIGINT PRIMARY KEY,'
+        'post_id BIGINT REFERENCES pawbridge_community.posts(post_id))')
+    MARKER_SQL = "SELECT value || ':' || owner FROM pawbridge_f4_fixture.marker"
+
+    def setUp(self):
+        self.events = []
+        self.owner = '123-1'
+        self.enter(patch.dict(os.environ, {'F4_CI_OWNER': self.owner}, clear=True))
+        self.hosted = self.enter(patch.object(f4.f2, 'require_hosted',
+            side_effect=lambda: self.events.append('hosted') or self.owner))
+        self.fixture = self.enter(patch.object(f4.f3, 'require_fixture',
+            side_effect=lambda: self.events.append('f3-owned')))
+        self.sql = self.enter(patch.object(f4.f3, 'sql', side_effect=self.execute))
+        self.command = self.enter(patch.object(f4.f2, 'command',
+            side_effect=AssertionError('Real commands forbidden')))
+        self.enter(patch.object(f4.f3.socket, 'socket',
+            side_effect=AssertionError('Real sockets forbidden')))
+
+    def enter(self, context):
+        value = context.__enter__()
+        self.addCleanup(context.__exit__, None, None, None)
+        return value
+
+    def execute(self, query):
+        self.events.append(query)
+        return f4.MARKER + ':' + self.owner if query == self.MARKER_SQL else ''
+
+    def tearDown(self):
+        self.command.assert_not_called()
+
+    def test_given_owned_fixture__when_preparing_shape__then_create_only_two_fk_tables_after_identity(self):
+        f4.prepare_business_shape()
+        self.assertEqual(['hosted', 'f3-owned', self.MARKER_SQL, self.TABLES_SQL], self.events)
+        self.assertEqual(2, self.TABLES_SQL.count('CREATE TABLE '))
+        for operation in ('TRUNCATE ', 'INSERT ', 'UPDATE ', 'DELETE ', 'setval(', 'GRANT '):
+            self.assertNotIn(operation, self.sql.call_args.args[0])
+
+    def test_given_unowned_fixture__when_preparing_shape__then_refuse_before_table_writes(self):
+        for failure in ('hosted', 'f3-owner', 'f4-owner', 'marker'):
+            with self.subTest(failure=failure):
+                self.events.clear()
+                self.sql.reset_mock()
+                with patch.object(f4.f2, 'require_hosted',
+                        side_effect=SystemExit('Hosted target required') if failure == 'hosted' else None,
+                        return_value=self.owner), \
+                     patch.object(f4.f3, 'require_fixture',
+                        side_effect=SystemExit('F3 owner mismatch') if failure == 'f3-owner' else None), \
+                     patch.dict(os.environ, {'F4_CI_OWNER': 'foreign' if failure == 'f4-owner' else self.owner}), \
+                     patch.object(f4.f3, 'sql', return_value=f4.MARKER + ':foreign') as sql:
+                    with self.assertRaises(SystemExit):
+                        f4.prepare_business_shape()
+                    self.assertTrue(all(call.args == (self.MARKER_SQL,) for call in sql.call_args_list))
+
+    def test_given_ddl_failure__when_preparing_shape__then_propagate_without_retry_or_business_writes(self):
+        failure = subprocess.CalledProcessError(1, 'synthetic-owned-sql')
+        self.sql.side_effect = [f4.MARKER + ':' + self.owner, failure]
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            f4.prepare_business_shape()
+        self.assertIs(failure, raised.exception)
+        self.assertEqual([(self.MARKER_SQL,), (self.TABLES_SQL,)],
+            [call.args for call in self.sql.call_args_list])
+
+    def test_given_full_business_preparation__when_preparing__then_preserve_original_single_sql_and_order(self):
+        with patch.object(f4, 'prepare_business_shape') as shape:
+            f4.prepare_business_rows()
+        self.sql.assert_called_once_with(
+            'TRUNCATE pawbridge_community.post_search_documents,pawbridge_community.outbox_events,'
+            'pawbridge_community.posts,pawbridge_user.users; '
+            "INSERT INTO pawbridge_user.users VALUES(42,'합성작성자'); "
+            "SELECT setval('pawbridge_community.posts_post_id_seq',100000,true); "
+            + self.TABLES_SQL)
+        # Splitting this call would change the original psql -c transaction boundary.
+        shape.assert_not_called()
+
+    def test_given_shape_cli__when_invoked__then_use_only_owned_database_shape_path(self):
+        with patch.object(f4.sys, 'argv', ['f4_ci.py', 'prepare-shape']):
+            runpy.run_path(str(Path(f4.__file__)), run_name='__main__')
+        self.assertEqual(['hosted', 'hosted', 'f3-owned', self.MARKER_SQL, self.TABLES_SQL], self.events)
 
 
 class Log:

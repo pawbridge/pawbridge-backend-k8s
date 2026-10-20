@@ -146,6 +146,9 @@ final class F29LegacyNoteSendOracle implements AutoCloseable {
         }
     }
 
+    /** F30 reuses the exact selected void source expiry method under this same JpaTM/Clock. */
+    void expire() { original.expire(); }
+
     UUID send(long caller, PrivateNoteModels.SendNote request) { return original.send(caller, request).noteId(); }
     int insertAttempts() { return insertAttempts.get(); }
     List<UUID> generatedIds() { return List.copyOf(generatedIds); }

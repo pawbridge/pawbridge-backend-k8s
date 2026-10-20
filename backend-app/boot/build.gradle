@@ -855,7 +855,7 @@ tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF29L
 tasks.register('noteSendCompatibilityTest', Test) {
     testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
     classpath = sourceSets.compatibilityTest.runtimeClasspath
-    useJUnitPlatform()
+    useJUnitPlatform { excludeTags 'note-expiry' }
     systemProperty 'user.timezone', 'UTC'
     systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
@@ -873,7 +873,7 @@ tasks.register('noteSendCompatibilityTest', Test) {
 tasks.register('noteSendCompatibilitySeoulTest', Test) {
     testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
     classpath = sourceSets.compatibilityTest.runtimeClasspath
-    useJUnitPlatform()
+    useJUnitPlatform { excludeTags 'note-expiry' }
     systemProperty 'user.timezone', 'Asia/Seoul'
     systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
     ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
@@ -881,6 +881,24 @@ tasks.register('noteSendCompatibilitySeoulTest', Test) {
     }
     filter {
         includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest.givenMicrosecondLeapYearSend__whenPersistingAndSerializingInEitherZone__thenKeepOneInstantAcrossBothMailboxesRequestAndNotification'
+        failOnNoMatchingTests = true
+    }
+    shouldRunAfter tasks.named('noteSendCompatibilityTest')
+    outputs.upToDateWhen { false }
+}
+
+// F30 reuses the same fixed raw repository, JpaTM oracle and owned eighteen-table fixture.
+tasks.register('noteExpiryCompatibilityTest', Test) {
+    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
+    classpath = sourceSets.compatibilityTest.runtimeClasspath
+    useJUnitPlatform { includeTags 'note-expiry' }
+    systemProperty 'user.timezone', 'UTC'
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    ['f24', 'f25', 'f26', 'f27', 'f28', 'f29'].each { stage ->
+        systemProperty "${stage}.fixture.receipt", rootProject.file("build/ci/${stage}-fixture-write.txt").absolutePath
+    }
+    filter {
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest'
         failOnNoMatchingTests = true
     }
     shouldRunAfter tasks.named('noteSendCompatibilityTest')

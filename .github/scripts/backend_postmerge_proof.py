@@ -35,7 +35,9 @@ MAX_AGE = dt.timedelta(hours=24)
 PACKAGE_MEMBERS = ('build/ci/runtime-metadata.txt', 'build/ci/boot-jar.sha256')
 FULL_MEMBERS = PACKAGE_MEMBERS + ('build/ci/contract-plan.txt', 'build/ci/contract-execution.txt')
 ALLOWED_STEP_CONDITIONS = {'always()', "${{ matrix.profile == 'full' }}",
-                           "${{ success() && matrix.profile == 'full' }}"}
+                           "${{ success() && matrix.profile == 'full' }}",
+                           "${{ matrix.profile == 'note-expiry' }}",
+                           "${{ matrix.profile != 'note-expiry' }}"}
 
 
 class Unavailable(ValueError):
@@ -218,7 +220,7 @@ def workflow_contract(raw):
         require(name is not None and 'continue-on-error' not in body, 'unknown-workflow')
         name = name.group(1)
         if key == 'check':
-            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| '[^']+' \}\}", name)
+            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?'[^']+' \}\}", name)
             require(expression is not None, 'unknown-workflow')
             name = expression.group(1)
         require('${{' not in name, 'unknown-workflow')
@@ -229,7 +231,10 @@ def workflow_contract(raw):
             condition = re.findall(r'^        if: (.+)$', part, re.MULTILINE)
             require(len(condition) <= 1 and all(c in ALLOWED_STEP_CONDITIONS for c in condition),
                     'unknown-workflow-condition')
-            steps.append(step.group(1))
+            # This verifier still accepts only an actually executed full profile.
+            # A scoped-only preparation is not part of that full execution.
+            if condition != ["${{ matrix.profile == 'note-expiry' }}"]:
+                steps.append(step.group(1))
         require(bool(steps) and len(steps) == len(set(steps)), 'unknown-workflow')
         result[key] = (name, steps)
     return result
@@ -407,8 +412,10 @@ def verify(identity, payload, workflow, git, api, now):
     saved = document(contents['proof']['postmerge-proof.txt'])
     require(isinstance(saved, dict) and set(saved) == {'schema_version', 'status', 'mode', 'reason', 'identity'} and
             type(saved.get('schema_version')) is int and saved['schema_version'] == 1 and
-            saved.get('status') == 'decided' and saved.get('mode') == 'full' and
-            saved.get('reason') == 'pull-request-full' and 'source_proof' not in saved,
+            saved.get('status') == 'decided' and
+            (saved.get('mode'), saved.get('reason')) in (
+                ('full', 'pull-request-full'), ('execute', 'pull-request-validation')) and
+            'source_proof' not in saved,
             'source-proof-was-not-executed-full')
     source = saved.get('identity')
     require(isinstance(source, dict) and source.get('repository') == profile.REPOSITORY and
@@ -467,12 +474,12 @@ def verify(identity, payload, workflow, git, api, now):
 
 
 def decide(env, *, git_reader=git_read, github_reader=None, now=None):
-    result = {'schema_version': 1, 'status': 'decided', 'mode': 'full', 'reason': 'unavailable', 'identity': {}}
+    result = {'schema_version': 1, 'status': 'decided', 'mode': 'execute', 'reason': 'unavailable', 'identity': {}}
     try:
         identity, payload, workflow = context(env, git_reader)
         result['identity'] = identity
         if identity['event_name'] == 'pull_request':
-            result['reason'] = 'pull-request-full'
+            result['reason'] = 'pull-request-validation'
             return result  # API0, including fork PRs; ordinary full is never reduced.
         api = github_reader if github_reader is not None else GitHubReader(env.get('GH_TOKEN'))
         reference = verify(identity, payload, workflow, git_reader, api,

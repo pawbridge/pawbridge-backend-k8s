@@ -296,6 +296,10 @@ class PawBridgeApplicationTest {
                     assertThat(sendTransaction.getTransactionManager()).isSameAs(writeManager);
                     assertThat(sendTransaction.getTimeout()).isEqualTo(15);
                     assertThat(sendTransaction.isReadOnly()).isFalse();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.note.application.NoteExpiry.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.boot.configuration.NoteExpiryConfiguration.NoteExpiryJob.class)).isEmpty();
+                    assertThat(context.getBeansOfType(org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class)).isEmpty();
+                    assertThat(context.getBeansOfType(org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor.class)).isEmpty();
                     pools.values().forEach(pool -> {
                         assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                         assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();

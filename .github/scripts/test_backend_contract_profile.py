@@ -211,6 +211,7 @@ class ContractProfileTest(unittest.TestCase):
                          changed_paths=Mock(return_value=list(reversed(PATHS))),
                          git=Mock(return_value=(ctx['tree_sha'] + '\n').encode()))
                 with patch.dict('sys.modules', {'ci_branch_policy': common}), \
+                        patch.object(profile, 'verify_note_expiry_inputs', return_value=False), \
                         patch.dict(profile.os.environ, env, clear=True), \
                         patch.object(profile.Path, 'read_text', return_value=json.dumps(payload)):
                     actual, paths = profile.runtime_context()
@@ -220,7 +221,8 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual(ctx['source_sha'], actual['source_sha'])
                 self.assertEqual(ctx['head_sha'] if event == 'pull_request' else ctx['source_sha'], actual['head_sha'])
                 self.assertEqual(PATHS, paths)
-                self.assertEqual(set(profile.IDENTITY_KEYS), set(actual))
+                self.assertEqual(set(profile.IDENTITY_KEYS) | {'note_expiry_scope_verified'}, set(actual))
+                self.assertIs(False, actual['note_expiry_scope_verified'])
 
     def test_given_payload_base_differs_from_common_policy_input__when_loading__then_refuse_context(self):
         payload = {'pull_request': {'base': {'sha': profile.PILOT_BASE}}}

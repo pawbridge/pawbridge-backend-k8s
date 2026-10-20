@@ -247,6 +247,14 @@ SERVICE_UNITS = [{'source': 'community-service/src/main/java/com/pawbridge/commu
   'end_delimiter': '\n    }\n',
   'sha256': '6a0d213030b2d6481724b2a74ebf6b3c4ea1d40a80be03e927efe77b416d4dad'}]
 
+
+# F30 adds only the source void expiry entry; the raw shared Repository already contains both DELETEs.
+SERVICE_UNITS.append({'source': SERVICE,
+ 'signature': '    public void expire() {',
+ 'start_anchor': '    public void expire() {',
+ 'end_delimiter': '\n    }\n',
+ 'sha256': '7cb174de49561324b4a313901c757138d18f6cabc826fff0a363fbd5c412ad14'})
+
 CONTROLLER_UNITS = [{'source': 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteController.java',
   'signature': '    public ResponseDTO<Receipt> send(',
   'start_anchor': '    @PostMapping\n',
@@ -528,10 +536,11 @@ import org.springframework.web.bind.annotation.*;
         'wiring: unique F29 service/controller/advice; TransactionOperations+Clock+Stream constructor injection; original TT15/full constructor are source-only evidence',
         'wiring: original service logger class literal replaced once by canonical FQN String; original afterCommit body/type-only warning and logger category retained; no whole Service/stub',
         'wiring: raw original PrivateNoteStream is reused byte-for-byte from F26 shared output; it is never generated or auto-registered here',
-        'proof: wrapper17 exact UTF-8/LF methods; extra10 source-only methods are evidence, not whole-service execution',
+        'proof: wrapper18 exact UTF-8/LF methods; extra10 source-only methods are evidence, not whole-service execution',
         'proof: real PG reference requires JpaTM and independent bounded User thread; RecordingTM/mockStream MVC is not PG/JPA/SSE proof',
         'proof: afterCommit may have bound Spring resources/ActualTxActive; actual committed visibility determines commit timing',
         'scope: pre-TX validation/hash, two active members, request/replay before block/rate, new Clock1 or reply Clock2, unchanged UUID.randomUUID, note/mailbox/request INSERT then recipient afterCommit publish',
+        'scope: F30 source void expire samples the same Clock once inside TT15 and reuses raw Repository.expire; no new full source or wrapper type',
         'scope: no original app, cleanup scheduler, migration, JVM, PG or Stream thread starts during extraction',
     ])
     pending = [(output / relative, content) for relative, content in generated.items()]
