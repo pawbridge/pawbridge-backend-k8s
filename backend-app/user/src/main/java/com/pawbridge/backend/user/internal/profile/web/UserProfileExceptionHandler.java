@@ -10,7 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice(assignableTypes = {UserProfileController.class, AdminUserDetailController.class})
+@RestControllerAdvice(assignableTypes = {UserProfileController.class, AdminUserDetailController.class, com.pawbridge.backend.user.internal.directory.web.AdminUserDirectoryController.class})
 public final class UserProfileExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(UserProfileExceptionHandler.class);
     private static final int MAX_LOGGED_CAUSES = 4;

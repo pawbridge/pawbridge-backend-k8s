@@ -107,7 +107,7 @@ class AdminUserDetailHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GET /api/v1/admin/users/search", "GET /api/v1/admin/users", "PUT /api/v1/admin/users/8/extra"})
+    @ValueSource(strings = {"GET /api/v1/admin/users/search/extra", "GET /api/v1/admin/users/extra/extra", "PUT /api/v1/admin/users/8/extra"})
     void given__an_unported_reserved_collection_or_method__when__admin_requests_it__then__keep_generic_default_deny(String wire) throws Exception {
         var parts = wire.split(" ", 2);
         mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))

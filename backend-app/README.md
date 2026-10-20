@@ -570,3 +570,45 @@ ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`�
 `pawbridge.chat.enabled`는 기본 false다. false에서는 채팅 Redis·소켓·유지관리 scheduler를 만들지 않는다. true일 때 명시 Redis 연결과 namespace를 요구한다. `pawbridge.jobs.cleanup-enabled=false`이면 true 채팅에서도 보관 기한 정리는 실행하지 않으며, 세션 lease 관리는 별도 유지한다. 기존 설치 데이터의 회원 탈퇴 정리는 이 옵션과 별개로 기존 흐름에서 한 번만 처리한다. DB 커밋 뒤 WITHDRAWN 신호로 본인 연결을 닫고 살아 있는 연결에는 재조회 신호를 보낸다.
 
 종료 시 로컬 세션을 먼저 분리해 동기·지연 close callback의 중복 Redis/User I/O를 막고 기존 lease 만료를 사용한다. 이는 모의 callback 검증이며 실제 JVM·소켓 종료 시간의 증거는 아니다. 신규·관련 단위/HTTP·인가·프로토콜·조립과 계층 검사는 수행했으나 실제 Redis Lua/리스너·WebSocket·채팅 DB 통합은 아직 미실행이다. 선택 CI의 관리자 페이지 PG11을 채팅의 통합 검증으로 세지 않는다.
+
+
+## 기존 Google 로그인 편입
+
+`pawbridge.auth.google-enabled`는 기본 false다. true에서는 기존 AuthSessions·JwtSessionTokens와 명시 Google client/secret/callback·frontend 설정을 요구한다. 정확한 Google authorization/callback 두 경로만 별도 보안 체인으로 조립하며 REST의 STATELESS JWT 경계를 유지한다. OAuth 요청 state는 기존 Spring의 임시 HttpSession 저장 방식을 사용한다. Google 네트워크 호출·자격증명·운영 설정을 이 구현 과정에서 실행하거나 변경하지 않았다.
+
+Google의 이메일/공급자로 기존 회원을 우선 찾고 LOCAL 충돌은 자동 연결하지 않는다. 신규 회원의 기존 닉네임·ROLE_USER·provider ID와 감사시각을 보존한다. 기존 User nickname 저장소를 재사용하며 Google 외부 I/O 후 회원 생성 TX와 refresh 저장 TX를 분리한다. 계정 연결·LOCAL 폐지·Naver는 추가하지 않는다. unique 충돌의 원래1회 추가시도는 실패 TX 종료 뒤 별도 TX로 이동하며, 최초 refresh 저장은 같은 회원 행 잠금 뒤 재조회한다. 실제 JPA flush/23505·동시 가입·DB 감사시각의 동등성은 아직 PostgreSQL 비교로 입증하지 않았다.
+
+성공 redirect는 원문처럼 access/refresh query를 유지한다. 임의 예외/원격 응답을 실패 주소에 복사하지 않고 정해진 문구만 허용한다. redirect URL 전체를 DEBUG로 기록하던 framework 경로는 같은 응답의 servlet redirect로 제한했고, 재현 RED→수정 GREEN으로 토큰 미기록을 확인했다. 이는 실제 HTTP framework TRACE 전체 로그의 검증이 아니며 query 토큰 자체의 전달 방식 개선은 후속 P8 계약이다.
+
+가까운 업무·설정·state/오류·JWT REST·기본 비활성·DEBUG 회귀의 고유30사례는 분할 실행으로 통과했고 계층383class도 검사했다. 실제 Google 인증 교환/브라우저 쿠키·활성 JAR·DB/Redis 통합은 아직 미실행이다. 고정 User 합집합 입력의 선택 CI는 공통 빌드/단위·기존 관리자 페이지 PG11과 cleanup만 실행하며 Google 통합이나 전체 full 성공으로 확대하지 않는다.
+
+
+## 관리자 회원 목록·검색
+
+ADMIN GET `/api/v1/admin/users`와 `/api/v1/admin/users/search`는 기존 reader·읽기 전용 TX·회원7필드 projection을 재사용한다. 기본20건/createdAt DESC와 Page wire·부분 페이지의 count 생략, 원문의 trim/escape 없는 email/name/nickname LIKE와 role AND 필터를 유지한다. JWT ADMIN 판정을 바인딩·DB 조회보다 먼저 수행하며 외부 사용자 헤더를 신뢰하지 않는다.
+
+정렬은 기존 조회 권한의7필드만 허용한다. 원문 JPA가 받을 수 있는 password/careRegNo/providerId/updatedAt4필드는 후보가 명시 거부한다. 이는 알려진 지원범위 차이이며 완전 호환으로 표시하지 않는다. 해당 정렬을 위해 비밀번호 열 조회나 운영 권한을 늘리지 않았다. 실제 운영 전환 전 정렬 정책을 확정해야 한다.
+
+원문·후보 SQL의 실제 PostgreSQL LIKE/collation·정렬·동시 count/JPA 동등성은 아직 미실행이다. 가까운 JDBC/HTTP/명시 조립의 첫 선택41사례/5XML와 계층390class는 통과했으며 모의 transaction을 실제 PG 롤백으로 표현하지 않는다. 고정 코호트 선택 CI도 Google·목록/검색의 실제 DB 통합 대신 공통 단위·구조와 기존 관리자 게시글 페이지 PG11만 요구한다.
+
+
+## User HTTP 편입 묶음
+
+Google·관리자 회원 목록/검색·보호소 신청/승인·본인 동물 활동을 개별 대기열 대신 User 모듈의 한 편입 PR로 정리한다. 원문53개 앱/시험 파일의 연속 before/after와 최종 활동 사본 바이트를 전수 대조했으며 업무 코드를 다시 작성하지 않았다. 기존 private 준비와 실패 증거는 보존한다.
+
+보호소는 `pawbridge.shelter-membership.enabled=false`, 동물 활동은 `pawbridge.user-animal-activities.enabled=false`가 기본이다. true에서는 명시 Animal origin을 요구한다. 보호소는 현재 DB 관리자 확인과 User→신청 재잠금, TX 안 Animal 조회, 승인 역할/등록번호·감사시각, 원문의 RR 기간 통계를 유지한다. 찜 추가/제거는 기존 Favorite와 Outbox를 같은 TX에 저장하고 payload eventId와 Outbox event_id를 별도로 생성한다. 삭제0행에서는 이벤트를 만들지 않는다. 본인 동물 조회의 DELETED fallback과 원문 Page wire도 유지한다.
+
+Kafka 보상 소비/manualACK·재시도·processed 저장·정리 예약의 소유권은 아직 편입하지 않았다. LOCAL 가입/로그인·이메일, Store 활동 조회와 P8 계정 정책도 이 묶음에 없다. 이 상태로 구 User 실행기 종료나 Kafka 종료를 완료했다고 표시하지 않는다.
+
+코드 활성화 전에는 선택한 writer의 실제 DML 권한, Google/Animal/Redis/Kafka·DB 통합 및 JPA flush/감사시각/경합을 격리 환경에서 검증해야 한다. CI cleanup 역할을 새 true 기능에 그대로 재사용할 수 있다고 가정하지 않는다. 이 작업은 실제 권한이나 운영 설정을 변경하지 않았다.
+
+선택 CI는 고정108 입력과 공통 빌드·단위/HTTP/구조, 기존 관리자 페이지 PG11·소유 정리를 요구한다.39계약·28JAR의 미실행과 새로운 User SQL/외부 연동의 미실증은 명시적으로 남기며 full 또는 운영 인계 성공으로 확대하지 않는다.
+
+
+### Google 실패·경합 보완과 남은 실제 연동 검증
+
+자동 리뷰에서 원문에도 있던 같은 TX의23505 뒤 재시도와 최초 refresh 선조회/저장 경합을 찾았다. 회원 생성은 첫 TX의 rollback·cleanup이 끝난 뒤 새 TX에서 Google/LOCAL을 재조회하고 원래 한도인 추가1회만 시도한다. 동시 요청이 이미 만든 Google 계정은 재사용한다. refresh는 발급 순서를 보존한 뒤 같은 기존 writer TX에서 회원 PK를 FOR UPDATE로 잠그고 refresh를 재조회·저장한다. 사라진 회원·복수 refresh 행은 임의 보정하지 않고 실패한다. 이는 기존 실패/경합 동작의 의도적 보완이며 source byte 동일성으로 표현하지 않는다. 새 DDL/UNIQUE/데이터 보정은 없다.
+
+Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/유한 시도/잠금 전 조회 금지와 실패 전파를 보호한다. 실제 PostgreSQL23505 복구·동시 row lock·선택 writer의 SELECT/행잠금/DML 권한은 아직 검증하지 않았다. 현재 OAuth 웹 호출에는 outer TX가 없으며, 다른 refresh writer까지 직렬화되거나 모든 isolation에서 동일하다고 주장하지 않는다. Google 활성화 전 실제 DB/격리수준·브라우저 흐름을 확인해야 한다.
+
+오류 redirect에 기존 query가 있으면 두 번째 물음표가 붙는 결함도 URI builder로 보완했다. 새2 RED 실패→기존 포함7 GREEN, 기존 오류 문구·query 없는 응답·토큰 미기록을 유지했다. fragment 시험은 handler 경계이며 Boot의 fragment 거부 정책은 그대로다.
