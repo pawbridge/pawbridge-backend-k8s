@@ -173,6 +173,47 @@ ADMIN_METHOD_CASES = (
 ADMIN_REPORT_CASES = tuple(method + '[' + str(index) + ']'
                            for method, count in ADMIN_METHOD_CASES for index in range(1, count + 1))
 
+
+VISIT_COLLECTION = 'visit-collection'
+VISIT_BASE = 'd938003e464c1413b8c27071e3f07d85b4e25ed6'
+VISIT_APP_HASHES = {'backend-app/boot/build.gradle': 'e06453da8a4f23d3b939c1abccb5b17829579353267580fba64eec18f62d2ce8',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F16VisitCollectionOracle.java': '2cbd4d9067a00caa6bc4c94137936d8d68e880fdb9e1c513ed4282785090ab6b',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlVisitCollectionCompatibilityTest.java': 'eeac62f9b62398a6dc13388771b12b6e77dff93809b5d513cb2920c28c9459c8',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '1309aa9842a35a9ff349c48b944d131bf4e5944778d59224ef0f3e203f94e5cd',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '1db238567ec15f202c447b1f7d56c8275e75c348b6002342b8f38bbedf69858a',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/VisitCollectionConfiguration.java': '03d4c5e008994ad17c4c8811783fb4b4c8f49a6d9c119f058a02377e68363d9b',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '57759b237d2e20c8a5607c4567e2b1aa94354784ddf24222a5522a425288edbf',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/VisitCollectionConfigurationTest.java': '1fea63fbf550b05a2c94fd82feebf50a072cbbdc2a41ca0209f885ab63f36ecd',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/VisitCollectionHttpTest.java': '218956473015ef344af513a39c46f8c9e8123eb1f5d363b273dd98deab7fc4af',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitCollection.java': 'f0a9d95ef4a40cba7e3649f391cbdf9fe049bb6ede19dc4493e7b6f81503ea92',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionRejectedException.java': '8b180a43c9e2ad6708ca45733e6e7318c13629c41dc563a8edd9db014a06acd3',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionStore.java': 'fa43789205d6af3651400ac40245b0d621c3f75223ee16eb9d4be9d17086fbc8',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/application/VisitIdentity.java': 'f82baafa315963d7667b7904390c030a42cbfb55d9ccc2d539c47a0586d74142',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/infrastructure/JdbcVisitCollectionStore.java': 'c880cd0b01e48ca7bd499ea8b1166a73a1d5ff54b8c84b2cd0892f86d5ed2885',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/web/VisitCollectionController.java': '8cef77c073dd59e856eb88959a062ba1a5c5ba8f5c06fa114a6d5600dc18e013',
+ 'backend-app/community/src/main/java/com/pawbridge/backend/community/internal/visit/web/VisitCollectionExceptionHandler.java': '25b695f5d6721152e2db1fdb212f357718f3da167541554947eea9eb9a0405ad',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/visit/application/VisitCollectionTest.java': '3ac79ed67d79d7f817f94610e3bf86d1e2b3d140d2e9f1873922e57cfd6aa1e9',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/visit/application/VisitIdentityTest.java': 'f1ca42cd42fe49519bdb5c9bcaf300768f7d4877cdca06028f42cc931d563c6e',
+ 'backend-app/scripts/f29_ci.py': 'bee3366d450ec82a462ea586221ac5812d76d6a96cc75f62e7f4c23596478151',
+ 'backend-app/scripts/prepare_f16_legacy_oracle.py': 'c315deaa411d3664830f0a3c3d038a0e8959654479998202dbcd9043f2dd44eb',
+ 'backend-app/scripts/test_f16_ci_guards.py': '30e7a9ce10484d47806e5ee6e718c60ea2b55a668cff240d8bb3b0cce8ab7dcf'}
+VISIT_APP_EXCEPTIONS = frozenset(VISIT_APP_HASHES) | {'backend-app/README.md'}
+VISIT_ALLOWED_PATHS = ADMIN_ALLOWED_PATHS | frozenset(VISIT_APP_HASHES) | {
+    '.github/scripts/test_backend_visit_collection_profile.py',
+}
+VISIT_REQUIRED_CONTRACTS = ('fixture_f4_shape', 'compile_visit_collection', 'fixture_member_cleanup',
+                            'fixture_visit_collection', 'pg_visit_collection')
+VISIT_FULL_CONTRACTS = ('fixture_admin_visit_collection', 'pg_visit_collection')
+VISIT_SKIPPED_CONTRACTS = ('pg_note_expiry', 'pg_member_cleanup', 'pg_signup_statistics',
+                           'compile_admin_update', 'fixture_admin_update', 'pg_admin_update',
+                           'fixture_admin_visit_collection')
+VISIT_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlVisitCollectionCompatibilityTest'
+VISIT_SINGLE_METHODS = ('givenAMicrosecondCollectionStartAndSparseLeapDays__whenStartingTwiceAndReadingPeriodsInEitherZone__thenKeepTheFirstInstantAndZeroFillOnlyCollectedDays', 'givenNewAndRepeatedDayIdentities__whenCountingThenARealSqlFailureOccursAfterTheCte__thenDedupeAndRollbackBothPhysicalWritesWithEitherManager', 'givenOldAndCurrentVisitorRows__whenCleanupCrossesTheSeoulFiveMinuteGrace__thenCommitEachOldDayAndPreserveAllAggregatesAndStartMetadata', 'givenCleanupHoldsTheExclusiveOldDayLock__whenCountWaitsAcrossSeoulMidnight__thenRecheckTheDayAfterWaitingAndNeverRecreateTheCleanedIdentity')
+VISIT_PARAMETER_METHODS = ('givenSharedDayLocksAndConcurrentIdentities__whenBothCount__thenSameIdentityDedupesAndDifferentIdentitiesIncrementWithoutLostUpdates', 'givenAnExactWriterPrivilegeRevoked__whenCountingOrCleaning__thenKeepTheWholePriorStateAndRestoreOnlyThatPrivilegeBeforeRecovery')
+VISIT_REPORT_CASES = tuple(name + '()' for name in VISIT_SINGLE_METHODS) + tuple(
+    name + '[' + str(index) + ']' for name in VISIT_PARAMETER_METHODS for index in (1,2))
+VISIT_SEOUL_METHOD = 'givenAMicrosecondCollectionStartAndSparseLeapDays__whenStartingTwiceAndReadingPeriodsInEitherZone__thenKeepTheFirstInstantAndZeroFillOnlyCollectedDays'
+
 REPOSITORY = 'pawbridge/pawbridge-backend-k8s'
 PILOT_REF = 'ci/backend-contract-regression-scope'
 PILOT_BASE = '0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3'
@@ -316,6 +357,30 @@ def verify_admin_member_update_inputs(git_reader=None):
         return False
 
 
+def verify_visit_collection_inputs(git_reader=None):
+    """Accept only the fixed visit application/compiler/fixture bytes on the administrator parent."""
+    def read(*args):
+        return subprocess.run(['git', *args], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, check=True, timeout=8).stdout
+    git = git_reader if git_reader is not None else read
+    try:
+        if len(VISIT_APP_HASHES) != 21:
+            return False
+        raw = git('diff', '--name-only', '--no-renames', '-z', VISIT_BASE, 'HEAD', '--', 'backend-app')
+        if not isinstance(raw, bytes):
+            return False
+        paths = [value.decode('utf-8') for value in raw.split(b'\0') if value]
+        if len(paths) != len(set(paths)) or not set(paths).issubset(VISIT_APP_EXCEPTIONS):
+            return False
+        for path, digest in VISIT_APP_HASHES.items():
+            blob = git('show', 'HEAD:' + path)
+            if not isinstance(blob, bytes) or hashlib.sha256(blob).hexdigest() != digest:
+                return False
+        return True
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, TypeError):
+        return False
+
+
 def verify_admin_member_update_report(directory):
     """Check all sixteen unique, source-pinned parameterized method/index labels."""
     try:
@@ -338,6 +403,37 @@ def verify_admin_member_update_report(directory):
             raise ProfileBlocked('The administrator update cases did not all execute successfully.')
     except (OSError, ValueError, TypeError, ET.ParseError):
         raise ProfileBlocked('The administrator update report is invalid.') from None
+
+
+def verify_visit_collection_report(utc_directory, seoul_directory):
+    """Require all eight method/index labels and only the designated Seoul boundary case."""
+    for folder, expected in ((utc_directory, VISIT_REPORT_CASES),
+                             (seoul_directory, (VISIT_SEOUL_METHOD + '()',))):
+        try:
+            directory = Path(folder).absolute()
+            reports = list(directory.glob('TEST-*.xml'))
+            if (directory.is_symlink() or directory.resolve() != directory or len(reports) != 1
+                    or reports[0].is_symlink() or reports[0].resolve() != reports[0]
+                    or reports[0].name != 'TEST-' + VISIT_REPORT_CLASS + '.xml'):
+                raise ProfileBlocked('The visit collection report is missing or redirected.')
+            suite = ET.parse(reports[0]).getroot()
+            cases = list(suite.iter('testcase'))
+            names = [case.attrib.get('name', '') for case in cases]
+            if (suite.tag != 'testsuite' or suite.attrib.get('name') != VISIT_REPORT_CLASS
+                    or int(suite.attrib.get('tests', -1)) != len(expected) or len(cases) != len(expected)
+                    or len(suite.findall('testcase')) != len(expected)
+                    or len(set(names)) != len(expected) or set(names) != set(expected)
+                    or any(int(suite.attrib.get(key, -1)) != 0 for key in ('failures', 'errors', 'skipped'))
+                    or any(int(node.attrib.get(key, 0)) != 0 for node in suite.iter()
+                           for key in ('failures', 'errors', 'skipped', 'disabled'))
+                    or any(node.tag in ('failure', 'error', 'skipped', 'disabled') for node in suite.iter())
+                    or any(case.attrib.get('classname') != VISIT_REPORT_CLASS
+                           or case.attrib.get('status', 'run') not in ('run', 'passed')
+                           or case.attrib.get('result', 'completed') not in ('completed', 'passed', 'success')
+                           for case in cases)):
+                raise ProfileBlocked('The visit collection cases did not all execute successfully.')
+        except (OSError, ValueError, TypeError, ET.ParseError):
+            raise ProfileBlocked('The visit collection report is invalid.') from None
 
 
 def verify_note_expiry_report(directory):
@@ -368,7 +464,7 @@ def select_profiles(context, paths):
     if not isinstance(context, dict):
         raise ProfileBlocked('Profile context is invalid.')
     requested = context.get('requested_profile')
-    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE):
+    if requested not in (None, '', FULL, PILOT, NOTE_EXPIRY, MEMBER_MANAGEMENT, SIGNUP_STATISTICS, ADMIN_MEMBER_UPDATE, VISIT_COLLECTION):
         raise ProfileBlocked('Requested profile is unknown.')
     if requested == FULL:
         return [FULL]
@@ -412,6 +508,16 @@ def select_profiles(context, paths):
         raise ProfileBlocked('The requested administrator update scope differs from its reviewed inputs.')
     if admin_scoped and requested in (None, '', ADMIN_MEMBER_UPDATE):
         return [ADMIN_MEMBER_UPDATE]
+    visit_scoped = (context.get('event_name') in ('pull_request', 'push')
+                    and context.get('repository') == REPOSITORY
+                    and context.get('head_repository') == REPOSITORY
+                    and (context.get('event_name') != 'push' or context.get('head_ref') == 'dev')
+                    and context.get('visit_collection_scope_verified') is True
+                    and bool(paths) and set(paths).issubset(VISIT_ALLOWED_PATHS))
+    if requested == VISIT_COLLECTION and not visit_scoped:
+        raise ProfileBlocked('The requested visit collection scope differs from its reviewed inputs.')
+    if visit_scoped and requested in (None, '', VISIT_COLLECTION):
+        return [VISIT_COLLECTION]
     eligible = (context.get('event_name') == 'pull_request'
                 and context.get('repository') == REPOSITORY
                 and context.get('head_repository') == REPOSITORY
@@ -426,6 +532,8 @@ def select_profiles(context, paths):
 
 
 def expected_smokes(profile):
+    if profile == VISIT_COLLECTION:
+        return ()
     if profile == ADMIN_MEMBER_UPDATE:
         return ()
     if profile == SIGNUP_STATISTICS:
@@ -481,7 +589,8 @@ def make_plan(context, paths, profile, jar_sha256):
         'schema_version': 1, 'status': 'planned', 'profile': profile,
         'identity': identity, 'jar_sha256': jar_sha256,
         'changed_paths_sha256': hashlib.sha256(_encoded(paths)).hexdigest(),
-        'selection_reason': ('fixed-admin-update-inputs-and-scoped-postgresql' if profile == ADMIN_MEMBER_UPDATE else
+        'selection_reason': ('fixed-visit-inputs-and-scoped-postgresql' if profile == VISIT_COLLECTION else
+                             'fixed-admin-update-inputs-and-scoped-postgresql' if profile == ADMIN_MEMBER_UPDATE else
                              'fixed-signup-inputs-and-scoped-postgresql' if profile == SIGNUP_STATISTICS else
                              'fixed-member-inputs-and-scoped-postgresql' if profile == MEMBER_MANAGEMENT else
                              'fixed-f30-inputs-and-scoped-postgresql' if profile == NOTE_EXPIRY else
@@ -489,7 +598,12 @@ def make_plan(context, paths, profile, jar_sha256):
         'required_smokes': list(required),
         'skipped_smokes': [step for step in ALL_SMOKES if step not in required],
     }
-    if profile == NOTE_EXPIRY:
+    if profile == FULL:
+        result['required_contracts'] = list(VISIT_FULL_CONTRACTS)
+    elif profile == VISIT_COLLECTION:
+        result['required_contracts'] = list(VISIT_REQUIRED_CONTRACTS)
+        result['skipped_contracts'] = list(VISIT_SKIPPED_CONTRACTS)
+    elif profile == NOTE_EXPIRY:
         result['required_contracts'] = ['fixture_f4_shape', 'pg_note_expiry']
     elif profile == MEMBER_MANAGEMENT:
         result['required_contracts'] = list(MEMBER_REQUIRED_CONTRACTS)
@@ -511,7 +625,8 @@ def audit_execution(plan, context, paths, profile, jar_sha256, steps):
     results = {}
     required = set(expected['required_smokes'])
     contracts = tuple(expected.get('required_contracts', ()))
-    for key in ALL_SMOKES + contracts + ('owned_cleanup',):
+    skipped_contracts = tuple(expected.get('skipped_contracts', ()))
+    for key in ALL_SMOKES + contracts + skipped_contracts + ('owned_cleanup',):
         step = steps.get(key)
         wanted = 'success' if key == 'owned_cleanup' or key in required or key in contracts else 'skipped'
         if (not isinstance(step, dict) or step.get('outcome') != wanted
@@ -529,6 +644,8 @@ def audit_execution(plan, context, paths, profile, jar_sha256, steps):
     }
     if contracts:
         result['required_contracts'] = list(contracts)
+    if skipped_contracts:
+        result['skipped_contracts'] = list(skipped_contracts)
     return result
 
 
@@ -582,6 +699,7 @@ def runtime_context():
         identity['member_management_scope_verified'] = verify_member_management_inputs()
         identity['signup_statistics_scope_verified'] = verify_signup_statistics_inputs()
         identity['admin_member_update_scope_verified'] = verify_admin_member_update_inputs()
+        identity['visit_collection_scope_verified'] = verify_visit_collection_inputs()
         return identity, _paths(paths)
     except (ImportError, KeyError, TypeError, AttributeError, OSError, UnicodeError, ValueError):
         raise ProfileBlocked('The verified runtime context could not be constructed.') from None

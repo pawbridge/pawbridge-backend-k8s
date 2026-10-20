@@ -952,7 +952,175 @@ def admin_update_denied_privilege(kind):
         admin_update_require_fixture()
 
 
+# Visit collection has two explicit parents. The selected lane does not acquire admin User privileges.
+VISIT_COLLECTION_RECEIPT = 'visit-collection-fixture-write.txt'
+VISIT_COLLECTION_TABLES = (('daily_visitor','pawbridge_community.daily_visitor','visit_date,visitor_hash'),
+                           ('visit_collection','pawbridge_community.visit_collection','singleton'))
+VISIT_COLLECTION_GRANTS = """GRANT SELECT(visit_date),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;
+GRANT SELECT(visit_date,unique_visitors),INSERT(visit_date,unique_visitors),UPDATE(unique_visitors) ON pawbridge_community.daily_visit_count TO pawbridge_f3_writer;
+GRANT SELECT(singleton,started_at),INSERT(singleton,started_at) ON pawbridge_community.visit_collection TO pawbridge_f3_writer;
+"""
+
+
+def _visit_collection_proof(owner, parent):
+    if parent not in ('member-cleanup', 'admin-user-update'):
+        raise ValueError('Unknown fixed visit collection parent')
+    return ('owner=' + owner + '\nsource_sha=33cad5567767f8730fc2c4389815ecd031f41dc0\n'
+            'fixture=' + parent + ' plus visit collection\nnew_business_ddl=0\nsynthetic_tables_added=2\n'
+            'new_schema=0\nnew_marker=0\nsnapshot_tables=26\nreader_delta=0\nnew_sequence_acl=0\n'
+            + hashlib.sha256(VISIT_COLLECTION_GRANTS.encode()).hexdigest() + '  visit-collection-exact-grants\n')
+
+
+def visit_collection_fixture_proof(owner):
+    return _visit_collection_proof(owner, 'member-cleanup')
+
+
+def admin_visit_collection_fixture_proof(owner):
+    return _visit_collection_proof(owner, 'admin-user-update')
+
+
+def visit_collection_require_oracle_receipt():
+    import prepare_f16_legacy_oracle as visits
+    try:
+        for source, relative in visits.COLLECTION_SHARED.items():
+            target = ROOT.parent / relative
+            if (target.is_symlink() or target.resolve() != target or not target.is_file()
+                    or hashlib.sha256(target.read_bytes()).hexdigest() != visits.COLLECTION_EXPECTED[source]):
+                raise ValueError()
+        for name, expected in (('f16-oracle-sha256.txt', visits.collection_base_receipt()),
+                               ('f16-collection-oracle-sha256.txt', visits.collection_receipt())):
+            target = EVIDENCE / name
+            if (target.is_symlink() or target.resolve() != target or not target.is_file() or target.read_text() != expected):
+                raise ValueError()
+    except (OSError, UnicodeError, ValueError):
+        raise SystemExit('Visit collection raw F16/F7 artifacts or separate source receipt differ') from None
+
+
+def visit_collection_require_identity():
+    owner = member_require_identity()
+    f21.check_receipt(EVIDENCE / VISIT_COLLECTION_RECEIPT, visit_collection_fixture_proof(owner))
+    visit_collection_require_oracle_receipt()
+    return owner
+
+
+def admin_visit_collection_require_identity():
+    owner = admin_update_require_identity()
+    f21.check_receipt(EVIDENCE / VISIT_COLLECTION_RECEIPT, admin_visit_collection_fixture_proof(owner))
+    visit_collection_require_oracle_receipt()
+    return owner
+
+
+def _visit_collection_require_tables():
+    expected = {
+        'daily_visitor': (2, "('visit_date','date',0,'NO',0),('visitor_hash','character',64,'NO',0)", "column_name='visit_date'", 'true', 'false', True, 1),
+        'daily_visit_count': (2, "('visit_date','date',0,'NO',0),('unique_visitors','bigint',0,'NO',0)", 'true', 'true', "column_name='unique_visitors'", False, 2),
+        'visit_collection': (2, "('singleton','boolean',0,'NO',0),('started_at','timestamp with time zone',0,'NO',6)", 'true', 'true', 'false', False, 2),
+    }
+    for table, (columns, shape, read, create, change, delete, constraints) in expected.items():
+        relation = 'pawbridge_community.' + table
+        where = " FROM information_schema.columns WHERE table_schema='pawbridge_community' AND table_name='" + table + "'"
+        defaults = "CASE WHEN column_name='singleton' THEN column_default='true' ELSE column_default IS NULL END" if table == 'visit_collection' else 'column_default IS NULL'
+        if owned_sql("SELECT count(*)=" + str(columns) + " AND bool_and(is_identity='NO' AND is_generated='NEVER' AND " + defaults
+                     + " AND (column_name,data_type,COALESCE(character_maximum_length,0),is_nullable,COALESCE(datetime_precision,0)) IN (" + shape + "))" + where) != 't':
+            raise SystemExit('Visit collection exact V11 column/default shape differs')
+        reader = 'true' if table == 'daily_visit_count' else 'false'
+        if owned_sql("SELECT count(*)=2 AND bool_and(has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'SELECT')=(" + read
+                     + ") AND has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'INSERT')=(" + create
+                     + ") AND has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'UPDATE')=(" + change
+                     + ") AND NOT has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'REFERENCES')"
+                     + " AND has_column_privilege('pawbridge_f2_reader','" + relation + "',column_name,'SELECT')=" + reader
+                     + " AND NOT has_column_privilege('pawbridge_f2_reader','" + relation + "',column_name,'INSERT,UPDATE,REFERENCES')"
+                     + " AND pg_get_serial_sequence('" + relation + "',column_name) IS NULL)" + where) != 't':
+            raise SystemExit('Visit collection exact writer/unchanged reader/no-sequence columns differ')
+        if owned_sql("SELECT NOT has_table_privilege('pawbridge_f3_writer','" + relation + "','SELECT,INSERT,UPDATE,TRUNCATE,REFERENCES,TRIGGER')"
+                     + " AND has_table_privilege('pawbridge_f3_writer','" + relation + "','DELETE')=" + str(delete).lower()
+                     + " AND NOT has_table_privilege('pawbridge_f2_reader','" + relation + "','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')") != 't':
+            raise SystemExit('Visit collection exact table ACL differs')
+        keys = ('visit_date','visitor_hash') if table == 'daily_visitor' else ('visit_date',) if table == 'daily_visit_count' else ('singleton',)
+        names = 'ARRAY[' + ','.join(f4.literal(key) for key in keys) + ']::text[]'
+        if owned_sql("SELECT (SELECT relkind='r' AND relpersistence='p' AND pg_get_userbyid(relowner)='postgres' FROM pg_class WHERE oid='" + relation + "'::regclass)"
+                     + " AND (SELECT count(*)=" + str(constraints) + " AND bool_and(convalidated AND NOT condeferrable) AND count(*) FILTER(WHERE contype='p')=1 AND count(*) FILTER(WHERE contype='f')=0 FROM pg_constraint WHERE conrelid='" + relation + "'::regclass)"
+                     + " AND (SELECT ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY k(num,ord) JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.num ORDER BY k.ord)=" + names + " FROM pg_constraint c WHERE conrelid='" + relation + "'::regclass AND contype='p')"
+                     + " AND (SELECT count(*)=1 AND bool_and(indisprimary AND indisunique AND indisvalid AND indisready AND indpred IS NULL AND indexprs IS NULL) FROM pg_index WHERE indrelid='" + relation + "'::regclass)") != 't':
+            raise SystemExit('Visit collection owner/PK/constraint/index inventory differs')
+        if table != 'daily_visitor':
+            check = 'unique_visitors>=0' if table == 'daily_visit_count' else 'singleton'
+            if owned_sql("SELECT count(*)=1 AND bool_and(convalidated AND regexp_replace(pg_get_expr(conbin,conrelid),'::bigint|[()[:space:]]','','g')=" + f4.literal(check) + ") FROM pg_constraint WHERE conrelid='" + relation + "'::regclass AND contype='c'") != 't':
+                raise SystemExit('Visit collection original V11 CHECK differs')
+
+
+def visit_collection_require_fixture():
+    owner = visit_collection_require_identity()
+    _member_require_fixture_without_user_writer_acl()
+    _member_require_user_writer_acl(('user_id','nickname'), ('user_id','nickname','updated_at'))
+    _visit_collection_require_tables()
+    return owner
+
+
+def admin_visit_collection_require_fixture():
+    owner = admin_visit_collection_require_identity()
+    _member_require_fixture_without_user_writer_acl()
+    _member_require_user_writer_acl(('user_id','nickname','role','care_reg_no'), ('user_id','nickname','updated_at','role','care_reg_no'))
+    _visit_collection_require_tables()
+    return owner
+
+
+def _visit_collection_snapshot():
+    tables = SNAPSHOT_TABLES + MEMBER_TABLES + VISIT_COLLECTION_TABLES
+    fields = [f4.literal(key) + ',(SELECT COALESCE(json_agg(r ORDER BY ' + order + "),'[]'::json) FROM " + relation + ' r)' for key, relation, order in tables]
+    value = json.loads(owned_sql('SELECT json_build_object(' + ','.join(fields) + ')'))
+    if not isinstance(value,dict) or set(value) != {key for key,_,_ in tables} or any(not isinstance(v,list) for v in value.values()):
+        raise SystemExit('Visit collection requires exactly twenty-six raw tables')
+    return value
+
+
+def visit_collection_database_snapshot():
+    visit_collection_require_identity()
+    return _visit_collection_snapshot()
+
+
+def admin_visit_collection_database_snapshot():
+    admin_visit_collection_require_identity()
+    return _visit_collection_snapshot()
+
+
+def _visit_collection_extend(owner, proof, require_new, snapshot_new):
+    import prepare_f16_legacy_oracle as visits
+    visit_collection_require_oracle_receipt()  # Before any new table, grant or row write.
+    target = EVIDENCE / VISIT_COLLECTION_RECEIPT
+    f21.check_receipt(target, proof, allow_missing=True)
+    if target.exists():
+        raise SystemExit('Refusing an existing visit collection fixture receipt')
+    raw = subprocess.check_output(['git','show',visits.SOURCE + ':' + visits.COLLECTION_DDL], cwd=ROOT.parent, stderr=subprocess.PIPE)
+    fragments = visits.collection_fragments(raw)
+    if owned_sql("SELECT count(*)=2 AND bool_and(has_column_privilege('pawbridge_f2_reader','pawbridge_community.daily_visit_count',column_name,'SELECT') AND NOT has_column_privilege('pawbridge_f2_reader','pawbridge_community.daily_visit_count',column_name,'INSERT,UPDATE,REFERENCES') AND NOT has_column_privilege('pawbridge_f3_writer','pawbridge_community.daily_visit_count',column_name,'SELECT,INSERT,UPDATE,REFERENCES')) AND NOT has_table_privilege('pawbridge_f2_reader','pawbridge_community.daily_visit_count','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AND NOT has_table_privilege('pawbridge_f3_writer','pawbridge_community.daily_visit_count','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') FROM information_schema.columns WHERE table_schema='pawbridge_community' AND table_name='daily_visit_count'") != 't':
+        raise SystemExit('Visit collection requires unchanged parent reader-two/writer-zero count ACL before grant')
+    for _, relation, _ in VISIT_COLLECTION_TABLES:
+        if owned_sql('SELECT to_regclass(' + f4.literal(relation) + ') IS NULL') != 't':
+            raise SystemExit('Refusing an existing visit collection business table')
+    before = member_database_snapshot()
+    owned_sql(input_text='BEGIN;\n' + ''.join(fragments) + '\n' + VISIT_COLLECTION_GRANTS + 'COMMIT;\n')
+    with target.open('x') as out:
+        out.write(proof)
+    if require_new() != owner:
+        raise SystemExit('Visit collection owner changed after preparation')
+    if snapshot_new() != dict(before, **{key:[] for key,_,_ in VISIT_COLLECTION_TABLES}):
+        raise SystemExit('Visit collection extension changed existing twenty-four rows')
+
+
+def visit_collection_prepare():
+    f2.require_hosted()
+    owner = member_require_fixture()  # Last old member24 strict, selected lane only.
+    _visit_collection_extend(owner, visit_collection_fixture_proof(owner), visit_collection_require_fixture, visit_collection_database_snapshot)
+
+
+def admin_visit_collection_prepare():
+    f2.require_hosted()
+    owner = admin_update_require_fixture()  # Last old admin24 strict, full lane only.
+    _visit_collection_extend(owner, admin_visit_collection_fixture_proof(owner), admin_visit_collection_require_fixture, admin_visit_collection_database_snapshot)
+
+
 if __name__ == "__main__":
     import sys
     f2.require_hosted()
-    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke, "admin-update-prepare": admin_update_prepare}[sys.argv[1]]()
+    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke, "admin-update-prepare": admin_update_prepare, "visit-collection-prepare": visit_collection_prepare, "admin-visit-collection-prepare": admin_visit_collection_prepare}[sys.argv[1]]()

@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -23,7 +24,9 @@ import org.springframework.security.web.context.RequestAttributeSecurityContextR
 @Configuration(proxyBeanMethods = false)
 public class ReadSecurityConfiguration {
     @Bean
-    SecurityFilterChain postReadSecurity(HttpSecurity http, PostTokenAuthenticator tokens) throws Exception {
+    SecurityFilterChain postReadSecurity(HttpSecurity http, PostTokenAuthenticator tokens,
+            @Value("${pawbridge.visits.enabled:false}") boolean visitsEnabled,
+            @Value("${pawbridge.visits.collection-enabled:false}") boolean collectionEnabled) throws Exception {
         var postCreation = new AntPathRequestMatcher("/api/v1/posts", "POST");
         var postDeletion = new AntPathRequestMatcher("/api/v1/posts/*", "DELETE");
         var postUpdate = new AntPathRequestMatcher("/api/v1/posts/*", "PUT");
@@ -56,8 +59,16 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "GET"),
                 new NegatedRequestMatcher(new AntPathRequestMatcher("/api/v1/admin/users/search", "GET")));
         var userUpdate = new AntPathRequestMatcher("/api/v1/admin/users/{userId}", "PUT");
-        var adminRoutes = new OrRequestMatcher(totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate);
-        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate);
+        var visitCollectionEnabled = (org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> visitsEnabled && collectionEnabled;
+        var visitIdentity = new AndRequestMatcher(visitCollectionEnabled,
+                new AntPathRequestMatcher("/api/v1/visits/identity", "POST"));
+        var visitCount = new AndRequestMatcher(visitCollectionEnabled,
+                new AntPathRequestMatcher("/api/v1/visits/today", "POST"));
+        var visitPeriod = new AndRequestMatcher(visitCollectionEnabled,
+                new AntPathRequestMatcher("/api/v1/admin/visits/stats/period", "GET"));
+        var adminRoutes = new OrRequestMatcher(totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -73,6 +84,7 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/home/videos").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/visits/today").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/comments/posts/read/{postId}").permitAll()
+                        .requestMatchers(visitIdentity, visitCount).permitAll()
                         .requestMatchers(adminRoutes).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())

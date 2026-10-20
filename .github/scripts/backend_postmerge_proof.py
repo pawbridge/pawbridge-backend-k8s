@@ -50,6 +50,23 @@ ALLOWED_STEP_CONDITIONS = {'always()', "${{ matrix.profile == 'full' }}",
                            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'admin-member-update' }}",
                            "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' }}",
                            "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' }}"}
+ALLOWED_STEP_CONDITIONS.update({"${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != "
+ "'admin-member-update' && matrix.profile != 'visit-collection' }}",
+ "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != "
+ "'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' }}",
+ "${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != "
+ "'signup-statistics' && matrix.profile != 'visit-collection' }}",
+ "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' && matrix.profile != "
+ "'admin-member-update' && matrix.profile != 'visit-collection' }}",
+ "${{ matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' }}",
+ "${{ matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != "
+ "'visit-collection' }}",
+ "${{ matrix.profile == 'admin-member-update' }}",
+ "${{ matrix.profile == 'full' || matrix.profile == 'visit-collection' }}",
+ "${{ matrix.profile == 'full' }}",
+ "${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == "
+ "'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' }}",
+ "${{ matrix.profile == 'visit-collection' }}"})
 
 
 class Unavailable(ValueError):
@@ -232,7 +249,7 @@ def workflow_contract(raw):
         require(name is not None and 'continue-on-error' not in body, 'unknown-workflow')
         name = name.group(1)
         if key == 'check':
-            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?(?:matrix.profile == 'signup-statistics' && '[^']+' \|\| )?(?:matrix.profile == 'admin-member-update' && '[^']+' \|\| )?'[^']+' \}\}", name)
+            expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| (?:matrix.profile == 'note-expiry' && '[^']+' \|\| )?(?:matrix.profile == 'member-management' && '[^']+' \|\| )?(?:matrix.profile == 'signup-statistics' && '[^']+' \|\| )?(?:matrix.profile == 'admin-member-update' && '[^']+' \|\| )?(?:matrix.profile == 'visit-collection' && '[^']+' \|\| )?'[^']+' \}\}", name)
             require(expression is not None, 'unknown-workflow')
             name = expression.group(1)
         require('${{' not in name, 'unknown-workflow')
@@ -249,7 +266,9 @@ def workflow_contract(raw):
                                   ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}"],
                                   ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}"],
                                   ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' }}"],
-                                  ["${{ matrix.profile == 'admin-member-update' }}"]):
+                                  ["${{ matrix.profile == 'admin-member-update' }}"],
+                                  ["${{ matrix.profile == 'visit-collection' }}"],
+                                  ["${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' || matrix.profile == 'visit-collection' }}"]):
                 steps.append(step.group(1))
         require(bool(steps) and len(steps) == len(set(steps)), 'unknown-workflow')
         result[key] = (name, steps)

@@ -27,6 +27,9 @@ def steps(mode):
     result = {key: {'outcome': 'success' if key in required else 'skipped',
                     'conclusion': 'success' if key in required else 'skipped'}
               for key in profile.ALL_SMOKES}
+    if mode == profile.FULL:
+        for key in profile.VISIT_FULL_CONTRACTS:
+            result[key] = {'outcome': 'success', 'conclusion': 'success'}
     result['owned_cleanup'] = {'outcome': 'success', 'conclusion': 'success'}
     return result
 
@@ -110,7 +113,7 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual('passed', result['status'])
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
-                self.assertEqual(29, len(result['step_results']))
+                self.assertEqual(29 + (2 if mode == profile.FULL else 0), len(result['step_results']))
 
     def test_given_other_source_base_head_tree_run_or_jar__when_auditing__then_reject_stale_evidence(self):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
@@ -215,6 +218,7 @@ class ContractProfileTest(unittest.TestCase):
                         patch.object(profile, 'verify_note_expiry_inputs', return_value=False), \
                         patch.object(profile, 'verify_member_management_inputs', return_value=False), \
                         patch.object(profile, 'verify_signup_statistics_inputs', return_value=False), \
+                        patch.object(profile, 'verify_visit_collection_inputs', return_value=False), \
                         patch.object(profile, 'verify_admin_member_update_inputs', return_value=False), \
                         patch.dict(profile.os.environ, env, clear=True), \
                         patch.object(profile.Path, 'read_text', return_value=json.dumps(payload)):
@@ -225,11 +229,12 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual(ctx['source_sha'], actual['source_sha'])
                 self.assertEqual(ctx['head_sha'] if event == 'pull_request' else ctx['source_sha'], actual['head_sha'])
                 self.assertEqual(PATHS, paths)
-                self.assertEqual(set(profile.IDENTITY_KEYS) | {'note_expiry_scope_verified', 'member_management_scope_verified', 'signup_statistics_scope_verified', 'admin_member_update_scope_verified'}, set(actual))
+                self.assertEqual(set(profile.IDENTITY_KEYS) | {'note_expiry_scope_verified', 'member_management_scope_verified', 'signup_statistics_scope_verified', 'admin_member_update_scope_verified', 'visit_collection_scope_verified'}, set(actual))
                 self.assertIs(False, actual['note_expiry_scope_verified'])
                 self.assertIs(False, actual['member_management_scope_verified'])
                 self.assertIs(False, actual['signup_statistics_scope_verified'])
                 self.assertIs(False, actual['admin_member_update_scope_verified'])
+                self.assertIs(False, actual['visit_collection_scope_verified'])
 
     def test_given_payload_base_differs_from_common_policy_input__when_loading__then_refuse_context(self):
         payload = {'pull_request': {'base': {'sha': profile.PILOT_BASE}}}
