@@ -68,6 +68,38 @@ class JpaStoreMemberReadsTest {
         verifyNoInteractions(carts);assertEquals(1,read.calls);assertFalse(read.active);
     }
 
+    static Stream<Arguments> blockedSortRequests() {
+        return Stream.of(true,false).flatMap(wishlist -> {
+            String deep=wishlist ? "sku.product.category.parent.parent.name" : "orderItems.order.orderItems.price";
+            return Stream.concat(Stream.of("unknown"," ","sum(price)",null,deep,deep.replace('.', '_'),
+                    wishlist ? "skuProductCategoryParentParentName" : "orderItemsOrderOrderItemsPrice",
+                    wishlist ? "orderItems.price" : "sku.price")
+                    .map(property -> Arguments.of(wishlist,List.of(new StoreMemberReads.Order(property,true,false)))),
+                    Stream.of(Arguments.of(wishlist,java.util.Collections.nCopies(5,new StoreMemberReads.Order("createdAt",true,false)))));
+        });
+    }
+    @ParameterizedTest(name="blockedSort[{index}]") @MethodSource("blockedSortRequests")
+    void given__unsupported_or_excessive_sort__when__reading_pages__then__reject_with_fixed_message_before_transaction_or_repository(boolean wishlist,List<StoreMemberReads.Order> sort) {
+        var input=new StoreMemberReads.Request(0,2,sort);
+        var failure=assertThrows(IllegalArgumentException.class,()->{if(wishlist)store.wishlists(7,input);else store.orders(7,input);});
+        assertEquals("Store member sort is not supported",failure.getMessage());
+        assertEquals(0,read.calls);assertFalse(read.active);verifyNoInteractions(wishlists,orders,carts);
+    }
+
+    @ParameterizedTest @ValueSource(booleans={true,false})
+    void given__four_allowed_sort_terms__when__reading_pages__then__preserve_every_term_inside_one_read_transaction(boolean wishlist) {
+        var sort=List.of(new StoreMemberReads.Order("id",true,false),new StoreMemberReads.Order("userId",false,false),
+                new StoreMemberReads.Order("createdAt",true,false),new StoreMemberReads.Order("updatedAt",false,false));
+        var input=new StoreMemberReads.Request(0,2,sort);
+        var expected=PageRequest.of(0,2,Sort.by(Sort.Order.asc("id"),Sort.Order.desc("userId"),Sort.Order.asc("createdAt"),Sort.Order.desc("updatedAt")));
+        if(wishlist)when(wishlists.findByUserId(7L,expected)).thenAnswer(call->{assertTrue(read.active);return org.springframework.data.domain.Page.empty(expected);});
+        else when(orders.findByUserId(7L,expected)).thenAnswer(call->{assertTrue(read.active);return org.springframework.data.domain.Page.empty(expected);});
+        var result=wishlist ? store.wishlists(7,input) : store.orders(7,input);
+        assertEquals(sort,result.sort());assertEquals(1,read.calls);assertFalse(read.active);
+        if(wishlist){verify(wishlists).findByUserId(7L,expected);verifyNoInteractions(orders);}else{verify(orders).findByUserId(7L,expected);verifyNoInteractions(wishlists);}
+        verifyNoInteractions(carts);
+    }
+
     @Test void given__wishlist_with_long_price_and_repeated_option_group__when__mapping__then__run_original_mapper_inside_transaction_and_preserve_all_fields() {
         Product product = Product.builder().name("stored name").status(ProductStatus.DELETED).build(); id(product,90L);
         ProductSKU sku = ProductSKU.builder().product(product).skuCode("stored sku").price(Long.MAX_VALUE).stockQuantity(0).build(); id(sku,80L);

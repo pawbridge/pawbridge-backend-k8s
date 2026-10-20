@@ -221,6 +221,38 @@ class OwnedPostgresqlStoreMemberJpaTest {
         });
     }
 
+    @Test void givenUnboundedOrUnapprovedSortRequests_whenReading_thenRejectBeforeAnyJpaTransactionOrSql() {
+        observed("bounded sort refusal before the reader transaction", () -> {
+            TransactionTemplate guardedReads = reads(candidateEmf);
+            AtomicInteger begins = new AtomicInteger();
+            ((JpaTransactionManager) guardedReads.getTransactionManager()).addListener(
+                    new org.springframework.transaction.TransactionExecutionListener() {
+                        @Override public void beforeBegin(org.springframework.transaction.TransactionExecution transaction) {
+                            begins.incrementAndGet();
+                        }
+                    });
+            var guarded = new JpaStoreMemberReads(SharedEntityManagerCreator.createSharedEntityManager(candidateEmf), guardedReads, cart);
+            var tooMany = new StoreMemberReads.Request(0, 2, java.util.Collections.nCopies(5,
+                    new StoreMemberReads.Order("createdAt", true, false)));
+            String recursive = "sku.product.category." + "parent.".repeat(64) + "name";
+            for (boolean wishlist : List.of(true, false)) {
+                var inputs = List.of(request(0, 2, recursive, false),
+                        request(0, 2, wishlist ? "orderItems.price" : "sku.price", false), tooMany);
+                for (StoreMemberReads.Request input : inputs) {
+                    RuntimeException rejected = null;
+                    try { if (wishlist) guarded.wishlists(MEMBER, input); else guarded.orders(MEMBER, input); }
+                    catch (IllegalArgumentException expected) { rejected = expected; }
+                    check(rejected != null && !rejected.getMessage().contains(recursive),
+                            "Only a fixed request refusal may escape for a disallowed sort");
+                    check(begins.get() == 0 && candidateSql.statements.get() == 0,
+                            "Rejected sort paths and excessive sort counts must not start a JpaTM transaction or execute SQL");
+                    released();
+                }
+            }
+            verifyNoInteractions(cart);
+        });
+    }
+
     @Test void givenAnOffsetBeyondIntegerRange_whenReading_thenBothRejectBeforeAnOrmSelect() {
         observed("original large-offset refusal", () -> {
             var request = request(Integer.MAX_VALUE, 2, "createdAt", false);

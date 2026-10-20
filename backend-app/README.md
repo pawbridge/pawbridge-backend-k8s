@@ -767,7 +767,7 @@ ADDED는 4회 시도 후 새 Animal TX에서 영수증을 재확인하고 필요
 
 ## Store 회원 목록의 원문 JPA 재사용
 
-명시 `pawbridge.user-store-mypage.enabled=true`와 `backend=module`일 때 주문·찜 목록은 원래 Store의 13개 model/enum/base와 repository2·DTO2를 패키지·import만 바꿔 재사용한다. 중첩·컬렉션·underscore/camel 정렬을 SQL 별칭 표로 제한하지 않고 원래 Spring Data/Hibernate가 처리한다. Cart는 기존 JDBC 읽기를 유지한다. 공개 Store API와 User 응답, HTTP 기본 경로는 유지한다.
+명시 `pawbridge.user-store-mypage.enabled=true`와 `backend=module`일 때 주문·찜 목록은 원래 Store의 13개 model/enum/base와 repository2·DTO2를 패키지·import만 바꿔 재사용한다. 허용된 중첩·컬렉션·underscore/camel 정렬은 원래 Spring Data/Hibernate가 처리한다. 클라이언트가 재귀 Category.parent 경로로 쿼리를 증폭하지 못하도록 찜·주문별 유한한 정렬 속성 목록과 요청당 최대4개 정렬을 적용한다. 부모 카테고리는 명시한 한 단계만 허용하며, 목록 밖 속성·과도한 개수는 Store 읽기 트랜잭션과 SQL을 시작하기 전에 고정 오류로 거부한다. 이는 임의 정렬 경로 전체 호환에서 의도적으로 좁힌 보안 경계다. 기존 User Runtime 오류 응답과 기본 HTTP backend 경로는 유지한다. Cart는 기존 JDBC 읽기를 유지한다. 공개 Store API와 User 응답, HTTP 기본 경로는 유지한다.
 
 Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을 공유한다. 별도 명명 JpaTM의 RO/RR/5초 안에서 entity→DTO 변환까지 마친다. 전역 JPA/entity/repository 자동스캔, OSIV, schema 생성·변경·validate는 켜지 않는다. schema는 pawbridge_store, 물리 naming과 UTC를 고정하며 bootstrap JDBC metadata 조회도 끈다. 기존 reader JdbcTM과 writer pool은 다른 업무에서 그대로 유지한다.
 
