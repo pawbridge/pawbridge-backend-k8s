@@ -48,7 +48,17 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.animal-lost-search.enabled:false}") String animalLostSearchEnabledFlag,
             @Value("${pawbridge.store-carts.enabled:false}") String storeCartsEnabledFlag,
             @Value("${pawbridge.store-order-administration.enabled:false}") String storeOrderAdministrationFlag,
-            @Value("${pawbridge.animal-travel.enabled:false}") String animalTravelFlag) throws Exception {
+            @Value("${pawbridge.animal-travel.enabled:false}") String animalTravelFlag,
+            @Value("${lost-gallery-feed.enabled:false}") String galleryFeedFlag) throws Exception {
+
+        var galleryFeedEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> "true".equalsIgnoreCase(galleryFeedFlag);
+        var galleryFeedRoutes=new AndRequestMatcher(galleryFeedEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/internal/animals/lost-gallery","GET"),
+                new AntPathRequestMatcher("/internal/animals/lost-gallery/snapshots","POST"),
+                new AntPathRequestMatcher("/internal/animals/lost-gallery/snapshots/{id}","GET"),
+                new AntPathRequestMatcher("/internal/animals/lost-gallery/snapshots/{id}/pages","GET"),
+                new AntPathRequestMatcher("/internal/animals/lost-gallery/snapshots/{id}","DELETE")));
 
         var storeOrderAdministrationEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(storeOrderAdministrationFlag);
@@ -256,7 +266,7 @@ public class ReadSecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(storeOrderAdministrationRoutes).hasRole("ADMIN")
-                        .requestMatchers(animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
+                        .requestMatchers(galleryFeedRoutes, animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()
