@@ -23,7 +23,10 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.sql.Connection;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +34,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -178,6 +182,27 @@ class OwnedPostgresqlShelterCommandTest {
             for(long linked:List.of(990010L,990012L,990013L,990014L,990015L))send(mvc,"DELETE",ROOT+"/"+linked,token(ADMIN,"ROLE_ADMIN"),null,409);
             send(mvc,"DELETE",ROOT+"/"+created,token(ADMIN,"ROLE_ADMIN"),null,204);
             check(jdbc.queryForObject("SELECT count(*) FROM pawbridge_animal.shelters WHERE id=?",Long.class,created)==0L,"An unlinked owned creation must be physically removed");
+        });
+    }
+
+    @Test void givenOwnedShelterWithPreviousOrNullAudit_whenUpdatingThroughHttp_thenReturnFlushedAuditMatchingCommittedRow(){
+        http((mvc,context)->{
+            long id=create(mvc);String care=care(id);
+            Calendar utc=Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            LocalDateTime created=jdbc.queryForObject("SELECT created_at FROM pawbridge_animal.shelters WHERE id=? AND care_reg_no=?",(row,index)->row.getTimestamp(1,utc).toLocalDateTime(),id,care);
+            LocalDateTime previous=jdbc.queryForObject("SELECT updated_at FROM pawbridge_animal.shelters WHERE id=? AND care_reg_no=?",(row,index)->row.getTimestamp(1,utc).toLocalDateTime(),id,care);
+            for(int revision=0;revision<2;revision++){
+                if(revision==1)check(jdbc.update("UPDATE pawbridge_animal.shelters SET updated_at=NULL WHERE id=? AND care_reg_no=? AND name=?",id,care,name(care))==1,
+                        "Only the registered owned creation may model a legacy null audit");
+                JsonNode response=send(mvc,"PUT",ROOT+"/"+id,token(ADMIN,"ROLE_ADMIN"),Map.of("phone","p15-audit-"+revision),200);
+                LocalDateTime returned=JSON.treeToValue(response.path("updatedAt"),LocalDateTime.class);
+                LocalDateTime committed=jdbc.queryForObject("SELECT updated_at FROM pawbridge_animal.shelters WHERE id=? AND care_reg_no=?",(row,index)->row.getTimestamp(1,utc).toLocalDateTime(),id,care);
+                check(returned!=null&&returned.isAfter(previous),"The response must expose the advanced auditing value, including a legacy null value");
+                check(Duration.between(returned,committed).abs().compareTo(Duration.ofNanos(1000))<0,
+                        "Response and committed audit must match within PostgreSQL microsecond precision");
+                check(created.equals(JSON.treeToValue(response.path("createdAt"),LocalDateTime.class)),"Updating must preserve creation audit");
+                previous=committed;
+            }
         });
     }
 

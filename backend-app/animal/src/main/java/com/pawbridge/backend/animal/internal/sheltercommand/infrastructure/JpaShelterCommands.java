@@ -58,6 +58,7 @@ public final class JpaShelterCommands implements ShelterCommands {
                     || !actor.careRegNo().equals(shelter.getCareRegNo()))) throw new ShelterCommandForbiddenException();
             requireRollbackCharset(request.phone(),request.email(),request.introduction(),request.adoptionProcedure(),request.operatingHours());
             shelter.updateInfo(request.phone(), request.email(), request.introduction(), request.adoptionProcedure(), request.operatingHours());
+            entities.flush();
             return mapper.toDetailResponse(shelter);
         });
     }

@@ -899,3 +899,5 @@ P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
 ```
 
 시험 전용 fixture는 축소 User 모델과 원문 Animal 8표로 구성되며 실제 운영 migration·권한 변경 근거가 아니다. 실제 API 활성화·기존 수집기/회원 승인 경로의 배타 인계는 별도 미완료 항목이다.
+
+보호소 수정은 감사 리스너의 `updatedAt`을 반영하도록 DTO 변환 전에 같은 writer 트랜잭션을 flush한다. 신규 격리 PUT 계약은 이전 시각 및 기존 NULL 감사값을 모두 다루며 응답과 커밋된 값의 일치를 PostgreSQL 마이크로초 정밀도로 확인한다. JDBC 관측은 기존 Animal 명령 시험과 같은 UTC Calendar를 사용한다. 실제 운영 데이터나 API는 변경하지 않았다.

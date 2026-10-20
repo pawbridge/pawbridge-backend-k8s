@@ -87,7 +87,7 @@ class JpaShelterCommandsTest {
         assertThat(result.address()).isEqualTo("서울");assertThat(result.ownerName()).isEqualTo("대표");
         assertThat(result.organizationName()).isEqualTo("기관");
         var order=inOrder(actors,entities);order.verify(actors).find(10L);order.verify(entities).find(Shelter.class,7L);
-        verify(entities,never()).flush();verifyNoInteractions(search,members);
+        order.verify(entities).flush();verifyNoInteractions(search,members);
     }
     @Test void givenAdministratorWithForeignCareNumber__whenUpdate__thenAllowEveryShelter() {
         when(actors.find(10L)).thenReturn(new Actor(10L,"ROLE_ADMIN","other",true,false));
