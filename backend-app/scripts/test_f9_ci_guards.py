@@ -231,7 +231,7 @@ class F9GuardTest(unittest.TestCase):
         self.assertLess(workflow.index('python3 scripts/f8_ci.py smoke'), workflow.index('python3 scripts/f9_ci.py smoke'))
         for required in ('scripts/test_f9_ci_guards.py', 'build/ci/f9-helper-refusal.txt',
                          'build/ci/f9-oracle-sha256.txt', 'f[23456789]_fixture', 'f[23456789]LegacyOracle',
-                         "grep -Ev '^BOOT-INF/lib/(hibernate-validator-[0-9][^/]*|spring-data-redis-3[.]4[.]11|feign-core-13[.]5|hibernate-core-6[.]6[.]33[.]Final|hibernate-commons-annotations-7[.]0[.]3[.]Final|spring-data-jpa-3[.]4[.]11)\\.jar$'"):
+                         "grep -Ev '^BOOT-INF/lib/(hibernate-validator-[0-9][^/]*|spring-data-redis-3[.]4[.]11|feign-(core|form)-13[.]5|hibernate-core-6[.]6[.]33[.]Final|hibernate-commons-annotations-7[.]0[.]3[.]Final|spring-data-jpa-3[.]4[.]11)\\.jar$'"):
             self.assertIn(required, workflow)
 
     def test_given_actual_jar_filter__when_allowing_validator__then_orm_legacy_and_test_artifacts_still_fail(self):
@@ -240,6 +240,7 @@ class F9GuardTest(unittest.TestCase):
         allowed = ('BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\n'
                    'BOOT-INF/lib/spring-data-redis-3.4.11.jar\n'
                    'BOOT-INF/lib/feign-core-13.5.jar\n'
+                   'BOOT-INF/lib/feign-form-13.5.jar\n'
                    'BOOT-INF/lib/hibernate-core-6.6.33.Final.jar\n'
                    'BOOT-INF/lib/hibernate-commons-annotations-7.0.3.Final.jar\n'
                    'BOOT-INF/lib/spring-data-jpa-3.4.11.jar\n'
@@ -259,6 +260,10 @@ class F9GuardTest(unittest.TestCase):
                           'BOOT-INF/lib/feign-core-13.4.jar', 'BOOT-INF/lib/feign-core-13.50.jar',
                           'BOOT-INF/lib/feign-okhttp-13.5.jar', 'BOOT-INF/lib/feign-core-13.5-extra.jar',
                           'BOOT-INF/classes/feign-core-13.5.jar',
+                          'BOOT-INF/lib/feign-form-13.4.jar', 'BOOT-INF/lib/feign-form-13.50.jar',
+                          'BOOT-INF/lib/feign-form-spring-13.5.jar', 'BOOT-INF/lib/feign-form-extra-13.5.jar',
+                          'BOOT-INF/lib/feign-form-13.5-extra.jar', 'BOOT-INF/classes/feign-form-13.5.jar',
+                          'test/feign-form-13.5.jar',
                           'BOOT-INF/lib/junit-jupiter-5.11.4.jar', 'BOOT-INF/classes/f9_fixture.sql',
                           'BOOT-INF/classes/f9LegacyOracle/Input.class',
                           'test/f9LegacyOracle/hibernate-validator-8.0.3.Final.jar'):

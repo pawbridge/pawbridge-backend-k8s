@@ -20,6 +20,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-annotations'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'io.github.openfeign:feign-core:13.5'
+    implementation 'io.github.openfeign:feign-form:13.5'
     implementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
 
     compileOnly 'jakarta.servlet:jakarta.servlet-api'

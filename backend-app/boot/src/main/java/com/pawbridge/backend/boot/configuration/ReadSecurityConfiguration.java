@@ -43,7 +43,8 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.animal-query.backend:}") String animalQueryBackend,
             @Value("${pawbridge.animal-statistics.enabled:false}") boolean animalStatisticsEnabledFlag,
             @Value("${pawbridge.animal-commands.enabled:false}") String animalCommandsEnabledFlag,
-            @Value("${pawbridge.store-direct-orders.enabled:false}") String storeDirectOrdersEnabledFlag) throws Exception {
+            @Value("${pawbridge.store-direct-orders.enabled:false}") String storeDirectOrdersEnabledFlag,
+            @Value("${pawbridge.animal-lost-search.enabled:false}") String animalLostSearchEnabledFlag) throws Exception {
 
         var animalCommandsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(animalCommandsEnabledFlag);
@@ -58,6 +59,11 @@ public class ReadSecurityConfiguration {
         var storeDirectOrderRoutes=new AndRequestMatcher(storeDirectOrdersEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/orders/direct","POST"),
                 new AntPathRequestMatcher("/api/v1/orders/{orderId}","GET")));
+
+        var animalLostSearchEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> "true".equalsIgnoreCase(animalLostSearchEnabledFlag);
+        var animalLostSearchRoute=new AndRequestMatcher(animalLostSearchEnabled,
+                new AntPathRequestMatcher("/api/v1/animals/lost-candidates","POST"));
 
         var animalDiscoveryEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->animalDiscoveryEnabledFlag;
         var animalDiscoveryReading=new AndRequestMatcher(animalDiscoveryEnabled,new OrRequestMatcher(
@@ -214,7 +220,7 @@ public class ReadSecurityConfiguration {
                 .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers(animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
+                        .requestMatchers(animalLostSearchRoute, animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()
