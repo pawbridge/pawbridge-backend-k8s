@@ -37,7 +37,10 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.user-store-mypage.enabled:false}") boolean storeMyPageEnabledFlag,
             @Value("${pawbridge.animal-discovery.enabled:false}") boolean animalDiscoveryEnabledFlag,
             @Value("${pawbridge.animal-recommendations.enabled:false}") boolean animalRecommendationsEnabledFlag,
-            @Value("${pawbridge.store-catalog.enabled:false}") boolean storeCatalogEnabledFlag) throws Exception {
+            @Value("${pawbridge.store-catalog.enabled:false}") boolean storeCatalogEnabledFlag,
+            @Value("${pawbridge.animal-shelters.enabled:false}") boolean animalSheltersEnabledFlag,
+            @Value("${pawbridge.animal-query.backend:}") String animalQueryBackend,
+            @Value("${pawbridge.animal-statistics.enabled:false}") boolean animalStatisticsEnabledFlag) throws Exception {
 
         var animalDiscoveryEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->animalDiscoveryEnabledFlag;
         var animalDiscoveryReading=new AndRequestMatcher(animalDiscoveryEnabled,new OrRequestMatcher(
@@ -46,6 +49,27 @@ public class ReadSecurityConfiguration {
         var animalRecommendationsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->animalRecommendationsEnabledFlag;
         var animalRecommendationReading=new AndRequestMatcher(animalRecommendationsEnabled,
                 new RegexRequestMatcher("^/api/v1/animals/[0-9]+/similar(?:\\?.*)?$","GET"));
+
+        var animalSheltersEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->animalSheltersEnabledFlag;
+        var animalShelterReading=new AndRequestMatcher(animalSheltersEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/shelters","GET"),
+                new RegexRequestMatcher("^/api/v1/shelters/[0-9]+(?:\\?.*)?$","GET"),
+                new AntPathRequestMatcher("/api/v1/shelters/by-care-reg-no/{careRegNo}","GET"),
+                new AntPathRequestMatcher("/api/v1/shelters/count","GET")));
+        var postgresqlSheltersEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request->animalSheltersEnabledFlag && "postgresql".equalsIgnoreCase(animalQueryBackend);
+        var animalShelterDiscoveryReading=new AndRequestMatcher(postgresqlSheltersEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/shelters/discovery","GET"),
+                new RegexRequestMatcher("^/api/v1/shelters/[0-9]+/observations(?:\\?.*)?$","GET")));
+
+        var animalStatisticsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->animalStatisticsEnabledFlag;
+        var publicAnimalStatistics=new AndRequestMatcher(animalStatisticsEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/animals/stats/today","GET"),
+                new AntPathRequestMatcher("/api/v1/animals/stats/status","GET"),
+                new AntPathRequestMatcher("/api/v1/animals/stats/regional","GET")));
+        var adminAnimalStatistics=new AndRequestMatcher(animalStatisticsEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/admin/stats/daily-animals","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/stats/intake-trend","GET")));
 
         var storeCatalogEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->storeCatalogEnabledFlag;
         var storeCatalog=new AndRequestMatcher(storeCatalogEnabled,new OrRequestMatcher(
@@ -156,8 +180,8 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/approve","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
-        var adminRoutes = new OrRequestMatcher(homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var adminRoutes = new OrRequestMatcher(adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -168,7 +192,7 @@ public class ReadSecurityConfiguration {
                 .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
-                        .requestMatchers(animalDiscoveryReading, animalRecommendationReading, storeCatalog).permitAll()
+                        .requestMatchers(animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()
