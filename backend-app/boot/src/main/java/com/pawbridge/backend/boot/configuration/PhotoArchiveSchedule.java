@@ -31,7 +31,11 @@ final class PhotoArchiveSchedule implements SmartLifecycle {
     @Override public synchronized void start() {
         if (running || closing) return;
         worker.resume();
-        executor = new ScheduledThreadPoolExecutor(1, task -> new Thread(task, "apms-photo-archive"));
+        executor = new ScheduledThreadPoolExecutor(1, task -> {
+            var thread = new Thread(task, "apms-photo-archive");
+            thread.setDaemon(true);
+            return thread;
+        });
         executor.setRemoveOnCancelPolicy(true);
         executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
         executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);

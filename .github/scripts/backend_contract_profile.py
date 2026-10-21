@@ -884,11 +884,11 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveHttpClientTest.java': 'b2bbaa5d3056e0a3bea533a8c4f6df2a2f351868f8259d5c55df41f5309d3e78',
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveWorkerTest.java': '7609f598e30fb3e84d3635e82c2e29a8e458a8b645c34201a8e7ec02897c51fa',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalPhotoArchiveConfiguration.java': 'fb57597c11709432895fe5de7b1adf97f47051bf42c5b47e888a0f0248ebdccb',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PhotoArchiveSchedule.java': '921c156f065092adb09729cf845f2eb03d437a6faeb32e2ea425b27036c0929b',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PhotoArchiveSchedule.java': '3aed8ff6a17f94e60da42f60512705d27e577f760a1b3217aeade357c7caad7e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PhotoArchiveStorageProperties.java': 'd123601b7804c9fd1a6784cddfa42e43b2e55db1653260bde9b9016e0f7a7cb8',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalPhotoArchiveConfigurationTest.java': 'b977d0c04d45e263a531161c002b5f22cda2333fefe32330c49462cd6ecf14c4',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlApmsPhotoArchiveTest.java': '8648e73decb420dde0163431c263973f4fe1f0b67b6cd362be0af0c5eaa8a758',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/PhotoArchiveScheduleTest.java': 'dfbb909914b576b86d45b8ff1666872ef89e771677a7f4330ff8609550b85b64',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/PhotoArchiveScheduleTest.java': '6d0fd9f7595bc940d3a4254ba70ac04c5e712d648f1af6cc0a95661d9a8afaec',
  'backend-app/boot/src/test/resources/owned-postgresql/apms-photo-archive-owned-schema.sql': '6930ff2d0f3bcd0bd48bad24c16410ae3348ed1480c9284037b0318f15c3083e',
 }
 # Only the identical, previously successful TestKit inputs may be referenced.

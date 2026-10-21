@@ -66,7 +66,9 @@ class PhotoArchiveScheduleTest {
         var worker = mock(PhotoArchiveWorker.class);
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
+        var workerThread = new java.util.concurrent.atomic.AtomicReference<Thread>();
         doAnswer(call -> {
+            workerThread.set(Thread.currentThread());
             entered.countDown();
             while (release.getCount() != 0) {
                 try { release.await(); }
@@ -88,6 +90,7 @@ class PhotoArchiveScheduleTest {
             var executor = (java.util.concurrent.ScheduledThreadPoolExecutor)
                     org.springframework.test.util.ReflectionTestUtils.getField(schedule, "executor");
             assertThat(executor.isTerminated()).isFalse();
+            assertThat(workerThread.get().isDaemon()).isTrue();
             assertThat(appender.list).anySatisfy(event -> assertThat(event.getFormattedMessage())
                     .isEqualTo("APMS photo archive shutdown incomplete; lease recovery may be required"));
             verify(worker, times(1)).scheduled();
