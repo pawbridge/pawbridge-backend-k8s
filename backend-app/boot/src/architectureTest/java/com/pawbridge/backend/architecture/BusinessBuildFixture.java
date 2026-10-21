@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 abstract class BusinessBuildFixture {
-    static final List<String> MODULES = List.of("boot", "user", "community", "animal", "store");
+    static final List<String> MODULES = List.of("boot", "user", "community", "animal", "store", "payment");
 
     @TempDir
     static Path testKitDirectory;
@@ -40,7 +40,7 @@ abstract class BusinessBuildFixture {
         fixture = Files.createDirectory(temporaryDirectory.resolve("backend-app"));
         write("settings.gradle", """
                 rootProject.name = 'pawbridge-backend-app'
-                include 'boot', 'user', 'community', 'animal', 'store'
+                include 'boot', 'user', 'community', 'animal', 'store', 'payment'
                 """);
         write("gradle.properties", """
                 org.gradle.jvmargs=-Xmx192m -Dfile.encoding=UTF-8
@@ -76,6 +76,7 @@ abstract class BusinessBuildFixture {
                     implementation project(':community')
                     implementation project(':animal')
                     implementation project(':store')
+                    implementation project(':payment')
                 }
                 """);
 
@@ -86,7 +87,7 @@ abstract class BusinessBuildFixture {
         Files.copy(guard, fixture.resolve("gradle/architecture.gradle"));
         // Apply the actual business module scripts and production guard entry. The
         // boot fixture is a plain Java consumer so it cannot recursively run TestKit.
-        for (String module : List.of("user", "community", "animal", "store")) {
+        for (String module : List.of("user", "community", "animal", "store", "payment")) {
             Files.createDirectories(fixture.resolve(module));
             Files.copy(productionBuild.resolve(module + "/build.gradle"),
                     fixture.resolve(module + "/build.gradle"));
@@ -142,6 +143,12 @@ abstract class BusinessBuildFixture {
                     private final com.pawbridge.backend.store.internal.domain.StoreName name =
                         new com.pawbridge.backend.store.internal.domain.StoreName("PawBridge");
                     public String breed() { return name.value(); }
+                }
+                """);
+        javaSource("payment", "api.PaymentSummary", "public record PaymentSummary(String status) {}");
+        javaSource("payment", "internal.application.PaymentReader", """
+                public class PaymentReader {
+                    private com.pawbridge.backend.store.api.StoreLookup store;
                 }
                 """);
     }

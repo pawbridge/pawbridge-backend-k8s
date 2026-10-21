@@ -19,13 +19,14 @@ import org.gradle.language.jvm.tasks.ProcessResources
 
 // Business dependencies are a DAG. Boot is the sole composition/packaging root.
 def allowedDependencies = [
-    ':boot'     : [':user', ':community', ':animal', ':store'] as Set,
+    ':boot'     : [':user', ':community', ':animal', ':store', ':payment'] as Set,
     ':user'     : [':store', ':animal'] as Set,
     ':community': [':user'] as Set,
     ':animal'   : [] as Set,
-    ':store'    : [] as Set
+    ':store'    : [] as Set,
+    ':payment'  : [':store'] as Set
 ]
-def businessModules = [':user', ':community', ':animal', ':store'] as Set
+def businessModules = [':user', ':community', ':animal', ':store', ':payment'] as Set
 
 def rejectArchitecture = { String detail ->
     throw new GradleException("Architecture violation: ${detail}")
@@ -40,7 +41,7 @@ def verifyDeclaredGraph = {
     }
     def expectedProjects = allowedDependencies.keySet()
     if (rootProject.subprojects.collect { it.path }.toSet() != expectedProjects) {
-        rejectArchitecture('only boot, user, community, animal and store projects are allowed')
+        rejectArchitecture('only boot, user, community, animal, store and payment projects are allowed')
     }
     if (!gradle.includedBuilds.empty) {
         rejectArchitecture('included builds are not allowed in this isolated application')
@@ -72,7 +73,7 @@ def verifyDeclaredGraph = {
 
 def verifyArchitecture = tasks.register('verifyArchitecture') {
     group = 'verification'
-    description = 'Checks the boot/user/community/animal/store production Gradle dependency graph and input isolation.'
+    description = 'Checks the boot/user/community/animal/store/payment production Gradle dependency graph and input isolation.'
 
     doLast {
         verifyDeclaredGraph()
@@ -203,7 +204,7 @@ def describeBusinessType = { String name ->
     while (normalized.endsWith('[]')) {
         normalized = normalized.substring(0, normalized.length() - 2)
     }
-    def moduleName = ['user', 'community', 'animal', 'store'].find { normalized.startsWith("${businessPrefix}${it}.") }
+    def moduleName = ['user', 'community', 'animal', 'store', 'payment'].find { normalized.startsWith("${businessPrefix}${it}.") }
     if (moduleName == null) {
         return null
     }

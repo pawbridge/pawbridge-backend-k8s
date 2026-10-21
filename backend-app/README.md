@@ -1010,3 +1010,12 @@ Unit, configuration, actual Security/JWT and architecture checks cover developme
 The selected 30 unit cases, 12 configuration cases and 101 Security/JWT MVC cases verify local business, shared-resource and request-boundary contracts. Mocked service/repository/storage results do not validate real PostgreSQL or R2 success. The Animal-parent Main/Security merge preserves the chatbot and observation configuration; a combined actual-Main runtime check is a separate final integration gate.
 
 Original DELETED patch/cart bypass, ignored SKU update fields, option mutation races and legacy cache coordination remain deferred activation gates. No payment functionality, category CRUD, live storage operation or production activation is introduced by this change.
+
+
+## 결제 확인과 Store 결제 결과 처리
+
+`pawbridge.payments.enabled=true`는 원문의 POST `/api/payments/confirm`을 명시적으로 조립한다. 인증된 사용자의 요청 DTO와 응답 형태를 유지하며, Store 주문 조회는 별도 reader 트랜잭션을 사용하고 Payment 저장은 기존 writer DataSource 위의 전용 JPA 단위를 사용한다. Toss 연결은 기존 endpoint 기본값과 주입형 RestClient를 사용한다. 키를 로그에 남기지 않으며 이 기능은 기본 비활성이다.
+
+`pawbridge.store-payment-events.enabled=true`는 원문의 DONE/ABORTED/CANCELED 처리, 주문 결제·취소와 재고·검색·outbox 쓰기를 기존 Store writer에 연결한다. ranking은 기존 `memberChatRedis`가 있으면 차용하고, 없으면 명시한 Redis 설정으로 소유 factory를 구성한다. Kafka 등록에는 추가 `kafka-enabled=true`가 필요하며, 원문 topic/group과 재시도 설정을 유지한 listener는 `autoStartup=false`로 둔다. Kafka의 전역 자동 구성은 제외하고 명명한 조건부 consumer factory만 사용한다.
+
+단위·구성·실제 Security/JWT와 합성 HTTP 검증 근거를 보존했다. 최종 단일 조립에서 기존 actualMain2와 동일 소유 PostgreSQL의 SELECT3을 재검증했고, Kafka Admin·ConsumerFactory·ProducerFactory·listener registry가 기본 비활성 상태에서 생성되지 않음을 확인했다. 선택한 구조 계약3과 현재 구조 guard도 통과했으며, 생성한 JAR의 실제 runtime162개 목록은 기존 CI 격리 경계를 통과했다. 전체 구조 자체회귀는 CI에서 별도로 실행해야 한다. 이 결과는 실 Toss·Redis·Kafka 운영 연결, 소비·ACK 성공, 결제 소유권·정상 상태·금액 정책 보완이나 운영 활성화 완료를 의미하지 않는다. 원문의 늦은 결제 결과·중복/경합·외부 보상·DB commit 뒤 실패 한계는 후속 보완으로 유보한다.

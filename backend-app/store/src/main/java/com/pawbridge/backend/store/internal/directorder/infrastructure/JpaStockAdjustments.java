@@ -15,14 +15,15 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** Selected original stock business; locks remain held until the caller's writer transaction completes. */
-final class JpaStockAdjustments {
+public final class JpaStockAdjustments {
     private final ProductRepository products;
     private final ProductSKURepository skus;
     private final ProductSnapshots snapshots;
-    JpaStockAdjustments(ProductRepository products,ProductSKURepository skus,ProductSnapshots snapshots) {
+    public JpaStockAdjustments(ProductRepository products,ProductSKURepository skus,ProductSnapshots snapshots) {
         this.products=products;this.skus=skus;this.snapshots=snapshots;
     }
     void decreaseStocks(Map<Long,Integer> quantities) { adjustStocks(quantities,true); }
+    public void increaseStocks(Map<Long,Integer> quantities) { adjustStocks(quantities,false); }
     private void adjustStocks(Map<Long,Integer> quantities,boolean decrease) {
         if(quantities==null || quantities.isEmpty()) return;
         quantities.forEach((id,quantity)->{
