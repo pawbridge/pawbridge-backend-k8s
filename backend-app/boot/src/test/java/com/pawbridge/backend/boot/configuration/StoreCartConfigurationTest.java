@@ -169,7 +169,7 @@ class StoreCartConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings={"cart","direct","both"})
-    void given__enabled_order_features__when__mapping_http__then__expose_one_shared_get_and_only_the_owned_posts(String mode) {
+    void given__enabled_order_features__when__mapping_http__then__expose_one_shared_read_controller_and_only_the_owned_posts(String mode) {
         boolean carts=!mode.equals("direct");
         boolean direct=!mode.equals("cart");
         DataSource writer=mock(DataSource.class);
@@ -207,7 +207,9 @@ class StoreCartConfigurationTest {
                             assertThat(((HandlerMethod)cartPost.getHandler()).getBeanType()).isEqualTo(CartOrderController.class);
                             assertThat(cartPost.getResponse().getStatus()).isEqualTo(401);
                         } else {
-                            assertThat(cartPost.getResponse().getStatus()).isEqualTo(404);
+                            // Collection GET exists; standalone MVC rejects its unsupported POST as 405.
+                            // The SecurityFilterChain separately denies this unowned POST before MVC.
+                            assertThat(cartPost.getResponse().getStatus()).isEqualTo(405);
                             assertThat(cartPost.getHandler()).isNull();
                         }
                     } finally { SecurityContextHolder.clearContext(); }

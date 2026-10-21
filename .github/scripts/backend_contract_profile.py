@@ -730,7 +730,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreCartDisabledHttpTest.java': '5d554e98e3b92457b45cf713e87a3ec5992c38f9406159c1e983fd34aba6442a',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreCartOrderTest.java': '1943ff6e4b7c22d2031f3e5f8f1f543ea0e22566e94beefc015161aee14e92ca',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreCartTest.java': '53c2973a302b47a3a8ed2c9c6d3fe51e7920dda85a48d7346824e75f633e0ed5',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreCartConfigurationTest.java': '38bbe44ab14d08a63b60acb1a3e3889cc8e6d9feadb4589224d5b397e4fca0c3',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreCartConfigurationTest.java': '415bccd04c341baf11b64939bc92904c697e92b58e406d4e62e154e88d484b23',
  'backend-app/boot/src/test/resources/owned-postgresql/cart-order-owned-schema.sql': 'b1a72de7ea05a1dac7514d4fc3c5306057716b8082fd6eff635afe7fa96f7b4f',
  'backend-app/boot/src/test/resources/owned-postgresql/cart-owned-schema.sql': '801dda5e91c393e2a9a227bce02ea82b902eb8acbe11db0791394ebacb10b690',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/cart/application/CartActorRejectedException.java': 'f7d9f21251010d404cde22631147fe3df4ee762e202a58135c800095cd4eaea8',
