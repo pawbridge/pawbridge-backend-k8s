@@ -104,7 +104,8 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/carts","DELETE"),
                 new AntPathRequestMatcher("/api/v1/orders","POST")));
         var storeOrderReading=new AndRequestMatcher(new OrRequestMatcher(storeDirectOrdersEnabled,storeCartsEnabled),
-                new AntPathRequestMatcher("/api/v1/orders/{orderId}","GET"));
+                new OrRequestMatcher(new AntPathRequestMatcher("/api/v1/orders/{orderId}","GET"),
+                        new AntPathRequestMatcher("/api/v1/orders","GET")));
 
         var animalLostSearchEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(animalLostSearchEnabledFlag);

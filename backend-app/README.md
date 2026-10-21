@@ -977,3 +977,11 @@ Servlet 실행기에서 `pawbridge.animal-query.projection-schedule-enabled=true
 기존 검색은 관련 dirty source가 있으면 준비 미완료를 반환하며 수선 후 다시 조회할 수 있다. dirty=false 문서 유실이 항상 준비 미완료 응답을 만드는 것은 아니다. 한 page가 0행이어도 다른 작업이 source를 잠갔을 수 있으므로 전체 준비 완료를 뜻하지 않는다. page 상한은 수선 행 수 상한이며 전체 감사의 스캔 비용 상한 증명이 아니다. 예외는 해당 page를 롤백하고 다음 tick에 남기며 로그에는 예외 타입과 수선 개수만 쓴다.
 
 Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유하고 종료 시 새 주기·지연 작업을 취소하며 진행 작업을 최대 15초 기다린다. daemon은 이 스레드가 JVM을 붙잡지 않게 하는 설정이며 모든 DB I/O·전체 context의 유한 종료나 진행 page 완주를 보장하지 않는다. 실제 활성화 전에 기존 projector와 새 실행기의 배타 소유·writer 최소 권한·연결 예산·자료 크기와 lock 실패 대응을 따로 확인해야 한다. 이 개발 편입은 운영 예약 활성화가 아니다.
+
+## 본인 주문 상태별 이력
+
+기존 Direct 또는 Cart 기능을 명시적으로 true로 조립한 Servlet 앱에서 `GET /api/v1/orders`가 검증된 현재 회원의 주문 목록을 반환한다. status 생략 또는 기존 OrderStatus 필터, 기본 size10·직접 Page 형식과 저장된 주문/품목 snapshot을 보존한다. 기존 `/api/v1/users/me/orders`의 envelope·size20 계약을 바꾸지 않는다. 외부 회원 헤더·query를 소유자로 사용하지 않는다.
+
+기존 동일 writer의 RO 트랜잭션에서 현재 회원 적격성을 확인한 뒤 본인 조건의 부모 Page를 조회하고, 선택된 부모 ID들의 품목만 한 번 일괄 조회한다. 부모 순서·Page metadata·기존 단건과 같은 snapshot 형식을 유지한다. 빈 Page는 품목 조회를 생략하며 collection fetch에 pageable을 직접 적용하지 않는다. 지원 scalar 정렬 최대4개·부모 size1..100·offset 정수 범위를 검증한다. 부모 상한은 각 주문의 품목 수·전체 응답 bytes의 절대 상한을 뜻하지 않는다.
+
+기본 off·alias off와 익명/이웃 경로 차단을 유지한다. 새 pool/EMF/table·생산 DDL·주문 상태 전이·결제·상품 CUD는 추가하지 않는다. 실제 운영 활성화와 결제 전체 흐름 인수는 별도 작업이다.
