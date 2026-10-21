@@ -23,6 +23,9 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok' 
     implementation 'com.fasterxml.jackson.core:jackson-annotations'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'org.redisson:redisson:3.45.0'
+    implementation 'com.bucket4j:bucket4j_jdk17-redis-common:8.13.1'
+    implementation 'com.bucket4j:bucket4j_jdk17-redisson:8.13.1'
     implementation 'io.github.openfeign:feign-core:13.5'
     implementation 'io.github.openfeign:feign-form:13.5'
     implementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
@@ -36,4 +39,6 @@ dependencies {
     testImplementation 'org.mockito:mockito-junit-jupiter'
     testImplementation 'org.assertj:assertj-core'
     testImplementation 'ch.qos.logback:logback-classic'
+    testRuntimeOnly 'org.hibernate.validator:hibernate-validator'
+    testRuntimeOnly 'org.apache.tomcat.embed:tomcat-embed-el'
 }

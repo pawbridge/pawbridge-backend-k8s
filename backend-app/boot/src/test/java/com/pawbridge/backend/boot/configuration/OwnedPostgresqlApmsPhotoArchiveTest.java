@@ -96,7 +96,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
             sourcesBefore = sourceFingerprint(); released();
             // Reuse the existing shared writer definition, without an app/context copy or another production EMF.
             var writer = new AnimalJpaWriterConfiguration();
-            entityManagerFactory = writer.animalCommandEntityManagerFactory(pool); entityManagerFactory.afterPropertiesSet();
+            entityManagerFactory = writer.animalCommandEntityManagerFactory(pool, "false"); entityManagerFactory.afterPropertiesSet();
             manager = writer.animalCommandJpaTransactionManager(Objects.requireNonNull(entityManagerFactory.getObject()),pool);
             manager.afterPropertiesSet();
             check(manager.getDataSource()==pool && manager.getDefaultTimeout()==15, "Use the unchanged existing Animal writer definition");

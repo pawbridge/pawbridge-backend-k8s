@@ -50,7 +50,13 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.store-carts.enabled:false}") String storeCartsEnabledFlag,
             @Value("${pawbridge.store-order-administration.enabled:false}") String storeOrderAdministrationFlag,
             @Value("${pawbridge.animal-travel.enabled:false}") String animalTravelFlag,
-            @Value("${lost-gallery-feed.enabled:false}") String galleryFeedFlag) throws Exception {
+            @Value("${lost-gallery-feed.enabled:false}") String galleryFeedFlag,
+            @Value("${pawbridge.animal-chatbot.enabled:false}") String chatbotFlag) throws Exception {
+
+        var chatbotEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> "true".equalsIgnoreCase(chatbotFlag) && "postgresql".equals(animalQueryBackend);
+        var chatbotMessages=new AndRequestMatcher(chatbotEnabled,
+                new AntPathRequestMatcher("/api/v1/animals/{animalId}/chat/messages","POST"));
 
         var galleryFeedEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(galleryFeedFlag);
@@ -273,7 +279,7 @@ public class ReadSecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(storeOrderAdministrationRoutes).hasRole("ADMIN")
-                        .requestMatchers(galleryFeedRoutes, animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalExtraDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
+                        .requestMatchers(chatbotMessages, galleryFeedRoutes, animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalExtraDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()
