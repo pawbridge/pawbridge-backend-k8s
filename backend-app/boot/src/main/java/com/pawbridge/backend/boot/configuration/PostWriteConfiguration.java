@@ -26,6 +26,7 @@ import com.pawbridge.backend.user.api.UserNicknameQuery;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -45,10 +46,12 @@ public class PostWriteConfiguration {
     }
 
     @Bean(destroyMethod = "close")
-    HikariDataSource writeDataSource(ReadDatabaseSettings reader, PostWriteSettings writer) {
+    HikariDataSource writeDataSource(ReadDatabaseSettings reader, PostWriteSettings writer,
+            @Value("${pawbridge.database.writer.maximum-pool-size:1}") int maximumPoolSize) {
+        if (maximumPoolSize < 1) throw new IllegalArgumentException("Writer pool capacity must be positive");
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(reader.jdbcUrl()); config.setUsername(writer.username()); config.setPassword(writer.password());
-        config.setPoolName("pawbridge-post-write"); config.setMaximumPoolSize(1); config.setMinimumIdle(0);
+        config.setPoolName("pawbridge-post-write"); config.setMaximumPoolSize(maximumPoolSize); config.setMinimumIdle(0);
         config.setConnectionTimeout(2000); config.setValidationTimeout(1000); config.setInitializationFailTimeout(-1);
         config.setReadOnly(false);
         return new HikariDataSource(config);

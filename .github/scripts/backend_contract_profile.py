@@ -346,10 +346,10 @@ POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
 POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d57f7606f60d2987'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '3b73f3d6102882d7de5863f05442315e22949a311210b7a61817d0d3dd4d8681',
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01eb5a2cbad5260ae769ac4dc9d3efa71dbda1ce7a837',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '7822833552315e7308af3fcef8d7e87014f64d0c293a14978f2326a6fdfea9f4',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '4bf8e521d7d1ef749a81deba0e22ff188ac1a785eec5a9ebb6119fdfce29d33b',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -360,7 +360,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '3b73f3d6102882d7de586
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatSocketConfiguration.java': 'eb6b7740f6c4ebaa467541c56a7a54859e8ba83b7727b20b730325da71bc83ae',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c7430dfd017008c3f65ddc7e92209a6a4a65d07421264a78f50b0407d0e2a6c9',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c3e8c62ce0457be98e18cb4cbca31a762699f50ee396c678fcffd7382987362f',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '920e5ee11c873bc9518e30d0a051464c7f68253ea370e1222b3a33e8f6718109',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '5998ca012795207e034ee0cb19e657820e98faf78609184b35f49171d612d5fc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'dda638d643fc686e44102314be4d0d6d88b36a07e910fd074615950d6a3f21d1',
@@ -818,6 +818,19 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '3b73f3d6102882d7de586
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlAnimalGalleryFeedTest.java': 'e70e4a22ddd29fc5f294f007c89101f094ac2680eec9e9d6d9581dd01334310c',
  'backend-app/boot/src/test/resources/owned-postgresql/gallery-feed-owned-schema.sql': '01b718b927cf5c4bd9137ea03b386e5fbf3515d3e4c15b9f66ff01a234c71a92',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlAnimalExtraDiscoveryTest.java': 'f2ed6e5077880bdc688df2d2d868f4b4e872b9fc008850b89de5a07b64a63c90',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/PetTravelCollector.java': 'f7363de2c48f587bf32d4ec5b5b6dfcfdecc1325ddf51926db87ca5db6f706a5',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/PostgresqlTravelCollectionCatalog.java': 'a5bad3101ac4915e123de4889101a360bae10fa25c1ed233173a36d8c2783f3d',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/PostgresqlTravelSessionLock.java': 'cb6b3251894a4a70257a3d201fafabe065f0e9cbae684b01df7112ce541b8b97',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/TourApiClient.java': '218a0ab380a018e5f1d3fdbc210c7905b652d440bb741267559f5662818fa818',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/TourApiProperties.java': '435ecd60c1ec0abac90accf85228c64ca6a487f445d4a139106bba6c591cf9dd',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/PetTravelBulkCollectorTest.java': '72840ba7945251fce64dff3e947269e009e4b003fe4a49fa148b646e02e84f47',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/TourApiClientTest.java': '1837aa98273c874d4cd5d8c0714070d41f63af8e642408d0897b8f4b08a9e70b',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/travel/infrastructure/collection/TourApiPropertiesTest.java': '4c751e591fa617e661e59a0e148cbfd2661744e437feed7bcfc1eb3a06d4c333',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalTravelCollectionConfiguration.java': 'f48034221ca359fb9d1ab8d953a5ffd3a10268032acb4641a4b7001d9ddf5766',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalTravelCollectionSchedule.java': '799ac9e07bf69fe4e3611d00e586732de175b3a01ec6cdc9088f681ae9396af7',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalTravelCollectionConfigurationTest.java': '295af2cf8ccb4082254e13d87d51841bd28cae556cb4d448a8440b9e6150729c',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlTravelCollectionTest.java': '98e29429cd91b6fc66bcaa25297b099d8f75983c455f7707e2817383f3ab753f',
+ 'backend-app/boot/src/test/resources/owned-postgresql/travel-collection-owned-schema.sql': '6174aaaec39c6920d3f3a30767a6276e3f2f2282095eee66a24869a0601b38c6',
 }
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
@@ -1168,7 +1181,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 472
+                or len(POST_READS_APP_HASHES) != 485
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

@@ -920,3 +920,19 @@ P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
 APMS 번호는 원문 번호 그대로 검색하며 기존 Shelter JOIN과 NON_NULL 상세 28필드를 사용한다. 미존재는 기존 404다. 종료 임박은 JVM 오늘부터 3일 뒤까지 양끝을 포함한 PROTECT 동물이며 noticeEndDate·id 오름차순이다. 단일 사용자 정렬은 기존 동작대로 고정 순서로 처리하고 기존 페이지 상한·응답 7필드를 유지한다. 새 풀·스키마·수집·외부 호출·운영 활성화를 추가하지 않는다.
 
 보안과 실제 컨트롤러를 연결한 영향 HTTP 10메서드 및 기존 P10 전용 DB를 재사용한 실제 PostgreSQL 2메서드를 검증했다. P10 시험은 기존 reader5 설정과 같은 폴더의 fixture7 설정을 확인하고 최대 6개 소유 행만 등록·정리한다. 기존 seed·8표·marker·허용 sequence를 유지하며 새 권한·스키마를 추가하지 않는다. 정확한 `PAWBRIDGE_OWNED_SETTINGS_ENV=P10_PG_SETTINGS`, `P10_PG_SETTINGS` 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalExtraDiscoveryTest` 선택이 필요하다. 대상·역할·기존 fixture가 다르면 거부하며 fallback하지 않는다. 공개 운영 활성화는 별도 단계다.
+
+## 여행 수집에서 기존 여행 조회까지
+
+`tourapi.enabled`와 `tourapi.schedule-enabled`는 기본 off다. 기존 여행 GET 조회 플래그와 독립이며 조회만 켜도 외부 클라이언트·수집 Job·예약은 생기지 않는다. 수집은 원문 PostgreSQL 사업 흐름과 별도 API 키·일별 operation 예산·페이지와 checkpoint 원자성·실패 재개·RUNNING 고아 기록 거부를 재사용한다. 새 requestId 실행은 Batch restart와 다르며 Batch COMPLETED만으로 catalog PARTIAL·QUOTA를 전량 성공으로 보지 않는다.
+
+기존 공유 writer DataSource·JdbcTemplate·JdbcTransactionManager를 사용하고 새 pool을 만들지 않는다. writer 기본 용량 1은 유지한다. 세션 advisory lock이 연결 하나를 유지하므로 활성화 전에 `pawbridge.database.writer.maximum-pool-size`를 명시해 최소 2를 확보해야 한다. 이 최소값은 전체 동시 업무 용량 보장이 아니며 합성 시험 용량 4도 운영 권장값이 아니다. PostgreSQL Batch 메타는 `pawbridge_animal.BATCH_`를 명시하고 DB metadata 탐색·자동 DDL/스키마 초기화·시작 시 Job 자동 실행을 사용하지 않는다.
+
+수집과 예약을 모두 선택하면 Asia/Seoul 기준 기본 30분 cron을 단일 scheduler가 소유한다. 원문 NOT_SUPPORTED tasklet과 짧은 Catalog 쓰기 TX를 유지한다. 정상 종료 설정은 새 지연·주기 실행을 막고 실행 중 작업을 기다리도록 구성하지만 Spring scheduled 취소·실제 외부 요청·프로세스 강제 종료를 포함한 무조건 완주/복구는 보장하지 않는다. 모든 HTTP 뒤 저장에 lock 재확인이 있다고 주장하지 않는다. 실제 활성화에는 이전 실행기 중단·단일 소유권·풀 용량·키/제공자 사용 조건·lock 상실과 고아 기록 대응을 별도로 확인해야 한다.
+
+기존 Main의 Gallery·Shelter 설정 등록을 보존하고 Travel 수집 설정만 명시적으로 추가한다. 첫 준비 원고의 기존 두 import 누락을 부모 전체 등록 목록의 합집합으로 수정했다. 실제 Main의 @Import가 Gallery·Shelter·Travel 세 설정을 유지하는 단일 회귀는 기존 원고에서 RED1(.026초), 수정 후 GREEN1(.024초)로 확인했다. 기존 구성13(.854초)과 별도 실행한 근거이며 전체14를 한 번에 통과했다고 표현하지 않는다.
+
+선택 구성 시험은 13사례(.854초), 새 전용 PostgreSQL fixture의 수집·Batch·기존 조회·session lock·정상 scheduler 종료·실패·quota/orphan 계약은 5사례(.954초)로 각각 성공했다. 두 실행과 기존 business 단위38은 분리된 근거다. provider는 대역이며 실제 외부 HTTP/API 키·운영 수집·배포는 검증하지 않았다. 첫 PG 실행의 provider 관측은 빈 Spring ConnectionHolder binding까지 금지해 실패했다. 원시 active borrow1/TX0와 cached 동작을 확인해 이 과잉 조건만 고쳤으며 실제 TX0·추가 borrow0·동일 lock PID/autocommit/pg_locks·최종 자원 반환 관측은 유지했다. Catalog 11메서드 TT 추가안은 적용하지 않았다. 첫 실패 DB·RUNNING 가능 기록·claim과 원시 근거는 보존하고 재사용하지 않았다.
+
+owned 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P17_PG_SETTINGS`와 정확한 `P17_PG_SETTINGS=/private/tmp/pawbridge-owned-pg-night-20261020/travel-collection-recovery-1/travel-collection.properties`를 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlTravelCollectionTest`로 한 클래스를 명시 선택한다. 설정이 없거나 대상·역할·marker·권한·초기 상태가 다르면 skip하지 않고 거부한다. 준비 helper/실행 결과/설정 자격파일은 게시하지 않는다. 이 시험은 새 이력과 마지막 RUNNING 행을 남기므로 동일 DB를 자동 재실행하거나 reset하지 않는다.
+
+새 Batch 의존성으로 현재 Boot build 지문이 과거 자체회귀 참조 입력과 달라진다. 과거 reference RUN39481336774/head217cb7a의 16개 지문은 그대로 두며 새 Boot 지문으로 승격하지 않는다. 따라서 해당 reference는 거부되고 기존 workflow의 `execute-current-selftests`가 현재 TestKit108을 실행해야 한다. 실제 architecture·module unit·Boot JAR·필수 계약·cleanup/fence를 줄이지 않는다.
