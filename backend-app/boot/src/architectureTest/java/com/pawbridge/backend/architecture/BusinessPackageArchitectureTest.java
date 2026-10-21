@@ -12,6 +12,21 @@ import java.util.Map;
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS;
 
 class BusinessPackageArchitectureTest extends BusinessBuildFixture {
+    @Test
+    void givenPaymentStorePublicContract_whenRootCheck_thenAllowOnlyPublicApi() throws IOException {
+        BuildResult result = runner("check").build();
+        assertTask(result, ":verifyBusinessPackages", SUCCESS);
+        assertCompiled("payment", "internal.application.PaymentReader");
+    }
+
+    @Test
+    void givenPaymentStoreInternalReference_whenRootCheck_thenRejectsBoundary() throws IOException {
+        javaSource("payment", "internal.application.PaymentBypass",
+                "public class PaymentBypass { com.pawbridge.backend.store.internal.domain.StoreName value; }");
+        assertPackageRejected(runner("check").buildAndFail(), "BUSINESS_INTERNAL",
+                "com.pawbridge.backend.store.internal.domain.StoreName");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"check", ":user:check", ":community:check", ":boot:check"})
     void givenLegalBusinessClasses_whenRootOrIndividualCheck_thenRunsPackageGuard(String task) throws IOException {

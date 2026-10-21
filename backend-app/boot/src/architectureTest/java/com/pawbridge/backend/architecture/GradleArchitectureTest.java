@@ -102,7 +102,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     @ParameterizedTest
     @CsvSource({"user, community", "user, boot", "community, boot", "community, animal",
             "animal, user", "animal, community", "animal, boot",
-            "community, store", "store, user", "store, community", "store, boot"})
+            "community, store", "store, user", "store, community", "store, boot", "payment, boot", "payment, user", "payment, community", "payment, animal", "store, payment", "user, payment", "community, payment", "animal, payment"})
     void givenForbiddenBusinessEdge_whenCheck_thenRejectsGraph(String source, String target) throws IOException {
         appendModuleBuild(source, "dependencies { implementation project(':" + target + "') }");
 
@@ -119,7 +119,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"user", "community", "animal", "store"})
+    @ValueSource(strings = {"user", "community", "animal", "store", "payment"})
     void givenBusinessBootPlugin_whenCheck_thenRejectsExecutableBusinessModule(String module) throws IOException {
         appendModuleBuild(module, "apply plugin: 'org.springframework.boot'");
 
@@ -128,7 +128,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"user", "community", "animal", "store"})
+    @ValueSource(strings = {"user", "community", "animal", "store", "payment"})
     void givenBusinessUsesPlainJavaPlugin_whenCheck_thenRejectsMissingLibraryContract(String module) throws IOException {
         write(module + "/build.gradle", "plugins { id 'java' }\n"
                 + (module.equals("community") ? "dependencies { implementation project(':user') }\n" : ""));
@@ -216,6 +216,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
     @Test
     void givenStoreReferencesUserOutputAsFiles_whenStoreCheck_thenRejectsOwner() throws IOException {
+        appendModuleBuild("payment", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         appendModuleBuild("user", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         appendModuleBuild("store", """
                 evaluationDependsOn(':user')
@@ -228,6 +229,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
     @Test
     void givenStoreSiblingServiceFileClasspath_whenStoreCheck_thenRejects() throws IOException {
+        appendModuleBuild("payment", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         appendModuleBuild("boot", "configurations.implementation.dependencies.clear()");
         appendModuleBuild("user", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         createEmptyJar("../store-service/build/libs/store-service.jar");
@@ -376,7 +378,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
         append("settings.gradle", "include 'legacy'");
         write("legacy/build.gradle", "plugins { id 'java-library' }");
 
-        assertGraphRejected(runner("check").buildAndFail(), "only boot, user, community, animal and store projects are allowed");
+        assertGraphRejected(runner("check").buildAndFail(), "only boot, user, community, animal, store and payment projects are allowed");
     }
 
     @Test

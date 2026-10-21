@@ -57,6 +57,10 @@ class PawBridgeCoreIntegrationTest {
         var resources = new Resources();
         runner(resources).run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(SecurityFilterChain.class);
+            assertThat(context).doesNotHaveBean(org.springframework.kafka.core.KafkaAdmin.class);
+            assertThat(context).doesNotHaveBean(org.springframework.kafka.core.ConsumerFactory.class);
+            assertThat(context).doesNotHaveBean(org.springframework.kafka.core.ProducerFactory.class);
+            assertThat(context).doesNotHaveBean(org.springframework.kafka.config.KafkaListenerEndpointRegistry.class);
             assertThat(context.getBeansOfType(DataSource.class)).containsOnlyKeys("dataSource", "writeDataSource");
             assertThat(context.getBeansOfType(EntityManagerFactory.class)).containsOnlyKeys(
                     "storeMemberEntityManagerFactory", "animalCommandEntityManagerFactory", "storeDirectOrderEntityManagerFactory");
