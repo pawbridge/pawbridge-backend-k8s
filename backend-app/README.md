@@ -901,3 +901,14 @@ P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
 시험 전용 fixture는 축소 User 모델과 원문 Animal 8표로 구성되며 실제 운영 migration·권한 변경 근거가 아니다. 실제 API 활성화·기존 수집기/회원 승인 경로의 배타 인계는 별도 미완료 항목이다.
 
 보호소 수정은 감사 리스너의 `updatedAt`을 반영하도록 DTO 변환 전에 같은 writer 트랜잭션을 flush한다. 신규 격리 PUT 계약은 이전 시각 및 기존 NULL 감사값을 모두 다루며 응답과 커밋된 값의 일치를 PostgreSQL 마이크로초 정밀도로 확인한다. JDBC 관측은 기존 Animal 명령 시험과 같은 UTC Calendar를 사용한다. 실제 운영 데이터나 API는 변경하지 않았다.
+
+
+### 내부 AI 갤러리 입력 자료 조회
+
+`lost-gallery-feed.enabled=true`와 명시적 내부키·R2 로컬 서명 설정이 있을 때만 원문 `/internal/animals/lost-gallery`와 snapshot 생성·조회·페이지·해제 5개 API를 등록한다. 기본값은 비활성이며 정확한 경로도 controller의 내부키 검사를 통과해야 한다. 일반 JWT는 내부키를 대체하지 않는다.
+
+기존 reader DataSource/transaction manager를 공유한다. v1은 read callback 종료 후 fingerprint·서명·응답을 만들고, v2는 repeatable-read source callback에서 행을 읽어 파일에 기록한다. describe/page/release는 DB를 열지 않는다. snapshot의 원문 크기·행·페이지·TTL·requestId·cursor·동시 생성·파일 소유권 제한을 보존한다. 원문 statement 20초 설정은 Spring의 트랜잭션 잔여시간으로 덮일 수 있으므로 물리 20초 상한을 보장한다고 해석하지 않는다.
+
+서명은 객체 전송 없이 정확한 R2 HTTPS endpoint와 `pawbridge-animal-originals`의 1시간 GET URL을 로컬 생성한다. 갤러리 벡터 추출·게시, 모델·R2 객체 다운로드, AI 배치와 예약을 실행하는 기능은 아니다. 실제 활성화 전에는 원래/새 feed의 단일 소유권, reader 권한, 내부키·relay·source URL, snapshot 전용 경로를 별도 확인한다. 기존 스냅샷 디렉터리에 임의로 연결하지 않는다. 원문 파일 IO 실패 시 정리 한계도 남는다.
+
+아카이브의 저장 SHA와 객체 경로의 SHA가 일치해야 하며 불일치는 서명·항목 발행 전에 거부한다. snapshot-directory는 비어 있지 않은 절대 정규화 경로여야 하고 파일시스템 루트나 현재 작업 디렉터리는 거부한다. 경로 검증은 스냅샷 저장소의 chmod·잠금·정리가 시작되기 전에 수행한다. 유효한 절대 경로도 실제 활성화 전에는 전용 위치·소유권을 확인해야 한다.
