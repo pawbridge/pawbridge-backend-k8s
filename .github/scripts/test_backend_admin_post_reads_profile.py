@@ -156,8 +156,8 @@ class AdminPostReadsProfileTest(unittest.TestCase):
             git.assert_any_call('show', 'HEAD:' + path)
 
     def test_given_identical_reviewed_guard_inputs__when_only_the_fixed_cohort_is_selected__then_reference_only_selftests(self):
-        self.assertEqual(39481336774, profile.ARCHITECTURE_SELFTEST_REFERENCE_RUN)
-        self.assertEqual('217cb7a3d9a61e6d8de5eacc893c97a762b1d193', profile.ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
+        self.assertEqual(39553020979, profile.ARCHITECTURE_SELFTEST_REFERENCE_RUN)
+        self.assertEqual('c84c0f6704cd214cca94e0138f09d6f2aa888b4b', profile.ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
         self.assertEqual(16, len(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES))
         blobs = {path: ('fixed guard input ' + str(i)).encode()
                  for i, path in enumerate(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES)}
