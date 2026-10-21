@@ -1029,3 +1029,27 @@ Original DELETED patch/cart bypass, ignored SKU update fields, option mutation r
 Animal·Store·Payment 생산 코드를 합친 최종 조립에서는 기존 Main 무DB 2사례와 위 Main PostgreSQL 3사례, 총 5사례를 한 번 재검증했다. 새 고유 5사례로 합산하지 않는다. Payment→Store 공개 계약·내부 참조 거부·6모듈 의존 그래프의 선택 구조 시험 3사례, 현재 architecture/business-package 검사, 실행 JAR 생성도 통과했다. 해당 JAR의 실제 런타임 라이브러리 162개는 기존 CI 경계 검사에서 추가 허용 예외 없이 통과했다. 이 근거는 전체 TestKit 시험 성공이나 실행 JAR 기동·Kafka 소비·Redis·Toss·R2·AI·운영 배포 성공을 뜻하지 않는다. 관측 PostgreSQL 2사례는 이 최종 조립 검증 뒤 별도로 최초 실행됐다.
 
 두 PostgreSQL 시험은 명시적인 전용 설정 선택자와 소유권·권한·기준 자료 검증을 요구하며 입력이 없거나 잘못되면 건너뛰거나 다른 DB로 대체하지 않고 실패한다. 게시하는 파일은 시험 Java 2개와 합성 스키마 SQL 2개다. 자료 준비 helper, 동적 설정, 인증정보, 소유권 상태·영수증과 덤프는 게시하지 않는다. CI에서 이 자료를 새로 준비하거나 운영 기능을 켰다는 의미도 아니다.
+
+### 기존 LOCAL 로그인 편입
+
+`pawbridge.auth.local-enabled`는 기본 false다. true에서는 기존 `pawbridge.auth.sessions-enabled=true`, 명명된 writer/JdbcTransactionManager와 기존 JWT issuer를 요구한다. 정확한 `/api/v1/auth/login`에만 별도 보안 체인을 조립하고, 인증 관리자·BCrypt·DAO는 해당 체인 내부에서만 구성한다. 전역 인증 관리자·인코더·서블릿 필터를 추가하지 않는다. 기본 비활성 및 다른 인증·업무 경로의 보안은 유지한다.
+
+원문 필터의 JSON email/password 입력, 대소문자를 구분하지 않는 이메일 조회, 기본 BCrypt와 미존재 계정 숨김, 200 응답의 userId/email/name/role/careRegNo/accessToken/refreshToken, 401 문구를 보존한다. 원문 필터는 메서드 제한 없이 같은 경로를 처리하고 DTO의 MVC 검증을 실행하지 않는다. 새 POST 전용·이메일 형식·provider/삭제 상태 정책은 추가하지 않았다. 인증된 DB 계정 정보만 토큰에 사용하고 요청의 사용자·권한 헤더나 Bearer 값으로 비밀번호 인증을 우회하지 않는다. 토큰은 응답 본문에만 전달하며 세션 쿠키를 만들지 않는다.
+
+이메일·refresh 조회와 BCrypt 인증은 save 트랜잭션 밖에서 수행하고, 기존 refresh 행 갱신 또는 새 행 삽입만 개별 writer 트랜잭션에 둔다. 원문의 전체 로그인 트랜잭션·행 잠금 부재와 동시 첫 로그인 경합은 해결된 것으로 표시하지 않는다. 복수 단건 조회 결과를 임의 한 행으로 정상화하지 않으며, 조회 실패의 일반401과 인증 후 저장 실패의 예외 전파를 구분한다. 파싱·내부 인증·저장 예외는 기존 실패 경계를 유지하면서 비밀번호·토큰이 원인 메시지나 principal 문자열에 노출되지 않도록 고정 메시지와 비밀 없는 표현을 사용한다.
+
+JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경된 실제 Main 기존2사례가 성공했고 현재 생산 구조·업무 패키지 검사1003클래스를 통과했다. 첫 Boot 컴파일의 지원되지 않는 DAO 생성자는 기존 지원 API의 setter 조립으로만 교정했다. 실제 PostgreSQL 로그인·실계정·메일·운영 인증은 실행하지 않았다. 가입·비밀번호 재설정·계정 연결·LOCAL 폐지·Naver·운영 활성화는 포함하지 않는다.
+
+#### LOCAL 로그인 writer 권한 증분과 적용 순서
+
+`f29_ci.py`가 auth-session 단계까지 누적한 writer `pawbridge_f3_writer` 권한 중 로그인 관련 부분은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `refresh_tokens`의 `SELECT(refresh_token_id,token,user_id,expires_at)`·`UPDATE(token,expires_at)`·`DELETE`다. 이 밖에 앞선 member/admin 단계의 `users` 일부 열 UPDATE와 DELETE 권한도 누적돼 있다. 누적 권한에는 `users.password` SELECT와 `refresh_tokens` INSERT가 없다. LOCAL 로그인은 이메일 조회에서 `password`를 읽고 첫 로그인에서 `refresh_tokens`에 새 행을 넣으므로 이 권한만으로는 실패한다(SQLSTATE 42501).
+
+`boot/src/test/resources/owned-postgresql/local-login-writer-grants.sql`은 이 차이만 보충하는 증분이다. `SELECT(password) ON users`와 `INSERT(token,user_id,expires_at,created_at) ON refresh_tokens` 두 권한만 추가한다. `refresh_token_id`는 원문 V1의 identity 열이라 기본값 생성에 sequence 권한이 필요 없으므로 sequence 권한을 추가하지 않는다. `refresh_token_id`를 명시한 INSERT는 열 권한이 없어 거부된다. 기존 권한은 회수하지 않는다.
+
+적용 순서:
+
+1. 기존 strict F29 준비와 그 검증을 먼저 끝낸다. 증분은 F29 기준선의 일부가 아니다.
+2. 테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v login_writer=pawbridge_f3_writer -f local-login-writer-grants.sql`로 증분을 한 번 적용한다.
+3. 증분 적용 뒤에는 writer의 `users` SELECT 열 집합과 `refresh_tokens` INSERT 열 집합이 F29 strict 검증의 정확 집합과 달라지므로, 같은 역할에 strict F29 준비·검증을 다시 실행하지 않는다. 다시 실행하려면 먼저 두 권한을 `REVOKE`한다.
+
+`OwnedPostgresqlLocalLoginWriterTest`(`owned-postgresql` 태그, 일반 `test`·CI에서는 제외)는 `f29_ci.py`의 strict 준비를 실행한 것이 아니라, auth-session 이후 로그인 관련 권한 부분집합을 재현한 새 합성 PostgreSQL에 증분을 적용한 상태를 한 번 확인했다. 증분 전 비밀번호 조회·첫 INSERT 거부(42501) 재현은 저장소 밖 준비 기록에만 남아 있다. 시험은 정확한 열 권한 집합, 실제 BCrypt 비밀번호 조회, 첫 로그인 INSERT와 재로그인 동일 행 UPDATE, sequence 권한 없이 identity 생성, writer의 추가 쓰기 거부, reader의 `password`·`refresh_tokens` 조회 거부를 확인했다. 이 fixture는 F29 전체 권한 재현이 아니며 writer의 `users` UPDATE·DELETE도 주지 않는다. reader의 `refresh_tokens` INSERT·UPDATE·DELETE 거부는 단언하지 않는다(이번 증분은 writer에만 적용된다). 시험은 이미 종료한 일회용 합성 서버의 식별값에 고정돼 있어 그대로 재실행할 수 없다. CI는 이 증분을 준비하거나 재검증하지 않으므로, 이후 `JdbcLocalLogin`의 SQL이 바뀌면 권한 불일치를 CI가 잡지 못한다. 실제 운영 DB 역할의 권한 결정과 LOCAL 로그인 활성화는 이 문서가 승인하는 범위가 아니다.
