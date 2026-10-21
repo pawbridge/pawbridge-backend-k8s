@@ -193,17 +193,22 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
     @Test @Order(2)
     void givenRealWorkerAndInprocessObjects__whenTwoSlotsComplete__thenReadySlotOneFeedsExistingGalleryOutsideDatabaseWaits() {
         contract("READY to existing Gallery", () -> {
-            due(1,1); due(1,2); int before=puts.get();
-            var result=worker(2).runOnce();
-            check(result.completed()==2 && result.failed()==0 && puts.get()==before+2,"Real worker must publish both slots after object readback");
-            check("READY".equals(state(1,1)) && "READY".equals(state(1,2)) && externalChecks.get()>=10,
+            due(1,1); due(1,2); due(2,1); int before=puts.get();
+            var result=worker(3).runOnce();
+            check(result.completed()==3 && result.failed()==0 && puts.get()==before+3,"Real worker must publish all three photos, including the whitespace-normalized second Animal");
+            check("READY".equals(state(1,1)) && "READY".equals(state(1,2)) && "READY".equals(state(2,1)) && externalChecks.get()>=15,
                     "Download, optimize and object callbacks must all observe no database transaction or active borrow");
             var reads=new TransactionTemplate(manager); reads.setReadOnly(true); reads.setTimeout(15);
             var feed=new LostGalleryFeed(jdbc,mapper,key -> "https://synthetic.gallery.invalid/"+BUCKET+"/"+key,reads,reads);
             var snapshot=feed.snapshot(null); var body=mapper.readTree(snapshot.body());
-            check(body.get("complete").asBoolean() && body.get("count").asInt()==1
-                    && body.get("records").get(0).get("id").asLong()==1 && body.get("photos").size()==1,
-                    "Existing Gallery consumes READY slot1 once, not slot2 or unready archives");
+            var snapshotIds=new ArrayList<Long>();
+            body.get("records").forEach(record -> snapshotIds.add(record.get("id").asLong()));
+            check(body.get("complete").asBoolean() && body.get("count").asInt()==2
+                    && snapshotIds.equals(List.of(1L,2L)) && body.get("photos").size()==2,
+                    "V1 Gallery must consume both READY slot1 Animals including the unchanged whitespace source, without slot2 duplication");
+            var streamIds=new ArrayList<Long>();
+            feed.streamEntries(entry -> streamIds.add(((Number)entry.record().get("id")).longValue()));
+            check(streamIds.equals(List.of(1L,2L)),"V2 streaming must consume the same exact ordered Animal IDs as V1");
             check(feed.snapshot(snapshot.etag()).body()==null,"Unchanged existing Gallery ETag must remain stable");
         });
     }
@@ -374,7 +379,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
         static Settings load() throws Exception {
             check("P19_PG_SETTINGS".equals(System.getenv("PAWBRIDGE_OWNED_SETTINGS_ENV")), "Only the explicit P19 selector is accepted");
             String path = System.getenv("P19_PG_SETTINGS"); check(path != null && !path.isBlank(), "P19_PG_SETTINGS is required without fallback or skip");
-            Path file = Path.of(path), expected = Path.of("/private/tmp/pawbridge-owned-pg-night-20261020/apms-photo-archive/apms-photo-archive.properties");
+            Path file = Path.of(path), expected = Path.of("/private/tmp/pawbridge-owned-pg-night-20261020/apms-photo-archive-trim-green/apms-photo-archive.properties");
             check(file.isAbsolute() && file.normalize().equals(file) && file.equals(expected) && Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(file), "Only the exact new P19 regular settings file is accepted");
             for (Path parent=file.getParent();parent!=null;parent=parent.getParent()) check(!Files.isSymbolicLink(parent), "Settings ancestors may not be symlinks");
             check(Files.getPosixFilePermissions(file,LinkOption.NOFOLLOW_LINKS).equals(Set.of(PosixFilePermission.OWNER_READ,PosixFilePermission.OWNER_WRITE))

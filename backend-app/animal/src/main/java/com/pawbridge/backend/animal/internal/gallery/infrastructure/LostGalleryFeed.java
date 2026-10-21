@@ -20,7 +20,7 @@ public class LostGalleryFeed {
                    p.object_key, p.stored_sha256, p.stored_bytes, p.content_type
             FROM pawbridge_animal.apms_photo_archive p JOIN pawbridge_animal.animals a ON a.id = p.animal_id
             WHERE p.state = 'READY' AND p.slot = 1
-              AND p.source_url = p.archived_source_url AND p.source_url = a.image_url
+              AND p.source_url = p.archived_source_url AND p.source_url = TRIM(a.image_url)
               AND a.species IN ('DOG', 'CAT')
             ORDER BY a.id LIMIT 100001
             """;
