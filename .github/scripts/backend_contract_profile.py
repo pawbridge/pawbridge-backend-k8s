@@ -902,7 +902,8 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreOrderHistoryHttpTest.java': 'c2a3128e22ee8334035e2d0319f987bb8d8c8ac7ad36e017571220f46dea7ee6',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreOrderHistoryTest.java': 'db1585ab2ffca292564f34628ea7fdb8de20938fa05e24f9b499ada279b2d792',
  'backend-app/boot/src/test/resources/owned-postgresql/store-order-history-owned-schema.sql': '8ce980cb07524f7e8129c7f940744ee36dcdce5a3166b4d7c179e8f509b7cdea',
- 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/OrderReadControllerTest.java': '370b0795ed9a9d5263041427be3a8338b222f3d29087d01071d8ea14c100a3a0'}
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/OrderReadControllerTest.java': '370b0795ed9a9d5263041427be3a8338b222f3d29087d01071d8ea14c100a3a0',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeCoreIntegrationTest.java': '1a68ec5e5f8f1234dc0c1ee73f3e652fb54607dc8521ccaf8265cf9f90f9c441'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39553020979
@@ -1252,7 +1253,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 556
+                or len(POST_READS_APP_HASHES) != 557
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
