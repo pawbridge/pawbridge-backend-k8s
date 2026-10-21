@@ -12,15 +12,21 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /** Original ProductOutboxService snapshot and ProductSKUService.findPrimarySku; no cache consumer exists in this module. */
-final class ProductSnapshots {
+public final class ProductSnapshots {
     private final OutboxRepository outbox;
     private final ObjectMapper mapper;
     private final PostgresqlSearchDocuments documents;
     private final Clock clock;
+    public ProductSnapshots(jakarta.persistence.EntityManager sharedWriter,
+            org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations search,
+            com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms terms,ObjectMapper mapper) {
+        this(new org.springframework.data.jpa.repository.support.JpaRepositoryFactory(sharedWriter).getRepository(OutboxRepository.class),
+                mapper,new PostgresqlSearchDocuments(search,terms),Clock.systemDefaultZone());
+    }
     ProductSnapshots(OutboxRepository outbox,ObjectMapper mapper,PostgresqlSearchDocuments documents,Clock clock) {
         this.outbox=outbox;this.mapper=mapper;this.documents=documents;this.clock=clock;
     }
-    void publishProductSnapshot(Product product) {
+    public void publishProductSnapshot(Product product) {
         if(product.getSkus().isEmpty()) { documents.delete(product.getId());return; }
         ProductSKU primary=findPrimarySku(product.getSkus());
         documents.write(product.getId(),primary.getId(),product.getName(),primary.generateOptionName());

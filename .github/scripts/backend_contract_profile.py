@@ -349,7 +349,7 @@ POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d5
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'b672140c7b204f863141a3a12fb1a3310b8f937b195d09213dcab525e8b5ba1c',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '62b30c42f00f2a44941c8e81fb721dfb4de861aeec86e43c3f877fb708af37ac',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '6f6b7840e0a89630c5813ff7b41a2bc6eeaf1b8313a306979c21b1a3fcceac5f',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -361,7 +361,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'b672140c7b204f863141a
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c3e8c62ce0457be98e18cb4cbca31a762699f50ee396c678fcffd7382987362f',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '9d6f992c55be921765dbf780e0a9ab7bc194a4303af387fce85b87f3809abfe4',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '403abd0f4a993d4ce12e36a2557e60d4dfefe2e66da815a4d5b93e5ed92eab1d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '5998ca012795207e034ee0cb19e657820e98faf78609184b35f49171d612d5fc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'dda638d643fc686e44102314be4d0d6d88b36a07e910fd074615950d6a3f21d1',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '7016adb41e6e20e7400999aab42eabef66c18de3739b63878e22bf0cd889dd31',
@@ -533,7 +533,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'b672140c7b204f863141a
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreCatalogConfiguration.java': 'ae24f5d7021e15f979155008819486321b5c4bac1b4615290ea916952a654df4',
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreCatalogConfigurationTest.java': '3d73e171e7107277299d3b6d6f1dc64617f2bc5f476e17a48cddf59d57a12e15',
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreCatalogHttpTest.java': '344c86c625618f1157e77c90d62d369ed2eae63e477a455acd9286159e1eec72',
- 'backend-app/store/build.gradle': 'ac392803320ec701149beddf2d4b17aeb099f54b909caf0a5f8ee799a632907e',
+ 'backend-app/store/build.gradle': '2f473c585123588bf9e9e68ddf52a66663352470a8d3626ff8cef0c2c7be1eed',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalog/application/CatalogSearchUnavailableException.java': '26899ea435a11dc2664e3649d571eb9b604f816bd0b40dc80ac20644a87c0779',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalog/application/StoreCatalog.java': '33e43d7f72e925ce390ba0e14f912f06fa1ad9821b81bb7cb0e3d730cd2dafa3',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalog/infrastructure/JdbcStoreCatalog.java': 'b1f4b8432f5726aff03142a0b7d9fb5408fa4ad52622bbcbf532715a74c6aefe',
@@ -693,7 +693,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'b672140c7b204f863141a
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaStockAdjustments.java': '7d13f12429776c9bfff67343030553795ed81c491a3ac91bb3c1ab965260333b',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/PostgresqlRollbackCharsetViolation.java': '34f4c01fbe9899eff9b2de96572c8e686cede900c1b2c39666561e1a05d059e8',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/PostgresqlSearchDocuments.java': '5f486f39504a05e4a3e4b6ddecd478ecb5fe64a4b4c6a5bceb90b4dad2db897b',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/ProductSnapshots.java': '3ac82df48903153468bc3ea01a2d14b4caee4e9694676c64061c0a6ccd861eeb',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/ProductSnapshots.java': '16518726110e1b7404b086439d3fd128c3aae7f321751f98cdf7ff17dc7901d1',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/jpa/model/Outbox.java': '6436bd61b3a74cf80b0f546f76a543ea1d8ebf8f780cbf6f51fc70d6e70dcb36',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/jpa/projection/OrderItemResponse.java': '31944a4def87c0b71eb484372afa37113cdcc81b399caa1aa3f66252f818a99f',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/jpa/projection/OrderResponse.java': '34c3180f18f135f869d5a08b24b8126f39173290a25bd3fac96e0b7b7b21eec3',
@@ -725,7 +725,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'b672140c7b204f863141a
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/CombinedAnimalStoreConfigurationTest.java': 'ed90d7f6de3bcaca00fb23668dbed1839fe1ec92b5fa7e328edad16c3929885e',
  'api-gateway/src/test/java/com/pawbridge/apigateway/filter/LostSearchLimitsTest.java': '5b10904d36809531798a52072011c8496d9f786ba8cfbd4d621759e74596026d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreCartConfiguration.java': '747c2c8af7d7a1e11368136513e49dc1bc2c23affa789e01e49ce1a875e3a4a3',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreJpaWriterConfiguration.java': 'b0eb61ea9408c9977cb622285039e44bdcc533da1cdf8ddc6799008ba01a619c',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreJpaWriterConfiguration.java': 'b466afbadb3c1e93d01d952e113ca39bb3eb299a57c2425101a97b91e9beebbf',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreOrderSupportConfiguration.java': '9b4cf920df15a19307f790fcf7371f364dc6e040b3575f641d18edb9c5f832c4',
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreCartDisabledHttpTest.java': '5d554e98e3b92457b45cf713e87a3ec5992c38f9406159c1e983fd34aba6442a',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreCartOrderTest.java': '1943ff6e4b7c22d2031f3e5f8f1f543ea0e22566e94beefc015161aee14e92ca',
@@ -942,7 +942,38 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'b672140c7b204f863141a
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterObservationConfiguration.java': 'e642f8a8e5be552eb652dd102244516dfb84de9f74d51ead49d54ec932c4418c',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalChatbotHttpTest.java': '9a5390ef63697cae51ebe3fbdde953856a9e3359e2ca9d62d3b30c0f75502d6d',
  'backend-app/boot/src/test/java/com/pawbridge/backend/ShelterObservationConfigurationTest.java': '6ebb20bf06c043e28c876cc54d93e490d5ec8238f02afbe479b0791a31acab0f',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalChatbotConfigurationTest.java': '2afff33541134c3eb21122d390296a9ea4809185fa0dc300d8a613073f91e11e'}
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalChatbotConfigurationTest.java': '2afff33541134c3eb21122d390296a9ea4809185fa0dc300d8a613073f91e11e',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreCatalogManagementConfiguration.java': 'c68a7334b9e442ff6ff7e44bf7e7d8a5ebd355528f8423525e11da3b03b25f9d',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreCatalogManagementConfigurationTest.java': '4a3079f100978edf31056e26cff36ab5f700514dd23a9a023b55a520f645a854',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/JpaCatalogOptions.java': '94233b281e8d40d00de6b64adcc044071bcfc2a565a3c1b839fcb66d9bd761ee',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/JpaCatalogProducts.java': '759594b3e1db33f4f953590abedce9059380aa5d6a081aa919faea9a6afb62a2',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/ProductSkus.java': '1f8b7e8e17373b10089eee51bd2897f2ff8f0ca8002fe106caf168a0ab511e01',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/S3ProductImages.java': '3213550d54dffe175ec4d26440c96eef81cc56ef78c7e4aececc53802de8e84a',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/jpa/repository/CartItemRepository.java': 'b7934c8c59fe3ac15834a1660b80d5f5d62107243d2987325d51ac6e3dbf5226',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/jpa/repository/CategoryRepository.java': '8c6127932e33b10b7967df22844587a2708e8989beccc513c3a2f335c32776ec',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/jpa/repository/OptionGroupRepository.java': 'e22a907277076c2f3aeea99d605139c26f21574282ddf78ea23947b037a78078',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/jpa/repository/OptionValueRepository.java': 'd44fa6ea48d98f6c1c83d1fc9c27d484fe40ad86f551e272721e410328cbb2f3',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/jpa/repository/SKUValueRepository.java': '9b51dc120e9e632b45ee832dccd81ecfde0bb28dd838e400e4d530229548d87c',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/CatalogManagementExceptionHandler.java': 'f3e7b88225987dcbc4961843229ce7782f21938cc2d854736cf2e42665cb5025',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/OptionGroupRequest.java': 'efea16bdecb2ca939cc083e62d05547e8805b59c0383553931811f1363deb716',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/OptionGroupResponse.java': 'abf39ed75afed69002b3c4f410e87f7d514dcf5496ca89e8eeaa1b800222e805',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/OptionManagementController.java': '4e5922b7c4a74c84084224ca488845a9d3fe5e8dd49f29982cbd84d2749945b3',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/OptionValueRequest.java': 'cb98fe419dfdfe9a12000797e5de0d5e32c35eddfeee7309da093e948ccbc865',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/OptionValueResponse.java': 'a765589e14bca2705fd83ad12f4fec29a8ffe30123695748e9df2a09382a6ca8',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/ProductCreateRequest.java': '71511512e42c62916440e3f8b1b9d768c97f34e21ea847359b4437b0e1f40aa0',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/ProductImageController.java': '135694ec31b0f09391d24f2e83c8ef5ca588bfbed49b83101ec7fc3761e8e77f',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/ProductResponse.java': 'f7e6444db0d6e199f0170cd65c96dc2c8b2b7ebc6335dbc06abaa8b78d761c5f',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/ProductUpdateRequest.java': '46bfdb0771ccb5075970381a28c3c78d3b70245c7c4addd071ef578adbcdd24c',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/ProductWriteController.java': '34e1337594c2250dc076fe20431a0bb730d0496f95680f2842a69f004372d2cd',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/SkuCreateDto.java': 'f0078bd7e2402b28ff418f00e08071c1d41dd7b5b0877cf5a7c8dd2e18186ca1',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/SkuDetailDto.java': 'a84afcaa7a1a61a7d3c94663597ccfbc435ed2ee4d7e4d517218c2b66524294e',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/SkuUpdateDto.java': '1e24bb04c87070d3cb5c046fae2336ca465e004716566dd9e4125fbaad54a01f',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/JpaCatalogOptionsTest.java': '3a3614f63403c032268e4a2a449a2869e41d391fb19b856132c927fd12a26329',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/JpaCatalogProductsTest.java': 'dc2746474b89be100b86a8a23b1ceeded2b620f295ee9a32e16df6890c0ffbce',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/ProductSkusTest.java': '618cfdc4384aa92545bc55656a2e0af571a7651ffebffcc90dc871d719663b77',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/S3ProductImagesTest.java': '83b249918f002f53ab5c27841d60089500f46cb7bcd95b0c21d0ff49b0e933c2',
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/catalogwrite/web/CatalogManagementControllerTest.java': '8a3e16f9986f828db29e5773f659d7f703c888da61e61bcf70ff0cef2bc9fb34',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/StoreCatalogManagementHttpTest.java': '1ecdcf383482b8d54efc5a873c8175672a3503b0781720ecbbdd9912d1117035'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39553020979
@@ -1292,7 +1323,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 596
+                or len(POST_READS_APP_HASHES) != 627
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

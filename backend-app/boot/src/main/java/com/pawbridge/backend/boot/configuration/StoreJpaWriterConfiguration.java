@@ -25,8 +25,9 @@ public class StoreJpaWriterConfiguration {
     @Bean
     LocalContainerEntityManagerFactoryBean storeDirectOrderEntityManagerFactory(
             @Qualifier("writeDataSource") DataSource source,
-            @Value("${pawbridge.store-carts.enabled:false}") String cartFlag) {
-        boolean carts = "true".equalsIgnoreCase(cartFlag);
+            @Value("${pawbridge.store-carts.enabled:false}") String cartFlag,
+            @Value("${pawbridge.store-catalog-management.enabled:false}") String catalogFlag) {
+        boolean carts = "true".equalsIgnoreCase(cartFlag) || "true".equalsIgnoreCase(catalogFlag);
         String[] managed = Arrays.copyOf(StoreMemberJpaConfiguration.MANAGED_TYPES,
                 StoreMemberJpaConfiguration.MANAGED_TYPES.length + (carts ? 3 : 1));
         int next = StoreMemberJpaConfiguration.MANAGED_TYPES.length;

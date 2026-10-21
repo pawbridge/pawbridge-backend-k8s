@@ -19,6 +19,8 @@ dependencies {
     implementation 'jakarta.validation:jakarta.validation-api'
     compileOnly 'jakarta.servlet:jakarta.servlet-api'
     implementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:3.0.3')
+    implementation 'software.amazon.awssdk:s3'
     testImplementation 'org.springframework.data:spring-data-commons'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-web'
