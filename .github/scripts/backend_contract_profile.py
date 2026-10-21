@@ -905,10 +905,10 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/OrderReadControllerTest.java': '370b0795ed9a9d5263041427be3a8338b222f3d29087d01071d8ea14c100a3a0'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
-ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39481336774
-ARCHITECTURE_SELFTEST_REFERENCE_HEAD = '217cb7a3d9a61e6d8de5eacc893c97a762b1d193'
-ARCHITECTURE_SELFTEST_INPUT_HASHES = {'backend-app/animal/build.gradle': 'd18708a42123baae412030670f286b0632aa8c9afd01c86f07231aa2a88356cb',
- 'backend-app/boot/build.gradle': '3b73f3d6102882d7de5863f05442315e22949a311210b7a61817d0d3dd4d8681',
+ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39553020979
+ARCHITECTURE_SELFTEST_REFERENCE_HEAD = 'c84c0f6704cd214cca94e0138f09d6f2aa888b4b'
+ARCHITECTURE_SELFTEST_INPUT_HASHES = {'backend-app/animal/build.gradle': '6cde585aae7d5d626d1b817ba64dd73137b36ef87594017266d96f52b14205c3',
+ 'backend-app/boot/build.gradle': 'a8284a102992133240e01eb5a2cbad5260ae769ac4dc9d3efa71dbda1ce7a837',
  'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessBuildFixture.java': '289776b8432e47b87656714c84c2d051bf456dc261f2afd23e280e616d5e7322',
  'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessPackageArchitectureTest.java': '6522fb03fea64eb29b903fced123659e0e1012bae432458ed8ce261e4ffce616',
  'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '1c32ca2a01d6dc5467b1e3303e55a6bac182a4034c6f4533f0a01b38e36a8983',
