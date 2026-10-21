@@ -8,6 +8,8 @@ import java.util.List;
 public interface AnimalDiscovery {
     Page search(Search request, PageRequest page);
     Details findById(long id);
+    Details findByApmsDesertionNo(String number);
+    Page findExpiringSoonAnimals(PageRequest page);
 
     enum Species { DOG, CAT, ETC }
     enum Gender { MALE, FEMALE, UNKNOWN }

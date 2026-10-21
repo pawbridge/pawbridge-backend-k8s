@@ -29,6 +29,21 @@ public final class AnimalDiscoveryController {
     @GetMapping("/api/v1/animals/{id}")
     public AnimalDetails detail(@PathVariable("id") Long id) { return AnimalDetails.from(animals.findById(id)); }
 
+    @GetMapping("/api/v1/animals/apms/{apmsDesertionNo}")
+    public AnimalDetails getAnimalByApmsNo(@PathVariable("apmsDesertionNo") String number) {
+        return AnimalDetails.from(animals.findByApmsDesertionNo(number));
+    }
+
+    @GetMapping("/api/v1/animals/expiring-soon")
+    public AnimalPage listExpiringSoon(@PageableDefault(size = 20, sort = "noticeEndDate",
+            direction = Sort.Direction.ASC) Pageable pageable) {
+        Page result = animals.findExpiringSoonAnimals(new PageRequest(pageable.getPageNumber(),
+                pageable.getPageSize(), pageable.getSort().stream()
+                        .map(order -> new Order(order.getProperty(), order.isAscending())).toList(), pageable.isPaged()));
+        return new AnimalPage(result.content().stream().map(AnimalSummary::from).toList(), result.number(),
+                result.size(), result.totalElements(), result.totalPages(), result.first(), result.last());
+    }
+
     public record AnimalPage(List<AnimalSummary> content, int number, int size, long totalElements,
                              int totalPages, boolean first, boolean last) { }
 }
