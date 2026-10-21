@@ -31,12 +31,19 @@ public class AnimalJpaWriterConfiguration {
 
     @Bean
     LocalContainerEntityManagerFactoryBean animalCommandEntityManagerFactory(
-            @Qualifier("writeDataSource") DataSource source) {
+            @Qualifier("writeDataSource") DataSource source,
+            @org.springframework.beans.factory.annotation.Value("${pawbridge.animal-chatbot.enabled:false}") String chatbotFlag) {
         var factory = new LocalContainerEntityManagerFactoryBean();
         factory.setDataSource(source);
         factory.setPersistenceUnitName("pawbridge-animal-command-writer");
-        factory.setManagedTypes(PersistenceManagedTypes.of(MODEL + "Animal", MODEL + "Shelter",
+        var managed = new java.util.ArrayList<String>(java.util.List.of(MODEL + "Animal", MODEL + "Shelter",
                 MODEL + "OutboxEvent", MODEL + "BaseTimeEntity"));
+        if ("true".equalsIgnoreCase(chatbotFlag)) {
+            managed.add("com.pawbridge.backend.animal.internal.chatbot.infrastructure.entity.ChatbotSession");
+            managed.add("com.pawbridge.backend.animal.internal.chatbot.infrastructure.entity.ChatbotMessage");
+            managed.add("com.pawbridge.backend.animal.internal.chatbot.infrastructure.entity.ChatbotBlockLog");
+        }
+        factory.setManagedTypes(PersistenceManagedTypes.of(managed.toArray(String[]::new)));
         factory.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
         factory.setJpaPropertyMap(Map.of(
                 "hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect",

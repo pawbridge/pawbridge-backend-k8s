@@ -13,6 +13,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface AnimalRepository extends JpaRepository<Animal, Long> {
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"shelter"})
+    Optional<Animal> findWithShelterById(Long id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from Animal a where a.id = :id")
     Optional<Animal> findByIdForUpdate(@Param("id") Long id);

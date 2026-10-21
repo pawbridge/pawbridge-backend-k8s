@@ -992,3 +992,12 @@ Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유�
 `PawBridgeCoreIntegrationTest`는 실제 `PawBridgeApplication`에서 User의 Animal/Store module 조회와 Animal 명령·Store 바로 주문 writer를 함께 활성화한다. 업무·actor·facade·DataSource 대역 없이 named reader/writer pool2, JPA factory3와 transaction manager5의 실제 소비자 연결, 인증·역할·메서드 거부7경로, 소유 writer TX 밖 actor 거부, DB borrow0과 정상 close를 검증한다. writer 용량0은 자원을 만들기 전 fail-fast하며 늦은 startup 실패의 자원 정리를 검증한 것은 아니다.
 
 기존 각 기능의 별도 DB 검증은 보존한다. 이 코어 조합 시험은 정상 인증 DB 응답·실 Redis/OAuth/R2·외부 수집·예약 인수·운영 준비 완료를 의미하지 않는다. 외부 기능과 예약은 이 시험에서 비활성이다.
+
+
+## Animal remaining flows
+
+`pawbridge.animal-chatbot.enabled=true` plus `pawbridge.animal-query.backend=postgresql` explicitly assembles the original anonymous POST `/api/v1/animals/{animalId}/chat/messages`. It shares the existing Animal writer, entity manager, transaction manager and analyzer. Only repository phases use short transactions; Redis and Python are outside them. Original cookie/IP hash, five quotas, guard and message ordering are preserved. This feature defaults off.
+
+`pawbridge.shelter-observations.schedule-enabled=true` enables the original daily 04:00 Asia/Seoul observation. One writer SQL snapshot counts PROTECT animals including zero for empty shelters, preserving the first observation of each day. The existing shelter observation GET consumes these rows. Scheduling defaults off and does not run immediately at startup.
+
+Unit, configuration, actual Security/JWT and architecture checks cover development contracts. Real Redis/Python, production scheduling and operating data are not validated or changed. Original forwarded-header trust, quota/message-cap races, post-AI persistence failure and retention policies remain deferred activation gates.
