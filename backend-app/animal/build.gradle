@@ -4,6 +4,8 @@ plugins {
 
 dependencies {
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:3.0.3')
+    implementation 'software.amazon.awssdk:s3'
     implementation 'org.springframework:spring-jdbc'
     implementation 'org.springframework:spring-tx'
     implementation 'org.springframework.batch:spring-batch-core:5.2.4'
