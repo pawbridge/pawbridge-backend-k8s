@@ -882,6 +882,22 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 원문 PostgreSQL의 여행 카탈로그 7개 테이블과 응답·가용 상태·이미지 이용 조건을 사용하며, 응답 중 TourAPI·R2·AI 호출을 하지 않습니다. 수집·스케줄러·갱신 API는 이 구성에 포함하지 않습니다. 새 합성 DB 검증은 SELECT 전용 reader와 `P14_PG_SETTINGS`를 사용하는 `OwnedPostgresqlAnimalTravelTest`로 분리합니다. 기존 수집기의 실행 소유권 인계와 실제 운영 활성화는 별도 미완료 항목입니다.
 
 
+### Animal 이미지 업로드·삭제
+
+`pawbridge.animal-images.enabled=true`에서만 원문 `ImageController`의 세 경로를 조립한다. 기본 off이며 `on` 등 true 이외 별칭은 비활성이다. 저장소 client·bucket·공개 URL은 Post 소유 설정을 빌려 쓰고 닫지 않는다. 새 pool·DDL·의존성은 없다.
+
+| 메서드 | 경로 | 결과 |
+| --- | --- | --- |
+| POST | `/api/v1/animals/images` (`file`) | `{"imageUrl"}`, 200 |
+| POST | `/api/v1/animals/images/multiple` (`files`, 최대5) | `{"imageUrls","count"}`, 200 |
+| DELETE | `/api/v1/animals/images?imageUrl=` | `{"message":"이미지가 삭제되었습니다."}`, 200 |
+
+권한은 이전 Gateway 규칙의 의미를 유지한다. 단건 업로드와 삭제는 non-USER 경로였으므로 서명 검증한 회원 ID로 기존 writer 트랜잭션에서 현재 회원을 조회해 ADMIN·SHELTER만 허용하고(403 `권한이 부족합니다.`), 조회를 커밋한 뒤 저장소를 호출한다. 다중 업로드는 Gateway 역할 규칙에 걸리지 않던 2단 경로라 인증만 요구한다. `/api/animals/...` alias는 Gateway 책임으로 남긴다.
+
+원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 `animals/{uuid}{확장자}` 키, 부분 업로드 실패 시 앞 객체 유지, 삭제 실패·외부 URL 무시와 200 응답을 유지한다. 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다.
+
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
+
 ### 보호소 관리 쓰기와 회원 승인 직렬화
 
 `pawbridge.shelter-commands.enabled=true`에서 보호소 POST·PUT·DELETE만 추가한다. 기본 off·true 이외 별칭은 거부하며 기존 Animal 쓰기와 같은 named writer/EntityManager/트랜잭션·auditing을 공유한다. 새 pool·DDL·원격 호출은 없다.
