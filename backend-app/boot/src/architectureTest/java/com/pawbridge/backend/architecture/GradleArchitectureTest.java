@@ -216,6 +216,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
     @Test
     void givenStoreReferencesUserOutputAsFiles_whenStoreCheck_thenRejectsOwner() throws IOException {
+        appendModuleBuild("payment", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         appendModuleBuild("user", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         appendModuleBuild("store", """
                 evaluationDependsOn(':user')
@@ -228,6 +229,7 @@ class GradleArchitectureTest extends BusinessBuildFixture {
 
     @Test
     void givenStoreSiblingServiceFileClasspath_whenStoreCheck_thenRejects() throws IOException {
+        appendModuleBuild("payment", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         appendModuleBuild("boot", "configurations.implementation.dependencies.clear()");
         appendModuleBuild("user", "configurations.implementation.dependencies.removeAll { it instanceof org.gradle.api.artifacts.ProjectDependency && it.dependencyProject.path == ':store' }");
         createEmptyJar("../store-service/build/libs/store-service.jar");

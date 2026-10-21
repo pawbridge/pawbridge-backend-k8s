@@ -521,7 +521,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/recommendation/web/AnimalRecommendationControllerTest.java': '4902a59b66e155d03e6bb5179eb37fa68b5d58f6d82909401218fb02a37c1c7e',
  'backend-app/gradle/architecture.gradle': 'ca825f609fd21787986bdbc0e52668fcb73fa29b180796830c583c601c6b2e5d',
  'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessBuildFixture.java': 'ec8457df5ae2a9f0c75ea3f729ad19c90041d1b20cb3bcfa0d51365ef6045a23',
- 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '4c7a743990dd70b5a08458514b7e29d0667126333192a44dd41a237b5baff960',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '10be33ae04d89db2c79731780a42624beec5d1460b1bc04e13c7d9b3749122b4',
  'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessPackageArchitectureTest.java': 'fb01c5732e6df20e037a02895b752aa5bf354eac5e57659ac9dd015da61c9dc6',
  'backend-app/settings.gradle': '0fbbfd2e3fdcb234148d42964ba69ff5b410b206ceb339ae79a03203e276de7e',
  'backend-app/animal/build.gradle': '2ff3037bc77f583f34c474a3213fb41e2d8242b63d75df85d191000dce4a71db',
