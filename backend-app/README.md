@@ -1019,3 +1019,13 @@ Original DELETED patch/cart bypass, ignored SKU update fields, option mutation r
 `pawbridge.store-payment-events.enabled=true`는 원문의 DONE/ABORTED/CANCELED 처리, 주문 결제·취소와 재고·검색·outbox 쓰기를 기존 Store writer에 연결한다. ranking은 기존 `memberChatRedis`가 있으면 차용하고, 없으면 명시한 Redis 설정으로 소유 factory를 구성한다. Kafka 등록에는 추가 `kafka-enabled=true`가 필요하며, 원문 topic/group과 재시도 설정을 유지한 listener는 `autoStartup=false`로 둔다. Kafka의 전역 자동 구성은 제외하고 명명한 조건부 consumer factory만 사용한다.
 
 단위·구성·실제 Security/JWT와 합성 HTTP 검증 근거를 보존했다. 최종 단일 조립에서 기존 actualMain2와 동일 소유 PostgreSQL의 SELECT3을 재검증했고, Kafka Admin·ConsumerFactory·ProducerFactory·listener registry가 기본 비활성 상태에서 생성되지 않음을 확인했다. 선택한 구조 계약3과 현재 구조 guard도 통과했으며, 생성한 JAR의 실제 runtime162개 목록은 기존 CI 격리 경계를 통과했다. 전체 구조 자체회귀는 CI에서 별도로 실행해야 한다. 이 결과는 실 Toss·Redis·Kafka 운영 연결, 소비·ACK 성공, 결제 소유권·정상 상태·금액 정책 보완이나 운영 활성화 완료를 의미하지 않는다. 원문의 늦은 결제 결과·중복/경합·외부 보상·DB commit 뒤 실패 한계는 후속 보완으로 유보한다.
+
+### 실제 Main 조립과 격리 PostgreSQL 계약 검증
+
+`OwnedPostgresqlMainCoreIntegrationTest`의 3사례는 실제 `PawBridgeApplication`과 JWT·SecurityFilterChain을 통해 User→Animal 즐겨찾기, User→Store 구매 내역, Community→User 작성자 조회를 검증한다. 읽기 전용 권한을 가진 별도 합성 PostgreSQL 자료에서 실제 저장소 조회, 트랜잭션 분리, 요청 후 연결 반환, 자료 불변과 정상 종료를 확인했다. 운영 데이터나 정상 결제·외부 서비스 성공을 검증한 결과는 아니다.
+
+`OwnedPostgresqlShelterObservationTest`의 2사례는 별도 합성 PostgreSQL의 축소된 3개 업무 테이블에서 실제 관측 기록 SQL과 기존 통계 조회 SQL을 실행한다. DB의 한국 날짜, 빈 보호소와 PROTECT 수, 기존 관측 보존, 같은 날짜 재기록의 중복 방지, 트랜잭션 롤백과 서버의 읽기 전용 쓰기 거부를 확인했다. 이 시험은 실제 Boot 구성의 recorder 조립 메서드를 직접 사용하며 Main·04시 스케줄러·HTTP를 기동하지 않는다. 관측 시험 2사례의 추가는 시험·SQL만의 변경이며 결제·상품·Animal 생산 코드를 바꾸지 않는다.
+
+Animal·Store·Payment 생산 코드를 합친 최종 조립에서는 기존 Main 무DB 2사례와 위 Main PostgreSQL 3사례, 총 5사례를 한 번 재검증했다. 새 고유 5사례로 합산하지 않는다. Payment→Store 공개 계약·내부 참조 거부·6모듈 의존 그래프의 선택 구조 시험 3사례, 현재 architecture/business-package 검사, 실행 JAR 생성도 통과했다. 해당 JAR의 실제 런타임 라이브러리 162개는 기존 CI 경계 검사에서 추가 허용 예외 없이 통과했다. 이 근거는 전체 TestKit 시험 성공이나 실행 JAR 기동·Kafka 소비·Redis·Toss·R2·AI·운영 배포 성공을 뜻하지 않는다. 관측 PostgreSQL 2사례는 이 최종 조립 검증 뒤 별도로 최초 실행됐다.
+
+두 PostgreSQL 시험은 명시적인 전용 설정 선택자와 소유권·권한·기준 자료 검증을 요구하며 입력이 없거나 잘못되면 건너뛰거나 다른 DB로 대체하지 않고 실패한다. 게시하는 파일은 시험 Java 2개와 합성 스키마 SQL 2개다. 자료 준비 helper, 동적 설정, 인증정보, 소유권 상태·영수증과 덤프는 게시하지 않는다. CI에서 이 자료를 새로 준비하거나 운영 기능을 켰다는 의미도 아니다.
