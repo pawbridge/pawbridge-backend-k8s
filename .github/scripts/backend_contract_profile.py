@@ -349,7 +349,7 @@ POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d5
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01eb5a2cbad5260ae769ac4dc9d3efa71dbda1ce7a837',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '9bcb32be8e45506810723753c1a35fc71497086b54f5346205b679df7c5ece2c',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '797b5a2921a1696806688d2cb9a89a996109345609043d1fa3f0d1bb4025984e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -524,7 +524,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01
  'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '1c32ca2a01d6dc5467b1e3303e55a6bac182a4034c6f4533f0a01b38e36a8983',
  'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessPackageArchitectureTest.java': '6522fb03fea64eb29b903fced123659e0e1012bae432458ed8ce261e4ffce616',
  'backend-app/settings.gradle': '6a488a40f2aa4afc2ae1462a7fdac6280159510e65362f5a0f1724dd3cb0473f',
- 'backend-app/animal/build.gradle': '0c0eec38e643dbff897025dc40a2350da00708e51561bd79b85a954ce6693ec0',
+ 'backend-app/animal/build.gradle': '6cde585aae7d5d626d1b817ba64dd73137b36ef87594017266d96f52b14205c3',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalDiscoveryConfiguration.java': 'fd01efd3019bfa7e6d31d5e1850ca8bcd6c5a85f4350b5bc4d91e39071994238',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalRecommendationsConfiguration.java': '545aa79195b7608755f84bf0ee98b81e57b29b1d15080421a7e8264b4ba07f13',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalReadConfigurationTest.java': '85c5c26176aaa1f5ab16426208c135e0d9c8cb43a4167535ab2ef3d3ff1f0975',
@@ -673,7 +673,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/command/infrastructure/service/AnimalCommandServiceTest.java': '5fe59bee78d4a52516c53e1b42bcea64dd1d33fab2186a788485b4a89f15e7c3',
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/command/web/AnimalCommandExceptionHandlerTest.java': '74fb1982ecae92d07b336e91df77bae3172e2b69702523c7041196e4a9576b59',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalCommandConfiguration.java': 'c41fb223ddb0bda7098f86d272b38f7114f87687f1a8ec10e634b3c3cc383f84',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalSearchConfiguration.java': '16e0a2debb14ebbacde9998dd5c979ffc262f5cfe3f576bef4f7d9093298ac8b',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalSearchConfiguration.java': '56a0fb54677061b0f856497be20f71ff3cf200ade2cfc3b43d9ea09384464095',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalCommandConfigurationTest.java': '61c8decf949d90baa7efb75461402f8587fd2695c19cb9567a8a0784b18cc570',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalCommandDisabledHttpTest.java': 'fd46357abd4644f764282f59306279f9902db36d94016aac5cf417c62b99ffbb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlAnimalCommandTest.java': 'd029ee360f565a8b5ca830897a4d5090e78b50e18b99434eaacd95ae55d607fc',
@@ -874,6 +874,22 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'a8284a102992133240e01
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/ApmsHttpClientTest.java': '39e536740b81281ffe176a1c82a572e382b57e28cf455e7e2aa9bfd8cabde376',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlApmsCollectionTest.java': '88f045f46683765234b1d319b80f235fb5432a4710d32d234937894b1503ac77',
  'backend-app/boot/src/test/resources/owned-postgresql/apms-collection-owned-schema.sql': '55dbd18513400e3037f025f352550c1c10dff2bf2a8b110095f601276e27f8f5',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/ArchivedPhoto.java': '98cfdb484bb9bac7c2fb5377777984531d5d8e8a444737deb29c1891c23e7f2c',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveFailure.java': 'd37822c6579e217d0e1e2eceb0b84a45dcffd09c487ff003b44810662816d8f8',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveHttpClient.java': 'f56e96bd1a9741738baa6cea0ff40339f5967d27c5fbc6e9a06f7a492e4c85b9',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveObjectStorage.java': 'c0f2ad588cdff85ea1d215c50f5947166b42ec96d657b37cd1ba7eabb2ce7862',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveProperties.java': '6a7ba0ec194c8dc6e09e89b77318021e0239aae9133e7c5331235da359771ee3',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveStore.java': '9229e9728611281a4148687e8b0f9b22940979ee8ca7e031e0cd4292076a995a',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveWorker.java': '98b4f93396ed812dcfbcb5b1c9c175fb59cb4ff59ddb2bca8507d628383d6fb1',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveHttpClientTest.java': 'b2bbaa5d3056e0a3bea533a8c4f6df2a2f351868f8259d5c55df41f5309d3e78',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/photoarchive/infrastructure/PhotoArchiveWorkerTest.java': '7609f598e30fb3e84d3635e82c2e29a8e458a8b645c34201a8e7ec02897c51fa',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalPhotoArchiveConfiguration.java': 'fb57597c11709432895fe5de7b1adf97f47051bf42c5b47e888a0f0248ebdccb',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PhotoArchiveSchedule.java': '921c156f065092adb09729cf845f2eb03d437a6faeb32e2ea425b27036c0929b',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PhotoArchiveStorageProperties.java': 'd123601b7804c9fd1a6784cddfa42e43b2e55db1653260bde9b9016e0f7a7cb8',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalPhotoArchiveConfigurationTest.java': 'b977d0c04d45e263a531161c002b5f22cda2333fefe32330c49462cd6ecf14c4',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlApmsPhotoArchiveTest.java': '8648e73decb420dde0163431c263973f4fe1f0b67b6cd362be0af0c5eaa8a758',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/PhotoArchiveScheduleTest.java': 'dfbb909914b576b86d45b8ff1666872ef89e771677a7f4330ff8609550b85b64',
+ 'backend-app/boot/src/test/resources/owned-postgresql/apms-photo-archive-owned-schema.sql': '6930ff2d0f3bcd0bd48bad24c16410ae3348ed1480c9284037b0318f15c3083e',
 }
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
@@ -1224,7 +1240,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 528
+                or len(POST_READS_APP_HASHES) != 544
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

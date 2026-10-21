@@ -951,3 +951,18 @@ HTTP transport는 명시한 HTTPS 제공자만 사용하고 redirect를 따르�
 새 전용 합성 PostgreSQL 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P18_PG_SETTINGS`와 소유한 0600 `P18_PG_SETTINGS` 파일을 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlApmsCollectionTest`로 정확히 선택한다. 원문 업무·검색5표와 Batch6표·6sequence, 별도 marker 및 최소권한을 확인하고 정상 upsert/search·checkpoint 재조회·실패 rollback·실제2PID slot·stale 회복·정상 종료를 다룬다. 이력과 실패 자료를 보존하며 같은 fixture를 자동 초기화·재실행하지 않는다. 준비 helper·자격파일·실행 로그는 Git에 게시하지 않는다. 실제 실행 성공과 남은 검증은 해당 PR의 근거로 구분하며 운영 활성화는 별도다.
 
 APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사례, 최종 새 합성 PG5사례(1.392초)는 서로 다른 실행 근거다. 최종 PG는 실제 source/search/Batch metadata DML 후 강제 rollback·physical commit 증가0, 원문 부분 복구·기존 행 보존, 두 실제 PID의 slot, stale10분, 정상 예약 종료를 확인했다. 제공자는 대역이며 실 APMS/운영 검증은 하지 않았다. 최초 SQL 개행 관측 오류와 원문 부분 commit을 전체 실패 원자성으로 오해한 두 시험 실패는 보존하고, 새 fixture에서 최소 정정 후 검증했다. 기존 DB를 reset하지 않았다.
+
+
+## APMS 사진 보관 예약 경로 편입
+
+`apms-photo-archive.enabled=true`를 명시할 때만 APMS 사진 발견·재시도·보관 작업을 조립한다. 기본 off에서는 archive writer/HTTP/S3/scheduler를 만들지 않으며, APMS 수집 자체나 Gallery 공개·내부 제공 기능을 자동 활성화하지 않는다. 수동 사진 업로드/삭제 API는 이 범위에 없다.
+
+원문의 두 사진 slot·신규/과거 발견 cursor·generation/lease token·최근/장기대기 교대와 PostgreSQL 분기를 선택 재사용한다. 같은 기존 writer DataSource/JdbcTemplate/AnimalJpaTransactionManager의 짧은15초 TX를 쓰고, 원문 이미지 다운로드·Photo 최적화·S3 GET/PUT/GET 무결성 확인 동안 DB TX를 유지하지 않는다. 기존 Animal writer와 검색 분석기를 공유하며 새 pool/EMF/스키마 자동생성은 없다. animals의 공개 원문 URL·자체 상태는 변경하지 않는다.
+
+필수 전용 입력은 `apms-photo-archive.bucket`, `optimizer-url`, `internal-api-key`와 `apms-photo-archive.storage.endpoint`, `region`(기본 auto), `access-key-id`, `secret-access-key`다. 공유 AWS 자격·환경 기본 탐색으로 대체하지 않는다. bucket은 기존 Gallery signer와 같은 `pawbridge-animal-originals`만 허용한다. 인증값·원문 URL·서명 URL을 로그나 예시에 넣지 않는다.
+
+R2 객체는 항상 raw 원본인 것이 아니라 Photo 계약의 원본 fallback 또는 fullsize WebP 결과다. stored SHA 기반 key와 실제 재조회한 bytes·MIME·해시가 일치해야 READY를 기록하고, lease/generation 및 현재 Animal 원문 URL이 다르면 완료를 거부한다. 기존 객체는 실패·URL변경·동물변경 때문에 자동 삭제하지 않는다. 보관 후 DB 완료가 실패하면 원문처럼 lease/재시도로 복구하며, 이를 원격 객체와 DB의 분산 원자성으로 표현하지 않는다.
+
+기본 scan50/maxPhotos25/maxRun300초/lease300초/recheck7일, 최초 지연60초·주기15분을 유지한다. 종료는 새 claim을 막고 현재 항목을 기다린다. `apms-photo-archive.shutdown-timeout-seconds`는1..300/기본15이며, 초과·중단이면 interrupt와 고정 미완료 경고를 남긴다. scheduler의 isRunning=false나 context close 반환은 모든 원격 I/O/worker 완주를 보장하지 않는다. 실제 운영 인계에는 기존 scheduler 중단·배타 소유·전용 권한·키·Photo/R2 실제 검증이 별도로 필요하다.
+
+최초 업무·HTTP·Root 구성/종료 단위 35사례와 새 P19 합성 PostgreSQL 전체 6사례를 검증했다. P19는 source SELECT-only·전 열 불변, 외부 대역 callback의 실제 TX/활성 연결0, READY→기존 Gallery slot1, 실제 세션 잠금/SKIP LOCKED와 claim·lease·재시도·협력 종료를 다룬다. 두 claim SQL의 동시 중첩, 동시 source UPDATE, 전체 Spring context 종료와 실 APMS/R2/Photo·운영 활성화는 검증하지 않았다. P19는 정확한 전체 OwnedPostgresqlApmsPhotoArchiveTest와 전용 P19_PG_SETTINGS/PAWBRIDGE_OWNED_SETTINGS_ENV를 선택하고 XML6/완료6을 확인한다. 성공한 fixture를 자동 초기화·재실행하지 않는다.

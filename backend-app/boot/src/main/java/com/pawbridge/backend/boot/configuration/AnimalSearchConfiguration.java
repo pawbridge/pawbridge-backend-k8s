@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
         + "'true'.equalsIgnoreCase('${pawbridge.animal-recommendations.enabled:false}') or "
         + "'true'.equalsIgnoreCase('${pawbridge.animal-commands.enabled:false}') or "
         + "'true'.equalsIgnoreCase('${pawbridge.shelter-commands.enabled:false}') or "
+        + "'true'.equalsIgnoreCase('${apms-photo-archive.enabled:false}') or "
         + "'true'.equalsIgnoreCase('${apms.batch.schedule-enabled:false}')")
 public class AnimalSearchConfiguration {
     @Bean(destroyMethod = "close")
