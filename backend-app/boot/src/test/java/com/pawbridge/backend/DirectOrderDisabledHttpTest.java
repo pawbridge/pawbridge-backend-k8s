@@ -23,7 +23,7 @@ class DirectOrderDisabledHttpTest {
     @Autowired MockMvc mvc;
     @MockitoBean DirectOrders orders;
 
-    @ParameterizedTest @CsvSource({"POST,/api/v1/orders/direct","GET,/api/v1/orders/7"})
+    @ParameterizedTest @CsvSource({"POST,/api/v1/orders/direct","GET,/api/v1/orders","GET,/api/v1/orders/7"})
     void given__no_order_flag__when__verified_member_uses_an_order_route__then__deny_before_business(String method,String path) throws Exception {
         mvc.perform(command(method,path)).andExpect(status().isForbidden());
         verifyNoInteractions(orders);
@@ -35,13 +35,13 @@ class DirectOrderDisabledHttpTest {
     }
 }
 
-@WebMvcTest(properties="pawbridge.store-direct-orders.enabled=on",
+@WebMvcTest(properties={"pawbridge.store-direct-orders.enabled=on","pawbridge.store-carts.enabled=yes"},
         excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
 @ContextConfiguration(classes={DirectOrderController.class,ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class DirectOrderAliasDisabledHttpTest {
     @Autowired MockMvc mvc;
     @MockitoBean DirectOrders orders;
-    @ParameterizedTest @CsvSource({"POST,/api/v1/orders/direct","GET,/api/v1/orders/7"})
+    @ParameterizedTest @CsvSource({"POST,/api/v1/orders/direct","GET,/api/v1/orders","GET,/api/v1/orders/7"})
     void given__unowned_boolean_alias__when__verified_member_uses_a_route__then__keep_the_owner_flag_closed(String method,String path) throws Exception {
         mvc.perform(DirectOrderDisabledHttpTest.command(method,path)).andExpect(status().isForbidden());
         verifyNoInteractions(orders);

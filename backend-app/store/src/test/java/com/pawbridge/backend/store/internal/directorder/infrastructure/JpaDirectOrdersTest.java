@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import com.pawbridge.backend.store.api.StoreOrderActors;
+import com.pawbridge.backend.store.api.StoreMemberReads;
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders;
 import com.pawbridge.backend.store.internal.directorder.application.OrderActorRejectedException;
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.*;
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.*;
 import org.springframework.transaction.TransactionSystemException;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 
 class JpaDirectOrdersTest {
     private DirectOrderFixture f;
@@ -125,5 +128,130 @@ class JpaDirectOrdersTest {
         var service=new JpaDirectOrders(f.writerOrders,f.readerOrders,f.skus,f.stocks,f.actors,absent,absent);
         assertThrows(IllegalStateException.class,()->{if(operation.equals("create"))service.create(7,f.command(1));else service.get(7,33);});
         verifyNoInteractions(f.actors,f.products,f.skus,f.writerOrders,f.readerOrders,f.jdbc,f.outbox);
+    }
+
+    @ParameterizedTest @NullSource @EnumSource(OrderStatus.class)
+    void given__optional_status_and_own_snapshot__when__listing_then_reading_detail__then__reuse_owner_query_ro_actor_and_identical_snapshot(OrderStatus status) {
+        var order=historyOrder(status==null?OrderStatus.PENDING:status);
+        var query=new StoreMemberReads.Request(1,10,List.of());
+        org.mockito.stubbing.Answer<org.springframework.data.domain.Page<Order>> page=call->{
+            f.reader();f.events.add("history-page");
+            Pageable pageable=call.getArgument(call.getArguments().length-1);
+            assertEquals(1,pageable.getPageNumber());assertEquals(10,pageable.getPageSize());assertTrue(pageable.getSort().isUnsorted());
+            return new PageImpl<>(List.of(order),pageable,11);
+        };
+        if(status==null)when(f.readerOrders.findByUserIdOrderByCreatedAtDesc(eq(7L),any())).thenAnswer(page);
+        else when(f.readerOrders.findByUserIdAndStatusOrderByCreatedAtDesc(eq(7L),eq(status),any())).thenAnswer(page);
+        when(f.readerOrders.findWithItemsByUserIdAndIdIn(7L,List.of(77L))).thenAnswer(call->{
+            f.reader();f.events.add("history-items");return List.of(order);
+        });
+        var result=f.service.list(7,status==null?null:status.name(),query);
+        assertEquals(11,result.totalElements());assertEquals(1,result.number());assertEquals(10,result.size());assertTrue(result.sort().isEmpty());
+        assertEquals(List.of("begin:reader","actor:read","history-page","history-items","commit:reader"),f.events);
+        f.product.updateName("later live product");f.target.updatePrice(999L);
+        assertEquals(result.content().getFirst(),f.service.get(7,77));
+        assertEquals("purchased product",result.content().getFirst().items().getFirst().productName());
+        assertEquals("PURCHASED-80",result.content().getFirst().items().getFirst().skuCode());
+        assertEquals(17L,result.content().getFirst().items().getFirst().price());
+        if(status==null)verify(f.readerOrders,never()).findByUserIdAndStatusOrderByCreatedAtDesc(anyLong(),any(),any());
+        else verify(f.readerOrders,never()).findByUserIdOrderByCreatedAtDesc(anyLong(),any());
+        verify(f.readerOrders).findWithItemsByUserIdAndIdIn(7L,List.of(77L));
+        verifyNoInteractions(f.writerOrders,f.skus,f.products,f.jdbc,f.outbox);
+        verify(f.actors,never()).currentForWrite(anyLong());
+    }
+
+    @ParameterizedTest @ValueSource(strings={"null","mismatch","inactive","deleted"})
+    void given__missing_or_ineligible_current_member__when__listing__then__reject_before_any_order_query(String state) {
+        f.actor=switch(state){case "null"->null;case "mismatch"->new StoreOrderActors.Actor(8,true,false);case "inactive"->new StoreOrderActors.Actor(7,false,false);default->new StoreOrderActors.Actor(7,true,true);};
+        assertThrows(OrderActorRejectedException.class,()->f.service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
+        verifyNoInteractions(f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        assertEquals(List.of("begin:reader","actor:read","rollback:reader"),f.events);
+    }
+
+    static Stream<Arguments> invalidHistoryPages(){return Stream.of(
+            Arguments.of(new StoreMemberReads.Request(0,101,List.of())),
+            Arguments.of(new StoreMemberReads.Request(Integer.MAX_VALUE,100,List.of())),
+            Arguments.of(new StoreMemberReads.Request(0,10,List.of(new StoreMemberReads.Order("orderItems.order.orderItems.order.id",true,false)))),
+            Arguments.of(new StoreMemberReads.Request(0,10,List.of(new StoreMemberReads.Order("unknown",true,false)))),
+            Arguments.of(new StoreMemberReads.Request(0,10,Collections.nCopies(5,new StoreMemberReads.Order("id",true,false)))));}
+    @ParameterizedTest @MethodSource("invalidHistoryPages")
+    void given__oversized_or_recursive_or_large_offset_query__when__listing__then__reject_before_transaction_or_actor(StoreMemberReads.Request request) {
+        assertThrows(IllegalArgumentException.class,()->f.service.list(7,null,request));assertTrue(f.events.isEmpty());
+        verifyNoInteractions(f.actors,f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+    }
+
+    @Test void given__valid_scalar_sorts__when__listing_empty_page__then__preserve_order_direction_and_ignore_case_without_relationship_paths() {
+        var sort=List.of(new StoreMemberReads.Order("totalAmount",true,false),new StoreMemberReads.Order("receiverName",false,true));
+        when(f.readerOrders.findByUserIdOrderByCreatedAtDesc(eq(7L),any())).thenAnswer(call->{
+            Pageable page=call.getArgument(1);assertEquals("totalAmount",page.getSort().toList().getFirst().getProperty());
+            assertTrue(page.getSort().getOrderFor("totalAmount").isAscending());assertTrue(page.getSort().getOrderFor("receiverName").isIgnoreCase());
+            return new PageImpl<>(List.<Order>of(),page,0);
+        });
+        var result=f.service.list(7,null,new StoreMemberReads.Request(0,100,sort));
+        assertTrue(result.content().isEmpty());assertEquals(0,result.totalElements());assertEquals(100,result.size());assertEquals(sort,result.sort());
+        verify(f.readerOrders,never()).findWithItemsByUserIdAndIdIn(anyLong(),anyList());
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"no-tx","read-in-rw"})
+    void given__miswired_history_read_transaction__when__listing__then__fail_before_actor_or_store_rows(String kind) {
+        var reads=kind.equals("no-tx")?org.springframework.transaction.support.TransactionOperations.withoutTransaction():f.write;
+        var service=new JpaDirectOrders(f.writerOrders,f.readerOrders,f.skus,f.stocks,f.actors,f.write,reads);
+        assertThrows(IllegalStateException.class,()->service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
+        verifyNoInteractions(f.actors,f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+    }
+
+    @Test void given__history_query_failure__when__listing__then__propagate_and_rollback_read_transaction_without_writes() {
+        when(f.readerOrders.findByUserIdOrderByCreatedAtDesc(eq(7L),any())).thenAnswer(call->{
+            f.reader();f.events.add("history-page");throw new org.springframework.dao.DataAccessResourceFailureException("private history query");
+        });
+        assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+                ()->f.service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
+        assertEquals(List.of("begin:reader","actor:read","history-page","rollback:reader"),f.events);
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+    }
+
+    @Test void given__nonempty_parent_page_and_different_bulk_result_order__when__listing__then__fetch_only_verified_owner_page_ids_once_and_preserve_parent_order_and_metadata() {
+        var first=historyOrder(77,OrderStatus.PAID);var second=historyOrder(88,OrderStatus.PAID);
+        var sort=List.of(new StoreMemberReads.Order("totalAmount",true,false));
+        when(f.readerOrders.findByUserIdAndStatusOrderByCreatedAtDesc(eq(7L),eq(OrderStatus.PAID),any())).thenAnswer(call->{
+            f.reader();f.events.add("history-page");return new PageImpl<>(List.of(second,first),call.getArgument(2),6);
+        });
+        when(f.readerOrders.findWithItemsByUserIdAndIdIn(7L,List.of(88L,77L))).thenAnswer(call->{
+            f.reader();f.events.add("history-items");return List.of(first,second);
+        });
+        var result=f.service.list(7,"PAID",new StoreMemberReads.Request(1,2,sort));
+        assertEquals(List.of(88L,77L),result.content().stream().map(DirectOrders.OrderDetails::orderId).toList());
+        assertEquals(1,result.number());assertEquals(2,result.size());assertEquals(6,result.totalElements());assertEquals(sort,result.sort());
+        assertEquals(List.of("begin:reader","actor:read","history-page","history-items","commit:reader"),f.events);
+        verify(f.readerOrders).findWithItemsByUserIdAndIdIn(7L,List.of(88L,77L));
+        verify(f.readerOrders,never()).findByUserIdOrderByCreatedAtDesc(anyLong(),any());
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+    }
+
+    @Test void given__page_item_bulk_query_failure__when__listing__then__propagate_and_rollback_same_read_transaction_without_writes() {
+        var order=historyOrder(OrderStatus.PENDING);
+        when(f.readerOrders.findByUserIdOrderByCreatedAtDesc(eq(7L),any())).thenAnswer(call->{
+            f.reader();f.events.add("history-page");return new PageImpl<>(List.of(order),call.getArgument(1),1);
+        });
+        when(f.readerOrders.findWithItemsByUserIdAndIdIn(7L,List.of(77L))).thenAnswer(call->{
+            f.reader();f.events.add("history-items");throw new org.springframework.dao.DataAccessResourceFailureException("private bulk query");
+        });
+        assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+                ()->f.service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
+        assertEquals(List.of("begin:reader","actor:read","history-page","history-items","rollback:reader"),f.events);
+        verify(f.readerOrders).findWithItemsByUserIdAndIdIn(7L,List.of(77L));
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+    }
+
+    private Order historyOrder(OrderStatus status) {
+        return historyOrder(77,status);
+    }
+    private Order historyOrder(long orderId,OrderStatus status) {
+        var order=Order.builder().userId(7L).orderUuid("owned-history-uuid").totalAmount(34L).receiverName("snapshot receiver")
+                .receiverPhone("snapshot phone").deliveryAddress("snapshot address").deliveryMessage("snapshot message").build();
+        order.updateStatus(status);DirectOrderFixture.id(order,orderId);org.springframework.test.util.ReflectionTestUtils.setField(order,"createdAt",f.time);
+        order.getOrderItems().add(OrderItem.builder().order(order).productSKU(f.target).productName("purchased product").skuCode("PURCHASED-80").price(17L).quantity(2).build());
+        f.orders.put(orderId,order);return order;
     }
 }

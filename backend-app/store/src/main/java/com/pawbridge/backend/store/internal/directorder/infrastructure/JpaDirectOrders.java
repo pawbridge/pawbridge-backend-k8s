@@ -2,6 +2,7 @@ package com.pawbridge.backend.store.internal.directorder.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.api.StoreOrderActors;
+import com.pawbridge.backend.store.api.StoreMemberReads;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders;
 import com.pawbridge.backend.store.internal.directorder.application.OrderActorRejectedException;
@@ -12,16 +13,23 @@ import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repos
 import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repository.ProductSKURepository;
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.Order;
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.OrderItem;
+import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.OrderStatus;
 import jakarta.persistence.EntityManager;
 import java.time.Clock;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 public final class JpaDirectOrders implements DirectOrders {
+    // Same scalar Order fields already accepted by Store member reads; no relationship paths.
+    private static final Set<String> HISTORY_SORTS=Set.of("id","userId","orderUuid","totalAmount","status",
+            "deliveryAddress","deliveryStatus","receiverName","receiverPhone","deliveryMessage","createdAt","updatedAt");
     private final OrderRepository writerOrders;
     private final OrderRepository readerOrders;
     private final ProductSKURepository skus;
@@ -72,6 +80,27 @@ public final class JpaDirectOrders implements DirectOrders {
             Order order=readerOrders.findById(orderId).orElseThrow(()->new IllegalArgumentException("Order not found"));
             if(!order.getUserId().equals(verifiedUserId)) throw new IllegalArgumentException("Order cannot be accessed by this member");
             return details(OrderResponse.from(order));
+        });
+    }
+    @Override public StoreMemberReads.Page<OrderDetails> list(long verifiedUserId,String status,StoreMemberReads.Request request) {
+        if(request.size()>100 || request.offset()>Integer.MAX_VALUE || request.sort().size()>4
+                || request.sort().stream().anyMatch(order->order.property()==null || !HISTORY_SORTS.contains(order.property())))
+            throw new IllegalArgumentException("Order history page or sort is not supported");
+        OrderStatus selected=status==null?null:OrderStatus.valueOf(status);
+        Sort sort=Sort.by(request.sort().stream().map(order->new Sort.Order(
+                order.ascending()?Sort.Direction.ASC:Sort.Direction.DESC,order.property(),order.ignoreCase(),Sort.NullHandling.NATIVE)).toList());
+        var pageable=PageRequest.of(request.page(),request.size(),sort);
+        return reads.execute(tx->{
+            requireTransaction(true);requireActor(verifiedUserId,actors.currentForRead(verifiedUserId));
+            var page=selected==null?readerOrders.findByUserIdOrderByCreatedAtDesc(verifiedUserId,pageable)
+                    :readerOrders.findByUserIdAndStatusOrderByCreatedAtDesc(verifiedUserId,selected,pageable);
+            if(page.hasContent()) {
+                // Initialize only this owner's page collections in the same persistence context.
+                readerOrders.findWithItemsByUserIdAndIdIn(verifiedUserId,page.getContent().stream().map(Order::getId).toList());
+            }
+            var content=page.getContent().stream().map(OrderResponse::from).map(JpaDirectOrders::details).toList();
+            return new StoreMemberReads.Page<>(content,page.getNumber(),page.getSize(),page.getTotalElements(),
+                    page.getSort().stream().map(order->new StoreMemberReads.Order(order.getProperty(),order.isAscending(),order.isIgnoreCase())).toList());
         });
     }
     private static void requireActor(long verified,StoreOrderActors.Actor actor) {
