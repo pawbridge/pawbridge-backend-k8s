@@ -8,7 +8,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** Original Store error envelope/statuses, scoped to the added handlers and without payload logging. */
-@RestControllerAdvice(assignableTypes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class})
+@RestControllerAdvice(assignableTypes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,
+        CategoryManagementController.class})
 public final class CatalogManagementExceptionHandler {
     public record FieldError(String field,String value,String reason){}
     public record Error(String message,String code,List<FieldError> errors){}

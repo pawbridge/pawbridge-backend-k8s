@@ -2,6 +2,7 @@ package com.pawbridge.backend.boot.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
+import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogCategories;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogOptions;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogProducts;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.S3ProductImages;
@@ -43,6 +44,7 @@ class StoreCatalogManagementConfigurationTest {
                 .doesNotHaveBean(JpaCatalogProducts.class).doesNotHaveBean(JpaCatalogOptions.class).doesNotHaveBean(S3ProductImages.class)
                 .doesNotHaveBean(ProductWriteController.class).doesNotHaveBean(OptionManagementController.class)
                 .doesNotHaveBean(ProductImageController.class).doesNotHaveBean(CatalogManagementExceptionHandler.class)
+                .doesNotHaveBean(JpaCatalogCategories.class).doesNotHaveBean(CategoryManagementController.class)
                 .doesNotHaveBean(KoreanSearchTerms.class).doesNotHaveBean(AuditingHandler.class).doesNotHaveBean(S3Client.class));
     }
 
@@ -61,7 +63,8 @@ class StoreCatalogManagementConfigurationTest {
                             .hasSingleBean(JpaTransactionManager.class).hasSingleBean(JpaAuditingConfiguration.class).hasSingleBean(AuditingHandler.class)
                             .hasSingleBean(JpaCatalogProducts.class).hasSingleBean(JpaCatalogOptions.class).hasSingleBean(S3ProductImages.class)
                             .hasSingleBean(ProductWriteController.class).hasSingleBean(OptionManagementController.class)
-                            .hasSingleBean(ProductImageController.class).hasSingleBean(CatalogManagementExceptionHandler.class).hasSingleBean(S3Client.class);
+                            .hasSingleBean(ProductImageController.class).hasSingleBean(CatalogManagementExceptionHandler.class).hasSingleBean(S3Client.class)
+                            .hasSingleBean(JpaCatalogCategories.class).hasSingleBean(CategoryManagementController.class);
                     unit.set(context.getBean("storeDirectOrderEntityManagerFactory",EntityManagerFactory.class));
                     var factory=context.getBean("&storeDirectOrderEntityManagerFactory",LocalContainerEntityManagerFactoryBean.class);
                     assertThat(factory.getDataSource()).isSameAs(writer);
@@ -87,6 +90,8 @@ class StoreCatalogManagementConfigurationTest {
                     assertThat(ReflectionTestUtils.getField(products,"writes")).isSameAs(writes);assertThat(ReflectionTestUtils.getField(options,"writes")).isSameAs(writes);
                     for(String field:List.of("products","categories","skus","cartItems"))sameRepositoryWriter(ReflectionTestUtils.getField(products,field),shared);
                     for(String field:List.of("groups","values","products","skus"))sameRepositoryWriter(ReflectionTestUtils.getField(options,field),shared);
+                    Object categories=context.getBean(JpaCatalogCategories.class);
+                    assertThat(ReflectionTestUtils.getField(categories,"writes")).isSameAs(writes);sameRepositoryWriter(ReflectionTestUtils.getField(categories,"categories"),shared);
                     var jdbc=context.getBean("storeCatalogManagementSearchJdbc",NamedParameterJdbcTemplate.class);
                     assertThat(jdbc.getJdbcTemplate().getDataSource()).isSameAs(writer);assertThat(jdbc.getJdbcTemplate().getQueryTimeout()).isEqualTo(5);
                     terms.set(context.getBean("storeCatalogManagementSearchTerms",KoreanSearchTerms.class));assertThat(terms.get().document("말티즈")).isNotBlank();
@@ -101,6 +106,7 @@ class StoreCatalogManagementConfigurationTest {
                     assertThat(ReflectionTestUtils.getField(context.getBean(ProductWriteController.class),"products")).isSameAs(products);
                     assertThat(ReflectionTestUtils.getField(context.getBean(OptionManagementController.class),"options")).isSameAs(options);
                     assertThat(ReflectionTestUtils.getField(context.getBean(ProductImageController.class),"images")).isSameAs(images);
+                    assertThat(ReflectionTestUtils.getField(context.getBean(CategoryManagementController.class),"categories")).isSameAs(categories);
                     if(mode.equals("catalog"))assertThat(context).doesNotHaveBean(DirectOrderController.class).doesNotHaveBean(OrderReadController.class).doesNotHaveBean(CartController.class);
                     verifyNoInteractions(writer,storage);
                 });

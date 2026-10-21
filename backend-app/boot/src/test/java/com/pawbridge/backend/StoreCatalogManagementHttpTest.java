@@ -5,6 +5,7 @@ import com.pawbridge.backend.store.internal.catalog.application.CatalogSearchUna
 import com.pawbridge.backend.store.internal.catalog.application.StoreCatalog;
 import com.pawbridge.backend.store.internal.catalog.web.StoreCatalogController;
 import com.pawbridge.backend.store.internal.catalog.web.StoreCatalogExceptionHandler;
+import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogCategories;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogOptions;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogProducts;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.S3ProductImages;
@@ -36,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** Actual ReadSecurity/JWT filter and scoped advice; only Store business collaborators are mocked. */
 @WebMvcTest(properties={"pawbridge.store-catalog-management.enabled=true","pawbridge.store-catalog.enabled=false"},
         excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
-@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,
+@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,CategoryManagementController.class,
         CatalogManagementExceptionHandler.class,StoreCatalogController.class,StoreCatalogExceptionHandler.class,
         ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class StoreCatalogManagementHttpTest {
@@ -51,7 +52,10 @@ class StoreCatalogManagementHttpTest {
             new Route("POST","/api/v1/option-groups/2/values",201,"{\"name\":\"small\"}"),
             new Route("PUT","/api/v1/option-groups/values/3",200,"{\"name\":\"small\"}"),
             new Route("DELETE","/api/v1/option-groups/values/3",204,"{}"),
-            new Route("POST","/api/v1/images",200,""));
+            new Route("POST","/api/v1/images",200,""),
+            new Route("POST","/api/v1/categories",201,"{\"name\":\"food\",\"parentId\":1}"),
+            new Route("PUT","/api/v1/categories/4",200,"{\"name\":\"dry\",\"parentId\":null}"),
+            new Route("DELETE","/api/v1/categories/4",204,"{}"));
     static final List<String> READS=List.of("/api/v1/products","/api/v1/products/8","/api/v1/categories",
             "/api/v1/option-groups","/api/v1/option-groups/2");
     @Autowired MockMvc mvc;
@@ -59,6 +63,7 @@ class StoreCatalogManagementHttpTest {
     @MockitoBean JpaCatalogOptions options;
     @MockitoBean S3ProductImages images;
     @MockitoBean StoreCatalog catalog;
+    @MockitoBean JpaCatalogCategories categories;
 
     static Stream<Route> writes(){return WRITES.stream();}
     static Stream<String> reads(){return READS.stream();}
@@ -71,7 +76,7 @@ class StoreCatalogManagementHttpTest {
 
     @ParameterizedTest @MethodSource("writes")
     void given__enabled_management_and_signed_admin__when__using_each_canonical_write__then__reach_only_its_original_handler(Route route) throws Exception {
-        stubWriteResponses(products,options,images);
+        stubWriteResponses(products,options,images,categories);
         var result=mvc.perform(command(route).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN"))
                         .header("X-User-Id","99").header("X-User-Role","ROLE_USER"))
                 .andExpect(status().is(route.status())).andExpect(header().doesNotExist("Set-Cookie"));
@@ -85,10 +90,13 @@ class StoreCatalogManagementHttpTest {
             case "POST /api/v1/option-groups/2/values"->{result.andExpect(jsonPath("$.groupId").value(2));verify(options).addOptionValue(eq(2L),argThat(body->"small".equals(body.getName())));}
             case "PUT /api/v1/option-groups/values/3"->{result.andExpect(jsonPath("$.id").value(3));verify(options).updateOptionValue(eq(3L),argThat(body->"small".equals(body.getName())));}
             case "DELETE /api/v1/option-groups/values/3"->verify(options).deleteOptionValue(3L);
+            case "POST /api/v1/categories"->{result.andExpect(jsonPath("$.id").value(4)).andExpect(jsonPath("$.children").isArray());verify(categories).createCategory(argThat(body->"food".equals(body.getName())&&Long.valueOf(1).equals(body.getParentId())));}
+            case "PUT /api/v1/categories/4"->{result.andExpect(jsonPath("$.name").value("dry"));verify(categories).updateCategory(eq(4L),argThat(body->"dry".equals(body.getName())&&body.getParentId()==null));}
+            case "DELETE /api/v1/categories/4"->{result.andExpect(content().string(""));verify(categories).deleteCategory(4L);}
             case "POST /api/v1/images"->{result.andExpect(jsonPath("$.imageUrl").value("https://fixture.invalid/products/upload.png"));verify(images).uploadImage(argThat(file->"photo.png".equals(file.getOriginalFilename())&&file.getSize()==3));}
             default->throw new AssertionError("Unknown catalog write contract");
         }
-        assertThat(result.andReturn().getRequest().getSession(false)).isNull();verifyNoMoreInteractions(products,options,images,catalog);
+        assertThat(result.andReturn().getRequest().getSession(false)).isNull();verifyNoMoreInteractions(products,options,images,catalog,categories);
     }
 
     @ParameterizedTest @MethodSource("deniedCredentials")
@@ -97,7 +105,7 @@ class StoreCatalogManagementHttpTest {
         if(credentials.equals("ROLE_USER"))call.header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_USER"));
         else if(credentials.equals("invalid"))call.header("Authorization","Bearer invalid-token");
         mvc.perform(call).andExpect(status().is(credentials.equals("ROLE_USER")?403:401)).andExpect(header().doesNotExist("Set-Cookie"));
-        verifyNoInteractions(products,options,images,catalog);
+        verifyNoInteractions(products,options,images,catalog,categories);
     }
 
     @ParameterizedTest @CsvSource({
@@ -106,17 +114,19 @@ class StoreCatalogManagementHttpTest {
             "POST,/api/option-groups/2/values","PUT,/api/option-groups/values/3","DELETE,/api/option-groups/values/3",
             "PUT,/api/v1/products/8","POST,/api/v1/products/8","POST,/api/v1/products/8/skus",
             "PATCH,/api/v1/option-groups/2","DELETE,/api/v1/option-groups","PUT,/api/v1/images",
-            "GET,/api/v1/images","POST,/api/v1/categories","POST,/api/v1/products/8/extra"})
+            "GET,/api/v1/images","POST,/api/v1/products/8/extra",
+            "POST,/api/categories","PUT,/api/categories/4","DELETE,/api/categories/4",
+            "PATCH,/api/v1/categories/4","POST,/api/v1/categories/4","PUT,/api/v1/categories","DELETE,/api/v1/categories","POST,/api/v1/categories/4/extra"})
     void given__signed_admin__when__using_gateway_alias_or_unowned_method_neighbor__then__retain_default_deny(String method,String path) throws Exception {
         mvc.perform(request(HttpMethod.valueOf(method),path).contentType(MediaType.APPLICATION_JSON).content("{}")
                         .header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
-                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog);
+                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog,categories);
     }
 
     @ParameterizedTest @MethodSource("reads")
     void given__management_enabled_but_public_catalog_disabled__when__admin_reads_catalog__then__do_not_widen_public_get_scope(String path) throws Exception {
         mvc.perform(get(path).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
-                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog);
+                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog,categories);
     }
 
     @Test void given__authorized_business_refusal__when__advice_handles_it__then__preserve_original_store_errors_outside_authentication() throws Exception {
@@ -126,14 +136,17 @@ class StoreCatalogManagementHttpTest {
         doThrow(new IllegalStateException("synthetic cart refusal")).when(products).deleteProduct(8L);
         mvc.perform(command(WRITES.get(2)).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
                 .andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value("C004"));
-        verify(products).createProduct(any());verify(products).deleteProduct(8L);verifyNoMoreInteractions(products,options,images,catalog);
+        doThrow(new IllegalStateException("synthetic child refusal")).when(categories).deleteCategory(4L);
+        mvc.perform(command(WRITES.getLast()).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
+                .andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value("C004"));
+        verify(products).createProduct(any());verify(products).deleteProduct(8L);verify(categories).deleteCategory(4L);verifyNoMoreInteractions(products,options,images,catalog,categories);
     }
 
     static MockHttpServletRequestBuilder command(Route route){
         if(route.path().equals("/api/v1/images"))return multipart(route.path()).file(new MockMultipartFile("file","photo.png","image/png",new byte[]{1,2,3}));
         return request(HttpMethod.valueOf(route.method()),route.path()).contentType(MediaType.APPLICATION_JSON).content(route.body());
     }
-    static void stubWriteResponses(JpaCatalogProducts products,JpaCatalogOptions options,S3ProductImages images){
+    static void stubWriteResponses(JpaCatalogProducts products,JpaCatalogOptions options,S3ProductImages images,JpaCatalogCategories categories){
         when(products.createProduct(any())).thenReturn(ProductResponse.builder().id(8L).name("food").status("ACTIVE").skus(List.of()).build());
         when(products.updateProduct(eq(8L),any())).thenReturn(ProductResponse.builder().id(8L).name("patched").status("HIDDEN").skus(List.of()).build());
         var group=OptionGroupResponse.builder().id(2L).name("size").values(List.of()).build();
@@ -141,50 +154,53 @@ class StoreCatalogManagementHttpTest {
         var value=OptionValueResponse.builder().id(3L).name("small").groupId(2L).groupName("size").build();
         when(options.addOptionValue(eq(2L),any())).thenReturn(value);when(options.updateOptionValue(eq(3L),any())).thenReturn(value);
         when(images.uploadImage(any())).thenReturn("https://fixture.invalid/products/upload.png");
+        var category=CategoryResponse.builder().id(4L).name("dry").parentId(1L).children(List.of()).build();
+        when(categories.createCategory(any())).thenReturn(CategoryResponse.builder().id(4L).name("food").parentId(1L).children(List.of()).build());
+        when(categories.updateCategory(eq(4L),any())).thenReturn(category);
     }
 }
 
 @WebMvcTest(excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
-@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,
+@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,CategoryManagementController.class,
         CatalogManagementExceptionHandler.class,StoreCatalogController.class,StoreCatalogExceptionHandler.class,
         ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class StoreCatalogManagementDisabledHttpTest {
     @Autowired MockMvc mvc;
-    @MockitoBean JpaCatalogProducts products;@MockitoBean JpaCatalogOptions options;@MockitoBean S3ProductImages images;@MockitoBean StoreCatalog catalog;
+    @MockitoBean JpaCatalogProducts products;@MockitoBean JpaCatalogOptions options;@MockitoBean S3ProductImages images;@MockitoBean StoreCatalog catalog;@MockitoBean JpaCatalogCategories categories;
     @ParameterizedTest @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
     void given__management_default_off__when__signed_admin_uses_each_canonical_write__then__deny_before_business(StoreCatalogManagementHttpTest.Route route) throws Exception {
         mvc.perform(StoreCatalogManagementHttpTest.command(route).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
-                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog);
+                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog,categories);
     }
 }
 
 @WebMvcTest(properties="pawbridge.store-catalog-management.enabled=on",
         excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
-@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,
+@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,CategoryManagementController.class,
         CatalogManagementExceptionHandler.class,StoreCatalogController.class,StoreCatalogExceptionHandler.class,
         ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class StoreCatalogManagementAliasDisabledHttpTest {
     @Autowired MockMvc mvc;
-    @MockitoBean JpaCatalogProducts products;@MockitoBean JpaCatalogOptions options;@MockitoBean S3ProductImages images;@MockitoBean StoreCatalog catalog;
+    @MockitoBean JpaCatalogProducts products;@MockitoBean JpaCatalogOptions options;@MockitoBean S3ProductImages images;@MockitoBean StoreCatalog catalog;@MockitoBean JpaCatalogCategories categories;
     @ParameterizedTest @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
     void given__boolean_alias_instead_of_literal_true__when__admin_uses_each_write__then__keep_management_closed(StoreCatalogManagementHttpTest.Route route) throws Exception {
         mvc.perform(StoreCatalogManagementHttpTest.command(route).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
-                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog);
+                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog,categories);
     }
 }
 
 @WebMvcTest(properties={"pawbridge.store-catalog.enabled=true","pawbridge.store-catalog-management.enabled=false"},
         excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
-@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,
+@ContextConfiguration(classes={ProductWriteController.class,OptionManagementController.class,ProductImageController.class,CategoryManagementController.class,
         CatalogManagementExceptionHandler.class,StoreCatalogController.class,StoreCatalogExceptionHandler.class,
         ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class StoreCatalogManagementReadOnlyHttpTest {
     @Autowired MockMvc mvc;
-    @MockitoBean JpaCatalogProducts products;@MockitoBean JpaCatalogOptions options;@MockitoBean S3ProductImages images;@MockitoBean StoreCatalog catalog;
+    @MockitoBean JpaCatalogProducts products;@MockitoBean JpaCatalogOptions options;@MockitoBean S3ProductImages images;@MockitoBean StoreCatalog catalog;@MockitoBean JpaCatalogCategories categories;
     @ParameterizedTest @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
     void given__only_public_catalog_enabled__when__admin_attempts_each_management_write__then__deny_before_business(StoreCatalogManagementHttpTest.Route route) throws Exception {
         mvc.perform(StoreCatalogManagementHttpTest.command(route).header("Authorization","Bearer "+F3TestInputs.token(7,"ROLE_ADMIN")))
-                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog);
+                .andExpect(status().isForbidden());verifyNoInteractions(products,options,images,catalog,categories);
     }
 
     @ParameterizedTest @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#reads")
@@ -203,12 +219,12 @@ class StoreCatalogManagementReadOnlyHttpTest {
             case "/api/v1/option-groups/2"->verify(catalog).optionGroup(2);
             default->throw new AssertionError("Unknown catalog read contract");
         }
-        verifyNoMoreInteractions(catalog);verifyNoInteractions(products,options,images);assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verifyNoMoreInteractions(catalog);verifyNoInteractions(products,options,images,categories);assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test void given__catalog_search_unavailable__when__public_get_fails__then__use_read_advice_without_management_error_capture() throws Exception {
         when(catalog.search(any())).thenThrow(new CatalogSearchUnavailableException());
         mvc.perform(get("/api/v1/products")).andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("P006"));
-        verify(catalog).search(any());verifyNoMoreInteractions(catalog);verifyNoInteractions(products,options,images);
+        verify(catalog).search(any());verifyNoMoreInteractions(catalog);verifyNoInteractions(products,options,images,categories);
     }
 }
