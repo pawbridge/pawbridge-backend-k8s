@@ -88,6 +88,7 @@ class PawBridgeApplicationTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.directorder.infrastructure.JdbcProductSearchRebuild.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage.class)).isEmpty();
                     assertThat(context.getBeansOfType(jakarta.persistence.EntityManagerFactory.class)).isEmpty();
