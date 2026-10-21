@@ -141,8 +141,8 @@ class AdminPostReadsProfileTest(unittest.TestCase):
 
     def test_given_frozen_cohort_inputs_and_readme_path_only__when_verifying__then_use_only_fixed_git_object_bytes(self):
         self.assertEqual(BASE, profile.POST_READS_BASE)
-        self.assertEqual(662, len(profile.POST_READS_APP_HASHES))
-        self.assertEqual('eaf9b9af6eac18e80a582f9a8ed3709ee711016b1a24487bd1d585b27123e7a5', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
+        self.assertEqual(666, len(profile.POST_READS_APP_HASHES))
+        self.assertEqual('e4bda329538067c6d4ea6f89b4102ecf94b17727c8048134b6a6b807337a7f63', hashlib.sha256(json.dumps(sorted(profile.POST_READS_APP_HASHES.items()), separators=(',', ':')).encode()).hexdigest())
         self.assertEqual(frozenset(profile.POST_READS_APP_HASHES) | {'backend-app/README.md'}, profile.POST_READS_APP_EXCEPTIONS)
         self.assertNotIn('backend-app/README.md', profile.POST_READS_APP_HASHES)
         self.assertEqual(profile.POST_READS_WORKFLOW_SHA256, hashlib.sha256(
@@ -156,9 +156,10 @@ class AdminPostReadsProfileTest(unittest.TestCase):
             git.assert_any_call('show', 'HEAD:' + path)
 
     def test_given_identical_reviewed_guard_inputs__when_only_the_fixed_cohort_is_selected__then_reference_only_selftests(self):
-        self.assertEqual(39553020979, profile.ARCHITECTURE_SELFTEST_REFERENCE_RUN)
-        self.assertEqual('c84c0f6704cd214cca94e0138f09d6f2aa888b4b', profile.ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
-        self.assertEqual(16, len(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES))
+        self.assertEqual(39577223965, profile.ARCHITECTURE_SELFTEST_REFERENCE_RUN)
+        self.assertEqual('a89cf733742d86c8d11982b2586adeb78a11fbde', profile.ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
+        self.assertEqual(17, len(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES))
+        self.assertEqual('704a2765b5699b61ed0b752ed6a55a52e93b5c05b3dd1fb06f5d260553752050', profile.ARCHITECTURE_SELFTEST_INPUT_HASHES['backend-app/payment/build.gradle'])
         blobs = {path: ('fixed guard input ' + str(i)).encode()
                  for i, path in enumerate(profile.ARCHITECTURE_SELFTEST_INPUT_HASHES)}
         hashes = {path: hashlib.sha256(raw).hexdigest() for path, raw in blobs.items()}
@@ -167,7 +168,7 @@ class AdminPostReadsProfileTest(unittest.TestCase):
                 patch.object(profile, 'verify_post_reads_inputs', return_value=True) as cohort:
             self.assertIs(True, profile.verify_architecture_selftest_inputs([profile.POST_READS], git))
             cohort.assert_called_once_with(git_reader=git)
-        self.assertEqual(16, git.call_count)
+        self.assertEqual(17, git.call_count)
         for selected in ([profile.FULL], [profile.PILOT], [profile.NOTE_EXPIRY], [profile.MEMBER_MANAGEMENT],
                          [profile.SIGNUP_STATISTICS], [profile.ADMIN_MEMBER_UPDATE], [profile.VISIT_COLLECTION],
                          [profile.AUTH_SESSIONS], [profile.POST_STATISTICS], [profile.POST_READS, profile.FULL],

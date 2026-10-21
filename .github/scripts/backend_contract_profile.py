@@ -1008,26 +1008,31 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/infrastructure/JpaStorePaymentEvents.java': '9e000a519b06e6941ff40a2452ca7a974457ffc7268ec0537af94f86e3102067',
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JpaStockRestorationTest.java': 'c14e22d88014901bfb7dc57c81de486669670d9a2385b1001bd40886b17a2c46',
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/payment/infrastructure/JdbcStorePaymentOrdersTest.java': 'cccd4bed47f642eb77c87a8eca0cd25fca76583642a289d2c7decea5c450d595',
- 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/payment/infrastructure/JpaStorePaymentEventsTest.java': '0fca81886769bae059e6a05a271af267b010f87310371995d787f2c5fbbdd716'}
+ 'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/payment/infrastructure/JpaStorePaymentEventsTest.java': '0fca81886769bae059e6a05a271af267b010f87310371995d787f2c5fbbdd716',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/OwnedPostgresqlMainCoreIntegrationTest.java': '3348cf23af9b014da09301bf4feab3d6f6d61ba559c155a2a52be91c41aa78f7',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlShelterObservationTest.java': '0d3401d0c5c1d7c8ead47d010d750afd0e6ae1b1e19c4934f30be1f52742c2bf',
+ 'backend-app/boot/src/test/resources/owned-postgresql/main-core-owned-schema.sql': 'c29b9adc5c085fd8d31d1ab3eb019a369d64d29f73debfbf78055319ccfaa294',
+ 'backend-app/boot/src/test/resources/owned-postgresql/shelter-observation-owned-schema.sql': '98a1b79a86c43820beba5d3a8fabeda0845e3231dfb308e88f00a4ae367d3c7f'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
-ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39553020979
-ARCHITECTURE_SELFTEST_REFERENCE_HEAD = 'c84c0f6704cd214cca94e0138f09d6f2aa888b4b'
-ARCHITECTURE_SELFTEST_INPUT_HASHES = {'backend-app/animal/build.gradle': '6cde585aae7d5d626d1b817ba64dd73137b36ef87594017266d96f52b14205c3',
- 'backend-app/boot/build.gradle': 'a8284a102992133240e01eb5a2cbad5260ae769ac4dc9d3efa71dbda1ce7a837',
- 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessBuildFixture.java': '289776b8432e47b87656714c84c2d051bf456dc261f2afd23e280e616d5e7322',
- 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessPackageArchitectureTest.java': '6522fb03fea64eb29b903fced123659e0e1012bae432458ed8ce261e4ffce616',
- 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '1c32ca2a01d6dc5467b1e3303e55a6bac182a4034c6f4533f0a01b38e36a8983',
+ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39577223965
+ARCHITECTURE_SELFTEST_REFERENCE_HEAD = 'a89cf733742d86c8d11982b2586adeb78a11fbde'
+ARCHITECTURE_SELFTEST_INPUT_HASHES = {'backend-app/animal/build.gradle': '2ff3037bc77f583f34c474a3213fb41e2d8242b63d75df85d191000dce4a71db',
+ 'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01eef7d3466f5ff57fec56f67823a7beff6284c5b9d7f6',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessBuildFixture.java': 'ec8457df5ae2a9f0c75ea3f729ad19c90041d1b20cb3bcfa0d51365ef6045a23',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/BusinessPackageArchitectureTest.java': 'fb01c5732e6df20e037a02895b752aa5bf354eac5e57659ac9dd015da61c9dc6',
+ 'backend-app/boot/src/architectureTest/java/com/pawbridge/backend/architecture/GradleArchitectureTest.java': '10be33ae04d89db2c79731780a42624beec5d1460b1bc04e13c7d9b3749122b4',
  'backend-app/build.gradle': '1633e17fa53b9172da0233ea1ec99d85c5969d498c6656fa338dbfdfc672a267',
  'backend-app/community/build.gradle': 'cae9d8a06febf4ceb5abe9a7728ed663ec07164883f85e01cba1f23fe3737408',
  'backend-app/gradle.properties': '4491e9ef524b507cce154ba37ed5ff7618bedf95a2546dc7c73d0d826ab87f14',
- 'backend-app/gradle/architecture.gradle': 'bb048697d4f1d17ff95398f7902c8177ba4755630905a64775502a82e62ef0ca',
+ 'backend-app/gradle/architecture.gradle': 'ca825f609fd21787986bdbc0e52668fcb73fa29b180796830c583c601c6b2e5d',
  'backend-app/gradle/wrapper/gradle-wrapper.jar': '7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172',
  'backend-app/gradle/wrapper/gradle-wrapper.properties': '05fcb55a155233ee632da57149d1ba3cd39a001701ae00e0c20782fbaf6c378b',
  'backend-app/gradlew': 'b187b4c52e749f5760afdd6fadc31b2a98ad35fb249bf0dff03b72650f320409',
  'backend-app/gradlew.bat': '94102713eb8fb22d032397924c0f38ab2da783ba60d07054339f1190a0c4e2cd',
- 'backend-app/settings.gradle': '6a488a40f2aa4afc2ae1462a7fdac6280159510e65362f5a0f1724dd3cb0473f',
- 'backend-app/store/build.gradle': 'ac392803320ec701149beddf2d4b17aeb099f54b909caf0a5f8ee799a632907e',
+ 'backend-app/payment/build.gradle': '704a2765b5699b61ed0b752ed6a55a52e93b5c05b3dd1fb06f5d260553752050',
+ 'backend-app/settings.gradle': '0fbbfd2e3fdcb234148d42964ba69ff5b410b206ceb339ae79a03203e276de7e',
+ 'backend-app/store/build.gradle': '2f473c585123588bf9e9e68ddf52a66663352470a8d3626ff8cef0c2c7be1eed',
  'backend-app/user/build.gradle': '2618227c07294560b5e318808d990152272acef69c1a071d7dc2a44d656f0835'}
 POST_READS_APP_EXCEPTIONS = frozenset(POST_READS_APP_HASHES) | {'backend-app/README.md'}
 POST_READS_ALLOWED_PATHS = POST_STATISTICS_ALLOWED_PATHS | frozenset(POST_READS_APP_HASHES) | {
@@ -1358,7 +1363,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 662
+                or len(POST_READS_APP_HASHES) != 666
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
@@ -1387,7 +1392,7 @@ def verify_architecture_selftest_inputs(profiles, git_reader=None):
     if (type(ARCHITECTURE_SELFTEST_REFERENCE_RUN) is not int
             or ARCHITECTURE_SELFTEST_REFERENCE_RUN <= 0
             or not re.fullmatch(r'[0-9a-f]{40}', ARCHITECTURE_SELFTEST_REFERENCE_HEAD)
-            or len(ARCHITECTURE_SELFTEST_INPUT_HASHES) != 16
+            or len(ARCHITECTURE_SELFTEST_INPUT_HASHES) != 17
             or any(not re.fullmatch(r'[0-9a-f]{64}', digest)
                    for digest in ARCHITECTURE_SELFTEST_INPUT_HASHES.values())):
         return False
