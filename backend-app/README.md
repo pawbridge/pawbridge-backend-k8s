@@ -966,3 +966,14 @@ R2 객체는 항상 raw 원본인 것이 아니라 Photo 계약의 원본 fallba
 기본 scan50/maxPhotos25/maxRun300초/lease300초/recheck7일, 최초 지연60초·주기15분을 유지한다. 종료는 새 claim을 막고 현재 항목을 기다린다. `apms-photo-archive.shutdown-timeout-seconds`는1..300/기본15이며, 초과·중단이면 interrupt와 고정 미완료 경고를 남긴다. scheduler의 isRunning=false나 context close 반환은 모든 원격 I/O/worker 완주를 보장하지 않는다. 실제 운영 인계에는 기존 scheduler 중단·배타 소유·전용 권한·키·Photo/R2 실제 검증이 별도로 필요하다.
 
 최초 업무·HTTP·Root 구성/종료 단위 35사례와 새 P19 합성 PostgreSQL 전체 6사례를 검증했다. P19는 source SELECT-only·전 열 불변, 외부 대역 callback의 실제 TX/활성 연결0, READY→기존 Gallery slot1, 실제 세션 잠금/SKIP LOCKED와 claim·lease·재시도·협력 종료를 다룬다. 두 claim SQL의 동시 중첩, 동시 source UPDATE, 전체 Spring context 종료와 실 APMS/R2/Photo·운영 활성화는 검증하지 않았다. P19는 정확한 전체 OwnedPostgresqlApmsPhotoArchiveTest와 전용 P19_PG_SETTINGS/PAWBRIDGE_OWNED_SETTINGS_ENV를 선택하고 XML6/완료6을 확인한다. 성공한 fixture를 자동 초기화·재실행하지 않는다.
+
+
+## 동물·보호소 검색 문서 수선 예약
+
+Servlet 실행기에서 `pawbridge.animal-query.projection-schedule-enabled=true`, `pawbridge.animal-query.backend=postgresql`, `pawbridge.animal-query.analyzed-text=true`를 모두 명시할 때만 검색 투영 수선 작업을 조립한다. 기본 off이며 일반 조회·명령·APMS flag만으로 예약을 켜지 않는다. 기존 분석기 하나와 writer DataSource/JdbcTransactionManager를 공유하고 새 pool·EMF·TM·생산 DDL을 만들지 않는다. projection-only 구성도 기존 분석기를 명시 import하며 다른 기능과 함께 켜도 중복 생성하지 않는다.
+
+원문처럼 dirty 수선은 기본 2초, 별도 무결성 감사는 기본 60초 지연·최초 60초다. 각 tick은 보호소 다음 동물 순서이고, 첫 보호소 처리 실패 시 그 tick의 동물 처리는 하지 않는다. 기본 page50/허용1..100, source ID 순서·source 선잠금·SKIP LOCKED와 타입별 독립 TX5초/statement4초/lock1초를 보존한다. 기존 업무 TX 안에서 호출하면 거부한다. source revision/분석기 버전·문서 유실 감사는 dirty-only 처리와 구분하며 기존 static 검색 writer로 문서와 dirty=false를 함께 커밋한다. source의 업무 값·상태·URL이나 Outbox는 변경하지 않는다.
+
+기존 검색은 관련 dirty source가 있으면 준비 미완료를 반환하며 수선 후 다시 조회할 수 있다. dirty=false 문서 유실이 항상 준비 미완료 응답을 만드는 것은 아니다. 한 page가 0행이어도 다른 작업이 source를 잠갔을 수 있으므로 전체 준비 완료를 뜻하지 않는다. page 상한은 수선 행 수 상한이며 전체 감사의 스캔 비용 상한 증명이 아니다. 예외는 해당 page를 롤백하고 다음 tick에 남기며 로그에는 예외 타입과 수선 개수만 쓴다.
+
+Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유하고 종료 시 새 주기·지연 작업을 취소하며 진행 작업을 최대 15초 기다린다. daemon은 이 스레드가 JVM을 붙잡지 않게 하는 설정이며 모든 DB I/O·전체 context의 유한 종료나 진행 page 완주를 보장하지 않는다. 실제 활성화 전에 기존 projector와 새 실행기의 배타 소유·writer 최소 권한·연결 예산·자료 크기와 lock 실패 대응을 따로 확인해야 한다. 이 개발 편입은 운영 예약 활성화가 아니다.
