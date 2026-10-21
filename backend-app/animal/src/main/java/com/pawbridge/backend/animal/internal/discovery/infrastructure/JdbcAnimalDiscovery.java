@@ -108,6 +108,26 @@ public final class JdbcAnimalDiscovery implements AnimalDiscovery {
                 .findFirst().orElseThrow(AnimalNotFoundException::new));
     }
 
+    @Override
+    public Details findByApmsDesertionNo(String number) {
+        return transactions.execute(status -> jdbc.query("SELECT " + DETAIL_COLUMNS + FROM
+                + "WHERE a.apms_desertion_no=:number", new MapSqlParameterSource("number", number),
+                JdbcAnimalDiscovery::detail).stream().findFirst().orElseThrow(AnimalNotFoundException::new));
+    }
+
+    @Override
+    public Page findExpiringSoonAnimals(PageRequest pageable) {
+        return transactions.execute(status -> {
+            validatePage(pageable);
+            Conditions conditions = new Conditions();
+            conditions.equal("a.status", "status", AnimalStatus.PROTECT);
+            conditions.where.add("a.notice_end_date BETWEEN :today AND :deadline");
+            LocalDate today = LocalDate.now();
+            conditions.parameters.addValue("today", today).addValue("deadline", today.plusDays(3));
+            return page(conditions, pageable, "a.notice_end_date ASC NULLS LAST,a.id ASC");
+        });
+    }
+
     private Page page(Conditions conditions, PageRequest pageable, String ordering) {
         String where = " WHERE " + (conditions.where.isEmpty() ? "TRUE" : String.join(" AND ", conditions.where));
         long total = jdbc.queryForObject("SELECT count(*)" + conditions.from + where, conditions.parameters, Long.class);

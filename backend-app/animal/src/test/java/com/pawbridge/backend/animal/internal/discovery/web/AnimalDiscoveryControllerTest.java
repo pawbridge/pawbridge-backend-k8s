@@ -106,10 +106,56 @@ class AnimalDiscoveryControllerTest {
         assertThat(body.has("data") || body.has("shelterAddress") || body.has("shelterPhone")).isFalse();
     }
 
-    @Test void nested_similarity_and_apms_endpoints_are_not_mapped_in_this_bundle() throws Exception {
+    @Test void nested_similarity_endpoint_is_not_mapped_in_this_controller() throws Exception {
         mvc.perform(get("/api/v1/animals/72/similar")).andExpect(status().isNotFound());
-        mvc.perform(get("/api/v1/animals/apms/D-72")).andExpect(status().isNotFound());
         verifyNoInteractions(animals);
+    }
+
+    @Test void apms_number_lookup_binds_exact_value_and_preserves_all_existing_detail_fields() throws Exception {
+        LocalDate date = LocalDate.of(2026, 9, 1);
+        LocalDateTime time = date.atTime(13, 14, 15, 123456000);
+        when(animals.findByApmsDesertionNo(" D-72 ")).thenReturn(new Details(72L, "N-72", Species.DOG,
+                "말티즈", Gender.FEMALE, NeuterStatus.YES, 2022, 4, "3.5(Kg)", "흰색", "접힌 귀",
+                AnimalStatus.ADOPTED, date, date.plusDays(10), "강남", date.minusDays(1), "one", "two", "설명", 0,
+                8L, "보호소", " D-72 ", "종료(입양)", time, ApiSource.APMS_ANIMAL, time, time));
+        JsonNode body = json.readTree(mvc.perform(get("/api/v1/animals/apms/{number}", " D-72 "))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        java.util.Set<String> fields = new java.util.HashSet<>(); body.fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder("id", "apmsNoticeNo", "species", "breed", "gender", "neuterStatus",
+                "birthYear", "age", "weight", "color", "specialMark", "status", "noticeStartDate", "noticeEndDate",
+                "happenPlace", "happenDate", "imageUrl", "imageUrl2", "description", "favoriteCount", "shelterId",
+                "shelterName", "apmsDesertionNo", "apmsProcessState", "apmsUpdatedAt", "apiSource", "createdAt", "updatedAt");
+        assertThat(body.path("apmsDesertionNo").asText()).isEqualTo(" D-72 ");
+        assertThat(body.path("status").asText()).isEqualTo("ADOPTED");
+        assertThat(body.path("updatedAt").asText()).isEqualTo("2026-09-01T13:14:15.123456");
+        verify(animals).findByApmsDesertionNo(" D-72 ");
+        verifyNoMoreInteractions(animals);
+    }
+
+    @Test void expiring_soon_binds_default_and_requested_pages_with_original_seven_field_wire() throws Exception {
+        when(animals.findExpiringSoonAnimals(any())).thenReturn(new Page(List.of(summary()), 0, 20, 1, 1, true, true));
+        JsonNode body = json.readTree(mvc.perform(get("/api/v1/animals/expiring-soon")).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        assertThat(body.size()).isEqualTo(7);
+        assertThat(body.path("content").get(0).path("id").asLong()).isEqualTo(72L);
+        assertThat(body.path("content").get(0).has("birthYear")).isFalse();
+        assertThat(body.path("number").asInt()).isZero();
+        assertThat(body.path("size").asInt()).isEqualTo(20);
+        verify(animals).findExpiringSoonAnimals(new PageRequest(0, 20, List.of(new Order("noticeEndDate", true)), true));
+        mvc.perform(get("/api/v1/animals/expiring-soon").param("page", "2").param("size", "30")
+                .param("sort", "unknown,desc")).andExpect(status().isOk());
+        verify(animals).findExpiringSoonAnimals(new PageRequest(2, 30, List.of(new Order("unknown", false)), true));
+        verifyNoMoreInteractions(animals);
+    }
+
+    @Test void extra_queries_keep_original_not_found_validation_and_private_database_error_wire() throws Exception {
+        when(animals.findByApmsDesertionNo("missing")).thenThrow(new AnimalNotFoundException());
+        assertError("/api/v1/animals/apms/missing", 404, "동물을 찾을 수 없습니다");
+        when(animals.findByApmsDesertionNo("failure")).thenThrow(
+                new org.springframework.dao.DataAccessResourceFailureException("synthetic private SQL"));
+        assertError("/api/v1/animals/apms/failure", 500, "데이터베이스 오류가 발생했습니다.");
+        when(animals.findExpiringSoonAnimals(any())).thenThrow(new IllegalArgumentException("정렬 기준은 하나만 지정할 수 있습니다."));
+        assertError("/api/v1/animals/expiring-soon?sort=createdAt,asc&sort=id,desc", 400, "정렬 기준은 하나만 지정할 수 있습니다.");
     }
 
     private void assertError(String url, int code, String message) throws Exception {

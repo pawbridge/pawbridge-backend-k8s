@@ -912,3 +912,11 @@ P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
 서명은 객체 전송 없이 정확한 R2 HTTPS endpoint와 `pawbridge-animal-originals`의 1시간 GET URL을 로컬 생성한다. 갤러리 벡터 추출·게시, 모델·R2 객체 다운로드, AI 배치와 예약을 실행하는 기능은 아니다. 실제 활성화 전에는 원래/새 feed의 단일 소유권, reader 권한, 내부키·relay·source URL, snapshot 전용 경로를 별도 확인한다. 기존 스냅샷 디렉터리에 임의로 연결하지 않는다. 원문 파일 IO 실패 시 정리 한계도 남는다.
 
 아카이브의 저장 SHA와 객체 경로의 SHA가 일치해야 하며 불일치는 서명·항목 발행 전에 거부한다. snapshot-directory는 비어 있지 않은 절대 정규화 경로여야 하고 파일시스템 루트나 현재 작업 디렉터리는 거부한다. 경로 검증은 스냅샷 저장소의 chmod·잠금·정리가 시작되기 전에 수행한다. 유효한 절대 경로도 실제 활성화 전에는 전용 위치·소유권을 확인해야 한다.
+
+## Animal APMS 번호 상세·공고 종료 임박 조회
+
+기존 Animal discovery 설정의 `true`와 PostgreSQL backend에서 `GET /api/v1/animals/apms/{apmsDesertionNo}` 및 `GET /api/v1/animals/expiring-soon`을 공개한다. 기존 목록·숫자 ID 조회의 설정 계약은 유지한다. 새 두 경로는 off, boolean 별칭(on/yes), 다른 backend 및 다른 HTTP 메서드에서 열리지 않는다.
+
+APMS 번호는 원문 번호 그대로 검색하며 기존 Shelter JOIN과 NON_NULL 상세 28필드를 사용한다. 미존재는 기존 404다. 종료 임박은 JVM 오늘부터 3일 뒤까지 양끝을 포함한 PROTECT 동물이며 noticeEndDate·id 오름차순이다. 단일 사용자 정렬은 기존 동작대로 고정 순서로 처리하고 기존 페이지 상한·응답 7필드를 유지한다. 새 풀·스키마·수집·외부 호출·운영 활성화를 추가하지 않는다.
+
+보안과 실제 컨트롤러를 연결한 영향 HTTP 10메서드 및 기존 P10 전용 DB를 재사용한 실제 PostgreSQL 2메서드를 검증했다. P10 시험은 기존 reader5 설정과 같은 폴더의 fixture7 설정을 확인하고 최대 6개 소유 행만 등록·정리한다. 기존 seed·8표·marker·허용 sequence를 유지하며 새 권한·스키마를 추가하지 않는다. 정확한 `PAWBRIDGE_OWNED_SETTINGS_ENV=P10_PG_SETTINGS`, `P10_PG_SETTINGS` 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalExtraDiscoveryTest` 선택이 필요하다. 대상·역할·기존 fixture가 다르면 거부하며 fallback하지 않는다. 공개 운영 활성화는 별도 단계다.

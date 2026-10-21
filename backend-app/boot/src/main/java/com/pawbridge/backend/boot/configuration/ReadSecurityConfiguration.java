@@ -36,6 +36,7 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.animal-reports.enabled:false}") boolean reportsEnabledFlag,
             @Value("${pawbridge.user-store-mypage.enabled:false}") boolean storeMyPageEnabledFlag,
             @Value("${pawbridge.animal-discovery.enabled:false}") boolean animalDiscoveryEnabledFlag,
+            @Value("${pawbridge.animal-discovery.enabled:false}") String animalExtraDiscoveryFlag,
             @Value("${pawbridge.animal-recommendations.enabled:false}") boolean animalRecommendationsEnabledFlag,
             @Value("${pawbridge.store-catalog.enabled:false}") boolean storeCatalogEnabledFlag,
             @Value("${pawbridge.store-wishlist.enabled:false}") boolean storeWishlistEnabledFlag,
@@ -114,6 +115,11 @@ public class ReadSecurityConfiguration {
         var animalDiscoveryReading=new AndRequestMatcher(animalDiscoveryEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/animals","GET"),
                 new RegexRequestMatcher("^/api/v1/animals/[0-9]+(?:\\?.*)?$","GET")));
+        var animalExtraDiscoveryEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
+                request -> "true".equalsIgnoreCase(animalExtraDiscoveryFlag) && "postgresql".equalsIgnoreCase(animalQueryBackend);
+        var animalExtraDiscoveryReading=new AndRequestMatcher(animalExtraDiscoveryEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/animals/apms/{apmsDesertionNo}","GET"),
+                new AntPathRequestMatcher("/api/v1/animals/expiring-soon","GET")));
         var animalRecommendationsEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->animalRecommendationsEnabledFlag;
         var animalRecommendationReading=new AndRequestMatcher(animalRecommendationsEnabled,
                 new RegexRequestMatcher("^/api/v1/animals/[0-9]+/similar(?:\\?.*)?$","GET"));
@@ -266,7 +272,7 @@ public class ReadSecurityConfiguration {
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(storeOrderAdministrationRoutes).hasRole("ADMIN")
-                        .requestMatchers(galleryFeedRoutes, animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
+                        .requestMatchers(galleryFeedRoutes, animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalExtraDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/read", "/api/v1/posts/read/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/posts/search").permitAll()

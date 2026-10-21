@@ -147,7 +147,7 @@ class JdbcAnimalDiscoverySqlTest {
         assertThat(calls.getFirst().parameters()).containsEntry("id", 72L);
     }
 
-    @Test void list_transaction_is_read_only_repeatable_read_with_five_second_transaction_and_query_timeouts() throws Exception {
+    @Test void all_query_methods_are_read_only_repeatable_read_with_five_second_timeouts() throws Exception {
         DataSource source = mock(DataSource.class);
         Connection connection = mock(Connection.class);
         PreparedStatement statement = mock(PreparedStatement.class);
@@ -158,9 +158,86 @@ class JdbcAnimalDiscoverySqlTest {
         when(manager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         var configured = new JdbcAnimalDiscovery(source, manager, analyzer);
         assertThatThrownBy(() -> configured.search(Search.empty(), page("createdAt", false))).isInstanceOf(DataAccessException.class);
-        verify(manager).getTransaction(argThat(definition -> definition.isReadOnly()
+        assertThatThrownBy(() -> configured.findByApmsDesertionNo("D-72")).isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> configured.findExpiringSoonAnimals(page("unknown", false))).isInstanceOf(DataAccessException.class);
+        verify(manager, times(3)).getTransaction(argThat(definition -> definition.isReadOnly()
                 && definition.getIsolationLevel() == TransactionDefinition.ISOLATION_REPEATABLE_READ && definition.getTimeout() == 5));
-        verify(statement).setQueryTimeout(5);
+        verify(statement, times(3)).setQueryTimeout(5);
+    }
+
+    @Test void apms_number_binds_exact_value_and_reads_one_shelter_join_without_status_filter() throws Exception {
+        java.sql.ResultSet row = mock(java.sql.ResultSet.class);
+        when(row.getLong("id")).thenReturn(72L);
+        when(row.getLong("shelter_id")).thenReturn(8L);
+        when(row.getString("species")).thenReturn("DOG");
+        when(row.getString("gender")).thenReturn("UNKNOWN");
+        when(row.getString("neuter_status")).thenReturn("UNKNOWN");
+        when(row.getString("status")).thenReturn("ADOPTED");
+        when(row.getString("api_source")).thenReturn("APMS_ANIMAL");
+        when(row.getString("apms_desertion_no")).thenReturn(" D-72 ");
+        when(jdbc.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class))).thenAnswer(call -> {
+            capture(call.getArgument(0), call.getArgument(1));
+            RowMapper<Details> mapper = call.getArgument(2);
+            return List.of(mapper.mapRow(row, 0));
+        });
+        Details detail = animals.findByApmsDesertionNo(" D-72 ");
+        assertThat(detail.id()).isEqualTo(72L);
+        assertThat(detail.shelterId()).isEqualTo(8L);
+        assertThat(detail.status()).isEqualTo(AnimalStatus.ADOPTED);
+        assertThat(detail.apmsDesertionNo()).isEqualTo(" D-72 ");
+        assertThat(calls).hasSize(1);
+        assertThat(calls.getFirst().sql()).contains("JOIN pawbridge_animal.shelters", "WHERE a.apms_desertion_no=:number")
+                .doesNotContain("status IN", "search_documents", "count(*)");
+        assertThat(calls.getFirst().parameters()).containsOnly(entry("number", " D-72 "));
+        verify(jdbc, never()).queryForObject(anyString(), any(SqlParameterSource.class), eq(Long.class));
+    }
+
+    @Test void missing_apms_and_database_failures_propagate_without_fallback_queries() {
+        assertThatThrownBy(() -> animals.findByApmsDesertionNo("missing")).isInstanceOf(AnimalNotFoundException.class);
+        var failure = new org.springframework.dao.DataAccessResourceFailureException("synthetic unavailable");
+        when(jdbc.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class))).thenThrow(failure);
+        assertThatThrownBy(() -> animals.findByApmsDesertionNo("D-72")).isSameAs(failure);
+        verify(jdbc, times(2)).query(anyString(), any(SqlParameterSource.class), any(RowMapper.class));
+        verify(jdbc, never()).queryForObject(anyString(), any(SqlParameterSource.class), eq(Long.class));
+    }
+
+    @Test void expiring_soon_uses_protect_inclusive_jvm_dates_and_fixed_order_ignoring_single_requested_sort() {
+        LocalDate before = LocalDate.now();
+        animals.findExpiringSoonAnimals(new PageRequest(2, 20, List.of(new Order("unknown", false)), true));
+        LocalDate after = LocalDate.now();
+        assertThat(calls).hasSize(2);
+        Call count = calls.getFirst(), content = calls.getLast();
+        assertThat(count.sql()).contains("a.status=:status", "a.notice_end_date BETWEEN :today AND :deadline")
+                .doesNotContain("search_documents", "search_dirty");
+        assertThat(count.parameters()).containsEntry("status", "PROTECT");
+        LocalDate today = (LocalDate) count.parameters().get("today");
+        assertThat(today).isBetween(before, after);
+        assertThat(count.parameters()).containsEntry("deadline", today.plusDays(3));
+        assertThat(content.sql()).endsWith("ORDER BY a.notice_end_date ASC NULLS LAST,a.id ASC LIMIT :limit OFFSET :offset");
+        assertThat(content.parameters()).containsEntry("limit", 20).containsEntry("offset", 40L);
+    }
+
+    @Test void expiring_empty_and_beyond_count_pages_do_not_read_content() {
+        var totals = new java.util.concurrent.atomic.AtomicInteger();
+        when(jdbc.queryForObject(anyString(), any(SqlParameterSource.class), eq(Long.class))).thenAnswer(call -> {
+            capture(call.getArgument(0), call.getArgument(1));
+            return (long) totals.getAndIncrement();
+        });
+        Page empty = animals.findExpiringSoonAnimals(new PageRequest(0, 20, List.of(), true));
+        assertThat(empty).isEqualTo(new Page(List.of(), 0, 20, 0, 0, true, true));
+        Page beyond = animals.findExpiringSoonAnimals(new PageRequest(499, 20, List.of(), true));
+        assertThat(beyond).isEqualTo(new Page(List.of(), 499, 20, 1, 1, false, true));
+        assertThat(calls).hasSize(2);
+        verify(jdbc, never()).query(anyString(), any(SqlParameterSource.class), any(RowMapper.class));
+    }
+
+    @Test void expiring_page_bounds_and_multiple_sorts_fail_before_query_sql() {
+        for (PageRequest invalid : List.of(new PageRequest(0, 20, List.of(), false),
+                new PageRequest(0, 101, List.of(), true), new PageRequest(500, 20, List.of(), true),
+                new PageRequest(0, 20, List.of(new Order("createdAt", true), new Order("id", true)), true))) {
+            assertThatThrownBy(() -> animals.findExpiringSoonAnimals(invalid)).isInstanceOf(IllegalArgumentException.class);
+        }
+        verifyNoInteractions(jdbc);
     }
 
     private static Search search(String keyword, String breed, String notice, AnimalStatus status) {
