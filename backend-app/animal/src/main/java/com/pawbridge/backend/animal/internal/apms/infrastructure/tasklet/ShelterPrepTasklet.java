@@ -1,0 +1,100 @@
+package com.pawbridge.backend.animal.internal.apms.infrastructure.tasklet;
+
+import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter;
+import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsAnimalSnapshot;
+import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsAnimal;
+import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Shelter;
+import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository;
+
+import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.util.StringUtils;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * Step 0: APMS API에서 보호소 정보를 사전 저장하는 Tasklet
+ * - Step 1(AnimalItemProcessor) 실행 전 모든 보호소를 DB에 저장
+ * - Chunk 트랜잭션 롤백과 무관하게 보호소 데이터 일관성 보장
+ * - 이 Step이 FAILED이면 Step Flow에 의해 Job을 즉시 종료 (Step 1 실행 안 함)
+ */
+@Slf4j
+public class ShelterPrepTasklet implements Tasklet {
+
+    private final SearchDocumentWriter searchDocuments;
+
+    private final ApmsAnimalSnapshot snapshot;
+    private final ShelterRepository shelterRepository;
+    private final org.springframework.transaction.support.TransactionTemplate writes;
+
+    public ShelterPrepTasklet(SearchDocumentWriter searchDocuments, ApmsAnimalSnapshot snapshot,
+            ShelterRepository shelterRepository, org.springframework.transaction.PlatformTransactionManager manager,
+            int timeoutSeconds) {
+        if (timeoutSeconds < 1) throw new IllegalArgumentException("APMS shelter timeout must be positive");
+        this.searchDocuments = searchDocuments; this.snapshot = snapshot; this.shelterRepository = shelterRepository;
+        writes = new org.springframework.transaction.support.TransactionTemplate(manager); writes.setTimeout(timeoutSeconds);
+    }
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
+        log.info("[BATCH Step 0] 보호소 사전 저장 Tasklet 시작");
+
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw new IllegalStateException("APMS preparation must start outside the writer transaction");
+        List<ApmsAnimal> allAnimals = snapshot.animals();
+        log.info("[BATCH Step 0] APMS API 전체 조회 완료: {} 건", allAnimals.size());
+
+        // careRegNo 기준 중복 제거 (첫 번째 등장 기준)
+        Map<String, ApmsAnimal> uniqueShelterMap = allAnimals.stream()
+                .filter(a -> StringUtils.hasText(a.getCareRegNo()))
+                .collect(Collectors.toMap(
+                        ApmsAnimal::getCareRegNo,
+                        a -> a,
+                        (existing, replacement) -> existing
+                ));
+
+        writes.executeWithoutResult(status -> {
+            List<String> allCareRegNos = new ArrayList<>(uniqueShelterMap.keySet());
+            Set<String> existingCareRegNos = shelterRepository.findByCareRegNoIn(allCareRegNos)
+                    .stream()
+                    .map(Shelter::getCareRegNo)
+                    .collect(Collectors.toSet());
+
+            List<Shelter> newShelters = uniqueShelterMap.entrySet().stream()
+                    .filter(e -> !existingCareRegNos.contains(e.getKey()))
+                    .map(e -> {
+                        ApmsAnimal a = e.getValue();
+                        return Shelter.createFromApms(
+                                e.getKey(),
+                                StringUtils.hasText(a.getCareNm()) ? a.getCareNm() : "알 수 없는 보호소",
+                                a.getCareTel(),
+                                a.getCareAddr(),
+                                a.getChargeNm(),
+                                a.getOrgNm()
+                        );
+                    })
+                    .collect(Collectors.toList());
+
+            if (!newShelters.isEmpty()) {
+                shelterRepository.saveAll(newShelters);
+                shelterRepository.flush();
+                for (Shelter shelter:newShelters) searchDocuments.shelter(shelter.getId());
+                log.info("[BATCH Step 0] 신규 보호소 {} 건 저장 완료 (기존: {} 건 유지)",
+                        newShelters.size(), existingCareRegNos.size());
+            } else {
+                log.info("[BATCH Step 0] 신규 보호소 없음 (기존: {} 건)", existingCareRegNos.size());
+            }
+
+        });
+        return RepeatStatus.FINISHED;
+    }
+
+}

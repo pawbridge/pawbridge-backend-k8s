@@ -936,3 +936,18 @@ APMS 번호는 원문 번호 그대로 검색하며 기존 Shelter JOIN과 NON_N
 owned 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P17_PG_SETTINGS`와 정확한 `P17_PG_SETTINGS=/private/tmp/pawbridge-owned-pg-night-20261020/travel-collection-recovery-1/travel-collection.properties`를 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlTravelCollectionTest`로 한 클래스를 명시 선택한다. 설정이 없거나 대상·역할·marker·권한·초기 상태가 다르면 skip하지 않고 거부한다. 준비 helper/실행 결과/설정 자격파일은 게시하지 않는다. 이 시험은 새 이력과 마지막 RUNNING 행을 남기므로 동일 DB를 자동 재실행하거나 reset하지 않는다.
 
 새 Batch 의존성으로 현재 Boot build 지문이 과거 자체회귀 참조 입력과 달라진다. 과거 reference RUN39481336774/head217cb7a의 16개 지문은 그대로 두며 새 Boot 지문으로 승격하지 않는다. 따라서 해당 reference는 거부되고 기존 workflow의 `execute-current-selftests`가 현재 TestKit108을 실행해야 한다. 실제 architecture·module unit·Boot JAR·필수 계약·cleanup/fence를 줄이지 않는다.
+
+
+## APMS 예약 수집에서 동물·보호소 검색 반영까지
+
+`apms.batch.schedule-enabled=true`를 명시할 때만 예약·수집 Job·HTTP transport를 함께 조립한다. 기본 off이며 수동 실행 API는 포함하지 않는다. 원문 `query-v2`/`updated-v1` 계획·30일 재조회 overlap·부분 성공·COUNT_MISMATCH·10분 stale 회복과 세션 advisory lock key1을 보존한다. 계획 시계는 Asia/Seoul, Batch heartbeat 비교 시계는 실제 Batch metadata의 JVM 기본 시간대에 맞춰 분리한다.
+
+기존 Animal writer DataSource·EntityManagerFactory·JpaTransactionManager·검색 writer를 공유하며 새 pool·엔티티·DDL·Outbox 발행을 만들지 않는다. 외부 snapshot fetch는 실제 TX 밖에서 수행하고 보호소 준비는 짧은 별도 JPA TX, Animal upsert·검색과 Batch chunk checkpoint는 같은 JPA TX를 사용한다. 같은 DataSource라도 서로 다른 JDBC/JPA transaction manager를 혼용하면 metadata 쓰기가 chunk를 조기 commit할 수 있으므로 Repository·Explorer·회복도 같은 Animal JpaTransactionManager를 사용한다. 원문 chunk1000/retry3와 준비 step의 독립 commit 의미는 유지한다. 원문 fault-tolerant recovery가 정상 항목을 별도 TX로 커밋한 뒤 최종 Step이 FAILED일 수도 있다. 실제 반영량·source/search 일치와 실패 구간의 다음 재조회 계획을 함께 확인한다.
+
+worker 기본값1/범위1~4와 writer 용량 `workers+2` 이상을 명시 검사한다. 전역 writer 기본 용량1과 전역 TX timeout은 변경하지 않는다. APMS 단계 timeout만 양수로 주입한다. 이 하한이나 합성 시험의 용량3은 TourAPI·일반 쓰기까지 포함한 운영 용량 보장이 아니다. 활성화 전 이전 실행기의 중단, 단일 예약 소유권, 동시 업무 용량·실제 API 사용 조건을 별도로 확인해야 한다.
+
+HTTP transport는 명시한 HTTPS 제공자만 사용하고 redirect를 따르지 않는다. 연결2초·요청5초·응답 대기6초와 본문2MiB 상한을 적용하며 실패에 URL·서비스키·응답 본문을 노출하지 않는다. 예약 정상 정지는 실행 중 흐름을 기다린 뒤 자신이 소유한 worker·HTTP client를 종료한다. 프로세스 강제 종료·lock 연결 상실 이후 모든 쓰기의 fencing이나 외부 API 정상 동작을 보장하지 않는다.
+
+새 전용 합성 PostgreSQL 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P18_PG_SETTINGS`와 소유한 0600 `P18_PG_SETTINGS` 파일을 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlApmsCollectionTest`로 정확히 선택한다. 원문 업무·검색5표와 Batch6표·6sequence, 별도 marker 및 최소권한을 확인하고 정상 upsert/search·checkpoint 재조회·실패 rollback·실제2PID slot·stale 회복·정상 종료를 다룬다. 이력과 실패 자료를 보존하며 같은 fixture를 자동 초기화·재실행하지 않는다. 준비 helper·자격파일·실행 로그는 Git에 게시하지 않는다. 실제 실행 성공과 남은 검증은 해당 PR의 근거로 구분하며 운영 활성화는 별도다.
+
+APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사례, 최종 새 합성 PG5사례(1.392초)는 서로 다른 실행 근거다. 최종 PG는 실제 source/search/Batch metadata DML 후 강제 rollback·physical commit 증가0, 원문 부분 복구·기존 행 보존, 두 실제 PID의 slot, stale10분, 정상 예약 종료를 확인했다. 제공자는 대역이며 실 APMS/운영 검증은 하지 않았다. 최초 SQL 개행 관측 오류와 원문 부분 commit을 전체 실패 원자성으로 오해한 두 시험 실패는 보존하고, 새 fixture에서 최소 정정 후 검증했다. 기존 DB를 reset하지 않았다.

@@ -10,7 +10,8 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnExpression("'true'.equalsIgnoreCase('${pawbridge.animal-discovery.enabled:false}') or "
         + "'true'.equalsIgnoreCase('${pawbridge.animal-recommendations.enabled:false}') or "
         + "'true'.equalsIgnoreCase('${pawbridge.animal-commands.enabled:false}') or "
-        + "'true'.equalsIgnoreCase('${pawbridge.shelter-commands.enabled:false}')")
+        + "'true'.equalsIgnoreCase('${pawbridge.shelter-commands.enabled:false}') or "
+        + "'true'.equalsIgnoreCase('${apms.batch.schedule-enabled:false}')")
 public class AnimalSearchConfiguration {
     @Bean(destroyMethod = "close")
     KoreanSearchAnalyzer animalDiscoveryAnalyzer() throws IOException { return new KoreanSearchAnalyzer(); }
