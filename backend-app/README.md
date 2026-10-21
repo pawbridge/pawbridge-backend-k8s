@@ -1001,3 +1001,12 @@ Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유�
 `pawbridge.shelter-observations.schedule-enabled=true` enables the original daily 04:00 Asia/Seoul observation. One writer SQL snapshot counts PROTECT animals including zero for empty shelters, preserving the first observation of each day. The existing shelter observation GET consumes these rows. Scheduling defaults off and does not run immediately at startup.
 
 Unit, configuration, actual Security/JWT and architecture checks cover development contracts. Real Redis/Python, production scheduling and operating data are not validated or changed. Original forwarded-header trust, quota/message-cap races, post-AI persistence failure and retention policies remain deferred activation gates.
+
+
+## Store catalog management
+
+`pawbridge.store-catalog-management.enabled=true` explicitly assembles the original product create/update/delete, option group/value writes and image upload. The canonical write handlers require an ADMIN JWT. Product, SKU, option, outbox and search writes share the existing Store writer transaction and entity manager; the existing catalog read flag remains separate. Image uploads borrow the explicitly configured Post-owned S3 client and storage settings. This feature defaults off.
+
+The selected 30 unit cases, 12 configuration cases and 101 Security/JWT MVC cases verify local business, shared-resource and request-boundary contracts. Mocked service/repository/storage results do not validate real PostgreSQL or R2 success. The Animal-parent Main/Security merge preserves the chatbot and observation configuration; a combined actual-Main runtime check is a separate final integration gate.
+
+Original DELETED patch/cart bypass, ignored SKU update fields, option mutation races and legacy cache coordination remain deferred activation gates. No payment functionality, category CRUD, live storage operation or production activation is introduced by this change.
