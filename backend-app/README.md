@@ -1029,3 +1029,13 @@ Original DELETED patch/cart bypass, ignored SKU update fields, option mutation r
 Animal·Store·Payment 생산 코드를 합친 최종 조립에서는 기존 Main 무DB 2사례와 위 Main PostgreSQL 3사례, 총 5사례를 한 번 재검증했다. 새 고유 5사례로 합산하지 않는다. Payment→Store 공개 계약·내부 참조 거부·6모듈 의존 그래프의 선택 구조 시험 3사례, 현재 architecture/business-package 검사, 실행 JAR 생성도 통과했다. 해당 JAR의 실제 런타임 라이브러리 162개는 기존 CI 경계 검사에서 추가 허용 예외 없이 통과했다. 이 근거는 전체 TestKit 시험 성공이나 실행 JAR 기동·Kafka 소비·Redis·Toss·R2·AI·운영 배포 성공을 뜻하지 않는다. 관측 PostgreSQL 2사례는 이 최종 조립 검증 뒤 별도로 최초 실행됐다.
 
 두 PostgreSQL 시험은 명시적인 전용 설정 선택자와 소유권·권한·기준 자료 검증을 요구하며 입력이 없거나 잘못되면 건너뛰거나 다른 DB로 대체하지 않고 실패한다. 게시하는 파일은 시험 Java 2개와 합성 스키마 SQL 2개다. 자료 준비 helper, 동적 설정, 인증정보, 소유권 상태·영수증과 덤프는 게시하지 않는다. CI에서 이 자료를 새로 준비하거나 운영 기능을 켰다는 의미도 아니다.
+
+### 기존 LOCAL 로그인 편입
+
+`pawbridge.auth.local-enabled`는 기본 false다. true에서는 기존 `pawbridge.auth.sessions-enabled=true`, 명명된 writer/JdbcTransactionManager와 기존 JWT issuer를 요구한다. 정확한 `/api/v1/auth/login`에만 별도 보안 체인을 조립하고, 인증 관리자·BCrypt·DAO는 해당 체인 내부에서만 구성한다. 전역 인증 관리자·인코더·서블릿 필터를 추가하지 않는다. 기본 비활성 및 다른 인증·업무 경로의 보안은 유지한다.
+
+원문 필터의 JSON email/password 입력, 대소문자를 구분하지 않는 이메일 조회, 기본 BCrypt와 미존재 계정 숨김, 200 응답의 userId/email/name/role/careRegNo/accessToken/refreshToken, 401 문구를 보존한다. 원문 필터는 메서드 제한 없이 같은 경로를 처리하고 DTO의 MVC 검증을 실행하지 않는다. 새 POST 전용·이메일 형식·provider/삭제 상태 정책은 추가하지 않았다. 인증된 DB 계정 정보만 토큰에 사용하고 요청의 사용자·권한 헤더나 Bearer 값으로 비밀번호 인증을 우회하지 않는다. 토큰은 응답 본문에만 전달하며 세션 쿠키를 만들지 않는다.
+
+이메일·refresh 조회와 BCrypt 인증은 save 트랜잭션 밖에서 수행하고, 기존 refresh 행 갱신 또는 새 행 삽입만 개별 writer 트랜잭션에 둔다. 원문의 전체 로그인 트랜잭션·행 잠금 부재와 동시 첫 로그인 경합은 해결된 것으로 표시하지 않는다. 복수 단건 조회 결과를 임의 한 행으로 정상화하지 않으며, 조회 실패의 일반401과 인증 후 저장 실패의 예외 전파를 구분한다. 파싱·내부 인증·저장 예외는 기존 실패 경계를 유지하면서 비밀번호·토큰이 원인 메시지나 principal 문자열에 노출되지 않도록 고정 메시지와 비밀 없는 표현을 사용한다.
+
+JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경된 실제 Main 기존2사례가 성공했고 현재 생산 구조·업무 패키지 검사1003클래스를 통과했다. 첫 Boot 컴파일의 지원되지 않는 DAO 생성자는 기존 지원 API의 setter 조립으로만 교정했다. 실제 PostgreSQL 로그인·실계정·메일·운영 인증은 실행하지 않았다. 가입·비밀번호 재설정·계정 연결·LOCAL 폐지·Naver·운영 활성화는 포함하지 않는다.
