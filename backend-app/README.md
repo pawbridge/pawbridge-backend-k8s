@@ -985,3 +985,10 @@ Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유�
 기존 동일 writer의 RO 트랜잭션에서 현재 회원 적격성을 확인한 뒤 본인 조건의 부모 Page를 조회하고, 선택된 부모 ID들의 품목만 한 번 일괄 조회한다. 부모 순서·Page metadata·기존 단건과 같은 snapshot 형식을 유지한다. 빈 Page는 품목 조회를 생략하며 collection fetch에 pageable을 직접 적용하지 않는다. 지원 scalar 정렬 최대4개·부모 size1..100·offset 정수 범위를 검증한다. 부모 상한은 각 주문의 품목 수·전체 응답 bytes의 절대 상한을 뜻하지 않는다.
 
 기본 off·alias off와 익명/이웃 경로 차단을 유지한다. 새 pool/EMF/table·생산 DDL·주문 상태 전이·결제·상품 CUD는 추가하지 않는다. 실제 운영 활성화와 결제 전체 흐름 인수는 별도 작업이다.
+
+
+## 실제 Main 코어 조립 검증
+
+`PawBridgeCoreIntegrationTest`는 실제 `PawBridgeApplication`에서 User의 Animal/Store module 조회와 Animal 명령·Store 바로 주문 writer를 함께 활성화한다. 업무·actor·facade·DataSource 대역 없이 named reader/writer pool2, JPA factory3와 transaction manager5의 실제 소비자 연결, 인증·역할·메서드 거부7경로, 소유 writer TX 밖 actor 거부, DB borrow0과 정상 close를 검증한다. writer 용량0은 자원을 만들기 전 fail-fast하며 늦은 startup 실패의 자원 정리를 검증한 것은 아니다.
+
+기존 각 기능의 별도 DB 검증은 보존한다. 이 코어 조합 시험은 정상 인증 DB 응답·실 Redis/OAuth/R2·외부 수집·예약 인수·운영 준비 완료를 의미하지 않는다. 외부 기능과 예약은 이 시험에서 비활성이다.
