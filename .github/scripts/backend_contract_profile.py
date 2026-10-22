@@ -346,10 +346,10 @@ POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
 POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d57f7606f60d2987'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01eef7d3466f5ff57fec56f67823a7beff6284c5b9d7f6',
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a102a2dad32f26aa848411d9dbe5bd3d7cd8cada375c1',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '6ee2a00cdb1f71dcfd09d8b35fcc4b5590a57a9e2414cbabf8292f24562fba5b',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'd0595c545a5ef79d5b19c23fdb6a38998a4a4851d88e447bd69d617714387f83',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -361,11 +361,11 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c3e8c62ce0457be98e18cb4cbca31a762699f50ee396c678fcffd7382987362f',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '951f9f3d503ee5925c3870e615e6785b8375ad9b25cf6b8e92adc92bebbcec93',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'e732dfc628a98c65db4b53119fecf95569317a9622e42fa7d55a138d272466fa',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '5998ca012795207e034ee0cb19e657820e98faf78609184b35f49171d612d5fc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'dda638d643fc686e44102314be4d0d6d88b36a07e910fd074615950d6a3f21d1',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '7016adb41e6e20e7400999aab42eabef66c18de3739b63878e22bf0cd889dd31',
- 'backend-app/boot/src/main/resources/application.properties': '98b95621811fecccee450ba697537736c46ccf1c020b7ed8697e18ad8e6f981b',
+ 'backend-app/boot/src/main/resources/application.properties': 'fd77aa5fcc6dacdf0aa337150beb703ca7d2dad29aa555342261357df13ee6bb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostMutationHttpTest.java': 'feca1b7a4f4f7c6cb6c97d06157ef1cea8005722b64c1a90258df18af4ca18fb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostReadHttpTest.java': 'ee591506da75a0841f5322f7d3d5f2db6a1654a5034c1d70b1a88bd8cced891b',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostStatisticsHttpTest.java': '8042c41ce6a179c48aa170fd448f2769c948efc5f2d66a9c59d86abef42cb93b',
@@ -377,7 +377,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatProtocolTest.java': 'fdbeeba7aa7da996e0b40ce0fe71af8005ec0d8fe3418f3621a82584726934f3',
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatSessionLifecycleTest.java': '8e1d8a6b05a1b114461bcf39fa11c0e90500a407f079dd3a6252d3a55362edf0',
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatTransportHttpTest.java': '11fb099240fc857c3a0311ef90d5f70df04f291b3393440639e147a558543ecd',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '91d4f52232aca2b95722543cf1b883795e60aea6b24cc797d67fb5fe1dc54018',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '8ca2a2e59d09471b4b901befdab40d0c9d20278e953d96f4df390bbfbe694887',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostDeleteHttpTest.java': 'ca8bec58cfbc8251b772cbcaaef91d8dfa14d5d525dc9510440c39df7e2d1cd6',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostListHttpTest.java': 'c23bff985fd2dc3a8ef48cc5d9f4bb2d6bfecc91d69cc985cb0d74c4ddbb2f37',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostSearchHttpTest.java': '009c20bb4daf58dba55e2ae670eb2c8c77723f37b3f9f72ae30a726a0caabae8',
@@ -444,7 +444,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/report/infrastructure/S3AnimalReportMediaUploaderTest.java': '82d782b119f53b4800f22fa4ebf6dee3e77947b890748e8c8f789804236d7deb',
  'backend-app/scripts/test_f14_ci_guards.py': 'aba0d5b772835abaa770e3bed93a4290e74609200e5a67d290e7c90a5e6d04bd',
  'backend-app/scripts/test_f9_ci_guards.py': 'a5e7871329d57bbc640118e9ecad96a56b245aee3c3f0c42ed55c3db4a92a29c',
- 'backend-app/user/build.gradle': '2618227c07294560b5e318808d990152272acef69c1a071d7dc2a44d656f0835',
+ 'backend-app/user/build.gradle': 'c316d39a5f7926126ac8ac8cc011362c7752b60149b061e1e10161559aa1b6de',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/animalactivity/application/FavoriteActivityRejectedException.java': 'a4aabe74ab6720eaf0e2f83c57390a0018b5b7a936af5e59af2608e9ad7edc8b',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/animalactivity/application/UserAnimalActivities.java': '1aed0c2ecc8d25bb0c58d73f2c028c5d6d7a5d151d290120d0093e8f14f28947',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/animalactivity/infrastructure/HttpUserAnimalLookup.java': '1f01f52059753ba5e6fdfeadbbdaa7151e057e14f43693a154f7b94487abd6c9',
@@ -1080,7 +1080,58 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreMockPaymentHttpTest.java': '3d379527cff8887d30b34c8ab75e2cc54bab14a019d238a69e7dfa6e6ef7d1df',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreMockPaymentConfigurationTest.java': 'ca0f76b90f951892431713c52e3c53ecac63398e03b9db973044e5e9a5834b8c',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/web/MockOrderPaymentController.java': 'baa902e892b1caff45d56a996e9e7235b87950a9ff25b0c617f23beb1fa19b6f',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/web/MockOrderPaymentExceptionHandler.java': 'd3ecc1feb1c591e0c50314f554cb55ad8a448daf599741ea5fabaf0d9bd27413'}
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/web/MockOrderPaymentExceptionHandler.java': 'd3ecc1feb1c591e0c50314f554cb55ad8a448daf599741ea5fabaf0d9bd27413',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/EmailVerificationConfiguration.java': '2bbe1393ea038d927ee7869ca1c3a386a31d868bf4debdf7185dd64d8c74a0b8',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/LocalSignupConfiguration.java': 'b2a144d9f9f3f9b0e91fc591db9a973b742460a5bb064a4dc21abdc0eec43fd9',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PasswordResetConfiguration.java': 'caeb41484173fbce6d32f44ab30a472fd5364415f5411c665dddd15f0168aed5',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/LocalAuthConfigurationTest.java': 'b301eb56bf115dac94b367c14ded218c55f95557ad45aa3318b44d8d7172b415',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/LocalAuthDisabledHttpTest.java': '0cc77e6f390861d0dfaa4745463d1071cef8765219cc7c392d589b26360ad756',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/LocalAuthHttpTest.java': '365d081c77db74874875843459ce1a675318d43a1d95da1807382c89de8789f2',
+ 'backend-app/boot/src/test/resources/owned-postgresql/local-signup-writer-grants.sql': '72b622d530ef2adc22d312d59f96e7b9d40f5d5daf974a5eb0599643ab7b5e11',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/EmailSendingException.java': 'd14aae629c1d45d5df78b842b4f564c758c250b2313858f2513208e8a42bad1e',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/EmailTemplateLoadException.java': 'e96f227705848164201bff239fa39ee36c3353573438b91fd3ce01f4bf73b017',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/EmailVerifications.java': '2c278615ce1c0e5410102104184f8d010db36979fcdba8b89d3c410dd19569b4',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/ExpiredCodeException.java': 'f0f7924b91d96b101a827e8508f085c6d2c3944814e7f384c849f79356ee8c71',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/InvalidCodeException.java': 'f3714f25191fd0692b85b60c09d4b053e28afb34e5db20a7cb9fcd2f01eafd75',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/TooManyAttemptsException.java': 'b4ce2964c91ff42d16361655927f997eec832cce2efefd733e6f6de9428387f2',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/VerificationMails.java': '8866668f9756328223eee6496e6e2cd60fe36756dc5f9cd4e69db22fc15545e5',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/application/VerificationStore.java': '546bfb3b4289c5f83187e7e1ace0b2ea6b5527450fc9fdfe239f5e3f4984b951',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/infrastructure/RedisVerificationStore.java': 'e913ef75b7a51ae94a8c271505b42c99a8a28058d89cb67165020c42a9c13354',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/infrastructure/SmtpVerificationMails.java': 'fd68404a8e462b371ffa6b6cdd22339de9b71180d0a4c7072f9aa480f23d0107',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/web/EmailVerificationController.java': '53c385f41c7ae7393994ebb89a2fd3bd885af4849d147b8e1654692a76d6e663',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/web/LocalAuthExceptionHandler.java': '6218738258f88bfb2380b535dfff935d6953fd829145e75049d14f061028b89a',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/web/SendVerificationCodeRequest.java': 'f78356a19b9c88b17186d4efca267b46596d989038615b46a2451e7811189d8b',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/emailverification/web/VerifyCodeRequest.java': 'ccb15e9baf81381e3239d5977adec62775205399084e3603484cefa3257a8d3f',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/passwordreset/application/PasswordReset.java': '1ace09427d89a0d424de1dbd6872970fab477008fecb9e28c84428b5d7ea0ee1',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/passwordreset/application/PasswordResetAccounts.java': '70dcee4640b95e366fe789b7d3eae4baa889f9a5c273490ad3483bd274d18c86',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/passwordreset/application/PasswordResetCodeInvalidException.java': 'f12241fb1282e71aa45e6590eeff1c90fb672170e142abbc77c1d70b7ea9ad6d',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/passwordreset/infrastructure/JdbcPasswordResetAccounts.java': '6ce006f8303027e9d9026beb4d6d5b01794906829add3e04fc5d74d046435ba0',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/passwordreset/web/PasswordResetController.java': '783a9d28de1589b60d29e19ddc3c550a33b596346376fbe9df56712f497165c4',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/passwordreset/web/PasswordResetRequest.java': '6c03c5029044f395e9f06582d4e99b67b7e4deb5b79ac77cda50214929b7cd7f',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/passwordreset/web/PasswordResetVerifyRequest.java': '884d74ad54ea510c37933e2eb4a4c207602d665d7e5a743c2a4ccb2584a61163',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/AdminRoleNotAllowedException.java': 'f2bb757ed40aa775a63fe70f9af87129219e375c9d8b9f8a58d2522c7b95052a',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/EmailDuplicateException.java': 'c88ea0e5b8ace06f42deec9d5622acbc35e10999e740ecf211c57374602294db',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/EmailNotVerifiedException.java': '7602067f669eddcbdae2eb71cbf47c60763c2d46e51ac2a4269c08a801927d23',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/InconsistentPasswordException.java': '2a4114638e69641e01186c857f57d8fa784ae4f0705e9482e9a572d041ae4a00',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/LocalSignup.java': '611b35dd2f22ab64435f619dace2d2d27bc8a11b7da61c2a73e70c0b6c8ffeef',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/RoleRequiredException.java': 'ea99d3ac46932db6178aa540a512813a74e4279d20744ce00269bdbe6da3d75d',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/ShelterApprovalRequiredException.java': 'e0702a2aa41de8cbcd65cb70df813565c84a0fa1fc3393984ea4b775698051d3',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/SignedUp.java': 'e87124aceb2efe5791575cb97434d06a743f65daa7651419a09ed1602d076269',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/SignupAccounts.java': 'a4dac824c44160bb70d14bb73ac0570b4528cc9ac77bc5ee52737b900797e33d',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/application/SignupRole.java': '60b6d087ebdeca73bc06889354da404f489a2ac688895d7b1b3cf3b7635bd086',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/infrastructure/JdbcSignupAccounts.java': 'a85ab828bba2e27ee74240b37330249ee63c69468d519d1a9a4b28c3b9f1b38d',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/infrastructure/RollbackCharsetViolation.java': 'ee313c0b9079905a567d6815bf755839dd11f51200387fc510c43c82cc5085e8',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/web/LocalSignupController.java': '1315fee390564a382c37006fe1745741cdee9af238c1cab7a22dca922a6495e7',
+ 'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/signup/web/SignupRequest.java': 'bad98b1a2c87d1ad6b8728f0f16d7c0babf9c24eece8c2127f2a158330e1a157',
+ 'backend-app/user/src/main/resources/templates/email_verification.html': '5ff4496047546e5d6595485959c2a0e98a7a4fb103d85ac2d9a1d5ce792e1473',
+ 'backend-app/user/src/main/resources/templates/password_reset.html': '8a82d0fa87d9bd3b82a5858af6eb71782b5eb26dbeb0899d131547006d83a1f7',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/emailverification/application/EmailVerificationsTest.java': '12d3b79c7977db459e32f3b72c5f916e9d7315613ce0db689f2cc850c8caba05',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/emailverification/infrastructure/RedisVerificationStoreTest.java': 'a6a6470d39ed5f429c0f2b7990e1070725bae011fab72f948e9a5cbc306d9c18',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/emailverification/infrastructure/SmtpVerificationMailsTest.java': '0da81027976a37af8a4ea171be50b4d1632c6c6c2e49417dbe07697135ad0326',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/passwordreset/application/PasswordResetTest.java': 'd9f625b1d637181911be31556602f1281f06bf7f05518247191e486653e25074',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/passwordreset/infrastructure/JdbcPasswordResetAccountsTest.java': '3536a10f45c3e590f0ad0131b3ac586899f3dd19b1004581108c3ac930d3aee0',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/signup/application/LocalSignupTest.java': '355fcbe090bc8cfac4fb25ecd6c0a054415008b7cdecc5250c139c0e68d253eb',
+ 'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/signup/infrastructure/JdbcSignupAccountsTest.java': '3285c5e3a8d4672386cadce5ad688ff9cb1ffe254ec8bb990b056a44515237f2'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39577223965
@@ -1431,7 +1482,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 735
+                or len(POST_READS_APP_HASHES) != 786
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

@@ -56,7 +56,10 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.payments.enabled:false}") String paymentsEnabledFlag,
             @Value("${pawbridge.user-password.enabled:false}") String userPasswordFlag,
             @Value("${pawbridge.store-mock-payment.enabled:false}") String storeMockPaymentFlag,
-            @Value("${pawbridge.animal-images.enabled:false}") String animalImagesFlag) throws Exception {
+            @Value("${pawbridge.animal-images.enabled:false}") String animalImagesFlag,
+            @Value("${pawbridge.email-verification.enabled:false}") String emailVerificationFlag,
+            @Value("${pawbridge.local-signup.enabled:false}") String localSignupFlag,
+            @Value("${pawbridge.password-reset.enabled:false}") String passwordResetFlag) throws Exception {
 
         var animalImagesEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(animalImagesFlag);
         var animalImageWriting=new AndRequestMatcher(animalImagesEnabled,new OrRequestMatcher(
@@ -220,6 +223,19 @@ public class ReadSecurityConfiguration {
         var commentUpdate = new AntPathRequestMatcher("/api/v1/comments/{commentId}", "PUT");
         var userProfile = new AntPathRequestMatcher("/api/v1/users/me", "GET");
         var userNickname = new AntPathRequestMatcher("/api/v1/users/me/nickname", "PUT");
+        // Original Gateway whitelist: these POST routes (and all of /api/v1/email/**) need no token; each is
+        // public only while its own flag is exactly true.
+        var emailVerificationPublic = new AndRequestMatcher(
+                (org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(emailVerificationFlag),
+                new OrRequestMatcher(new AntPathRequestMatcher("/api/v1/email/send", "POST"),
+                        new AntPathRequestMatcher("/api/v1/email/verify", "POST")));
+        var localSignupPublic = new AndRequestMatcher(
+                (org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(localSignupFlag),
+                new AntPathRequestMatcher("/api/v1/users/signup", "POST"));
+        var passwordResetPublic = new AndRequestMatcher(
+                (org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(passwordResetFlag),
+                new OrRequestMatcher(new AntPathRequestMatcher("/api/v1/auth/password/reset-request", "POST"),
+                        new AntPathRequestMatcher("/api/v1/auth/password/reset", "POST")));
         var userPassword = new AndRequestMatcher((org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(userPasswordFlag),
                 new AntPathRequestMatcher("/api/v1/users/me/password", "PUT"));
         var favoriteStatus = new AntPathRequestMatcher("/api/v1/favorites/{animalId}/check", "GET");
@@ -325,6 +341,7 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/comments/posts/read/{postId}").permitAll()
                         .requestMatchers(visitIdentity, visitCount).permitAll()
                         .requestMatchers(sessionRefresh).permitAll()
+                        .requestMatchers(emailVerificationPublic, localSignupPublic, passwordResetPublic).permitAll()
                         .requestMatchers(chatSocket).permitAll()
                         .requestMatchers(adminRoutes).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()
