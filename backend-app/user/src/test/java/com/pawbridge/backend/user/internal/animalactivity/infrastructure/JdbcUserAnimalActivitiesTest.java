@@ -73,6 +73,10 @@ class JdbcUserAnimalActivitiesTest {
         var f=new Fixture();f.jdbc.favoriteRows=List.of(8L,9L);f.batch=List.of(animal(8));var result=f.service.favorites(7);
         assertEquals(List.of(8L,9L),result.favorites().stream().map(FavoriteAnimal::animalId).toList());assertEquals("DOG",result.favorites().getFirst().species());assertEquals("DELETED",result.favorites().getLast().status());assertNull(result.favorites().getLast().breed());assertEquals(1,f.animalCalls);assertEquals(List.of(8L,9L),f.batchIds);assertTrue(f.jdbc.sql.getLast().endsWith("ORDER BY created_at DESC"));
     }
+    @Test void given__favorites__when__listing__then__read_the_animal_batch_only_after_the_user_read_transaction_completed(){
+        var f=new Fixture();f.jdbc.favoriteRows=List.of(8L);f.batch=List.of(animal(8));f.service.favorites(7);
+        assertEquals(List.of("begin","user","favorites","commit","cleanup"),f.events);assertEquals(1,f.animalCalls);
+    }
     @ParameterizedTest @ValueSource(strings={"http","duplicate","null"})
     void given__a_batch_failure_or_duplicate_identity__when__listing__then__propagate_without_turning_failure_into_deleted_animals(String phase){
         var f=new Fixture();f.jdbc.favoriteRows=List.of(8L);f.batchFailure=phase.equals("http");f.batch=phase.equals("null")?null:List.of(animal(8),animal(8));assertThrows(RuntimeException.class,()->f.service.favorites(7));assertEquals(1,f.animalCalls);
@@ -82,11 +86,12 @@ class JdbcUserAnimalActivitiesTest {
         var f=new Fixture();if(state.equals("missing"))f.jdbc.user=false;else if(state.equals("no-registration"))f.jdbc.care="";else f.jdbc.role=state;
         if(state.equals("missing"))assertThrows(UserNotFoundException.class,()->f.service.registered(7,request()));else assertThrows(IllegalStateException.class,()->f.service.registered(7,request()));assertEquals(0,f.animalCalls);
     }
-    @Test void given__shelter_membership__when__reading_registered_animals__then__keep_both_http_calls_inside_readonly_transaction_and_forward_raw_sort(){
-        var f=new Fixture();var result=f.service.registered(7,request());assertSame(f.page,result);assertEquals(request(),f.request);assertEquals(List.of("begin","current","shelter","animals","commit","cleanup"),f.events);assertTrue(f.manager.readOnly);
+    @Test void given__shelter_membership__when__reading_registered_animals__then__run_both_lookups_after_the_readonly_transaction_and_forward_raw_sort(){
+        var f=new Fixture();var result=f.service.registered(7,request());assertSame(f.page,result);assertEquals(request(),f.request);// Animal lookups are independent transactions; nesting them would hold two connections of the shared pool.
+        assertEquals(List.of("begin","current","commit","cleanup","shelter","animals"),f.events);assertTrue(f.manager.readOnly);
     }
     @ParameterizedTest @ValueSource(strings={"shelter","animals"})
-    void given__external_lookup_failure__when__reading_registered_animals__then__propagate_generic_runtime_and_no_empty_page(String phase){var f=new Fixture();f.externalFailure=phase;assertThrows(IllegalStateException.class,()->f.service.registered(7,request()));assertTrue(f.events.contains("rollback"));}
+    void given__external_lookup_failure__when__reading_registered_animals__then__propagate_generic_runtime_and_no_empty_page(String phase){var f=new Fixture();f.externalFailure=phase;assertThrows(IllegalStateException.class,()->f.service.registered(7,request()));assertEquals(List.of("begin","current","commit","cleanup"),f.events.subList(0,4));}
     private static PageRequest request(){return new PageRequest(3,20,"name,desc,createdAt,asc");}
     private static Animal animal(long id){return new Animal(id,"notice","DOG","breed","UNKNOWN",2025,1,"mark","PROTECT",LocalDate.of(2026,11,1),"https://fixture.invalid/image",2,4L,"shelter",NOW);}
     private static void assertReason(String reason,Runnable action){assertEquals(reason,assertThrows(FavoriteActivityRejectedException.class,action::run).reason().name());}
@@ -94,9 +99,9 @@ class JdbcUserAnimalActivitiesTest {
         final List<String> events=new ArrayList<>();final FakeJdbc jdbc=new FakeJdbc(events);final Manager manager=new Manager(events);final JdbcUserAnimalActivities service;
         List<Animal> batch=List.of();List<Long> batchIds;boolean batchFailure;String externalFailure="";int animalCalls;boolean animalExists=true;RuntimeException countFailure;final List<List<Object>> adjustments=new ArrayList<>();PageRequest request;final AnimalPage page=new AnimalPage(List.of(),0,20,0,0,true);
         Fixture(){var write=new TransactionTemplate(manager);var read=new TransactionTemplate(manager);read.setReadOnly(true);service=new JdbcUserAnimalActivities(jdbc,write,read,new AnimalLookup(){
-            public List<Animal> batch(List<Long> ids){animalCalls++;batchIds=ids;assertTrue(TransactionSynchronizationManager.isActualTransactionActive());if(batchFailure)throw new IllegalStateException("private");return batch;}
-            public Shelter shelter(String care){events.add("shelter");animalCalls++;assertEquals(" reg ",care);assertTrue(TransactionSynchronizationManager.isCurrentTransactionReadOnly());if(externalFailure.equals("shelter"))throw new IllegalStateException("private");return new Shelter(4L,"name");}
-            public AnimalPage byShelter(Long id,PageRequest value){events.add("animals");animalCalls++;request=value;if(externalFailure.equals("animals"))throw new IllegalStateException("private");assertEquals(4L,id);assertTrue(TransactionSynchronizationManager.isActualTransactionActive());return page;}
+            public List<Animal> batch(List<Long> ids){animalCalls++;batchIds=ids;assertFalse(TransactionSynchronizationManager.isActualTransactionActive());if(batchFailure)throw new IllegalStateException("private");return batch;}
+            public Shelter shelter(String care){events.add("shelter");animalCalls++;assertEquals(" reg ",care);assertFalse(TransactionSynchronizationManager.isActualTransactionActive());if(externalFailure.equals("shelter"))throw new IllegalStateException("private");return new Shelter(4L,"name");}
+            public AnimalPage byShelter(Long id,PageRequest value){events.add("animals");animalCalls++;request=value;if(externalFailure.equals("animals"))throw new IllegalStateException("private");assertEquals(4L,id);assertFalse(TransactionSynchronizationManager.isActualTransactionActive());return page;}
         },(animal,delta)->{events.add("count");adjustments.add(List.of(animal,delta));if(countFailure!=null)throw countFailure;return animalExists;},()->{events.add("now");return NOW;});}
     }
     private static final class FakeJdbc extends JdbcTemplate {

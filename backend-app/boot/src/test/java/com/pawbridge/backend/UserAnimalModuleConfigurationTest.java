@@ -77,7 +77,7 @@ class UserAnimalModuleConfigurationTest {
                     assertThat(ReflectionTestUtils.getField(registration,"shelters")).isInstanceOf(JdbcShelterReads.class);
                     var reads=(TransactionTemplate)ReflectionTestUtils.getField(registration,"reads");
                     assertThat(reads.getTransactionManager()).isSameAs(context.getBean("transactionManager"));
-                    assertThat(reads.isReadOnly()).isTrue();assertThat(reads.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    assertThat(reads.isReadOnly()).isTrue();assertThat(reads.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
                     if(shelter) {
                         var lookup=context.getBean(ShelterMembership.ShelterLookup.class);
                         assertThat(ReflectionTestUtils.getField(lookup,"shelters")).isSameAs(api);

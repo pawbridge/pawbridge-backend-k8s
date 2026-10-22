@@ -43,10 +43,14 @@ public final class JdbcUserAnimalActivities implements UserAnimalActivities {
         int deleted=jdbc.update("DELETE FROM pawbridge_user.favorites WHERE user_id=? AND animal_id=?",current,animal);
         if(deleted>0)counts.adjust(animal,-1);
     });}
-    public Favorites favorites(long current){return read.execute(tx->{
-        requireUser(current);
-        List<Favorite> favorites=jdbc.query("SELECT favorite_id,user_id,animal_id,created_at FROM pawbridge_user.favorites WHERE user_id=? ORDER BY created_at DESC",
+    // Animal lookups run after the User read transaction has returned its connection. They were independent
+    // transactions on a separate pool; nesting them here would hold two connections of the one shared pool.
+    public Favorites favorites(long current){
+        List<Favorite> favorites=read.execute(tx->{
+            requireUser(current);
+            return jdbc.query("SELECT favorite_id,user_id,animal_id,created_at FROM pawbridge_user.favorites WHERE user_id=? ORDER BY created_at DESC",
                 (rs,n)->{Timestamp value=rs.getTimestamp("created_at",utc());return new Favorite(rs.getLong("favorite_id"),rs.getLong("user_id"),rs.getLong("animal_id"),value==null?null:value.toLocalDateTime());},current);
+        });
         if(favorites.isEmpty())return new Favorites(current,0,List.of());
         List<Animal> found=animals.batch(favorites.stream().map(Favorite::animalId).toList());
         Map<Long,Animal> byId=found.stream().collect(Collectors.toMap(Animal::id,Function.identity()));
@@ -54,13 +58,16 @@ public final class JdbcUserAnimalActivities implements UserAnimalActivities {
             return animal==null?new FavoriteAnimal(favorite.favoriteId(),favorite.userId(),favorite.animalId(),favorite.createdAt(),null,null,null,null,null,null,"DELETED",null,null)
                 :new FavoriteAnimal(favorite.favoriteId(),favorite.userId(),favorite.animalId(),favorite.createdAt(),animal.breed(),animal.species(),animal.gender(),animal.age(),animal.imageUrl(),animal.shelterName(),animal.status(),animal.apmsNoticeNo(),animal.specialMark());}).toList();
         return new Favorites(current,content.size(),content);
-    });}
-    public AnimalPage registered(long current,PageRequest request){return read.execute(tx->{
-        List<CurrentUser> users=jdbc.query("SELECT role,care_reg_no FROM pawbridge_user.users WHERE user_id=?",(rs,n)->new CurrentUser(rs.getString("role"),rs.getString("care_reg_no")),current);
-        if(users.isEmpty())throw new UserNotFoundException();CurrentUser user=users.getFirst();
-        // The source UnauthorizedException is a RuntimeException handled by its generic 500 advice.
-        if(!"ROLE_SHELTER".equals(user.role()))throw new IllegalStateException("Shelter membership is required");
-        if(user.careRegNo()==null||user.careRegNo().isEmpty())throw new IllegalStateException("Shelter registration is missing");
+    }
+    public AnimalPage registered(long current,PageRequest request){
+        CurrentUser user=read.execute(tx->{
+            List<CurrentUser> users=jdbc.query("SELECT role,care_reg_no FROM pawbridge_user.users WHERE user_id=?",(rs,n)->new CurrentUser(rs.getString("role"),rs.getString("care_reg_no")),current);
+            if(users.isEmpty())throw new UserNotFoundException();CurrentUser found=users.getFirst();
+            // The source UnauthorizedException is a RuntimeException handled by its generic 500 advice.
+            if(!"ROLE_SHELTER".equals(found.role()))throw new IllegalStateException("Shelter membership is required");
+            if(found.careRegNo()==null||found.careRegNo().isEmpty())throw new IllegalStateException("Shelter registration is missing");
+            return found;
+        });
         Shelter shelter;
         try{shelter=animals.shelter(user.careRegNo());if(shelter==null)throw new IllegalStateException("Shelter response missing");}
         catch(Exception unavailable){throw new IllegalStateException("Shelter lookup failed",unavailable);}
@@ -69,7 +76,7 @@ public final class JdbcUserAnimalActivities implements UserAnimalActivities {
             AnimalPage result=animals.byShelter(shelter.id(),request);
             if(result==null)throw new IllegalStateException("Animal page missing");return result;
         }catch(Exception unavailable){throw new IllegalStateException("Animal page lookup failed",unavailable);}
-    });}
+    }
     private boolean exists(long current,long animal){return jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pawbridge_user.favorites WHERE user_id=? AND animal_id=?)",Boolean.class,current,animal);}
     private void requireUser(long current){if(!jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pawbridge_user.users WHERE user_id=?)",Boolean.class,current))throw new UserNotFoundException();}
     private static Calendar utc(){return Calendar.getInstance(TimeZone.getTimeZone("UTC"));}

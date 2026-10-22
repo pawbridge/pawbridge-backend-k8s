@@ -57,14 +57,25 @@ class JdbcAnimalReportsTest {
             reports=new JdbcAnimalReports(read,write,new TransactionTemplate(readManager),new TransactionTemplate(writeManager),users,uploader,remover,new ObjectMapper(),Clock.fixed(TIME,ZoneOffset.UTC));
         }
     }
-    @Test void given__valid_report__when__creating__then__validate_upload_insert_nickname_and_commit_without_outbox(){
+    @Test void given__valid_report__when__creating__then__validate_upload_insert_commit_then_nickname_without_outbox(){
         var f=new Fixture();var result=f.reports.create(draft(Kind.MISSING," 서울특별시 "," 강남구 ",AnimalType.DOG),List.of(photo()),7L);
         assertThat(result.reportId()).isEqualTo(43);assertThat(result.title()).isEqualTo("실종 · 서울 · 개");assertThat(result.authorNickname()).isEqualTo("작성자");
         assertThat(result.approximateTime()).isNull();assertThat(result.province()).isEqualTo("서울특별시");assertThat(result.district()).isEqualTo("강남구");
-        assertThat(f.events).containsExactly("write-begin","upload","insert","nickname","write-commit");
+        assertThat(f.events).containsExactly("write-begin","upload","insert","write-commit","nickname");
         assertThat(f.write.sql).hasSize(1);assertThat(f.write.sql.getFirst()).contains("INSERT INTO pawbridge_community.animal_reports","RETURNING report_id");
         assertThat(f.write.sql.getFirst().chars().filter(c->c=='?').count()).isEqualTo(f.write.arguments.getFirst().length);
         verifyNoInteractions(f.remover);
+    }
+    @ParameterizedTest @ValueSource(strings={"create","update"})
+    void given__failing_nickname_read__when__writing__then__commit_report_first_and_fall_back_outside_the_writer_transaction(String operation){
+        // On the shared pool a failing read inside the writer transaction would mark it rollback-only.
+        var f=new Fixture();var insideWriter=new ArrayList<Boolean>();
+        doAnswer(c->{insideWriter.add(TransactionSynchronizationManager.isActualTransactionActive());f.events.add("nickname");
+            throw new IllegalStateException("private-user");}).when(f.users).findNickname(7);
+        var result=operation.equals("create")?f.reports.create(draft(Kind.MISSING,null,null,null),List.of(photo()),7L)
+                :f.reports.update(42,new Draft(Kind.MISSING,row().occurredOn(),null,"부산",null,"고양이",null,null,null,null,null,"새 내용",null,null,null),null,7L);
+        assertThat(result.authorNickname()).isEqualTo("사용자7");assertThat(insideWriter).containsExactly(false);
+        assertThat(f.events).endsWith("write-commit","nickname").doesNotContain("write-rollback");verifyNoInteractions(f.remover);
     }
     @ParameterizedTest @ValueSource(booleans={false,true}) void given__insert_or_commit_failure__when__creating__then__compensate_only_body_failure(boolean commit){
         var f=new Fixture();f.write.failInsert=!commit;f.writeManager.failCommit=commit;
@@ -103,7 +114,7 @@ class JdbcAnimalReportsTest {
         var result=f.reports.update(42,input,null,7L);
         assertThat(f.write.sql).hasSize(2);assertThat(f.write.sql.getLast()).contains("UPDATE pawbridge_community.animal_reports").doesNotContain("image_urls=");
         assertThat(result.region()).isEqualTo("부산");assertThat(result.district()).isNull();assertThat(result.imageUrls()).isEqualTo(row().imageUrls());
-        assertThat(result.updatedAt()).isEqualTo(row().updatedAt());assertThat(f.events).endsWith("nickname","write-commit");
+        assertThat(result.updatedAt()).isEqualTo(row().updatedAt());assertThat(f.events).endsWith("write-commit","nickname");
     }
     @ParameterizedTest @ValueSource(strings={"photos","missing","foreign","kind"})
     void given__update_rejection__when__updating__then__retain_original_failure_precedence_without_writes(String defect){
