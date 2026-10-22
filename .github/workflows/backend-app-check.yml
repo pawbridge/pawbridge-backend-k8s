@@ -247,6 +247,9 @@ jobs:
           fi
           bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false "${architecture_args[@]}"
 
+      - name: Compile legacy compatibility tests without running them
+        run: bash ./gradlew :boot:compileCompatibilityTestJava --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+
       - name: Bind the candidate JAR to this checked source
         id: package
         run: |
