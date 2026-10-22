@@ -10,7 +10,6 @@ import jakarta.persistence.EntityManagerFactory;
 import java.time.Clock;
 import java.time.ZoneId;
 import java.util.List;
-import java.util.Map;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -23,33 +22,26 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
-import org.springframework.kafka.core.ConsumerFactory;
-import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
-import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.backoff.FixedBackOff;
 
-/** Real writer-unit wiring and dormant transport contracts; no DB/Kafka/Redis connection is requested. */
+/** Real writer-unit wiring and dormant Redis resource contracts; no DB/Redis connection is requested. */
 class StorePaymentEventsConfigurationTest {
     @ParameterizedTest @ValueSource(strings={"absent","false","yes","on"})
-    void given__payment_events_not_explicitly_enabled__when__assembling__then__create_no_business_writer_or_transport_resources(String flag) {
+    void given__payment_events_not_explicitly_enabled__when__assembling__then__create_no_business_writer_or_redis_resources(String flag) {
         var runner=runner();if(!flag.equals("absent"))runner=runner.withPropertyValues("pawbridge.store-payment-events.enabled="+flag);
         runner.run(context->assertThat(context).hasNotFailed().doesNotHaveBean(StorePaymentEvents.class)
                 .doesNotHaveBean(EntityManagerFactory.class).doesNotHaveBean(DataSource.class)
-                .doesNotHaveBean(RedisConnectionFactory.class).doesNotHaveBean(StringRedisTemplate.class)
-                .doesNotHaveBean(ConsumerFactory.class).doesNotHaveBean(KafkaListenerEndpointRegistry.class));
+                .doesNotHaveBean(RedisConnectionFactory.class).doesNotHaveBean(StringRedisTemplate.class));
     }
 
     @Test void given__explicit_business_only__when__assembling__then__reuse_one_store_writer_and_actual_stock_projection_without_starting_clients() {
         DataSource writer=mock(DataSource.class);
         inputs(writer).run(context->{
             assertThat(context).hasNotFailed().hasSingleBean(StorePaymentEvents.class).hasSingleBean(EntityManagerFactory.class)
-                    .hasSingleBean(DataSource.class).doesNotHaveBean(RedisConnectionFactory.class).hasSingleBean(StringRedisTemplate.class)
-                    .doesNotHaveBean(ConsumerFactory.class).doesNotHaveBean(KafkaListenerEndpointRegistry.class);
+                    .hasSingleBean(DataSource.class).doesNotHaveBean(RedisConnectionFactory.class).hasSingleBean(StringRedisTemplate.class);
             var service=context.getBean(StorePaymentEvents.class);
             var shared=context.getBean("storeDirectOrderEntityManager",EntityManager.class);
             var factory=context.getBean("storeDirectOrderEntityManagerFactory",EntityManagerFactory.class);
@@ -86,26 +78,6 @@ class StorePaymentEventsConfigurationTest {
             verifyNoMoreInteractions(sorted);
         });
         verifyNoInteractions(writer);
-    }
-
-    @Test void given__explicit_kafka_registration__when__context_starts__then__retain_original_topics_group_retry_contract_but_keep_the_listener_stopped() {
-        DataSource writer=mock(DataSource.class);
-        @SuppressWarnings("unchecked") ConsumerFactory<String,String> consumers=mock(ConsumerFactory.class);
-        when(consumers.getConfigurationProperties()).thenReturn(Map.of("bootstrap.servers","broker.invalid:9092"));
-        inputs(writer).withPropertyValues("pawbridge.store-payment-events.kafka-enabled=true")
-                .withBean("storePaymentEventsConsumerFactory",ConsumerFactory.class,()->consumers).run(context->{
-            assertThat(context).hasNotFailed().hasSingleBean(KafkaListenerEndpointRegistry.class);
-            var backOff=context.getBean("storePaymentEventsBackOff",FixedBackOff.class);
-            assertThat(backOff.getInterval()).isEqualTo(1000L);assertThat(backOff.getMaxAttempts()).isEqualTo(4L);
-            assertThat(context.getBean("storePaymentEventsErrorHandler",DefaultErrorHandler.class).isAckAfterHandle()).isFalse();
-            var registry=context.getBean(KafkaListenerEndpointRegistry.class);
-            assertThat(registry.getListenerContainers()).hasSize(1);
-            var container=(ConcurrentMessageListenerContainer<?,?>)registry.getListenerContainers().iterator().next();
-            assertThat(container.isAutoStartup()).isFalse();assertThat(container.isRunning()).isFalse();
-            assertThat(container.getContainerProperties().getTopics()).containsExactly("payment.events","payment");
-            assertThat(container.getContainerProperties().getGroupId()).isEqualTo("payment-group");
-        });
-        verify(consumers,never()).createConsumer(any(),any(),any(),any());verifyNoInteractions(writer);
     }
 
     private static ApplicationContextRunner runner() {
