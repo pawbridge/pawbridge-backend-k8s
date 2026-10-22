@@ -2,6 +2,7 @@ package com.pawbridge.backend.boot.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
+import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogCategories;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogOptions;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogProducts;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.S3ProductImages;
@@ -47,6 +48,12 @@ public class StoreCatalogManagementConfiguration {
         return new JpaCatalogOptions(sharedWriter,writes,search,terms,mapper);
     }
 
+    @Bean
+    JpaCatalogCategories storeCatalogCategories(@Qualifier("storeDirectOrderEntityManager") EntityManager sharedWriter,
+            @Qualifier("storeDirectOrderWrites") TransactionTemplate writes) {
+        return new JpaCatalogCategories(sharedWriter,writes);
+    }
+
     @Bean(destroyMethod="")
     S3ProductImages storeProductImages(@Qualifier("postS3Client") S3Client client,PostWriteSettings settings) {
         return new S3ProductImages(client,settings.bucket(),settings.publicBaseUrl());
@@ -55,5 +62,6 @@ public class StoreCatalogManagementConfiguration {
     @Bean ProductWriteController productWriteController(JpaCatalogProducts products){return new ProductWriteController(products);}
     @Bean OptionManagementController optionManagementController(JpaCatalogOptions options){return new OptionManagementController(options);}
     @Bean ProductImageController productImageController(S3ProductImages images){return new ProductImageController(images);}
+    @Bean CategoryManagementController categoryManagementController(JpaCatalogCategories categories){return new CategoryManagementController(categories);}
     @Bean CatalogManagementExceptionHandler catalogManagementExceptionHandler(){return new CatalogManagementExceptionHandler();}
 }
