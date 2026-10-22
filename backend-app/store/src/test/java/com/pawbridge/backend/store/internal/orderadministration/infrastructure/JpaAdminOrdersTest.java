@@ -62,7 +62,7 @@ class JpaAdminOrdersTest {
         when(itemFetch.getResultList()).thenAnswer(call->{active(true);events.add("batch");return List.of(order);});
         when(orders.findById(33L)).thenAnswer(call->{active(true);events.add("get");if(failure.equals("query"))throw problem();return Optional.of(order);});
         when(em.find(Order.class,33L,LockModeType.PESSIMISTIC_WRITE)).thenAnswer(call->{active(false);events.add("order-lock");if(failure.equals("query"))throw problem();return order;});
-        doAnswer(call->{active(false);events.add("flush");if(order.getDeliveryStatus()==null || failure.equals("flush"))throw new PersistenceException("synthetic constraint failure");return null;}).when(em).flush();
+        doAnswer(call->{active(false);events.add("flush");if(order.getDeliveryStatus()==null || order.getStatus()==null || failure.equals("flush"))throw new PersistenceException("synthetic constraint failure");return null;}).when(em).flush();
     }
     @AfterEach void close(){assertFalse(TransactionSynchronizationManager.isActualTransactionActive());}
     static DataAccessResourceFailureException problem(){return new DataAccessResourceFailureException("synthetic query failure");}
@@ -82,6 +82,39 @@ class JpaAdminOrdersTest {
         assertEquals(88L,result.userId());assertEquals("stored-uuid",result.orderUuid());assertEquals("stored address",result.deliveryAddress());assertEquals(1,result.items().size());
         assertEquals(List.of("begin:write","actor:write","order-lock","flush","map","commit:write"),events);
         verify(em).find(Order.class,33L,LockModeType.PESSIMISTIC_WRITE);verify(em).flush();verifyNoMoreInteractions(em);verifyNoInteractions(orders);verify(administrators,never()).currentForRead(anyLong());
+    }
+    @ParameterizedTest @ValueSource(strings={"PENDING","PAID","COMPLETED","CANCELLED","FAILED"})
+    void given__admin_and_locked_order__when__changing_status__then__only_status_changes_after_user_then_order_lock_and_flush(String status) {
+        var result=service.updateStatus(7,33,status);assertEquals(status,result.status());assertEquals("READY",result.deliveryStatus());assertEquals(9007199254740993L,result.totalAmount());
+        assertEquals(88L,result.userId());assertEquals("stored-uuid",result.orderUuid());assertEquals("stored address",result.deliveryAddress());assertEquals(1,result.items().size());
+        assertEquals(List.of("begin:write","actor:write","order-lock","flush","map","commit:write"),events);
+        verify(em).find(Order.class,33L,LockModeType.PESSIMISTIC_WRITE);verify(em).flush();verifyNoMoreInteractions(em);verifyNoInteractions(orders);verify(administrators,never()).currentForRead(anyLong());
+    }
+    @ParameterizedTest @MethodSource("invalidActors")
+    void given__ineligible_current_database_admin__when__changing_status__then__deny_before_order_rows(String state,String op) {
+        if(!op.equals("write"))return;
+        actor=switch(state){case "null"->null;case "wrong-id"->new StoreOrderAdministrators.Actor(8,true,false,"ROLE_ADMIN");case "inactive"->new StoreOrderAdministrators.Actor(7,false,false,"ROLE_ADMIN");
+            case "deleted"->new StoreOrderAdministrators.Actor(7,true,true,"ROLE_ADMIN");default->new StoreOrderAdministrators.Actor(7,true,false,switch(state){case "user"->"ROLE_USER";case "shelter"->"ROLE_SHELTER";case "lowercase"->"role_admin";case "space"->"ROLE_ADMIN ";case "prefix"->"ROLE_ADMIN_MORE";default->null;});};
+        assertThrows(AdministratorRejectedException.class,()->service.updateStatus(7,33,"PAID"));verifyNoInteractions(em,orders);assertEquals("rollback:write",events.getLast());
+    }
+    @Test void given__missing_order__when__changing_status__then__original_400_family_without_flush() {
+        doReturn(null).when(em).find(Order.class,33L,LockModeType.PESSIMISTIC_WRITE);
+        assertThrows(IllegalArgumentException.class,()->service.updateStatus(7,33,"PAID"));verify(em,never()).flush();assertEquals("rollback:write",events.getLast());
+    }
+    @Test void given__null_status__when__updating__then__generic_failure_after_actor_and_order_lock_without_update_or_flush() {
+        var failure=assertThrows(IllegalStateException.class,()->service.updateStatus(7,33,null));
+        assertEquals("Order status cannot be stored",failure.getMessage());assertEquals("PENDING",order.getStatus().name());
+        assertEquals(List.of("begin:write","actor:write","order-lock","rollback:write"),events);
+        verify(order,never()).updateStatus(nullable(com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.OrderStatus.class));verify(em,never()).flush();
+    }
+    @Test void given__flush_or_commit_failure__when__changing_status__then__propagate_without_success() {
+        failure="flush";assertThrows(PersistenceException.class,()->service.updateStatus(7,33,"CANCELLED"));assertEquals("rollback:write",events.getLast());
+        events.clear();failure="commit";assertThrows(TransactionSystemException.class,()->service.updateStatus(7,33,"CANCELLED"));
+    }
+    @Test void given__missing_or_read_only_transaction__when__changing_status__then__fail_before_admin_or_order_lookup() {
+        var none=new JpaAdminOrders(em,orders,TransactionOperations.withoutTransaction(),reads,administrators);
+        assertThrows(IllegalStateException.class,()->none.updateStatus(7,33,"PAID"));
+        writes.setReadOnly(true);assertThrows(IllegalStateException.class,()->service.updateStatus(7,33,"PAID"));verifyNoInteractions(em,orders,administrators);
     }
     static Stream<Arguments> invalidActors() {return Stream.of("null","wrong-id","inactive","deleted","user","shelter","lowercase","space","prefix","no-role")
             .flatMap(state->Stream.of("list","get","write").map(op->Arguments.of(state,op)));}

@@ -19,7 +19,7 @@ import com.pawbridge.backend.store.internal.orderadministration.web.AdminOrderCo
 @ContextConfiguration(classes={AdminOrderController.class,ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class StoreAdminOrderDisabledHttpTest {
     @Autowired MockMvc mvc; @MockitoBean AdminOrders orders;
-    @ParameterizedTest @CsvSource({"GET,/api/v1/admin/orders","GET,/api/v1/admin/orders/7","PATCH,/api/v1/admin/orders/7/delivery-status"})
+    @ParameterizedTest @CsvSource({"GET,/api/v1/admin/orders","GET,/api/v1/admin/orders/7","PATCH,/api/v1/admin/orders/7/delivery-status","PATCH,/api/v1/admin/orders/7/status"})
     void given__disabled_administration__when__signed_administrator_uses_a_route__then__deny_before_business(String method,String path) throws Exception {
         mvc.perform(command(method,path)).andExpect(status().isForbidden());verifyNoInteractions(orders);
     }
@@ -32,7 +32,7 @@ class StoreAdminOrderDisabledHttpTest {
 @ContextConfiguration(classes={AdminOrderController.class,ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class StoreAdminOrderAliasDisabledHttpTest {
     @Autowired MockMvc mvc; @MockitoBean AdminOrders orders;
-    @ParameterizedTest @CsvSource({"GET,/api/v1/admin/orders","GET,/api/v1/admin/orders/7","PATCH,/api/v1/admin/orders/7/delivery-status"})
+    @ParameterizedTest @CsvSource({"GET,/api/v1/admin/orders","GET,/api/v1/admin/orders/7","PATCH,/api/v1/admin/orders/7/delivery-status","PATCH,/api/v1/admin/orders/7/status"})
     void given__boolean_alias__when__signed_administrator_uses_a_route__then__keep_owner_flag_closed(String method,String path) throws Exception {
         mvc.perform(StoreAdminOrderDisabledHttpTest.command(method,path)).andExpect(status().isForbidden());verifyNoInteractions(orders);
     }
@@ -41,7 +41,7 @@ class StoreAdminOrderAliasDisabledHttpTest {
 @ContextConfiguration(classes={AdminOrderController.class,ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
 class StoreAdminOrderNeighborDisabledHttpTest {
     @Autowired MockMvc mvc; @MockitoBean AdminOrders orders;
-    @ParameterizedTest @CsvSource({"PUT,/api/v1/orders/7/status","PUT,/api/v1/orders/7/cancel","GET,/api/v1/orders/uuid/example","POST,/api/v1/payments/confirm","GET,/api/v1/orders/7"})
+    @ParameterizedTest @CsvSource({"PUT,/api/v1/orders/7/status","PUT,/api/v1/orders/7/cancel","GET,/api/v1/orders/uuid/example","POST,/api/v1/payments/confirm","GET,/api/v1/orders/7","PUT,/api/v1/admin/orders/7/status","POST,/api/v1/admin/orders/7/status","PATCH,/api/v1/admin/orders/7/status/","PATCH,/api/v1/admin/orders/7/status/extra"})
     void given__only_administration_enabled__when__an_unported_order_operation_is_requested__then__deny_before_business(String method,String path) throws Exception {
         mvc.perform(StoreAdminOrderDisabledHttpTest.command(method,path)).andExpect(status().isForbidden());verifyNoInteractions(orders);
     }

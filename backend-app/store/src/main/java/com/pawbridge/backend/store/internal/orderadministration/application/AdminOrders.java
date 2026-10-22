@@ -9,4 +9,5 @@ public interface AdminOrders {
     Page list(long verifiedAdministratorId,Query query);
     DirectOrders.OrderDetails get(long verifiedAdministratorId,long orderId);
     DirectOrders.OrderDetails updateDelivery(long verifiedAdministratorId,long orderId,String deliveryStatus);
+    DirectOrders.OrderDetails updateStatus(long verifiedAdministratorId,long orderId,String status);
 }

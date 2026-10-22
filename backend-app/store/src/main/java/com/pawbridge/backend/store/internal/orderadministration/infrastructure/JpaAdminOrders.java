@@ -20,7 +20,7 @@ import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-/** Root supplies one writer EM/JpaTM; only deliveryStatus is changed, never Order payment state. */
+/** Root supplies one writer EM/JpaTM; each PATCH changes only its own Order column, as the original did, with no stock, payment or outbox side effect. */
 public final class JpaAdminOrders implements AdminOrders {
     private static final Set<String> SORTS=Set.of("id","userId","orderUuid","totalAmount","status","deliveryAddress","deliveryStatus",
             "receiverName","receiverPhone","deliveryMessage","createdAt","updatedAt");
@@ -73,6 +73,18 @@ public final class JpaAdminOrders implements AdminOrders {
             if(order==null)throw new IllegalArgumentException("Order not found");
             if(delivery==null)throw new IllegalStateException("Delivery status cannot be stored");
             order.updateDeliveryStatus(delivery);
+            em.flush();
+            return details(order);
+        });
+    }
+    @Override public DirectOrders.OrderDetails updateStatus(long user,long orderId,String status) {
+        OrderStatus value=status==null?null:OrderStatus.valueOf(status);
+        return writes.execute(tx->{
+            transaction(false);actor(user,administrators.currentForWrite(user));
+            Order order=em.find(Order.class,orderId,LockModeType.PESSIMISTIC_WRITE);
+            if(order==null)throw new IllegalArgumentException("Order not found");
+            if(value==null)throw new IllegalStateException("Order status cannot be stored");
+            order.updateStatus(value);
             em.flush();
             return details(order);
         });
