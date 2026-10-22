@@ -67,7 +67,12 @@ class LegacyPostUpdateObservationTest {
         assertThat(observation.response()).isEqualTo(observation.before());
         assertThat(observation.afterFlush()).isEqualTo(changed?AUDIT.get():observation.before());
         assertThat(committed).isEqualTo(observation.afterFlush());
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_UPDATED'",Integer.class,Long.toString(created.postId()))).isOne();
+        // The candidate writer no longer holds outbox privileges; observe the legacy oracle's row as the fixture admin.
+        try (var connection=fixture.admin();
+             var statement=connection.prepareStatement("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_UPDATED'")) {
+            statement.setString(1,Long.toString(created.postId()));
+            try (var row=statement.executeQuery()) { row.next(); assertThat(row.getInt(1)).isOne(); }
+        }
         System.out.println("F5_LEGACY_UPDATE mode="+mode+" responseMatchesBefore="+observation.response().equals(observation.before())
                 +" responseMatchesCommit="+observation.response().equals(committed)+" audited="+changed+" zone="+ZoneId.systemDefault());
     }

@@ -732,7 +732,21 @@ Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named 
 
 동결 Shelter source7사례, 같은구조 guard6 성공과 독립 검수를 보존했습니다. 활동 module을 제외한 새조합은2사례·production compile/Business605를6초에 확인했습니다. 기존 source/전체구조 성공시험은 반복하지 않았습니다. 활동조회의 특정 collection sort는 원문200/후보500 차이가 있어 해당 API/JDBC/어댑터/시험/선택 설정을 게시에서 전부 제외하고 별도 준비본에 보존했습니다. 기존 User 활동조회는 HTTP를 유지합니다. 활동 모듈·전체 HTTP 동등성·운영 활성화 완료를 주장하지 않습니다.
 
-### 찜 증감 활성화 전 조건
+### 본인 찜상품 항목 관리
+
+`pawbridge.store-wishlist.enabled=true`에서만 JWT 회원의 `DELETE /api/v1/wishlists/{wishlistId}`를 허용합니다. body·query·헤더의 회원 ID 대신 검증된 principal을 사용하며, 항목 ID와 회원 ID를 같은 DELETE 조건에 묶습니다. 없음·다른 회원 소유·반복 삭제는 동일한 204이고 DB/TX 오류는 성공으로 숨기지 않습니다. 기존 POST와 SKU 기반 DELETE는 유지합니다.
+
+회원 찜 조회 정렬의 `skuPrice`·`sku_price`는 기존 `sku.price`와 같은 컬럼을 사용합니다. Store의 전체 재귀·컬렉션 JPA 정렬 호환성은 아직 미완료입니다. 이 변경과 합성 시험·CI는 운영 배포 또는 전체 회원 조회 전환 완료를 뜻하지 않습니다.
+
+## User 동물 조회와 찜 단일 트랜잭션
+
+`pawbridge.user-animal-activities.animal-backend`는 기본 `http`이며, 명시 `module`일 때만 Animal의 순수 Java `AnimalMemberReads`로 본인 동물·찜 목록을 읽는다. 보호소 API와 같은 reader를 사용하지만 공개 Animal 경로를 추가로 활성화하지 않는다. reader는 별도 읽기 manager의 read-only REQUIRES_NEW이며 User writer와 분리된다. 원문 MANUAL 목록, 입력 ID 순서·중복/부재 처리, nullable 필드, JPA 속성 경로 정렬과 페이지 중복 제거 의미를 유지한다. 후보 SQL의 owned PostgreSQL 관측과 원문 JPA 실행 비교는 구분한다.
+
+찜 추가·삭제는 `pawbridge.user-animal-activities.enabled=true`일 때 User writer 트랜잭션 하나에서 `pawbridge_user.favorites` INSERT/DELETE와 `pawbridge_animal.animals.favorite_count` 증감(`updated_at` 갱신)을 함께 처리한다. 증감은 Animal 공개 API `AnimalFavoriteCounts.adjust(animalId, +1/-1)`가 같은 `writeJdbc`·`writeTransactionManager`로 수행하며 자체 트랜잭션을 열지 않는다. 감소는 기존 값이 양수일 때만 수행한다. Outbox(`FAVORITE_ADDED`/`FAVORITE_REMOVED`)·전달기(DB 폴링)·`processed_events` 영수증·`FavoriteCompensation` 보상과 `pawbridge.favorite-delivery.*` 설정(`user-outbox-floor`/`animal-outbox-floor` 포함)은 제거했다. 이벤트 큐가 필요해지면 다시 도입한다. `animal-backend=http`여도 증감은 로컬 `pawbridge_animal.animals`를 갱신한다(이전 전달기와 같음).
+
+동작: 이미 찜했으면 409, 존재하지 않는 동물을 찜하면 404(`동물을 찾을 수 없습니다`)이며 찜 행도 같은 트랜잭션에서 롤백한다(UPDATE 영향 행 0). 이전에는 성공 응답 뒤 최대 4회 재시도 끝에 보상으로 취소했다. 찜하지 않은 동물의 삭제는 기존처럼 404이다. 이미 사라진 동물의 찜은 계속 삭제할 수 있다(영향 행 0이어도 삭제는 커밋하고 증감만 건너뛴다). 찜 수는 커밋 즉시 일관된다(이전: 폴링 1초 이상+재시도 지연). 회원 삭제가 `favorite_count`를 줄이지 않는 기존 갭은 구 시스템과 같고 이번에 바꾸지 않았다.
+
+락 순서: Animal 명령은 User 행 `FOR UPDATE` → Animal 행 순서이고, 찜은 `favorites` INSERT(users FK의 `FOR KEY SHARE`) → Animal 행 UPDATE 순서이며 한 트랜잭션이 Animal 행을 하나만 잡는다. 코드 검토상 순환은 찾지 못했다. 같은 회원의 명령과 찜은 users 행에서 먼저 직렬화되고, 다른 회원끼리는 서로 다른 users 행을 쥔 채 Animal 행 하나를 기다릴 뿐이며, Animal 모듈에는 users 행을 요청하는 경로가 없다. 단 실제 PostgreSQL 동시 실행으로는 검증하지 않았다(불확실). 인기 동물은 Animal 행 UPDATE에서 짧게 직렬화된다. `animal_search_changed` 트리거는 breed 등 검색 열이 바뀔 때만 동작하므로 찜 증감은 검색 dirty를 만들지 않는다.
 
 활성화 전 조건: 선택한 User writer에 `pawbridge_animal` 스키마 USAGE와 `pawbridge_animal.animals`의 `SELECT(id, favorite_count, updated_at)`·`UPDATE(favorite_count, updated_at)`가 필요하다(WHERE·SET·CASE가 세 열을 읽는다). `pawbridge_user.outbox_events` INSERT는 더 이상 필요 없다. 누적 F29 CI writer ACL(`backend-app/scripts/f29_ci.py`)에는 이 권한이 없고 owned PostgreSQL 증분 SQL과 시험은 추가하지 않았으므로 운영 역할에 직접 부여하고 확인한다. 이 단일 트랜잭션 SQL·권한·락은 단위·조립 시험(mock JDBC)으로만 확인했고 실제 PostgreSQL 시험은 하지 않았다. 이전 전달기·Debezium 소비자(구 user/animal-service)를 먼저 멈추고 미전달 `Favorite` Outbox 행이 없는 것을 확인한 뒤 켠다. User Outbox·Processed 보존 작업(`UserMaintenanceConfiguration`, `pawbridge.user-maintenance.*`)은 outbox 제거와 함께 삭제했다. 컷오버 때 community/user Debezium 커넥터와 `outbox_events`/`processed_events` 테이블 정리는 이 변경의 범위 밖이다.
 

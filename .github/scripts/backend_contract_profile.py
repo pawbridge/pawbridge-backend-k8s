@@ -1129,7 +1129,8 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '98f2e297447daffb5af14
  'backend-app/scripts/f3_ci.py': '1e65a952d37bb8d885a8896f05ffabdde371ec3b8042146c6bdb3499969d11ef',
  'backend-app/scripts/f3_fixture.sql': 'db4d13c33c146db0daaf4da6c306fce04d509e0cb1ed99d318f497c5b101ec67',
  'backend-app/scripts/f4_ci.py': 'c669ccf3ebb50af90ab9aa0af28c7b92566d962d3b9af106ea86ef1470f10414',
- 'backend-app/scripts/f5_ci.py': 'b4e4695c7eecf6d1856052ca99c1e731e24acbfaad058fc05069840ecdcc745e'}
+ 'backend-app/scripts/f5_ci.py': 'b4e4695c7eecf6d1856052ca99c1e731e24acbfaad058fc05069840ecdcc745e',
+ 'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/LegacyPostUpdateObservationTest.java': '8082b6ea9146ae9fd668bcce5f4d3143faf0add4f23f3d54bc47233a6890225e'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39577223965
@@ -1480,7 +1481,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 784
+                or len(POST_READS_APP_HASHES) != 785
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
