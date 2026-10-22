@@ -1030,6 +1030,16 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 
 단위·구성·실제 Security/JWT와 합성 HTTP 검증 근거를 보존했다. 최종 단일 조립에서 기존 actualMain2와 동일 소유 PostgreSQL의 SELECT3을 재검증했고, Kafka Admin·ConsumerFactory·ProducerFactory·listener registry가 기본 비활성 상태에서 생성되지 않음을 확인했다. 선택한 구조 계약3과 현재 구조 guard도 통과했으며, 생성한 JAR의 실제 runtime162개 목록은 기존 CI 격리 경계를 통과했다. 전체 구조 자체회귀는 CI에서 별도로 실행해야 한다. 이 결과는 실 Toss·Redis·Kafka 운영 연결, 소비·ACK 성공, 결제 소유권·정상 상태·금액 정책 보완이나 운영 활성화 완료를 의미하지 않는다. 원문의 늦은 결제 결과·중복/경합·외부 보상·DB commit 뒤 실패 한계는 후속 보완으로 유보한다.
 
+### Store 모의 결제
+
+`pawbridge.store-mock-payment.enabled=true`(대소문자 무시, `on` 등 다른 값은 비활성)에서만 원문 store-service `OrderController`의 POST `/api/v1/orders/{orderId}/payment`를 조립한다. 기본 off다. 업무는 이미 편입된 `StorePaymentEvents.processPayment`를 그대로 호출하므로 `pawbridge.store-payment-events.enabled=true`도 함께 켜야 하며, 그 업무 빈이 없으면 앱이 시작 시 실패한다(조용한 403으로 대체하지 않는다). 원문 `payments.enabled`(Toss 결제 확인)와는 별개 경로라 그 플래그에 묶지 않았다.
+
+원문 Gateway는 `/api/orders/**`에 유효한 토큰만 요구했으므로 서명 검증한 회원이면 USER·ADMIN·SHELTER 모두 호출할 수 있다. 원문 그대로 주문 ID로 주문을 찾아 PENDING이 아니면 거부하고 PAID로 바꾼 뒤 같은 Store writer 트랜잭션에서 `order`/`ORDER_PAID` outbox(`orderId`·`userId`·`totalAmount`·`status`)를 INSERT한다. 응답은 본문 없는 200, 없는 주문은 400 `C001`, PENDING이 아닌 주문과 outbox 직렬화 실패는 500 `C004`, 숫자가 아닌 주문 ID는 400 `C005`다. Kafka/CDC로 outbox를 전달하는 기존 방식은 바꾸지 않는다.
+
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **소유자·금액·실제 결제 확인 없이 아무 회원이나 다른 회원의 주문을 PAID로 바꾸고 ORDER_PAID 이벤트를 만들 수 있다.** 프런트는 이 경로를 쓰지 않으며 운영에서 켜지 않는 것을 전제로 한다. 주문 행 잠금이 없어 Toss 결제 결과 처리와 경합할 수 있고, 재고·랭킹은 바꾸지 않는다. 원문과 다른 점으로, 등록되지 않은 메서드·alias(`/api/orders/...`)·하위 경로는 원문 405/라우팅 대신 공통 보안 기본 거부 403이며, 원문 전역 advice의 문자셋 위반 C007 분기는 이 경로에서 입력 문자열이 없어 두지 않았다. 트랜잭션은 Store writer 기본 timeout 15초를 상속한다(원문은 timeout 없음).
+
+활성화 전 선택한 writer에 `pawbridge_store` USAGE, `orders` SELECT·UPDATE(`@DynamicUpdate`가 없어 Hibernate가 갱신 가능한 모든 열과 `updated_at`을 다시 씀), `outbox` INSERT와 `outbox_id_seq` USAGE가 필요하다. 누적 F29 CI ACL(`backend-app/scripts/f29_ci.py`)에는 Store 권한이 없고, 기존 직접 주문 합성 권한도 `orders` UPDATE를 주지 않는다. Store writer는 공유 `writeDataSource`(기본 최대 1개·연결 대기 2초)를 쓰므로 다른 쓰기와 연결을 다툴 수 있다. 단위·구성·실제 Security/JWT MVC 시험은 mock 업무 기준이며 실제 PostgreSQL·Kafka 전달 검증이 아니다.
+
 ### 실제 Main 조립과 격리 PostgreSQL 계약 검증
 
 `OwnedPostgresqlMainCoreIntegrationTest`의 3사례는 실제 `PawBridgeApplication`과 JWT·SecurityFilterChain을 통해 User→Animal 즐겨찾기, User→Store 구매 내역, Community→User 작성자 조회를 검증한다. 읽기 전용 권한을 가진 별도 합성 PostgreSQL 자료에서 실제 저장소 조회, 트랜잭션 분리, 요청 후 연결 반환, 자료 불변과 정상 종료를 확인했다. 운영 데이터나 정상 결제·외부 서비스 성공을 검증한 결과는 아니다.

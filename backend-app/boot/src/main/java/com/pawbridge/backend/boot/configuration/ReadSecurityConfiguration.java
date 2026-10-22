@@ -53,7 +53,8 @@ public class ReadSecurityConfiguration {
             @Value("${lost-gallery-feed.enabled:false}") String galleryFeedFlag,
             @Value("${pawbridge.animal-chatbot.enabled:false}") String chatbotFlag,
             @Value("${pawbridge.store-catalog-management.enabled:false}") String catalogManagementFlag,
-            @Value("${pawbridge.payments.enabled:false}") String paymentsEnabledFlag) throws Exception {
+            @Value("${pawbridge.payments.enabled:false}") String paymentsEnabledFlag,
+            @Value("${pawbridge.store-mock-payment.enabled:false}") String storeMockPaymentFlag) throws Exception {
 
         var catalogManagementEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(catalogManagementFlag);
         var catalogManagementWriting=new AndRequestMatcher(catalogManagementEnabled,new OrRequestMatcher(
@@ -73,6 +74,10 @@ public class ReadSecurityConfiguration {
 
         var paymentEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(paymentsEnabledFlag);
         var paymentConfirmation=new AndRequestMatcher(paymentEnabled,new AntPathRequestMatcher("/api/payments/confirm","POST"));
+        // Original Gateway required only a valid token for /api/orders/**; the mock route has no owner check.
+        var storeMockPaymentEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(storeMockPaymentFlag);
+        var storeMockPayment=new AndRequestMatcher(storeMockPaymentEnabled,
+                new AntPathRequestMatcher("/api/v1/orders/{orderId}/payment","POST"));
 
         var chatbotEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(chatbotFlag) && "postgresql".equals(animalQueryBackend);
@@ -288,7 +293,7 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
         var adminRoutes = new OrRequestMatcher(shelterCommandAdmin, storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(catalogManagementWriting, paymentConfirmation,shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var postWriting = new OrRequestMatcher(catalogManagementWriting, paymentConfirmation, storeMockPayment,shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
