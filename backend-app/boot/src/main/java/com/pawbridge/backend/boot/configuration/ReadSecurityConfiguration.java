@@ -93,6 +93,7 @@ public class ReadSecurityConfiguration {
         var storeOrderAdministrationRoutes=new AndRequestMatcher(storeOrderAdministrationEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/admin/orders","GET"),
                 new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}/status","PATCH"),
                 new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}/delivery-status","PATCH")));
         var animalTravelEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(animalTravelFlag) && "postgresql".equalsIgnoreCase(animalQueryBackend);

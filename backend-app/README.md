@@ -862,11 +862,19 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 ## 관리자 주문 조회·배송 관리
 
-`pawbridge.store-order-administration.enabled=true`일 때 관리자 주문 목록·필터/상세 조회와 배송 상태 변경의 세 API만 등록합니다. 기본값은 비활성이며 `on` 등 별칭은 허용하지 않습니다. 기존 Store writer EMF·DataSource·트랜잭션과 auditing을 공유합니다. 관리자 구성만으로 개인 주문 조회, 장바구니 또는 결제 API를 활성화하지 않습니다.
+`pawbridge.store-order-administration.enabled=true`일 때 관리자 주문 목록·필터/상세 조회와 배송 상태 변경의 세 API, 그리고 아래 주문 상태 변경 API를 등록합니다. 기본값은 비활성이며 `on` 등 별칭은 허용하지 않습니다. 기존 Store writer EMF·DataSource·트랜잭션과 auditing을 공유합니다. 관리자 구성만으로 개인 주문 조회, 장바구니 또는 결제 API를 활성화하지 않습니다.
 
 서명 검증된 관리자 JWT와 현재 DB의 정확한 `ROLE_ADMIN`을 모두 요구하며 삭제 대기·누락 계정은 거부합니다. 조회는 짧은 읽기 전용 트랜잭션, 변경은 같은 writer의 User 행 잠금 뒤 Order 행 잠금으로 실행합니다. 목록 크기는 1~100, 정렬은 명시된 Order의 scalar 필드로 제한합니다. 배송 변경은 주문의 결제 상태·금액·품목·재고·Outbox를 바꾸지 않습니다. 원문 계약인 단건 없음 404, 배송 변경 대상 없음 400, null 배송 상태의 500과 rollback을 유지합니다. null은 같은 쓰기 트랜잭션에서 현재 관리자와 주문을 확인한 뒤 DB 변경 전에 고정 오류로 거부해, DB 제약 오류에 수취 정보가 기록되는 경로를 막습니다.
 
 새 합성 DB 검증은 `P13_PG_SETTINGS`의 비공개 설정을 사용하는 `OwnedPostgresqlStoreOrderAdministrationTest`로 분리합니다. 이 소스 편입은 운영 활성화나 Payment·취소·환불·재입고 계약 완료가 아닙니다.
+
+### 관리자 주문 상태 변경
+
+같은 `pawbridge.store-order-administration.enabled=true`에서 원문 `AdminOrderController`의 PATCH `/api/v1/admin/orders/{orderId}/status`(`{"status"}`)를 추가합니다. 원문은 목록·상세·주문 상태·배송 상태를 한 컨트롤러로 묶었으므로 별도 flag를 두지 않습니다. Gateway의 `PATCH:/api/admin/orders/*/status` ADMIN 전용 규칙과 같이 서명 관리자 JWT를 요구하고, 배송 변경과 같은 현재 DB `ROLE_ADMIN` 확인→User 행 잠금→Order 행 잠금 순서로 실행합니다. 응답은 원문 `OrderResponse` 형태와 200이며 대상 없음 400, null 상태 500과 rollback, 알 수 없는 enum·깨진 JSON의 500 family는 배송 변경과 같은 원문 계약입니다.
+
+원문 그대로 `status` 열 하나만 바꿉니다. 허용 전이 검사, 결제·환불·재고·검색·Outbox·이벤트 연동이 없어 PAID→PENDING, 결제 없이 PAID, CANCELLED 전환 시 재고·결제 미복구 같은 임의 전이가 가능합니다. 이 원문 결함은 고치지 않고 활성화 전 확인 항목으로 둡니다. 변경 로그(원문 info)는 남기지 않습니다.
+
+활성화 전 writer에는 기존 관리자 주문 기능과 같은 권한(`pawbridge_store`·`pawbridge_user` USAGE, 대상 표 SELECT, `users` UPDATE(user_id) 행 잠금용, `orders` UPDATE — 이 기능은 `status`·auditing `updated_at`)이 필요합니다(`admin-order-owned-schema.sql`과 같음). 누적 F29 CI writer ACL에는 Store 주문 권한이 없으므로 그 역할로 켜면 권한 오류 500이 됩니다. 공유 writer pool 기본 최대 1개를 다른 쓰기와 함께 씁니다. 단위·MVC·Security 시험은 mock 저장소 기준이며 이 경로의 실제 PostgreSQL 검증은 추가하지 않았습니다.
 
 ### 관리자 주문 목록의 품목 일괄 조회
 

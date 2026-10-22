@@ -114,8 +114,41 @@ class AdminOrderControllerTest {
         when(orders.updateDelivery(7,33,"SHIPPING")).thenThrow(failure);String body=mvc.perform(request("write")).andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value("C004"))
                 .andReturn().getResponse().getContentAsString();assertFalse(body.contains("private"));assertFalse(body.contains("address"));
     }
-    @ParameterizedTest @ValueSource(strings={"/api/v1/admin/orders/33/status","/api/v1/orders/33/payment"})
-    void given__unapproved_payment_state_path__when__requesting__then__no_handler(String path) throws Exception {
-        current(7L);var call=path.endsWith("payment")?post(path):patch(path).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}");mvc.perform(call).andExpect(status().isNotFound());verifyNoInteractions(orders);
+    @Test void given__unported_payment_path__when__requesting__then__no_handler() throws Exception {
+        current(7L);mvc.perform(post("/api/v1/orders/33/payment")).andExpect(status().isNotFound());verifyNoInteractions(orders);
+    }
+    @ParameterizedTest @ValueSource(strings={"PENDING","PAID","COMPLETED","CANCELLED","FAILED"})
+    void given__status_enum_and_forged_other_fields__when__patching_status__then__only_status_and_verified_caller_are_forwarded(String status) throws Exception {
+        current(7L);when(orders.updateStatus(7,33,status)).thenReturn(detail);
+        var bytes=mvc.perform(patch("/api/v1/admin/orders/33/status").header("X-User-Id","99").header("X-User-Role","ROLE_ADMIN").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\""+status+"\",\"deliveryStatus\":\"DELIVERED\",\"userId\":99}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray();
+        assertEquals(json.readTree(json.writeValueAsBytes(detail)),json.readTree(bytes));verify(orders).updateStatus(7,33,status);verifyNoMoreInteractions(orders);
+    }
+    @ParameterizedTest @ValueSource(strings={"missing","text"})
+    void given__missing_or_non_long_principal__when__patching_status__then__unauthorized_without_application(String kind) throws Exception {
+        if(kind.equals("text"))current("99");
+        mvc.perform(patch("/api/v1/admin/orders/33/status").header("X-User-Role","ROLE_ADMIN").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"))
+                .andExpect(status().isUnauthorized()).andExpect(content().string(""));verifyNoInteractions(orders);
+    }
+    @Test void given__rejected_admin_or_missing_order__when__patching_status__then__original_403_and_400() throws Exception {
+        current(7L);when(orders.updateStatus(7,33,"PAID")).thenThrow(new AdministratorRejectedException());when(orders.updateStatus(7,34,"PAID")).thenThrow(new IllegalArgumentException("private missing id"));
+        mvc.perform(patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}")).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("C006"));
+        mvc.perform(patch("/api/v1/admin/orders/34/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}")).andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("C001"));
+    }
+    @ParameterizedTest @ValueSource(strings={"{}","{\"status\":null}"})
+    void given__null_status_value__when__patching__then__preserve_original_500_generic_failure_family(String body) throws Exception {
+        current(7L);when(orders.updateStatus(7,33,null)).thenThrow(new IllegalStateException("Order status cannot be stored"));
+        mvc.perform(patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value("C004"));
+        verify(orders).updateStatus(7,33,null);
+    }
+    @ParameterizedTest @ValueSource(strings={"{\"status\":\"UNKNOWN\"}","{"})
+    void given__invalid_status_enum_or_malformed_json__when__patching__then__original_generic_server_error_binding_family(String body) throws Exception {
+        current(7L);mvc.perform(patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value("C004"));verifyNoInteractions(orders);
+    }
+    @Test void given__wrong_order_id_type__when__patching_status__then__original_bad_type_contract() throws Exception {
+        current(7L);mvc.perform(patch("/api/v1/admin/orders/bad/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("C005")).andExpect(jsonPath("$.errors[0].field").value("orderId"));verifyNoInteractions(orders);
     }
 }
