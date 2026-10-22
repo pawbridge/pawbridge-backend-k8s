@@ -1,5 +1,6 @@
 package com.pawbridge.backend.store.internal.catalogwrite.web;
 
+import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogCategories;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogProducts;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogOptions;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.S3ProductImages;
@@ -21,9 +22,10 @@ class CatalogManagementControllerTest {
     private final JpaCatalogProducts products=mock(JpaCatalogProducts.class);
     private final JpaCatalogOptions options=mock(JpaCatalogOptions.class);
     private final S3ProductImages images=mock(S3ProductImages.class);
+    private final JpaCatalogCategories categories=mock(JpaCatalogCategories.class);
     private MockMvc mvc;
     @BeforeEach void setup(){mvc=MockMvcBuilders.standaloneSetup(new ProductWriteController(products),
-            new OptionManagementController(options),new ProductImageController(images)).setControllerAdvice(new CatalogManagementExceptionHandler()).build();}
+            new OptionManagementController(options),new ProductImageController(images),new CategoryManagementController(categories)).setControllerAdvice(new CatalogManagementExceptionHandler()).build();}
 
     @Test void givenProductBody__whenCreating__thenBindOriginalFieldsAndReturn201() throws Exception {
         when(products.createProduct(any())).thenReturn(ProductResponse.builder().id(10L).name("food").status("ACTIVE")
@@ -71,6 +73,30 @@ class CatalogManagementControllerTest {
         var image=new MockMultipartFile("file","photo.png","image/png",new byte[]{1});
         mvc.perform(multipart("/api/v1/images").file(image)).andExpect(status().isOk()).andExpect(jsonPath("$.imageUrl").value("https://assets.invalid/products/photo.png"));
         verify(images).uploadImage(any());
+    }
+
+    @Test void givenCategoryWriteRequests__whenDispatched__thenKeepOriginalMethodsStatusesAndTreeShape() throws Exception {
+        var child=CategoryResponse.builder().id(2L).name("dry").parentId(1L).children(List.of()).build();
+        var response=CategoryResponse.builder().id(1L).name("food").description("food category").children(List.of(child)).build();
+        when(categories.createCategory(any())).thenReturn(response);when(categories.updateCategory(eq(1L),any())).thenReturn(response);
+        mvc.perform(post("/api/v1/categories").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"food\",\"description\":\"food category\",\"parentId\":5}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.id").value(1)).andExpect(jsonPath("$.parentId").isEmpty())
+                .andExpect(jsonPath("$.children[0].parentId").value(1)).andExpect(jsonPath("$.children[0].children").isEmpty());
+        var created=ArgumentCaptor.forClass(CategoryCreateRequest.class);verify(categories).createCategory(created.capture());
+        assertThat(created.getValue().getName()).isEqualTo("food");assertThat(created.getValue().getDescription()).isEqualTo("food category");assertThat(created.getValue().getParentId()).isEqualTo(5L);
+        mvc.perform(put("/api/v1/categories/1").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"food\",\"parentId\":null}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("food"));
+        var updated=ArgumentCaptor.forClass(CategoryUpdateRequest.class);verify(categories).updateCategory(eq(1L),updated.capture());assertThat(updated.getValue().getParentId()).isNull();
+        mvc.perform(delete("/api/v1/categories/1")).andExpect(status().isNoContent()).andExpect(content().string(""));verify(categories).deleteCategory(1L);
+    }
+
+    @Test void givenCategoryBusinessFailures__whenMapped__thenKeepOriginal400InputAnd500StateErrorCodes() throws Exception {
+        when(categories.updateCategory(eq(1L),any())).thenThrow(new IllegalArgumentException("synthetic self parent"));
+        mvc.perform(put("/api/v1/categories/1").contentType(MediaType.APPLICATION_JSON).content("{\"parentId\":1}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("C001")).andExpect(jsonPath("$.errors").isEmpty());
+        doThrow(new IllegalStateException("synthetic child refusal")).when(categories).deleteCategory(1L);
+        mvc.perform(delete("/api/v1/categories/1")).andExpect(status().isInternalServerError()).andExpect(jsonPath("$.code").value("C004"));
+        mvc.perform(delete("/api/v1/categories/abc")).andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("C005"));
     }
 
     @Test void givenOriginalBusinessFailures__whenMapped__thenKeep400InputAnd500StateErrorCodes() throws Exception {
