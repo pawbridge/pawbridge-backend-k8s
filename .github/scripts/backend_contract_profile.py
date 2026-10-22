@@ -361,7 +361,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a1
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c3e8c62ce0457be98e18cb4cbca31a762699f50ee396c678fcffd7382987362f',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'e732dfc628a98c65db4b53119fecf95569317a9622e42fa7d55a138d272466fa',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '993771f52bab10f0f15f083f0d9a693aee4b178fe8e8f6a88ea62205685f7104',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '5998ca012795207e034ee0cb19e657820e98faf78609184b35f49171d612d5fc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'dda638d643fc686e44102314be4d0d6d88b36a07e910fd074615950d6a3f21d1',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '7016adb41e6e20e7400999aab42eabef66c18de3739b63878e22bf0cd889dd31',
@@ -673,7 +673,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a1
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/command/infrastructure/service/AnimalCommandServiceTest.java': '5fe59bee78d4a52516c53e1b42bcea64dd1d33fab2186a788485b4a89f15e7c3',
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/command/web/AnimalCommandExceptionHandlerTest.java': '74fb1982ecae92d07b336e91df77bae3172e2b69702523c7041196e4a9576b59',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalCommandConfiguration.java': 'c41fb223ddb0bda7098f86d272b38f7114f87687f1a8ec10e634b3c3cc383f84',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalSearchConfiguration.java': 'b26bd34a7ecb91682415082b82d2a73cbe6e84eb781009363e35bf9c21921b23',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalSearchConfiguration.java': 'e83981ef058917dc8ca4cd6135bf617e734c7cf144b92f7a4754d56eefcea1df',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalCommandConfigurationTest.java': '61c8decf949d90baa7efb75461402f8587fd2695c19cb9567a8a0784b18cc570',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalCommandDisabledHttpTest.java': 'fd46357abd4644f764282f59306279f9902db36d94016aac5cf417c62b99ffbb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlAnimalCommandTest.java': 'd029ee360f565a8b5ca830897a4d5090e78b50e18b99434eaacd95ae55d607fc',
@@ -864,11 +864,11 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a1
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/apms/infrastructure/reader/ApmsItemReaderTest.java': 'be4394b6fbd0b97126bd2e6572b55a89649198654ccd613ab9ce0e31dfc85f24',
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/apms/infrastructure/tasklet/ShelterPrepTaskletTest.java': '696526c124a21294b97be7d6f8b651a963aaa5985a7084c8d68b34c3355900e5',
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/apms/infrastructure/writer/AnimalItemWriterTest.java': 'b6dc3132aacb50a922b8e5970791982ce166da1a9c76efb3cfbd8b6126957aa3',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalApmsCollectionConfiguration.java': '99b41ec9141e3c81f53bacaaba1ca02077695a8d3f22cfc70506a8ecf592b88a',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalApmsCollectionConfiguration.java': 'f6e70de0614f3ed43417a17b23ce58b1dc18269368a8ce84599dfe2aa03f1dce',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalApmsJobConfiguration.java': 'fe7692576153f0d62cfc7805846a5380453531a6f6f46a4c4f13f22813196c5b',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ApmsCollectionSchedule.java': 'a3e89832b8d9c364ea7fbde6a6ac67841010aa5ecf38dff1bb4d2a0f07d2f6bb',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ApmsHttpClient.java': '975e28a2e9006b44449cd05fbac62490ec81b9fb3b03129d3e193e39c147242d',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ApmsScheduleSettings.java': '1e6a696c57677bf47b99f7227c38f17e0cfb9ae71e53628931be4c62ce28415c',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ApmsScheduleSettings.java': '54df20532c8ef370a3c4fa0dd9b77136cbd1c5f6ce1a23957de7accd737e5721',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/AnimalApmsCollectionConfigurationTest.java': 'e04c774e73f7ddc4e6b029edc1242fd802f5c4051a4a83ebb2957c212379256f',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/ApmsCollectionScheduleTest.java': 'e60db77f942730065c604029e82b8761d5f625bfaa2d60618e46a1d3b06041e2',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/ApmsHttpClientTest.java': '39e536740b81281ffe176a1c82a572e382b57e28cf455e7e2aa9bfd8cabde376',
@@ -1081,6 +1081,11 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a1
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreMockPaymentConfigurationTest.java': 'ca0f76b90f951892431713c52e3c53ecac63398e03b9db973044e5e9a5834b8c',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/web/MockOrderPaymentController.java': 'baa902e892b1caff45d56a996e9e7235b87950a9ff25b0c617f23beb1fa19b6f',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/web/MockOrderPaymentExceptionHandler.java': 'd3ecc1feb1c591e0c50314f554cb55ad8a448daf599741ea5fabaf0d9bd27413',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/apms/web/ApmsBatchController.java': '6e127798c6223e8382dbe525b314e0bfa556a314621dd51ac5d5bc32790b304e',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/apms/web/ApmsBatchControllerTest.java': '548b785b15eb77bca82d1202cb4d9deef9f5cf209d2d91018eae2744cd9d6cb5',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/ApmsManualSyncDisabledHttpTest.java': '63bd885e0a0d571d1335a2c0a7966c4c28d64c296a76702f7a58d3b0bc6682ad',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/ApmsManualSyncHttpTest.java': '64e755769e60d4cd56600587c387d53a7819ebe560a1b7e53dd8c668e4f2a948',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/ApmsManualSyncConfigurationTest.java': '6d0c47a59360309bd9a8312be5a5dc9827e631e64b1d0b68745eb5c7f85c2f39',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/EmailVerificationConfiguration.java': '2bbe1393ea038d927ee7869ca1c3a386a31d868bf4debdf7185dd64d8c74a0b8',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/LocalSignupConfiguration.java': 'b2a144d9f9f3f9b0e91fc591db9a973b742460a5bb064a4dc21abdc0eec43fd9',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PasswordResetConfiguration.java': 'caeb41484173fbce6d32f44ab30a472fd5364415f5411c665dddd15f0168aed5',
@@ -1482,7 +1487,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 786
+                or len(POST_READS_APP_HASHES) != 791
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
