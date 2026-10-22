@@ -157,7 +157,7 @@ class PostgresqlPostCreateCompatibilityTest {
         assertThat(fixture.count("posts")).isOne();
         assertThat(fixture.count("post_search_documents")).isOne();
         // Explicit difference from the legacy service: no POST_CREATED outbox row (the legacy oracle's rows are not compared).
-        assertThat(writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=?", Long.class, String.valueOf(saved.postId()))).isZero();
+        assertThat((Long) fixture.outboxEvents(String.valueOf(saved.postId()), null)).isZero();
         KoreanSearchTerms oracleTerms = new KoreanSearchTerms();
         try {
             Map<String,Object> document = writeJdbc.queryForMap("SELECT title_hash,content_hash,analyzer_version,tokens::text FROM pawbridge_community.post_search_documents WHERE post_id=?",saved.postId());
