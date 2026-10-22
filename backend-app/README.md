@@ -964,7 +964,7 @@ owned 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P17_PG_SETTINGS`와 정확한 `P17
 
 ## APMS 예약 수집에서 동물·보호소 검색 반영까지
 
-`apms.batch.schedule-enabled=true`를 명시할 때만 예약·수집 Job·HTTP transport를 함께 조립한다. 기본 off이며 수동 실행 API는 포함하지 않는다. 원문 `query-v2`/`updated-v1` 계획·30일 재조회 overlap·부분 성공·COUNT_MISMATCH·10분 stale 회복과 세션 advisory lock key1을 보존한다. 계획 시계는 Asia/Seoul, Batch heartbeat 비교 시계는 실제 Batch metadata의 JVM 기본 시간대에 맞춰 분리한다.
+`apms.batch.schedule-enabled=true`를 명시할 때만 예약·수집 Job·HTTP transport를 함께 조립한다. 기본 off이며 수동 실행 API는 아래 별도 flag로만 추가한다. 원문 `query-v2`/`updated-v1` 계획·30일 재조회 overlap·부분 성공·COUNT_MISMATCH·10분 stale 회복과 세션 advisory lock key1을 보존한다. 계획 시계는 Asia/Seoul, Batch heartbeat 비교 시계는 실제 Batch metadata의 JVM 기본 시간대에 맞춰 분리한다.
 
 기존 Animal writer DataSource·EntityManagerFactory·JpaTransactionManager·검색 writer를 공유하며 새 pool·엔티티·DDL·Outbox 발행을 만들지 않는다. 외부 snapshot fetch는 실제 TX 밖에서 수행하고 보호소 준비는 짧은 별도 JPA TX, Animal upsert·검색과 Batch chunk checkpoint는 같은 JPA TX를 사용한다. 같은 DataSource라도 서로 다른 JDBC/JPA transaction manager를 혼용하면 metadata 쓰기가 chunk를 조기 commit할 수 있으므로 Repository·Explorer·회복도 같은 Animal JpaTransactionManager를 사용한다. 원문 chunk1000/retry3와 준비 step의 독립 commit 의미는 유지한다. 원문 fault-tolerant recovery가 정상 항목을 별도 TX로 커밋한 뒤 최종 Step이 FAILED일 수도 있다. 실제 반영량·source/search 일치와 실패 구간의 다음 재조회 계획을 함께 확인한다.
 
@@ -976,6 +976,15 @@ HTTP transport는 명시한 HTTPS 제공자만 사용하고 redirect를 따르�
 
 APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사례, 최종 새 합성 PG5사례(1.392초)는 서로 다른 실행 근거다. 최종 PG는 실제 source/search/Batch metadata DML 후 강제 rollback·physical commit 증가0, 원문 부분 복구·기존 행 보존, 두 실제 PID의 slot, stale10분, 정상 예약 종료를 확인했다. 제공자는 대역이며 실 APMS/운영 검증은 하지 않았다. 최초 SQL 개행 관측 오류와 원문 부분 commit을 전체 실패 원자성으로 오해한 두 시험 실패는 보존하고, 새 fixture에서 최소 정정 후 검증했다. 기존 DB를 reset하지 않았다.
 
+### APMS 수동 실행 API
+
+`pawbridge.apms-manual.enabled=true`를 명시할 때만 원문 `BatchController`의 POST `/api/v1/batch/apms/sync`를 조립한다. 기본 off이며 `on` 등 true 이외 별칭은 비활성이다. 이 flag만 켜도 위 APMS Job·HTTP transport·`apms.api.*` 필수 입력 검사를 함께 조립하지만, 앱 내부 예약(`apmsCollectionSchedule`)은 `apms.batch.schedule-enabled=true`일 때만 만든다. 원문도 수동 API는 항상 두고 예약만 `schedule-enabled`로 켰다. 두 진입점은 같은 `ApmsBatchRunner`와 세션 advisory lock을 공유하므로 겹치면 뒤 요청은 409 `ALREADY_RUNNING`이다.
+
+원문처럼 동기 실행이다. 요청은 Job이 끝날 때까지 HTTP 연결과 요청 스레드를 붙잡는다. 응답 필드(`jobExecutionId`, `status`, `startTime`/`endTime` `yyyy-MM-dd HH:mm:ss`, `skipCount`, 수집 요약 4개, `searchSyncStatus`)와 상태 코드(완료·skip0 200, 실행 중·UNKNOWN 503, 그 밖 500, lock 경합 409, lock·metadata 확인 불가 503 `GUARD_UNAVAILABLE`, 예외 500 고정 문구)를 유지한다. `searchSyncStatus`는 원문 `elasticsearchIndexStep` 이름을 그대로 찾으므로 PostgreSQL Job에서는 원문 PostgreSQL 실행과 같이 항상 `NOT_STARTED`다.
+
+권한은 원문과 다르다. 원문 animal-service에는 자체 인증이 없어 클러스터 안 CronJob이 서비스에 직접 호출했고, Gateway의 `/api/v1/batch/**` 보호 경로는 JWT 로그인만 요구했지만 `/api/v1/v1/...`로 다시 써 실제로는 404였다. 모놀리스는 공개 앱이므로 무인증 개방 대신 기존 관리자 경로와 같이 서명 JWT의 ROLE_ADMIN만 허용한다(USER·SHELTER 403 `관리자 권한이 필요합니다.`, 토큰 없음·오류 401). 따라서 원래 CronJob 호출 방식(무토큰)은 이 경로로 옮길 수 없으며, 정기 수집은 앱 내부 예약을 쓰고 이 API는 관리자 재실행용으로 둔다.
+
+활성화 전 확인 항목: 이전 animal-service CronJob·수동 API와 앱 내부 예약 중 단일 실행 소유자, APMS writer 권한과 Batch metadata 권한, writer 용량 `workers+2` 이상(수동 요청도 같은 pool을 쓴다), 프록시·Ingress의 요청 timeout이 Job 실행 시간보다 긴지, 종료 유예 시간(모놀리스 `server.shutdown=graceful`·`timeout-per-shutdown-phase=10s`, 원문 animal-service는 330초)이다. 동기 수동 요청이 수 분 걸리는 도중 재배포나 종료가 오면 10초 뒤 writer pool이 닫히고 Job이 STARTED로 남아 10분 stale 회복에 의존한다. 단위·구성·실제 Security/JWT MVC 시험은 mock runner 기준이며 실제 APMS·PostgreSQL 실행 검증이 아니다.
 
 ## 보호소 디렉터리 예약 수집
 
