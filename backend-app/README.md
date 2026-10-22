@@ -1061,3 +1061,21 @@ JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경�
 3. 증분 적용 뒤에는 writer의 `users` SELECT 열 집합과 `refresh_tokens` INSERT 열 집합이 F29 strict 검증의 정확 집합과 달라지므로, 같은 역할에 strict F29 준비·검증을 다시 실행하지 않는다. 다시 실행하려면 먼저 두 권한을 `REVOKE`한다.
 
 `OwnedPostgresqlLocalLoginWriterTest`(`owned-postgresql` 태그, 일반 `test`·CI에서는 제외)는 `f29_ci.py`의 strict 준비를 실행한 것이 아니라, auth-session 이후 로그인 관련 권한 부분집합을 재현한 새 합성 PostgreSQL에 증분을 적용한 상태를 한 번 확인했다. 증분 전 비밀번호 조회·첫 INSERT 거부(42501) 재현은 저장소 밖 준비 기록에만 남아 있다. 시험은 정확한 열 권한 집합, 실제 BCrypt 비밀번호 조회, 첫 로그인 INSERT와 재로그인 동일 행 UPDATE, sequence 권한 없이 identity 생성, writer의 추가 쓰기 거부, reader의 `password`·`refresh_tokens` 조회 거부를 확인했다. 이 fixture는 F29 전체 권한 재현이 아니며 writer의 `users` UPDATE·DELETE도 주지 않는다. reader의 `refresh_tokens` INSERT·UPDATE·DELETE 거부는 단언하지 않는다(이번 증분은 writer에만 적용된다). 시험은 이미 종료한 일회용 합성 서버의 식별값에 고정돼 있어 그대로 재실행할 수 없다. CI는 이 증분을 준비하거나 재검증하지 않으므로, 이후 `JdbcLocalLogin`의 SQL이 바뀌면 권한 불일치를 CI가 잡지 못한다. 실제 운영 DB 역할의 권한 결정과 LOCAL 로그인 활성화는 이 문서가 승인하는 범위가 아니다.
+
+### LOCAL 비밀번호 변경
+
+`pawbridge.user-password.enabled`는 기본 false이며 정확히 `true`(대소문자 무시)일 때만 원문 `PUT /api/v1/users/me/password`를 조립한다. `on` 등 다른 값은 비활성이다. 보안 체인은 같은 flag가 켜졌을 때만 이 정확한 PUT을 기존 Bearer 인증 대상에 넣는다. 원문 Gateway도 이 경로를 인증만 요구했으므로 USER·ADMIN·SHELTER 모두 허용하고, 요청의 `X-User-*` 헤더나 본문 userId가 아니라 검증된 JWT principal만 사용한다. 다른 메서드·뒤 슬래시·`/api/users/...` alias는 거부(403)하며 alias는 Gateway 책임으로 남긴다. LOCAL 로그인(`pawbridge.auth.local-enabled`)과는 독립 flag다.
+
+원문 DTO의 `currentPassword` NotBlank, `newPassword` NotBlank와 8~20자 영문·숫자·특수문자(`@$!%*#?&`) 패턴과 메시지를 유지한다. 검증 실패는 원문처럼 `field: message`를 `, `로 이은 400이고 거부된 값은 응답·로그에 남기지 않는다. 기존 writer `writeTransactionManager` 한 트랜잭션(timeout 10초, 기존 F13과 같은 값) 안에서 회원 조회→`provider`가 정확히 `LOCAL`이 아니면 400 `소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다.`→기본 강도 BCrypt로 현재 비밀번호 확인 실패 시 400 `현재 비밀번호가 일치하지 않습니다.`→원문 문자열 동일 시 400 `현재 비밀번호와 동일한 비밀번호로 변경할 수 없습니다.`→새 BCrypt 해시와 `updated_at`(UTC 바인딩) 두 열 UPDATE 순서를 유지한다. 회원 부재는 400 `존재하지 않는 회원입니다.`, 그 밖의 예외는 500 `서버 에러!`이며 성공은 200 `비밀번호가 변경되었습니다.`·data:null이다. BCrypt는 이 기능 안에서만 생성하고 전역 `PasswordEncoder` bean을 등록하지 않는다. 새 pool·DDL·의존성은 없다.
+
+원문 결함과 차이는 고치지 않고 활성화 전 확인 항목으로 남긴다. 비밀번호 변경 뒤에도 기존 refresh token과 access token을 폐기하지 않는다(원문과 같음). 회원 행 잠금이 없어 동시 변경은 마지막 쓰기가 남는다. 원문은 JPA 전체 행 flush였지만 후보는 `password`·`updated_at`만 갱신하므로 동시에 바뀐 다른 열을 덮지 않는다. 삭제 대기 등 회원 상태는 원문처럼 확인하지 않는다.
+
+#### 비밀번호 변경 writer 권한 증분과 적용 순서
+
+누적 writer `pawbridge_f3_writer` 권한은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `UPDATE(user_id,nickname,updated_at,role,care_reg_no)`이고, LOCAL 로그인 증분을 적용했다면 `SELECT(password)`가 더해진다. 비밀번호 변경은 `provider`·`password` 조회와 `password` UPDATE가 추가로 필요하므로 이 권한만으로는 실패한다(SQLSTATE 42501). `boot/src/test/resources/owned-postgresql/user-password-writer-grants.sql`은 `SELECT(provider,password),UPDATE(password)`만 추가한다(이미 있는 `SELECT(password)` 재부여는 변화 없음). 기존 권한은 회수하지 않는다.
+
+1. 기존 strict F29 준비와 그 검증(필요하면 LOCAL 로그인 증분)을 먼저 끝낸다.
+2. 테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v password_writer=pawbridge_f3_writer -f user-password-writer-grants.sql`로 한 번 적용한다.
+3. 적용 뒤에는 writer `users` 열 집합이 F29 strict 정확 집합과 달라지므로 같은 역할에 strict F29를 다시 실행하지 않는다. 다시 실행하려면 먼저 추가 권한을 `REVOKE`한다.
+
+이 증분은 실제 PostgreSQL에서 실행·검증하지 않았고 CI도 준비·검증하지 않는다. 단위(JDBC 계약·순서·BCrypt)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며, 실제 PG 권한·운영 DB 역할 결정·기능 활성화는 이 문서가 승인하는 범위가 아니다.
