@@ -77,6 +77,17 @@ class LocalAuthConfigurationTest {
     }
 
     @Test
+    void given__verification_enabled__when__another_unqualified_redis_factory_exists__then__it_stays_the_only_default_candidate() {
+        enabled().withBean("otherRedisConnectionFactory", org.springframework.data.redis.connection.RedisConnectionFactory.class,
+                () -> org.mockito.Mockito.mock(org.springframework.data.redis.connection.RedisConnectionFactory.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(org.springframework.data.redis.connection.RedisConnectionFactory.class))
+                            .isSameAs(context.getBean("otherRedisConnectionFactory"));
+                });
+    }
+
+    @Test
     void given__verification_enabled_without_redis_host_or_mail_sender_or_sender_address__when__assembling__then__fail() {
         runner().withPropertyValues("pawbridge.email-verification.enabled=true", "spring.mail.username=noreply@example.test")
                 .withBean(JavaMailSender.class, () -> mock(JavaMailSender.class))

@@ -30,7 +30,8 @@ import org.springframework.mail.javamail.JavaMailSender;
 @ConditionalOnProperty(prefix = "pawbridge.email-verification", name = "enabled", havingValue = "true",
         matchIfMissing = false)
 public class EmailVerificationConfiguration {
-    @Bean
+    // Not a default autowire candidate: member chat injects an unqualified RedisConnectionFactory.
+    @Bean(defaultCandidate = false)
     LettuceConnectionFactory localAuthRedisConnectionFactory(@Value("${spring.data.redis.host}") String host,
             @Value("${spring.data.redis.port:6379}") int port, @Value("${spring.data.redis.database:0}") int database,
             @Value("${spring.data.redis.username:}") String username,
