@@ -241,14 +241,18 @@ def smoke():
             for method, path in (('POST', '/api/v1/users/me'), ('PUT', '/api/v1/users/me'),
                                  ('DELETE', '/api/v1/users/me'), ('PATCH', '/api/v1/users/me'),
                                  ('HEAD', '/api/v1/users/me'), ('OPTIONS', '/api/v1/users/me'),
-                                 ('GET', '/api/v1/users/me/'), ('GET', '/api/v1/users/me/extra'),
-                                 ('GET', '/api/users/me'), ('GET', '/api/v1/users/internal/42/nickname')):
+                                 ('GET', '/api/v1/users/me/'), ('GET', '/api/v1/users/me/extra')):
                 before = snapshot()
                 f3.expect(base, path, 403, method, {'Authorization': 'Bearer ' + tokens['ROLE_USER']})
                 if snapshot() != before:
                     raise AssertionError('Denied profile route changed DB or contacted S3')
                 returned()
                 result['denied_route_checks'] += 1
+            # Gateway-moved behavior: the temporary legacy alias serves the same profile as /api/v1, and the
+            # service-to-service user path is refused with 404 before security.
+            profile(path='/api/users/me')
+            f3.expect(base, '/api/v1/users/internal/42/nickname', 404, headers={'Authorization': 'Bearer ' + tokens['ROLE_USER']})
+            returned()
             result['principal_fields_null_nickname_roles_missing_permissions_and_recovery'] = 'passed'
         finally:
             try:

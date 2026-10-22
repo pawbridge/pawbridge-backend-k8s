@@ -103,6 +103,7 @@ class LocalLoginHttpTest {
         Throwable failure=catchThrowable(()->mvc.perform(post("/api/v1/auth/login").contentType("application/json").content("{\"password\":\""+PRIVATE+"\"")));
         assertThat(failure).isNotNull();assertThat(trace(failure)).doesNotContain(PRIVATE);assertThat(output.getAll()).doesNotContain(PRIVATE);verifyNoInteractions(login);
     }
+    // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
     @ParameterizedTest @ValueSource(strings={"/api/v1/auth/login/extra","/api/v1/auth/login/","/api/auth/login"})
     void given__neighboring_route__when__requesting__then__no_login_or_policy_widening(String path)throws Exception{
         mvc.perform(post(path).contentType("application/json").content("{}")) .andExpect(status().isForbidden());verifyNoInteractions(login);

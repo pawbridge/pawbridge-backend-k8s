@@ -206,10 +206,16 @@ def smoke():
                     raise AssertionError('Missing post contract changed')
             expect(base, '/api/v1/posts/read/abc', 500)
             expect(base, '/api/v1/posts/read/9223372036854775808', 500)
-            for method, path in [('GET','/error'),('GET','/api/v1/users/internal/42/nickname'),
-                                 ('GET','/api/posts/read/42'),('HEAD','/api/v1/posts/read/42'),
+            for method, path in [('GET','/error'),('HEAD','/api/v1/posts/read/42'),
                                  ('OPTIONS','/api/v1/posts/read/42'),('POST','/api/v1/posts/read/42')]:
                 expect(base, path, 403, method)
+            # Gateway-moved behavior: service-to-service user paths are refused with 404, and the temporary legacy
+            # alias is rewritten to the v1 public read (same body), no longer denied.
+            for internal in ('/api/v1/users/internal/42/nickname', '/api/users/internal/42/nickname'):
+                if expect(base, internal, 404) != {'code': 404, 'message': '\uc720\ud6a8\ud558\uc9c0 \uc54a\uc740 \uc5d4\ub4dc\ud3ec\uc778\ud2b8\uc785\ub2c8\ub2e4.', 'data': None}:
+                    raise AssertionError('Internal user path lost its fixed 404 body')
+            if expect(base, '/api/posts/read/42', 200) != expect(base, '/api/v1/posts/read/42', 200):
+                raise AssertionError('Legacy post read alias differs from the v1 route')
             sql('REVOKE SELECT(user_id,nickname) ON pawbridge_user.users FROM pawbridge_f2_reader')
             fallback = expect(base, '/api/v1/posts/read/42', 200)
             if fallback['data']['authorNickname'] != '사용자42':

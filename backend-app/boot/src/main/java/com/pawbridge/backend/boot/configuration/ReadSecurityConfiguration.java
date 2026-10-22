@@ -1,6 +1,7 @@
 package com.pawbridge.backend.boot.configuration;
 
 import jakarta.servlet.DispatcherType;
+import com.pawbridge.backend.boot.security.GatewayCors;
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator;
 import com.pawbridge.backend.boot.security.PostBearerAuthenticationFilter;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
@@ -60,7 +61,8 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.apms-manual.enabled:false}") String apmsManualFlag,
             @Value("${pawbridge.email-verification.enabled:false}") String emailVerificationFlag,
             @Value("${pawbridge.local-signup.enabled:false}") String localSignupFlag,
-            @Value("${pawbridge.password-reset.enabled:false}") String passwordResetFlag) throws Exception {
+            @Value("${pawbridge.password-reset.enabled:false}") String passwordResetFlag,
+            @Value("${pawbridge.cors.allowed-origin-patterns:" + GatewayCors.DEFAULT_ORIGIN_PATTERNS + "}") String corsOriginPatterns) throws Exception {
 
         var animalImagesEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(animalImagesFlag);
         var animalImageWriting=new AndRequestMatcher(animalImagesEnabled,new OrRequestMatcher(
@@ -327,6 +329,9 @@ public class ReadSecurityConfiguration {
         var adminRoutes = new OrRequestMatcher(apmsManualSync, shelterCommandAdmin, storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
         var postWriting = new OrRequestMatcher(apmsManualSync, animalImageWriting, catalogManagementWriting, paymentConfirmation, storeMockPayment,shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, userPassword, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
+        // Former Gateway health probe: only health (liveness/readiness included) is public; other actuator paths stay denied.
+        var healthProbe = new AntPathRequestMatcher("/actuator/health/**", "GET");
+        var health = new AntPathRequestMatcher("/actuator/health", "GET");
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -336,6 +341,7 @@ public class ReadSecurityConfiguration {
                 .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(health, healthProbe).permitAll()
                         .requestMatchers(storeOrderAdministrationRoutes, catalogManagementWriting).hasRole("ADMIN")
                         .requestMatchers(chatbotMessages, galleryFeedRoutes, animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalExtraDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
                         .requestMatchers(reportReading).permitAll()
@@ -351,6 +357,8 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(adminRoutes).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()
                         .anyRequest().denyAll())
+                // The preflight must be answered here, before authorization; rules mirror the Gateway globalcors block.
+                .addFilterAt(GatewayCors.filter(corsOriginPatterns), org.springframework.web.filter.CorsFilter.class)
                 .addFilterBefore(new PostBearerAuthenticationFilter(tokens, postWriting, noteStream, streamContexts), AnonymousAuthenticationFilter.class)
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, exception) -> forbidden(response))
