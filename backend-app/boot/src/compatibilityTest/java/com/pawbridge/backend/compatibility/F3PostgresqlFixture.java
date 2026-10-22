@@ -69,6 +69,20 @@ final class F3PostgresqlFixture implements AutoCloseable {
         }
     }
 
+    /** Outbox rows are observed as the fixture admin: the candidate writer holds no outbox privileges. */
+    long outboxEvents(String aggregateId, String type) throws SQLException {
+        String sql = "SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=?"
+                + (type == null ? "" : " AND type=?");
+        try (Connection connection = admin(); var statement = connection.prepareStatement(sql)) {
+            statement.setString(1, aggregateId);
+            if (type != null) statement.setString(2, type);
+            try (ResultSet row = statement.executeQuery()) {
+                row.next();
+                return row.getLong(1);
+            }
+        }
+    }
+
     @Override public void close() throws SQLException {
         // Only the legacy oracle writes outbox rows now; the candidate never does. Clean them before their posts.
         execute("DELETE FROM pawbridge_community.outbox_events WHERE aggregate_type='Post' AND aggregate_id IN "

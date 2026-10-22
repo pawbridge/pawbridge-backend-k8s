@@ -247,7 +247,7 @@ class PostgresqlPostDeleteCompatibilityTest {
 
     private PostToCreate input(List<String> images){return new PostToCreate(F3PostgresqlFixture.AUTHOR,"삭제 원본 제목","삭제 원본 본문",PostBoardType.COMMUNICATION,images);}
     /** Explicit difference from the legacy service: the candidate never writes POST_DELETED outbox rows, so this is always zero. */
-    private long deletedEvents(long id){return writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_DELETED'",Long.class,Long.toString(id));}
+    private long deletedEvents(long id){try{return fixture.outboxEvents(Long.toString(id),"POST_DELETED");}catch(java.sql.SQLException e){throw new IllegalStateException(e);}}
     private long searchCount(long id){return writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.post_search_documents WHERE post_id=?",Long.class,id);}
     private String unchangedBody(long id){return writeJdbc.queryForObject("SELECT (to_jsonb(p)-'deleted_at'-'updated_at')::text FROM pawbridge_community.posts p WHERE post_id=?",String.class,id);}
     private Connection writerConnection() throws SQLException {return DriverManager.getConnection(fixture.reads().jdbcUrl(),F3PostgresqlFixture.WRITER,fixture.writerPassword());}
