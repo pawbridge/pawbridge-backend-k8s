@@ -3,7 +3,7 @@ package com.pawbridge.backend.boot.configuration;
 import java.net.URI;
 import org.springframework.core.env.Environment;
 
-/** Settings exist only for the explicitly enabled APMS schedule. Never render the service key. */
+/** Settings exist only for the explicitly enabled APMS schedule or manual API. Never render the service key. */
 final class ApmsScheduleSettings {
     private final int workers;
     private final int transactionTimeout;
