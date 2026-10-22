@@ -12,7 +12,6 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.kafka.core.ConsumerFactory;
 
 class StorePaymentTransportConfigurationTest {
     private ApplicationContextRunner runner() {
@@ -20,10 +19,10 @@ class StorePaymentTransportConfigurationTest {
     }
 
     @ParameterizedTest @ValueSource(strings={"absent","false","yes","on"})
-    void given__transport_not_explicitly_enabled__when__settings_are_absent__then__create_no_redis_or_kafka_resource(String flag) {
+    void given__transport_not_explicitly_enabled__when__settings_are_absent__then__create_no_redis_resource(String flag) {
         var context=runner();if(!flag.equals("absent"))context=context.withPropertyValues("pawbridge.store-payment-events.enabled="+flag);
         context.run(app->assertThat(app).hasNotFailed().doesNotHaveBean(StringRedisTemplate.class)
-                .doesNotHaveBean(RedisConnectionFactory.class).doesNotHaveBean(ConsumerFactory.class)
+                .doesNotHaveBean(RedisConnectionFactory.class)
                 .doesNotHaveBean(StorePaymentTransportConfiguration.RedisResource.class));
     }
 
@@ -37,7 +36,7 @@ class StorePaymentTransportConfigurationTest {
                 .withBean("memberChatRedis",StringRedisTemplate.class,()->shared)
                 .withBean("storePaymentOwnedRedisFactory",StorePaymentTransportConfiguration.OwnedRedisFactory.class,()->factories)
                 .run(app->{
-                    assertThat(app).hasNotFailed().hasSingleBean(RedisConnectionFactory.class).doesNotHaveBean(ConsumerFactory.class);
+                    assertThat(app).hasNotFailed().hasSingleBean(RedisConnectionFactory.class);
                     assertThat(app.getBean("storePaymentRankingRedis")).isSameAs(shared);
                     assertThat(app.getBean(RedisConnectionFactory.class)).isSameAs(global);
                     app.getBean(StorePaymentTransportConfiguration.RedisResource.class).close();
@@ -56,7 +55,7 @@ class StorePaymentTransportConfigurationTest {
                         ()->settings->{seen.set(settings);return owned;})
                 .run(app->{
                     assertThat(app).hasNotFailed().hasSingleBean(StringRedisTemplate.class)
-                            .doesNotHaveBean(RedisConnectionFactory.class).doesNotHaveBean(ConsumerFactory.class);
+                            .doesNotHaveBean(RedisConnectionFactory.class);
                     assertThat(app.getBean("storePaymentRankingRedis",StringRedisTemplate.class).getConnectionFactory()).isSameAs(owned);
                     assertThat(seen.get().getHostName()).isEqualTo("127.0.0.1");assertThat(seen.get().getPort()).isEqualTo(6381);
                     assertThat(seen.get().getDatabase()).isEqualTo(2);assertThat(seen.get().getUsername()).isEqualTo("synthetic-user");

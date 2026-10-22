@@ -1,15 +1,10 @@
 package com.pawbridge.backend.boot.configuration;
 
-import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -17,13 +12,10 @@ import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.kafka.core.ConsumerFactory;
-import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 
 /** Explicit, dormant Store transport. A privately owned Redis factory never becomes a global bean. */
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.store-payment-events",name="enabled",havingValue="true")
-@EnableConfigurationProperties(KafkaProperties.class)
 public class StorePaymentTransportConfiguration {
     private static final String INVALID_REDIS="Explicit valid Store payment Redis settings are required";
 
@@ -80,18 +72,5 @@ public class StorePaymentTransportConfiguration {
                 catch(RuntimeException failure) { throw new IllegalStateException("Store payment Redis resource did not close"); }
             }
         }
-    }
-
-    @Bean
-    @ConditionalOnProperty(prefix="pawbridge.store-payment-events",name="kafka-enabled",havingValue="true")
-    @ConditionalOnMissingBean(name="storePaymentEventsConsumerFactory")
-    ConsumerFactory<String,String> storePaymentEventsConsumerFactory(KafkaProperties settings) {
-        var properties=new HashMap<>(settings.buildConsumerProperties(null));
-        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,StringDeserializer.class);
-        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,StringDeserializer.class);
-        // Original @KafkaListener's effective group; source application.yml supplies earliest unless overridden.
-        properties.put(ConsumerConfig.GROUP_ID_CONFIG,"payment-group");
-        properties.putIfAbsent(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,"earliest");
-        return new DefaultKafkaConsumerFactory<>(properties,new StringDeserializer(),new StringDeserializer());
     }
 }

@@ -346,10 +346,10 @@ POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
 POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d57f7606f60d2987'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a102a2dad32f26aa848411d9dbe5bd3d7cd8cada375c1',
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '98f2e297447daffb5af141ae93b076a186323c298f367abddec1f28cbe2bdbc8',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'd0595c545a5ef79d5b19c23fdb6a38998a4a4851d88e447bd69d617714387f83',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '9f984f20163ae571d3a6e88dcf7a9e36cbe4bd3f00b8994b41ab696034af748e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -896,7 +896,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a1
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreOrderHistoryTest.java': 'db1585ab2ffca292564f34628ea7fdb8de20938fa05e24f9b499ada279b2d792',
  'backend-app/boot/src/test/resources/owned-postgresql/store-order-history-owned-schema.sql': '8ce980cb07524f7e8129c7f940744ee36dcdce5a3166b4d7c179e8f509b7cdea',
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/OrderReadControllerTest.java': '370b0795ed9a9d5263041427be3a8338b222f3d29087d01071d8ea14c100a3a0',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeCoreIntegrationTest.java': 'ccc18c338701e547875818bb7d151246963ea1d1b1170e48c728239c435746d0',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeCoreIntegrationTest.java': '1a68ec5e5f8f1234dc0c1ee73f3e652fb54607dc8521ccaf8265cf9f90f9c441',
  'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/chatbot/infrastructure/client/FeignPythonChatbotClient.java': 'f7dde447789f89f92a269f7d56462f48e9b1a559f13c310c0fd625984e50d116',
  'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/chatbot/infrastructure/client/PythonChatbotClient.java': '9fb1f2ba878a7b71359eaf1e5ccce3ef32905671aa73ae48722ee7022b6c9b1f',
  'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/chatbot/infrastructure/client/dto/PythonChatbotMessageRequest.java': '780a9c4c7b2cb00f99343c7478d3145eb726a0fa2d8053fc5f5de5d65d5fa1c4',
@@ -968,13 +968,12 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a1
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/catalogwrite/web/CatalogManagementControllerTest.java': '35cfe0901d2e2e9d16ca5b0e3907457472effb44ab48aee0e6266788ff28e5ae',
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreCatalogManagementHttpTest.java': '7d24752318a277f07285b27a6eef2689a9eca04e367f6e58a701a2cddd425bd4',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PaymentConfirmationConfiguration.java': '88039865aef33fd44cb732226ce02d8c5ebd1be64f4292c76000c75b020d4e9a',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StorePaymentEventsConfiguration.java': '35193aea6b8bee60ea9976a1666628d32854e9b71340983c8043d0a7bb728177',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StorePaymentTransportConfiguration.java': '923a41fff420b5b72113022f221c4b4f754cc0b17761cc72171177516548043d',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StorePaymentEventsConfiguration.java': 'e5ec34ba08cc4f8ebc92f1afa955b5e5ac8ce9190effdd34009beb4a595acb51',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StorePaymentTransportConfiguration.java': 'f5d9e4153d3cf46c497aecbd4a8676c91c284877d850e13596c54bc93a6e8258',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PaymentConfirmationConfigurationTest.java': 'fa99275028ba6c2960e94c06ec7595502c29b7bab2e512bf1a042df28e0470b1',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PaymentConfirmationHttpTest.java': '869f898af01a6409542f90dfb7149aa34067db626203c24e5b07a031c2a3d41c',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StorePaymentEventsConfigurationTest.java': 'b3c042a9b9ab6cfef6a9a8f6a81168dd259c588d498f13587adbec3bdb5dd72a',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StorePaymentKafkaTransportConfigurationTest.java': 'ff93e0cc4553a99fa52cb127b56e8ccaf46e1c30e1514ef3665e6a087fe21188',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StorePaymentTransportConfigurationTest.java': '74ab40a488a080df504fe4c8b06fb8e0943e6dd66b0cf700bd27c295c0e3b50b',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StorePaymentEventsConfigurationTest.java': '9af267aaf78586968641d7efe5cfd99e7239b656e31ac755abf0868d680e86fb',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StorePaymentTransportConfigurationTest.java': '11007eda93fdc69f34191e0e8ee9f6ea9f2bbeecace12a1ccba3471c7f03b5e1',
  'backend-app/payment/build.gradle': '704a2765b5699b61ed0b752ed6a55a52e93b5c05b3dd1fb06f5d260553752050',
  'backend-app/payment/src/main/java/com/pawbridge/backend/payment/internal/confirmation/application/Payments.java': '580fa37f5b90f11fdb415ecc437be7ba7c5967a7b69a362d24e8ddf3caa4aecf',
  'backend-app/payment/src/main/java/com/pawbridge/backend/payment/internal/confirmation/application/dto/TossFailure.java': '95b15e1551712f1a463be154229460dad1d5591bfb3f0f44dc01b3d7aed51c6f',
@@ -1481,7 +1480,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 785
+                or len(POST_READS_APP_HASHES) != 784
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
