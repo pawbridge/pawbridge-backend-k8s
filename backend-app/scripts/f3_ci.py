@@ -310,12 +310,11 @@ def smoke():
             successful_puts = [item for item in after_success['requests'] if item['method'] == 'PUT' and item['status'] == 200]
             if returned_urls != ['https://fixture.invalid/' + item['key'] for item in successful_puts]:
                 raise AssertionError('Media URL ordering/public base changed')
-            # Every created HTTP post must have its six-field event and Nori projection.
+            # Every created HTTP post has its Nori projection. Explicit difference from the legacy service:
+            # the candidate writes no POST_CREATED outbox row (the event queue was removed from the monolith).
             for post_id in created:
-                payload = json.loads(sql("SELECT payload FROM pawbridge_community.outbox_events WHERE aggregate_id='" + str(post_id) + "'"))
-                if payload != {key: expect(base, '/api/v1/posts/read/' + str(post_id), 200)['data'][key]
-                               for key in ('postId','authorId','title','content','boardType','imageUrls')}:
-                    raise AssertionError('HTTP-created event payload changed')
+                if sql("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id='" + str(post_id) + "'") != '0':
+                    raise AssertionError('Candidate must not write a POST_CREATED outbox row')
                 if sql("SELECT count(*) FROM pawbridge_community.post_search_documents d JOIN pawbridge_community.posts p USING(post_id) WHERE d.post_id=" + str(post_id)
                     + " AND d.title_hash=md5(p.title) AND d.content_hash=md5(p.content) AND d.analyzer_version='nori-9.12.3-v1'") != '1':
                     raise AssertionError('HTTP-created post is missing its search projection')
@@ -324,12 +323,12 @@ def smoke():
             if row_counts() != stable:
                 raise AssertionError('Named charset rejection committed business rows')
             # A confirmed DB rollback retains uploaded objects and never retries POST or deletes.
-            sql("REVOKE INSERT ON pawbridge_community.outbox_events FROM " + WRITER)
+            sql("REVOKE INSERT ON pawbridge_community.post_search_documents FROM " + WRITER)
             before_failure = state()
             try:
                 post(tokens['ROLE_USER'], 500, files=[('rollback.jpg', 'image/jpeg', b'rollback-object')])
             finally:
-                sql('GRANT INSERT ON pawbridge_community.outbox_events TO ' + WRITER)
+                sql('GRANT INSERT ON pawbridge_community.post_search_documents TO ' + WRITER)
             failed = state()
             if (row_counts() != stable or failed['counts']['PUT'] != before_failure['counts']['PUT'] + 1
                     or len(failed['objects']) != len(before_failure['objects']) + 1 or failed['counts']['DELETE'] != 0):

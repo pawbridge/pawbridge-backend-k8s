@@ -91,13 +91,10 @@ def smoke():
             new_objects=[x for x in state()['objects'] if x['key']==response['imageUrls'][0].removeprefix('https://fixture.invalid/')]
             if len(new_objects)!=1 or new_objects[0]['sha256']!=hashlib.sha256(b'F5-new-video').hexdigest() or new_objects[0]['content_type']!='video/mp4':
                 raise AssertionError('Actual SDK replacement bytes or MIME changed')
-            history=events(post_id)
-            expected={k:current[k] for k in ('postId','authorId','title','content','boardType','imageUrls')}
-            if len(history)!=1 or history[0]['payload']!=expected or history[0]['aggregate_type']!='Post' or history[0]['aggregate_id']!=str(post_id):
-                raise AssertionError('Exact POST_UPDATED payload changed')
-            uuid.UUID(history[0]['event_id'])
+            # Explicit difference from the legacy service: no POST_UPDATED outbox row is written by the candidate.
+            if events(post_id):raise AssertionError('Candidate must not write a POST_UPDATED outbox row')
             unchanged=row(post_id);put(post_id)
-            if row(post_id)!=unchanged or len(events(post_id))!=2:raise AssertionError('No-op PUT row timestamp/event contract changed')
+            if row(post_id)!=unchanged or events(post_id):raise AssertionError('No-op PUT row timestamp/outbox contract changed')
             count_before=state()['counts'];empty=put(post_id,files=[('empty.jpg','image/jpeg',b'')])['data']
             if empty['imageUrls'] or state()['counts']['PUT']!=count_before['PUT'] or state()['counts']['DELETE']!=count_before['DELETE']+1:
                 raise AssertionError('One empty multipart file did not replace with an empty list')
@@ -106,7 +103,7 @@ def smoke():
             f3.expect(endpoint,'/__f3__/fail-next-delete',200,'POST',dict(controls,**{'Content-Type':'application/json'}),json.dumps({'after':0,'count':1,'status':400}).encode())
             put(item['postId'],files=[('new.jpg','image/jpeg',b'best-effort-new')])
             if state()['counts']['PUT']!=before_storage['counts']['PUT']+1:raise AssertionError('Best-effort deletion suppressed replacement')
-            # Upload failure retains the DB and event count; already deleted old objects are not restored.
+            # Upload failure retains the DB; already deleted old objects are not restored.
             item=create([('old.jpg','image/jpeg',b'upload-failure-old')]);unchanged=row(item['postId']);before_storage=state()
             f3.expect(endpoint,'/__f3__/fail-next-put',200,'POST',dict(controls,**{'Content-Type':'application/json'}),json.dumps({'after':0,'count':1,'status':400}).encode())
             put(item['postId'],{'title':'실패 변경'},[('new.jpg','image/jpeg',b'upload-failure-new')],500)
@@ -115,9 +112,9 @@ def smoke():
             put(item['postId'],{'title':'복구 변경'},[('new.jpg','image/jpeg',b'upload-recovered')])
             # One actual SQL rollback through the packaged bean graph; near-PG tests cover both later failure points.
             item=create([('old.jpg','image/jpeg',b'rollback-old')]);unchanged=row(item['postId']);before_storage=state()
-            f3.sql('REVOKE INSERT ON pawbridge_community.outbox_events FROM '+f3.WRITER)
+            f3.sql('REVOKE INSERT ON pawbridge_community.post_search_documents FROM '+f3.WRITER)
             try:put(item['postId'],{'title':'rollback'},[('new.jpg','image/jpeg',b'rollback-new')],500)
-            finally:f3.sql('GRANT INSERT ON pawbridge_community.outbox_events TO '+f3.WRITER)
+            finally:f3.sql('GRANT INSERT ON pawbridge_community.post_search_documents TO '+f3.WRITER)
             if row(item['postId'])!=unchanged or events(item['postId']) or state()['counts']['DELETE']!=before_storage['counts']['DELETE']+1 or state()['counts']['PUT']!=before_storage['counts']['PUT']+1:
                 raise AssertionError('SQL rollback caused DB changes or external compensation')
             put(item['postId'],{'title':'복구'},[('new.jpg','image/jpeg',b'rollback-recovered')])

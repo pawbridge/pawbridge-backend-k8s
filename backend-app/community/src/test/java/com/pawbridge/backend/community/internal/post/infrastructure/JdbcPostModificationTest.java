@@ -57,21 +57,18 @@ class JdbcPostModificationTest {
     @Test void given__partial_title__when__updating__then__lock_merge_emit_exact_payload_and_project_in_one_transaction() throws Exception {
         PostSnapshot saved;
         try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){saved=writer.update(42,7,"수정",null,null);}
-        assertThat(active).isFalse();assertThat(calls).hasSize(4);assertThat(calls.getFirst().sql).contains("FOR UPDATE","deleted_at IS NULL");
+        assertThat(active).isFalse();assertThat(calls).hasSize(3);assertThat(calls.getFirst().sql).contains("FOR UPDATE","deleted_at IS NULL");
         assertThat(saved).isEqualTo(new PostSnapshot(42,7,"수정","본문","MISSING",List.of("https://fixture.invalid/old"),previous,previous));
         assertThat(calls.get(1).values).containsEntry(1,"수정").containsEntry(2,"본문").containsEntry(4,Timestamp.valueOf(LocalDateTime.now(clock))).containsEntry(5,42L).containsEntry(6,7L);
-        Call event=calls.get(2);assertThat(event.values).containsEntry(2,"Post").containsEntry(3,"42").containsEntry(4,"POST_UPDATED");
-        assertThat(UUID.fromString((String)event.values.get(1)).toString()).isEqualTo(event.values.get(1));
-        assertThat(mapper.readTree((String)event.values.get(5))).isEqualTo(mapper.valueToTree(Map.of("postId",42,"authorId",7,"title","수정","content","본문","boardType","MISSING","imageUrls",saved.imageUrls())));
-        assertThat(calls.get(3).sql).contains("post_search_documents","ON CONFLICT","setweight");
-        assertThat(calls.get(3).values).containsEntry(1,42L).containsEntry(2,"수정").containsEntry(3,"본문");
+        assertThat(calls.get(2).sql).contains("post_search_documents","ON CONFLICT","setweight");
+        assertThat(calls.get(2).values).containsEntry(1,42L).containsEntry(2,"수정").containsEntry(3,"본문");
     }
     @ParameterizedTest @ValueSource(booleans={false,true})
-    void given__omitted_or_identical_values__when__updating__then__retain_row_timestamp_but_still_emit_event_and_projection(boolean same) {
+    void given__omitted_or_identical_values__when__updating__then__retain_row_timestamp_but_still_refresh_projection_without_outbox(boolean same) {
         try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){
             assertThat(writer.update(42,7,same?"제목":null,same?"본문":null,same?List.of("https://fixture.invalid/old"):null).updatedAt()).isEqualTo(previous);
         }
-        assertThat(calls).hasSize(3);assertThat(calls.get(1).sql).contains("outbox_events");assertThat(calls.get(2).sql).contains("post_search_documents");
+        assertThat(calls).hasSize(2);assertThat(calls.get(1).sql).contains("post_search_documents");assertThat(calls).noneMatch(c->c.sql.contains("outbox_events"));
     }
     @Test void given__explicit_empty_fields_and_images__when__updating__then__write_empty_values_without_creation_board_restriction() {
         try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){
@@ -79,10 +76,11 @@ class JdbcPostModificationTest {
         }
         assertThat(calls.get(1).values).containsEntry(1,"").containsEntry(2,"").containsEntry(3,"[]");
     }
-    @Test void given__json_literal_null_images__when__text_only_update__then__preserve_failure_before_db_mutation() {
+    // The former NullPointerException came only from building the POST_UPDATED outbox payload with Map.of; with no outbox it no longer fails.
+    @Test void given__json_literal_null_images__when__text_only_update__then__succeed_without_outbox_statement() {
         images="null";
-        try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){assertThatThrownBy(()->writer.update(42,7,"수정",null,null)).isInstanceOf(NullPointerException.class);}
-        assertThat(calls).hasSize(1);
+        try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){assertThat(writer.update(42,7,"수정",null,null).imageUrls()).isNull();}
+        assertThat(calls).noneMatch(c->c.sql.contains("outbox_events"));
     }
     @Test void given__foreign_author_after_lock__when__updating__then__deny_without_any_write() {
         try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){assertThatThrownBy(()->writer.update(42,8,"수정",null,null)).isInstanceOf(PostNotOwnedException.class);}
@@ -93,7 +91,7 @@ class JdbcPostModificationTest {
         try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){assertThatThrownBy(()->writer.update(42,7,"수정",null,null)).isInstanceOf(PostNotFoundException.class);}
         assertThat(calls).hasSize(1);
     }
-    @Test void given__lost_update_predicate__when__writing__then__404_without_outbox_or_projection() {
+    @Test void given__lost_update_predicate__when__writing__then__404_without_projection() {
         updated=0;
         try(var writer=new JdbcPostWriter(jdbc,tx,mapper,clock)){assertThatThrownBy(()->writer.update(42,7,"수정",null,null)).isInstanceOf(PostNotFoundException.class);}
         assertThat(calls).hasSize(2);

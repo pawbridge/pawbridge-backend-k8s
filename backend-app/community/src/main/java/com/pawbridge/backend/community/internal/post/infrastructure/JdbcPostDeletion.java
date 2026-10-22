@@ -1,7 +1,5 @@
 package com.pawbridge.backend.community.internal.post.infrastructure;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.community.internal.post.application.PostDeletion;
 import com.pawbridge.backend.community.internal.post.application.PostNotFoundException;
 import com.pawbridge.backend.community.internal.post.domain.PostOwnership;
@@ -12,9 +10,7 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Calendar;
-import java.util.Map;
 import java.util.TimeZone;
-import java.util.UUID;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -29,27 +25,20 @@ public final class JdbcPostDeletion implements PostDeletion {
             SET deleted_at = ?, updated_at = ?
             WHERE post_id = ? AND author_id = ? AND deleted_at IS NULL
             """;
-    private static final String INSERT_OUTBOX = """
-            INSERT INTO pawbridge_community.outbox_events
-                (event_id, aggregate_type, aggregate_id, type, payload, created_at)
-            VALUES (?, ?, ?, ?, CAST(? AS json), ?)
-            """;
     private static final String DELETE_SEARCH =
             "DELETE FROM pawbridge_community.post_search_documents WHERE post_id = ?";
 
     private final JdbcOperations jdbc;
     private final TransactionOperations transactions;
-    private final ObjectMapper objectMapper;
     private final Clock clock;
 
-    public JdbcPostDeletion(JdbcOperations jdbc, TransactionOperations transactions, ObjectMapper objectMapper) {
-        this(jdbc, transactions, objectMapper, Clock.systemDefaultZone());
+    public JdbcPostDeletion(JdbcOperations jdbc, TransactionOperations transactions) {
+        this(jdbc, transactions, Clock.systemDefaultZone());
     }
 
-    public JdbcPostDeletion(JdbcOperations jdbc, TransactionOperations transactions, ObjectMapper objectMapper, Clock clock) {
+    public JdbcPostDeletion(JdbcOperations jdbc, TransactionOperations transactions, Clock clock) {
         this.jdbc = jdbc;
         this.transactions = transactions;
-        this.objectMapper = objectMapper;
         this.clock = clock;
     }
 
@@ -75,18 +64,8 @@ public final class JdbcPostDeletion implements PostDeletion {
         if (changed != 1) {
             throw new PostNotFoundException();
         }
-        jdbc.update(connection -> prepare(connection, INSERT_OUTBOX, UUID.randomUUID().toString(),
-                "Post", Long.toString(postId), "POST_DELETED", payload(postId), LocalDateTime.now(clock)));
         // A soft delete does not trigger the search table's ON DELETE CASCADE.
         jdbc.update(connection -> prepare(connection, DELETE_SEARCH, postId));
-    }
-
-    private String payload(long postId) {
-        try {
-            return objectMapper.writeValueAsString(Map.of("postId", postId));
-        } catch (JsonProcessingException failure) {
-            throw new IllegalStateException("Failed to serialize post deletion event", failure);
-        }
     }
 
     private PreparedStatement prepare(Connection connection, String sql, Object... values) throws SQLException {

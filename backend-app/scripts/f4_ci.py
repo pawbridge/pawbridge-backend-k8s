@@ -215,15 +215,9 @@ def smoke():
                 raise AssertionError('Soft deletion changed a retained post field: ' + key)
         if now['deleted_at'] is None or now['updated_at'] is None:
             raise AssertionError('Soft-delete timestamps are missing')
-        events = json.loads(f3.sql('SELECT COALESCE(json_agg(e),\'[]\'::json) '
-            'FROM pawbridge_community.outbox_events e WHERE type=\'POST_DELETED\' AND aggregate_id=' + literal(post_id)))
-        if len(events) != 1:
-            raise AssertionError('Expected exactly one POST_DELETED event')
-        event = events[0]
-        uuid.UUID(event['event_id'])
-        if (event['aggregate_type'] != 'Post' or event['aggregate_id'] != str(post_id)
-                or event['payload'] != {'postId': post_id} or event['created_at'] is None):
-            raise AssertionError('POST_DELETED event fields or exact payload changed')
+        # Explicit difference from the legacy service: no POST_DELETED outbox row is written by the candidate.
+        if f3.sql('SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=' + literal(post_id)) != '0':
+            raise AssertionError('Candidate must not write a POST_DELETED outbox row')
         if f3.sql('SELECT count(*) FROM pawbridge_community.post_search_documents WHERE post_id=' + str(post_id)) != '0':
             raise AssertionError('Soft deletion did not remove its search document')
         absent = f3.expect(base, '/api/v1/posts/read/' + str(post_id), 404)
@@ -319,7 +313,7 @@ def smoke():
                     or expected_keys[0] not in {entry['key'] for entry in after['objects']}
                     or expected_keys[1] in {entry['key'] for entry in after['objects']}):
                 raise AssertionError('SDK failure stopped later URLs or retried the DELETE')
-            for table, permission in (('outbox_events', 'INSERT'), ('post_search_documents', 'DELETE')):
+            for table, permission in (('post_search_documents', 'DELETE'),):
                 item = create([('rollback.jpg', 'image/jpeg', b'irreversible-object')])
                 original = snapshot(item['postId'])
                 stable = business(item['postId'])

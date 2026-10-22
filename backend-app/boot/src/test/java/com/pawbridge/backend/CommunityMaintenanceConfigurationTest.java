@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.pawbridge.backend.boot.configuration.CommunityMaintenanceConfiguration;
-import com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention;
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild;
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostWriter;
 import java.time.Duration;
@@ -28,7 +27,6 @@ class CommunityMaintenanceConfigurationTest {
                 .withPropertyValues("pawbridge.community-maintenance.enabled=" + enabled)
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertThat(context.getBeansOfType(JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(JdbcPostSearchRebuild.class)).isEmpty();
                     assertThat(context.getBeansOfType(ThreadPoolTaskScheduler.class)).isEmpty();
                 });
@@ -40,14 +38,13 @@ class CommunityMaintenanceConfigurationTest {
                 .withPropertyValues("pawbridge.jobs.cleanup-enabled=true", "pawbridge.search.rebuild-enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertThat(context.getBeansOfType(JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(JdbcPostSearchRebuild.class)).isEmpty();
                     assertThat(context.getBeansOfType(ThreadPoolTaskScheduler.class)).isEmpty();
                 });
     }
 
     @Test
-    void given__both_jobs_explicitly_enabled__when__assembling_without_running_tasks__then__reuse_writer_and_manager_but_preserve_retention_timeout() {
+    void given__both_jobs_explicitly_enabled__when__assembling_without_running_tasks__then__reuse_writer_and_write_transaction() {
         var jdbc = mock(JdbcTemplate.class);
         var manager = mock(JdbcTransactionManager.class);
         var write = new TransactionTemplate(manager); write.setTimeout(10);
@@ -74,13 +71,7 @@ class CommunityMaintenanceConfigurationTest {
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(rebuild, "jdbc")).isSameAs(jdbc);
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(rebuild, "transactions")).isSameAs(write);
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(rebuild, "projection")).isSameAs(writer);
-                    var retention = context.getBean(JdbcCommunityEventRetention.class);
-                    var retentionTransaction = context.getBean("communityEventRetentionTransaction", TransactionTemplate.class);
-                    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(retention, "transactions")).isSameAs(retentionTransaction);
-                    assertThat(retentionTransaction.getTransactionManager()).isSameAs(manager);
-                    assertThat(retentionTransaction.getTimeout()).isEqualTo(-1);
                     assertThat(context.getBeansOfType(ThreadPoolTaskScheduler.class)).hasSize(1);
-                    assertThat(context.getBeansOfType(CommunityMaintenanceConfiguration.EventRetentionJobs.class)).hasSize(1);
                     assertThat(context.getBeansOfType(CommunityMaintenanceConfiguration.SearchRebuildJob.class)).hasSize(1);
                     verify(jdbc, never()).queryForList(org.mockito.ArgumentMatchers.anyString(), any(Object[].class));
                     verify(jdbc, never()).update(org.mockito.ArgumentMatchers.anyString(), any(Object[].class));
@@ -90,15 +81,11 @@ class CommunityMaintenanceConfigurationTest {
 
     @Test
     void given__a_job_failure__when__invoked__then__propagate_it_to_the_scheduler_without_continuing_other_work() {
-        var retention = mock(JdbcCommunityEventRetention.class);
         var rebuild = mock(JdbcPostSearchRebuild.class);
         var failure = new IllegalStateException("synthetic maintenance failure");
-        when(retention.cleanupOldOutboxEvents()).thenThrow(failure);
         when(rebuild.rebuildPage(100)).thenThrow(failure);
-        assertThatThrownBy(() -> new CommunityMaintenanceConfiguration.EventRetentionJobs(retention).cleanupOldOutboxEvents()).isSameAs(failure);
         assertThatThrownBy(() -> new CommunityMaintenanceConfiguration.SearchRebuildJob(rebuild).rebuild()).isSameAs(failure);
-        verify(retention).cleanupOldOutboxEvents();
         verify(rebuild).rebuildPage(100);
-        verifyNoMoreInteractions(retention, rebuild);
+        verifyNoMoreInteractions(rebuild);
     }
 }

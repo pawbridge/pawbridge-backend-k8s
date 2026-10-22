@@ -16,7 +16,6 @@ import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostRead
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostWriter;
 import com.pawbridge.backend.user.internal.nickname.infrastructure.JdbcUserNicknameQuery;
 import com.pawbridge.communityservice.domain.entity.BoardType;
-import com.pawbridge.communityservice.domain.entity.OutboxEvent;
 import com.pawbridge.communityservice.domain.entity.Post;
 import com.pawbridge.communityservice.domain.entity.StringListConverter;
 import com.pawbridge.communityservice.dto.response.PostResponse;
@@ -31,7 +30,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.hibernate.SessionFactory;
 import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.cfg.Configuration;
@@ -84,7 +82,7 @@ class PostgresqlPostCreateCompatibilityTest {
         posts = new JdbcPostWriter(writeJdbc, writeTx, mapper, clock);
         reads = new JdbcPostReader(readJdbc, readTx, mapper);
         nicknames = new JdbcUserNicknameQuery(readJdbc, readTx);
-        Configuration config = new Configuration().addAnnotatedClass(Post.class).addAnnotatedClass(OutboxEvent.class)
+        Configuration config = new Configuration().addAnnotatedClass(Post.class)
                 .addAttributeConverter(StringListConverter.class)
                 .setProperty(AvailableSettings.DEFAULT_SCHEMA, "pawbridge_community")
                 .setProperty(AvailableSettings.HBM2DDL_AUTO, "none")
@@ -153,28 +151,13 @@ class PostgresqlPostCreateCompatibilityTest {
     }
 
     @Test
-    void givenThreeTableWrite__whenCommitting__thenExactEventAndLegacyNoriWeightsAreCommittedOnWriterConnection()
+    void givenPostAndSearchWrite__whenCommitting__thenNoOutboxRowAndLegacyNoriWeightsAreCommittedOnWriterConnection()
             throws Exception {
         PostSnapshot saved = posts.create(input("한글 강아지 입양", "보호소 반려동물 이야기"));
         assertThat(fixture.count("posts")).isOne();
-        assertThat(fixture.count("outbox_events")).isOne();
         assertThat(fixture.count("post_search_documents")).isOne();
-        Map<String,Object> event = writeJdbc.queryForMap("SELECT event_id,aggregate_type,aggregate_id,type,payload::text FROM pawbridge_community.outbox_events WHERE aggregate_id=?", String.valueOf(saved.postId()));
-        assertThat(UUID.fromString((String) event.get("event_id")).toString()).isEqualTo(event.get("event_id"));
-        assertThat(event).containsEntry("aggregate_type", "Post").containsEntry("aggregate_id", String.valueOf(saved.postId()))
-                .containsEntry("type", "POST_CREATED");
-        JsonNode expected = mapper.readTree(mapper.writeValueAsString(Map.of("postId",saved.postId(),"authorId",saved.authorId(),
-                "title",saved.title(),"content",saved.content(),"boardType",saved.boardType(),"imageUrls",saved.imageUrls())));
-        assertThat(mapper.readTree((String)event.get("payload"))).isEqualTo(expected);
-        // Persist the exact legacy @JdbcTypeCode(JSON) OutboxEvent and compare its stored JSON shape.
-        OutboxEvent oracle = OutboxEvent.builder().eventId(UUID.randomUUID().toString()).aggregateType("Post")
-                .aggregateId(String.valueOf(saved.postId())).type("POST_CREATED").createdAt(LocalDateTime.now(clock))
-                .payload(mapper.writeValueAsString(expected)).build();
-        try (var session = legacy.openSession()) {
-            var tx = session.beginTransaction(); session.persist(oracle); tx.commit();
-        }
-        assertThat(mapper.readTree(writeJdbc.queryForObject("SELECT payload::text FROM pawbridge_community.outbox_events WHERE event_id=?", String.class, oracle.getEventId())))
-                .isEqualTo(expected);
+        // Explicit difference from the legacy service: no POST_CREATED outbox row (the legacy oracle's rows are not compared).
+        assertThat(writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=?", Long.class, String.valueOf(saved.postId()))).isZero();
         KoreanSearchTerms oracleTerms = new KoreanSearchTerms();
         try {
             Map<String,Object> document = writeJdbc.queryForMap("SELECT title_hash,content_hash,analyzer_version,tokens::text FROM pawbridge_community.post_search_documents WHERE post_id=?",saved.postId());
@@ -188,9 +171,10 @@ class PostgresqlPostCreateCompatibilityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings={"outbox_events", "post_search_documents"})
-    void givenLaterTablePermissionFailure__whenWriterFails__thenAllThreeBusinessTablesRollbackAndNextWriteRecovers(String table)
+    @ValueSource(strings={"post_search_documents"})
+    void givenLaterTablePermissionFailure__whenWriterFails__thenPostAndSearchTablesRollbackAndNextWriteRecovers(String table)
             throws Exception {
+        // The former outbox_events permission-denial case is gone: the candidate no longer writes that table.
         fixture.execute("REVOKE INSERT ON pawbridge_community." + table + " FROM " + F3PostgresqlFixture.WRITER);
         try {
             assertThatThrownBy(() -> posts.create(input("롤백", "원자성"))).isInstanceOf(DataAccessException.class);
@@ -203,7 +187,7 @@ class PostgresqlPostCreateCompatibilityTest {
         }
         posts.create(input("다음 성공", "시퀀스 간격을 원자성과 혼동하지 않음"));
         assertThat(fixture.count("posts")).isOne();
-        assertThat(fixture.count("outbox_events")).isOne();
+        assertThat(fixture.count("outbox_events")).isZero();
         assertThat(fixture.count("post_search_documents")).isOne();
     }
 
@@ -235,6 +219,7 @@ class PostgresqlPostCreateCompatibilityTest {
         assertPermissionDenied(() -> writeJdbc.update("UPDATE pawbridge_community.posts SET author_id=author_id"));
         assertPermissionDenied(() -> readJdbc.update("INSERT INTO pawbridge_community.posts(author_id,title,content,board_type,image_urls,created_at,updated_at) VALUES (1,'x','x','ADOPTION','[]',now(),now())"));
         assertPermissionDenied(() -> readJdbc.update("INSERT INTO pawbridge_community.outbox_events(aggregate_id,aggregate_type,created_at,event_id,payload,type) VALUES('x','Post',now(),'x','{}','POST_CREATED')"));
+        assertPermissionDenied(() -> writeJdbc.update("INSERT INTO pawbridge_community.outbox_events(aggregate_id,aggregate_type,created_at,event_id,payload,type) VALUES('x','Post',now(),'x','{}','POST_CREATED')"));
         try (Connection connection = writer.getConnection(); var statement = connection.createStatement();
              var role = statement.executeQuery("SELECT rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls FROM pg_roles WHERE rolname=current_user")) {
             assertThat(role.next()).isTrue();

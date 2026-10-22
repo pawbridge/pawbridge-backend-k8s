@@ -58,7 +58,7 @@ DB의 `TIMESTAMP(6)`와 기존 Hibernate UTC JDBC 추출 의미를 보존하도�
 
 일반 게시판 3종만 작성하고 MISSING/REPORT는 업로드 전에 전용 등록 안내로 거부한다. 기존에 적용되지 않던 NotBlank 등 새 입력 규칙은 추가하지 않는다. 작성 순서는 게시판 검증 → S3 업로드 → 독립된 짧은 User 닉네임 조회 → writer 트랜잭션 → 응답이다. 예상 밖 닉네임 오류가 DB commit 뒤에 발생하지 않도록 기존 HTTP 호출 순서를 조정했다. User 부재·명시적 unavailable fallback은 F2와 같으며, 닉네임과 게시글의 동일 시점 snapshot을 보장하지 않는다.
 
-writer는 같은 명시적 JDBC URL에 별도 계정·pool max1/minIdle0으로 연결한다. reader 기본 max2와 합쳐 후보 기본 상한은 3이며 운영 pool 예산을 확정한 수치는 아니다. 두 연결·JDBC·TM은 qualifier로 조립한다. F3 게시글 작성 조합에는 application 외곽 트랜잭션·REQUIRES_NEW·XA를 추가하지 않는다. `posts`, `outbox_events`, `post_search_documents`의 3개 쓰기는 writer의 단일 트랜잭션에 참여한다. 기존 POST_CREATED JSON·Nori 9.12.3·검색 가중치·UTC JDBC 바인딩 의미를 보존한다. F3 범위에는 검색 조회나 이벤트 소비자를 추가하지 않으며 검색 조회는 아래 F7 계약으로 구분한다.
+writer는 같은 명시적 JDBC URL에 별도 계정·pool max1/minIdle0으로 연결한다. reader 기본 max2와 합쳐 후보 기본 상한은 3이며 운영 pool 예산을 확정한 수치는 아니다. 두 연결·JDBC·TM은 qualifier로 조립한다. F3 게시글 작성 조합에는 application 외곽 트랜잭션·REQUIRES_NEW·XA를 추가하지 않는다. `posts`, `post_search_documents`의 2개 쓰기는 writer의 단일 트랜잭션에 참여한다. 구 시스템의 POST_CREATED `outbox_events` 쓰기는 의도적으로 제거했다(Debezium·Kafka·outbox를 모놀리스에서 제거하기로 결정했고 유일한 소비자였던 community-service ES 색인은 운영에서 쓰지 않았다. 이벤트 큐는 필요할 때 다시 도입한다). 후보 writer 역할에는 `outbox_events` 권한이 필요 없고 비교 시험은 구 oracle의 outbox 행을 비교 대상에서 제외하며 후보가 outbox를 쓰지 않는 것만 확인한다. Nori 9.12.3·검색 가중치·UTC JDBC 바인딩 의미는 보존한다. F3 범위에는 검색 조회나 이벤트 소비자를 추가하지 않으며 검색 조회는 아래 F7 계약으로 구분한다.
 
 | 추가 필수 환경 변수 | 의미 |
 |---|---|
@@ -77,7 +77,7 @@ writer는 같은 명시적 JDBC URL에 별도 계정·pool max1/minIdle0으로 �
 
 `DELETE /api/v1/posts/{postId}`는 기존 JWT의 작성자 본인만 허용한다. ADMIN도 일반 경로에서 다른 작성자의 글을 삭제할 수 없다. 성공은 HTTP/code200·`게시글이 삭제되었습니다.`·data:null이며, 부재/재삭제는404, 타인은403이다. 이 경로의 잘못된 숫자 타입은 기존500을 보존한다. legacy advice의 TypeMismatch import는 Hibernate 타입이므로 Spring 경로 변환 실패를 처리하는400 경로가 아니다. POST 작성 제한과 달리 기존5개 게시판 모두 삭제 대상이며 관리자 전용 삭제·별도 제보 삭제는 추가하지 않는다.
 
-짧은 reader 조회와 소유권 확인이 끝난 뒤 연결을 반환하고, 저장된 URL의 미디어 삭제를 시도한다. writer는 `FOR UPDATE`로 미삭제 상태·소유자를 다시 확인하고 조건부 soft delete·updatedAt·정확한 POST_DELETED Outbox·검색 문서 삭제를 한 트랜잭션으로 처리한다. soft delete는 본문·작성자·생성일·미디어 URL·댓글/쪽지를 물리 삭제하지 않는다. 같은 글의 경쟁 요청은 하나만 DB 삭제·이벤트를 커밋하고 나머지는404가 된다. 외부 미디어 시도는 경쟁 요청 양쪽에서 먼저 발생할 수 있다.
+짧은 reader 조회와 소유권 확인이 끝난 뒤 연결을 반환하고, 저장된 URL의 미디어 삭제를 시도한다. writer는 `FOR UPDATE`로 미삭제 상태·소유자를 다시 확인하고 조건부 soft delete·updatedAt·검색 문서 삭제를 한 트랜잭션으로 처리한다(구 시스템의 POST_DELETED Outbox 쓰기는 제거). soft delete는 본문·작성자·생성일·미디어 URL·댓글/쪽지를 물리 삭제하지 않는다. 같은 글의 경쟁 요청은 하나만 DB 삭제를 커밋하고 나머지는404가 된다. 외부 미디어 시도는 경쟁 요청 양쪽에서 먼저 발생할 수 있다.
 
 미디어는 명시 public-base·bucket·object-prefix 안의 DB 저장 URL만 처리한다. 업로더가 생성하는 `posts/images|videos/UUIDv4`와 마지막 점부터의 suffix는 원문 객체 key로 인식해 SDK에 그대로 전달한다. 이 경우 `%`, `?`, `#`, 구분자·제어문자를 URL로 재해석하거나 디코딩하지 않으며, 일반 key에는 기존 경로·인코딩 우회 방지 가드를 유지한다. URL별 검증/SDK 실패 후에도 다음 URL과 DB 처리를 계속하며 null·중복·순서를 임의 정규화하지 않는다. 파일 삭제 성공 후 DB rollback이 확정되면 파일은 복원되지 않고, 저장소 실패 후 DB 삭제가 성공하면 파일이 남을 수 있다. commit 결과 불명은 원래 오류로 전달하며 새 자동 재시도·객체 복원·보상 큐를 추가하지 않는다. SDK의 기존 같은 key 재시도와 새 애플리케이션 재처리는 구분한다. 오류 로그에는 URL·키·예외 메시지·원본 Throwable을 전달하지 않는다.
 
@@ -89,9 +89,9 @@ writer는 같은 명시적 JDBC URL에 별도 계정·pool max1/minIdle0으로 �
 
 reader 조회·소유권 확인 → 필요할 때 기존 파일 삭제 시도 → 새 업로드 → 닉네임 조회 → 짧은 writer tx 순서다. 외부 미디어·닉네임 I/O 중 두 DB 연결을 점유하지 않는다. writer는 `FOR UPDATE`로 미삭제 상태·소유자를 다시 확인하고 누락 필드는 잠근 현재 행에서 가져온다. 이로써 경쟁 수정의 다른 필드가 사라지거나 삭제된 글이 되살아나지 않는다. 외부 업로드 뒤의 재확인에서404/403이 발생할 수 있으며 이미 삭제한 파일 소실·새 객체 잔류는 기존 한계다. 새 자동 보상·애플리케이션 재시도는 넣지 않는다.
 
-실제 legacy JPA dirty checking·auditing·응답 생성 순서를 PostgreSQL에서 비교한다. 무변경/동일값 PUT은 행과 updatedAt을 바꾸지 않아도 `POST_UPDATED`와 검색 투영을 갱신한다. 값이 바뀐 PUT의 응답 updatedAt은 commit 전의 이전 값이며, 후속 GET은 감사 처리한 새 시각을 반환하는 기존 차이를 보존한다. SQL NULL 이미지는 빈 목록으로 읽지만 JSON literal null은 text-only 수정의 payload 생성에서500으로 rollback하는 기존 동작을 유지한다. 첨부 교체가 성공하면 빈 목록 또는 새 URL 목록으로 바꿀 수 있다.
+실제 legacy JPA dirty checking·auditing·응답 생성 순서를 PostgreSQL에서 비교한다. 무변경/동일값 PUT은 행과 updatedAt을 바꾸지 않아도 검색 투영을 갱신한다(구 시스템의 `POST_UPDATED` outbox 행은 쓰지 않는다). 값이 바뀐 PUT의 응답 updatedAt은 commit 전의 이전 값이며, 후속 GET은 감사 처리한 새 시각을 반환하는 기존 차이를 보존한다. SQL NULL 이미지는 빈 목록으로 읽는다. 구 시스템에서 JSON literal null 이미지의 text-only 수정이 500으로 rollback한 것은 POST_UPDATED outbox payload 생성(`Map.of`) 때문이었으므로, outbox를 쓰지 않는 후보는 이 경우를 오류 없이 처리하는 의도적 차이가 있다(후보는 outbox를 쓰지 않으므로 이 저장 형태를 만들지 않는다). 첨부 교체가 성공하면 빈 목록 또는 새 URL 목록으로 바꿀 수 있다.
 
-게시글 변경·정확한6필드 POST_UPDATED·Nori 검색 투영은 기존 writer 한 트랜잭션이다. reader max2/writer max1·설정·S3 client를 재사용하며 운영 schema/역할/ACL을 변경하지 않는다. 동일 필드/다른 필드 PUT 경합과 PUT/DELETE 양 순서는 독립 PG 연결·실제 blocking PID로 검증한다. 실패 응답과 로그의 인증값·예외 메시지 제외 정책은 F3/F4와 같다.
+게시글 변경·Nori 검색 투영은 기존 writer 한 트랜잭션이다. reader max2/writer max1·설정·S3 client를 재사용하며 운영 schema/역할/ACL을 변경하지 않는다. 동일 필드/다른 필드 PUT 경합과 PUT/DELETE 양 순서는 독립 PG 연결·실제 blocking PID로 검증한다. 실패 응답과 로그의 인증값·예외 메시지 제외 정책은 F3/F4와 같다.
 
 첨부 파싱은 컨트롤러 선택 전에 실패할 수 있으므로, `MultipartException`만 받는 공통 advice를 boot에서 명시적으로 조립한다. POST/PUT의 잘못된 multipart·용량 초과는 기존500/code/message/data 응답을 유지하고 로그에는 예외 클래스만 남긴다. 일반 업무/인증 오류의 담당,100MB/200MB 한도와 기본 eager parsing은 그대로다. 실제 resolver의 `getParts()` 실패를 주입한 회귀에서 handler=null·무토큰401/파싱0회·인증 후 안전한500·DB 연결0을 확인한다. 이 시험은 실제 대용량 바이트 전송이나 운영 저장소 시험이 아니다.
 
@@ -221,7 +221,7 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 1. 세 모듈 unit/MVC/Security·구조 fixture와 실행 JAR를 검사한다.
 2. digest로 고정한 공식 PostgreSQL 17.11 linux/amd64 컨테이너를 고유 run label로 생성한다. loopback bind·CPU 2·RAM 512MiB·tmpfs 제한과 합성 schema/SELECT-only reader 계정을 사용한 뒤, 같은 DB에 F3 3종 테이블·identity·최소 writer·run marker만 확장한다. 운영 migration/owner/ACL을 변경하는 절차가 아니다.
 3. compatibilityTest와 compatibilitySeoulTest를 별도 UTC/Asia-Seoul JVM에서 실행한다. 같은 저장행의 legacy Hibernate/Jackson과 새 JDBC, 실제 nickname decoder, pool max1·실제 권한 실패/회복·읽기 전용을 검사한다.
-4. 실제 JAR와 run 전용 S3 HTTP stub을 loopback에 띄워 기존 GET 회귀와 실제 발급기 JWT → multipart POST → GET을 확인한다. SDK가 전송한 bytes/MIME/순서, 인증·게시판 거부의 무부작용, Outbox/search 원자성, 권한·부분 업로드 실패 후 복구, 객체 유지·미삭제, 두 pool의 SIGTERM 종료·연결 해제를 검사한다. 필수 설정 누락도 listener·외부 접속 전에 거부하는지 확인한다.
+4. 실제 JAR와 run 전용 S3 HTTP stub을 loopback에 띄워 기존 GET 회귀와 실제 발급기 JWT → multipart POST → GET을 확인한다. SDK가 전송한 bytes/MIME/순서, 인증·게시판 거부의 무부작용, search 원자성(후보는 outbox 행을 쓰지 않음), 권한·부분 업로드 실패 후 복구, 객체 유지·미삭제, 두 pool의 SIGTERM 종료·연결 해제를 검사한다. 필수 설정 누락도 listener·외부 접속 전에 거부하는지 확인한다.
 5. F4는 같은 합성 DB의 최소 timestamp UPDATE·검색 DELETE 권한을 보완하고, 기존260건에 삭제 원자성·독립 연결의 행잠금·미디어 중 연결 반환·UTC/Seoul legacy auditing 비교를 더한다. 시험용 두 포트를 서로 다르게 선택하고 이번 자식의 bind 로그·readiness를 확인한다. 실제 bind 충돌이 확인된 경우만 최대3회 시도하고, 일반 기동 오류·timeout·강제 정리는 실패로 유지한다. 업무 fixture 초기화는 두 listener가 준비된 뒤에만 수행한다. F3 packaged 시험 뒤 opt-in DELETE를 허용한 같은 run 소유의 S3 stub으로 작성→삭제→조회404, 소유권·저장소 실패·DB rollback/회복·정상 종료를 확인한다.
 6. F5는 같은 소유 fixture에서 부분 수정 권한만 추가하고 실제 legacy JPA의 null/dirty checking·응답/commit 시각을 UTC와 Seoul에서 비교한다. SDK stub을 재사용해 실제 JAR의 작성→수정→조회→삭제, 빈 파일·미디어 실패·DB rollback/회복·정상 종료를 확인한다. 새 모델·운영 데이터·외부 R2를 사용하지 않는다.
 7. F6는 같은 fixture와 reader만 사용해 전체 목록·9필드·삭제/5종 게시판·동률 시각군·닉네임 실패/회복과 연결 반환을 검증한다. 실제 고정 Spring Data repository를 후보 SQL과 UTC/Seoul에서 비교한다. packaged 시험은 목록→단건·작성/수정 노출·삭제 제외를 실행하며 각 목록 GET 전후의 posts/Outbox/search와 S3 요청이 변하지 않는지 별도로 확인한다.
@@ -656,13 +656,13 @@ Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/
 Store의 non-2xx 응답은 본문 변환 전에 세 조회에서 모두 거부합니다. 리다이렉트를 정상 Page나 없는 장바구니204로 받아들이지 않으며 Location도 따라가지 않습니다. 정상200/204와 기존4xx/5xx 실패는 유지합니다.
 
 
-### Community 검색 재구축·이벤트 보존
+### Community 검색 재구축
 
-`pawbridge.community-maintenance.enabled`는 기본 false입니다. 전체 기능과 `pawbridge.search.rebuild-enabled` 또는 `pawbridge.jobs.cleanup-enabled`를 각각 명시 true로 지정해야 해당 작업을 조립합니다. 두 하위 기능이 꺼져 있으면 스케줄러도 만들지 않습니다. 원문의 cleanup 기본 true와 다른 의도적인 활성화 경계입니다.
+`pawbridge.community-maintenance.enabled`는 기본 false입니다. 전체 기능과 `pawbridge.search.rebuild-enabled`를 명시 true로 지정해야 검색 재구축을 조립합니다. 하위 기능이 꺼져 있으면 스케줄러도 만들지 않습니다. Outbox·Processed 이벤트 보존 작업은 outbox 제거(Debezium·Kafka·outbox를 모놀리스에서 제거하기로 결정)와 함께 삭제했고 `pawbridge.jobs.cleanup-enabled`는 이 기능에서 더 이상 쓰지 않습니다(Note/Chat 정리는 계속 사용).
 
-검색 재구축은 기존 writer의 Nori·해시·upsert를 재사용합니다. 같은 writer TX에서 최대100개의 누락·불일치 문서를 PK 순서로 잠그고 갱신하며 주기 기본값은5초입니다. 이벤트 보존은 별도 기본 TX에서 JVM 현지 시각의7일·30일 전보다 오래된 Outbox·Processed 행을 삭제하는 원문 정책을 유지합니다. 이 시간 기준이 CDC 전달 완료를 보증하지는 않습니다.
+검색 재구축은 기존 writer의 Nori·해시·upsert를 재사용합니다. 같은 writer TX에서 최대100개의 누락·불일치 문서를 PK 순서로 잠그고 갱신하며 주기 기본값은5초입니다.
 
-명시 활성화된 작업만 단일 소유 스케줄러를 사용합니다. 단위·조립 시험에서는 SQL 바인딩, 조건 분기와 실패 전파를 검증했고 실제 PG 잠금·rollback·삭제 권한·예약 실행·종료 대기는 검증하지 않았습니다. 기존 스케줄러 소유권, 대상 표·열과 행 잠금/UPSERT/DELETE 권한을 확인하기 전 활성화하거나 구 실행기를 종료하지 않습니다. 새 Kafka/ES 런타임·DDL·GRANT·운영 변경은 없습니다.
+명시 활성화된 작업만 단일 소유 스케줄러를 사용합니다. 단위·조립 시험에서는 SQL 바인딩, 조건 분기와 실패 전파를 검증했고 실제 PG 잠금·rollback·예약 실행·종료 대기는 검증하지 않았습니다. 기존 스케줄러 소유권, 대상 표·열과 행 잠금/UPSERT 권한을 확인하기 전 활성화하거나 구 실행기를 종료하지 않습니다. 새 Kafka/ES 런타임·DDL·GRANT·운영 변경은 없습니다.
 
 고정 입력 코호트는 기존140개에서147개로 확장했습니다. 새 파일6개와 기존 writer1개를 새로 고정하고 App·기본 조립 시험2개의 지문을 갱신했습니다. 기존138개 지문과 선택 검증/전체 회귀 구분, 기존 관리자 페이지 PG11 및 소유 정리를 유지합니다. 이 PG11은 이번 재구축·정리의 실제 DB 검증이 아닙니다.
 
@@ -732,17 +732,6 @@ Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named 
 
 동결 Shelter source7사례, 같은구조 guard6 성공과 독립 검수를 보존했습니다. 활동 module을 제외한 새조합은2사례·production compile/Business605를6초에 확인했습니다. 기존 source/전체구조 성공시험은 반복하지 않았습니다. 활동조회의 특정 collection sort는 원문200/후보500 차이가 있어 해당 API/JDBC/어댑터/시험/선택 설정을 게시에서 전부 제외하고 별도 준비본에 보존했습니다. 기존 User 활동조회는 HTTP를 유지합니다. 활동 모듈·전체 HTTP 동등성·운영 활성화 완료를 주장하지 않습니다.
 
-
-### User Outbox·Processed 보존 작업
-
-`pawbridge.user-maintenance.enabled=true`와 canonical `pawbridge.jobs.cleanup-enabled=true`를 둘 다 명시할 때만 단일 소유 scheduler와 두 작업을 조립합니다. 기본 off는 원문 cleanup missing=true와 다른 안전 활성화 경계이며, 구 실행기·작업 소유권을 확인하기 전 켜지 않습니다.
-
-원문처럼 Outbox created_at7일 전/Processed processed_at30일 전의 strict `<` 행을 상태·LIMIT 없이 삭제합니다. 각 작업의 TX 시작 뒤 JVM 현지 시각을 한 번 표본하고, UTC Calendar 바인딩과 별도 기본 timeout(-1)의 writer TX를 사용합니다. 기존 named writer JDBC/TM을 재사용하며 새 pool/DDL/GRANT는 없습니다. 예약은 JVM local03:00/03:30입니다. 삭제 예외는 TX 안에서 잡되 오류 타입만 로그로 남기고 begin/clock/commit/rollback 실패는 밖으로 전달합니다. 시간 기준 삭제가 CDC 전달 완료를 보증하지는 않습니다.
-
-source 신규28사례는 User12와 Boot16의 분할 성공 근거이며 한 번의 전체 실행으로 표현하지 않습니다. source에서 발생한 Mockito 준비 오류·이전 XML/로그는 보존했습니다. 최종 결합은 생산 컴파일·실제 business package 검사와 고정252입력 시험1만 수행하며 기존28 성공시험은 반복하지 않습니다.
-
-재사용 writeJdbc의 SQL5초 제한은 원문에 없던 상속 차이입니다. 실제 장시간 DELETE, JPA rollback-only와 PostgreSQL failed-TX/commit·rollback 차이, 최소 DELETE 권한/ACL, 시간 바인딩, 실제03:00/03:30 예약·종료와 단일 실행기 소유권은 미검증입니다. 활성화·구 실행기 종료 전 이를 확인해야 합니다. 실제 DB·데이터 삭제·예약·운영 변경은 하지 않았습니다.
-
 ### 본인 찜상품 항목 관리
 
 `pawbridge.store-wishlist.enabled=true`에서만 JWT 회원의 `DELETE /api/v1/wishlists/{wishlistId}`를 허용합니다. body·query·헤더의 회원 ID 대신 검증된 principal을 사용하며, 항목 ID와 회원 ID를 같은 DELETE 조건에 묶습니다. 없음·다른 회원 소유·반복 삭제는 동일한 204이고 DB/TX 오류는 성공으로 숨기지 않습니다. 기존 POST와 SKU 기반 DELETE는 유지합니다.
@@ -759,7 +748,7 @@ source 신규28사례는 User12와 Boot16의 분할 성공 근거이며 한 번�
 
 락 순서: Animal 명령은 User 행 `FOR UPDATE` → Animal 행 순서이고, 찜은 `favorites` INSERT(users FK의 `FOR KEY SHARE`) → Animal 행 UPDATE 순서이며 한 트랜잭션이 Animal 행을 하나만 잡는다. 코드 검토상 순환은 찾지 못했다. 같은 회원의 명령과 찜은 users 행에서 먼저 직렬화되고, 다른 회원끼리는 서로 다른 users 행을 쥔 채 Animal 행 하나를 기다릴 뿐이며, Animal 모듈에는 users 행을 요청하는 경로가 없다. 단 실제 PostgreSQL 동시 실행으로는 검증하지 않았다(불확실). 인기 동물은 Animal 행 UPDATE에서 짧게 직렬화된다. `animal_search_changed` 트리거는 breed 등 검색 열이 바뀔 때만 동작하므로 찜 증감은 검색 dirty를 만들지 않는다.
 
-활성화 전 조건: 선택한 User writer에 `pawbridge_animal` 스키마 USAGE와 `pawbridge_animal.animals`의 `SELECT(id, favorite_count, updated_at)`·`UPDATE(favorite_count, updated_at)`가 필요하다(WHERE·SET·CASE가 세 열을 읽는다). `pawbridge_user.outbox_events` INSERT는 더 이상 필요 없다. 누적 F29 CI writer ACL(`backend-app/scripts/f29_ci.py`)에는 이 권한이 없고 owned PostgreSQL 증분 SQL과 시험은 추가하지 않았으므로 운영 역할에 직접 부여하고 확인한다. 이 단일 트랜잭션 SQL·권한·락은 단위·조립 시험(mock JDBC)으로만 확인했고 실제 PostgreSQL 시험은 하지 않았다. 이전 전달기·Debezium 소비자(구 user/animal-service)를 먼저 멈추고 미전달 `Favorite` Outbox 행이 없는 것을 확인한 뒤 켠다. `UserMaintenanceConfiguration`의 User Outbox 정리는 그대로이며 `FavoriteDeliveryConfiguration`이 막던 `user-maintenance`+`jobs.cleanup-enabled` 조합 거부는 클래스와 함께 사라졌다.
+활성화 전 조건: 선택한 User writer에 `pawbridge_animal` 스키마 USAGE와 `pawbridge_animal.animals`의 `SELECT(id, favorite_count, updated_at)`·`UPDATE(favorite_count, updated_at)`가 필요하다(WHERE·SET·CASE가 세 열을 읽는다). `pawbridge_user.outbox_events` INSERT는 더 이상 필요 없다. 누적 F29 CI writer ACL(`backend-app/scripts/f29_ci.py`)에는 이 권한이 없고 owned PostgreSQL 증분 SQL과 시험은 추가하지 않았으므로 운영 역할에 직접 부여하고 확인한다. 이 단일 트랜잭션 SQL·권한·락은 단위·조립 시험(mock JDBC)으로만 확인했고 실제 PostgreSQL 시험은 하지 않았다. 이전 전달기·Debezium 소비자(구 user/animal-service)를 먼저 멈추고 미전달 `Favorite` Outbox 행이 없는 것을 확인한 뒤 켠다. User Outbox·Processed 보존 작업(`UserMaintenanceConfiguration`, `pawbridge.user-maintenance.*`)은 outbox 제거와 함께 삭제했다. 컷오버 때 community/user Debezium 커넥터와 `outbox_events`/`processed_events` 테이블 정리는 이 변경의 범위 밖이다.
 
 
 P6 이후 파일 기반 합성 PG 시험은 실행할 클래스의 환경변수 이름을 `PAWBRIDGE_OWNED_SETTINGS_ENV=P13_PG_SETTINGS`처럼 하나 명시하고, 해당 `P13_PG_SETTINGS`에는 소유 설정 파일의 절대경로를 지정한다. 이름은 `P[1-9][0-9]*_PG_SETTINGS`만 허용하며 이름·대응 값이 없거나 경로가 절대·정규·비심볼릭 일반 파일이 아니면 고정 오류로 실패한다. 실제 경로나 파일 내용은 출력하지 않는다. 이 task는 설정을 다른 변수나 클래스에 주입하지 않는다. 선택한 각 클래스는 계속 자기 Pn 환경변수와 파일0600·DB·역할·marker를 독립 검증한다. 환경이 다르면 실패하며 0건·skip은 성공이 아니다. 예: `PAWBRIDGE_OWNED_SETTINGS_ENV=P13_PG_SETTINGS`를 지정한 상태에서 기존 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreOrderAdministrationTest`를 선택한다. 이 이름 지정 규칙은 이후 P7~P14 설명의 파일 기반 호출에도 공통 적용된다. 기존 직접 환경변수형 Animal 회원 조회 시험의 예외는 `PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED=owned-fixture-only`와 CLI `--tests com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest`의 정확한 단일 선택에만 적용한다(같은 FQN의 정확한 메서드 하나도 허용). configured include/exclude는 비어 있어야 한다. 단순 이름·와일드카드·전체·여러 선택·legacy flag 단독은 예외가 아니며 기존 Pn 설정 선택 검증을 통과해야 한다. 클래스 자체 소유권 검증은 유지한다.

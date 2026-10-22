@@ -1,6 +1,5 @@
 package com.pawbridge.backend.boot.configuration;
 
-import com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention;
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild;
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostWriter;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -10,7 +9,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -18,31 +16,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "pawbridge.community-maintenance", name = "enabled", havingValue = "true", matchIfMissing = false)
-@Import({CommunityMaintenanceConfiguration.RetentionConfiguration.class,
-        CommunityMaintenanceConfiguration.SearchConfiguration.class})
+@Import(CommunityMaintenanceConfiguration.SearchConfiguration.class)
 public class CommunityMaintenanceConfiguration {
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(prefix = "pawbridge.jobs", name = "cleanup-enabled", havingValue = "true", matchIfMissing = false)
-    @Import(CommunityMaintenanceSchedulingConfiguration.class)
-    static class RetentionConfiguration {
-        @Bean
-        TransactionTemplate communityEventRetentionTransaction(
-                @Qualifier("writeTransactionManager") JdbcTransactionManager manager) {
-            return new TransactionTemplate(manager);
-        }
-
-        @Bean
-        JdbcCommunityEventRetention communityEventRetention(@Qualifier("writeJdbc") JdbcTemplate jdbc,
-                @Qualifier("communityEventRetentionTransaction") TransactionTemplate transaction) {
-            return new JdbcCommunityEventRetention(jdbc, transaction);
-        }
-
-        @Bean
-        EventRetentionJobs communityEventRetentionJobs(JdbcCommunityEventRetention retention) {
-            return new EventRetentionJobs(retention);
-        }
-    }
-
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(prefix = "pawbridge.search", name = "rebuild-enabled", havingValue = "true", matchIfMissing = false)
     @Import(CommunityMaintenanceSchedulingConfiguration.class)
@@ -57,17 +32,6 @@ public class CommunityMaintenanceConfiguration {
         SearchRebuildJob communitySearchRebuildJob(JdbcPostSearchRebuild rebuild) {
             return new SearchRebuildJob(rebuild);
         }
-    }
-
-    public static final class EventRetentionJobs {
-        private final JdbcCommunityEventRetention retention;
-        public EventRetentionJobs(JdbcCommunityEventRetention retention) { this.retention = retention; }
-
-        @Scheduled(scheduler = "communityMaintenanceScheduler", cron = "0 0 3 * * ?")
-        public void cleanupOldOutboxEvents() { retention.cleanupOldOutboxEvents(); }
-
-        @Scheduled(scheduler = "communityMaintenanceScheduler", cron = "0 0 4 * * ?")
-        public void cleanupOldProcessedEvents() { retention.cleanupOldProcessedEvents(); }
     }
 
     public static final class SearchRebuildJob {

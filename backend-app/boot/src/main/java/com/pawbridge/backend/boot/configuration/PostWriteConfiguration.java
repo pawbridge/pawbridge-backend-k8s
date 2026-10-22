@@ -106,8 +106,8 @@ public class PostWriteConfiguration {
 
     @Bean
     PostDeletion postDeletion(@Qualifier("writeJdbc") JdbcTemplate jdbc,
-            @Qualifier("writeTransaction") TransactionTemplate transaction, ObjectMapper mapper) {
-        return new JdbcPostDeletion(jdbc, transaction, mapper);
+            @Qualifier("writeTransaction") TransactionTemplate transaction) {
+        return new JdbcPostDeletion(jdbc, transaction);
     }
 
     @Bean
