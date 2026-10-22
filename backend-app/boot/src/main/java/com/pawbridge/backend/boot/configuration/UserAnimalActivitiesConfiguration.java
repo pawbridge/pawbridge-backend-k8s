@@ -1,5 +1,7 @@
 package com.pawbridge.backend.boot.configuration;
 
+import com.pawbridge.backend.animal.api.AnimalFavoriteCounts;
+import com.pawbridge.backend.animal.internal.favorite.infrastructure.JdbcAnimalFavoriteCounts;
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities;
 import com.pawbridge.backend.user.internal.animalactivity.infrastructure.*;
 import com.pawbridge.backend.user.internal.animalactivity.web.*;
@@ -30,8 +32,10 @@ public class UserAnimalActivitiesConfiguration {
         URI uri=URI.create(address);if(!uri.isAbsolute()||!("http".equals(uri.getScheme())||"https".equals(uri.getScheme()))||uri.getHost()==null||uri.getUserInfo()!=null||uri.getQuery()!=null||uri.getFragment()!=null||(!uri.getPath().isEmpty()&&!uri.getPath().equals("/")))throw new IllegalArgumentException("An explicit Animal HTTP origin is required");
         var requests=new JdkClientHttpRequestFactory(client);requests.setReadTimeout(Duration.ofSeconds(60));return new HttpUserAnimalLookup(RestClient.builder().baseUrl(uri.toString()).requestFactory(requests).build());
     }
-    @Bean UserAnimalActivities userAnimalActivities(@Qualifier("writeJdbc") JdbcTemplate jdbc,@Qualifier("writeTransactionManager") PlatformTransactionManager manager,UserAnimalActivities.AnimalLookup animals){
-        var write=new TransactionTemplate(manager);var read=new TransactionTemplate(manager);read.setReadOnly(true);return new JdbcUserAnimalActivities(jdbc,write,read,animals);
+    /** Same writer JDBC as the activities; the update joins the favorite transaction and opens none of its own. */
+    @Bean AnimalFavoriteCounts userAnimalFavoriteCounts(@Qualifier("writeJdbc") JdbcTemplate jdbc){return new JdbcAnimalFavoriteCounts(jdbc);}
+    @Bean UserAnimalActivities userAnimalActivities(@Qualifier("writeJdbc") JdbcTemplate jdbc,@Qualifier("writeTransactionManager") PlatformTransactionManager manager,UserAnimalActivities.AnimalLookup animals,AnimalFavoriteCounts counts){
+        var write=new TransactionTemplate(manager);var read=new TransactionTemplate(manager);read.setReadOnly(true);return new JdbcUserAnimalActivities(jdbc,write,read,animals,counts);
     }
     @Bean UserAnimalActivitiesController userAnimalActivitiesController(UserAnimalActivities activities){return new UserAnimalActivitiesController(activities);}
     @Bean UserAnimalActivitiesExceptionHandler userAnimalActivitiesExceptionHandler(){return new UserAnimalActivitiesExceptionHandler();}

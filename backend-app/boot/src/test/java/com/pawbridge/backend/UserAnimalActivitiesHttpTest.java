@@ -49,11 +49,11 @@ class UserAnimalActivitiesHttpTest {
         mvc.perform(post("/api/v1/favorites/bad").header("X-User-Id","7")).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/v1/favorites/bad").header("Authorization",token())).andExpect(status().isInternalServerError());verifyNoInteractions(activities);cleared();
     }
-    @ParameterizedTest @ValueSource(strings={"duplicate","missing","user","runtime","commit"})
+    @ParameterizedTest @ValueSource(strings={"duplicate","missing","animal","user","runtime","commit"})
     void given__business_or_storage_failure__when__mutating__then__retain_original_wire_and_never_expose_private_exception_text(String phase)throws Exception{
-        RuntimeException failure=switch(phase){case "duplicate"->new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ALREADY_EXISTS);case "missing"->new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.NOT_FOUND);
+        RuntimeException failure=switch(phase){case "duplicate"->new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ALREADY_EXISTS);case "missing"->new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.NOT_FOUND);case "animal"->new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ANIMAL_NOT_FOUND);
             case "user"->new com.pawbridge.backend.user.internal.profile.application.UserNotFoundException();case "commit"->new org.springframework.transaction.TransactionSystemException("synthetic-private-secret");default->new IllegalStateException("synthetic-private-secret");};
-        if(phase.equals("missing"))doThrow(failure).when(activities).remove(7,8);else when(activities.add(7,8)).thenThrow(failure);int status=phase.equals("duplicate")?409:phase.equals("missing")?404:phase.equals("user")?400:500;
+        if(phase.equals("missing"))doThrow(failure).when(activities).remove(7,8);else when(activities.add(7,8)).thenThrow(failure);int status=phase.equals("duplicate")?409:phase.equals("missing")||phase.equals("animal")?404:phase.equals("user")?400:500;
         var response=mvc.perform((phase.equals("missing")?delete("/api/v1/favorites/8"):post("/api/v1/favorites/8")).header("Authorization",token())).andExpect(status().is(status)).andExpect(header().doesNotExist("Set-Cookie")).andReturn().getResponse();
         assertThat(response.getContentAsString()).doesNotContain("synthetic-private-secret");assertThat(response.getHeader("Cache-Control")).contains("no-store");cleared();
     }
