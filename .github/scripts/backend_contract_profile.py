@@ -349,7 +349,7 @@ POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d5
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01eef7d3466f5ff57fec56f67823a7beff6284c5b9d7f6',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '5b2e47192ea5aef48c7e258992f03af3da0c08aa2f84ed63c3ae68675f179b27',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '9bdd94123515d5e4bbf0370228f2f17b7b79a45643274259a000b3bea0844500',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -361,7 +361,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c3e8c62ce0457be98e18cb4cbca31a762699f50ee396c678fcffd7382987362f',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'c93ebdf2cc8dff1bbd50ba1b24183e0af394aeea64f2bf2775551abae9d3f29d',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'c317e5e9fdd03efc2a704233b7a11a2541d143fb7f4f3eebd74f1320d54f9aea',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '5998ca012795207e034ee0cb19e657820e98faf78609184b35f49171d612d5fc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'dda638d643fc686e44102314be4d0d6d88b36a07e910fd074615950d6a3f21d1',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '7016adb41e6e20e7400999aab42eabef66c18de3739b63878e22bf0cd889dd31',
@@ -1032,6 +1032,17 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreMaintenanceConfigurationTest.java': 'de28d233e4d1fcc1c54a82f0d947dc165aecbff06e94711e10d3583f507f7073',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JdbcProductSearchRebuild.java': 'e9b2d78621959dca2cf60ec0f3d5062da18ce0109e1a41086dbd3f26fa966be3',
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/infrastructure/JdbcProductSearchRebuildTest.java': 'd6ab5ce060466505bc1793ceefc685acee25b29d1bcd55272d648039f17c1f54',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/image/infrastructure/AnimalImageForbiddenException.java': '04789f96b722bddb889a3da1cdcf4811a4954addd45e8044db9dea8decbc9e56',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/image/infrastructure/AnimalImageService.java': '22bc6659e5baeec05da0d7e16aa63361437c76a34f879b56992218c5ff705437',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/image/infrastructure/AnimalImageTooLargeException.java': '66893ab990ab84e477ab84856e90969702d6dc136b7a677ed3ac209e329d5a80',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/image/infrastructure/S3AnimalImages.java': '2eae128f491f7e143f5dfdd97021eb86683db6aeb24b006d89634c3d50b6c3bf',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/image/web/AnimalImageController.java': 'f02fcbdf32944d20e64cafff544d0af87a6eb24750a91fae4ec5966ae591b391',
+ 'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/image/web/AnimalImageExceptionHandler.java': 'dc068f6557243f3134a39362b7b9063122787a0d2e43ef637bf1925858c8060c',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/image/infrastructure/AnimalImageServiceTest.java': 'bffc0abac89ae4bc2776aaa9c07d5d8536fecd7a6ee81a20bcbb6fe0d8c606d3',
+ 'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/image/infrastructure/S3AnimalImagesTest.java': '0357961b55625de1e63d21a3ebe44b395fe0f03293ecb4e17ce1aecdb2d15feb',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalImageConfiguration.java': 'fa0a03c9e0e84678e44989f75c4dfe3202709908eb1257aaba991844e8700437',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalImageConfigurationTest.java': '201bdc1f1390d1b89656c13084532a204141f7ff2d057cf94043e6bfb351f6ef',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/AnimalImageHttpTest.java': '611e402e3f5f79c671975413ac97c3101578e1bf5a9fc5175147a33861d9bd27',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserPasswordConfiguration.java': '4e3b6263e4271a3793753a1aa500afd0538d642cc55087b41e81bca13835b8cc',
  'backend-app/boot/src/test/java/com/pawbridge/backend/UserPasswordConfigurationTest.java': 'ae8201bea4e463607a5a4a635156dd6d3139edf3affef22548318204e857f90f',
  'backend-app/boot/src/test/java/com/pawbridge/backend/UserPasswordDisabledHttpTest.java': '6d354c83e4bdaa4023f0b36b2ba49c211933332c8e28bd39f37cbc8f3fc7e3d0',
@@ -1402,7 +1413,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 706
+                or len(POST_READS_APP_HASHES) != 717
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')
