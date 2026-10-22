@@ -982,9 +982,9 @@ APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사
 
 원문처럼 동기 실행이다. 요청은 Job이 끝날 때까지 HTTP 연결과 요청 스레드를 붙잡는다. 응답 필드(`jobExecutionId`, `status`, `startTime`/`endTime` `yyyy-MM-dd HH:mm:ss`, `skipCount`, 수집 요약 4개, `searchSyncStatus`)와 상태 코드(완료·skip0 200, 실행 중·UNKNOWN 503, 그 밖 500, lock 경합 409, lock·metadata 확인 불가 503 `GUARD_UNAVAILABLE`, 예외 500 고정 문구)를 유지한다. `searchSyncStatus`는 원문 `elasticsearchIndexStep` 이름을 그대로 찾으므로 PostgreSQL Job에서는 원문 PostgreSQL 실행과 같이 항상 `NOT_STARTED`다.
 
-권한은 원문과 다르다. 원문 animal-service에는 자체 인증이 없어 클러스터 안 CronJob이 서비스에 직접 호출했고, Gateway의 `/api/v1/batch/**` 보호 경로는 JWT 로그인만 요구했지만 `/api/v1/v1/...`로 다시 써 실제로는 404였다. 모놀리스는 공개 앱이므로 무인증 개방 대신 기존 관리자 경로와 같이 서명 JWT의 ROLE_ADMIN만 허용한다(USER·SHELTER 403 `관리자 권한이 필요합니다.`, 토큰 없음·오류 401). 따라서 원래 CronJob 호출 방식(무토큰)은 이 경로로 옮길 수 없으며, 정기 수집은 앱 내부 예약을 쓰고 이 API는 관리자 재실행용으로 둔다.
+권한은 원문과 다르다. 원문 animal-service에는 자체 인증이 없었고(정기 수집은 원문부터 앱 내부 Spring 예약 `ApmsCollectionSchedule`이며 저장소·운영 Docker compose에 이 API를 부르는 CronJob은 없다), Gateway의 `/api/v1/batch/**` 보호 경로는 JWT 로그인만 요구했지만 `/api/v1/v1/...`로 다시 써 실제로는 404였다. 모놀리스는 공개 앱이므로 무인증 개방 대신 기존 관리자 경로와 같이 서명 JWT의 ROLE_ADMIN만 허용한다(USER·SHELTER 403 `관리자 권한이 필요합니다.`, 토큰 없음·오류 401). 따라서 원래 CronJob 호출 방식(무토큰)은 이 경로로 옮길 수 없으며, 정기 수집은 앱 내부 예약을 쓰고 이 API는 관리자 재실행용으로 둔다.
 
-활성화 전 확인 항목: 이전 animal-service CronJob·수동 API와 앱 내부 예약 중 단일 실행 소유자, APMS writer 권한과 Batch metadata 권한, writer 용량 `workers+2` 이상(수동 요청도 같은 pool을 쓴다), 프록시·Ingress의 요청 timeout이 Job 실행 시간보다 긴지, 종료 유예 시간(모놀리스 `server.shutdown=graceful`·`timeout-per-shutdown-phase=10s`, 원문 animal-service는 330초)이다. 동기 수동 요청이 수 분 걸리는 도중 재배포나 종료가 오면 10초 뒤 writer pool이 닫히고 Job이 STARTED로 남아 10분 stale 회복에 의존한다. 단위·구성·실제 Security/JWT MVC 시험은 mock runner 기준이며 실제 APMS·PostgreSQL 실행 검증이 아니다.
+활성화 전 확인 항목: 이전 animal-service의 앱 내부 예약·수동 API와 모놀리스 앱 내부 예약 중 단일 실행 소유자, APMS writer 권한과 Batch metadata 권한, writer 용량 `workers+2` 이상(수동 요청도 같은 pool을 쓴다), 프록시·Ingress의 요청 timeout이 Job 실행 시간보다 긴지, 종료 유예 시간(모놀리스 `server.shutdown=graceful`·`timeout-per-shutdown-phase=10s`, 원문 animal-service는 330초)이다. 동기 수동 요청이 수 분 걸리는 도중 재배포나 종료가 오면 10초 뒤 writer pool이 닫히고 Job이 STARTED로 남아 10분 stale 회복에 의존한다. 단위·구성·실제 Security/JWT MVC 시험은 mock runner 기준이며 실제 APMS·PostgreSQL 실행 검증이 아니다.
 
 ## 보호소 디렉터리 예약 수집
 
