@@ -29,27 +29,11 @@ class JpaDirectOrdersTest {
         assertEquals(new DirectOrders.OrderDetails(33L,created.orderUuid(),7L,200L,"PENDING","READY","fixture receiver","fixture phone","fixture address","fixture message",f.time,
                 List.of(new DirectOrders.Item("fixture product","CURRENT-80",100L,2))),created);
         UUID.fromString(created.orderUuid());assertEquals(3,f.target.getStockQuantity());assertEquals(8,f.sibling.getStockQuantity());
-        assertEquals(List.of("begin:writer","actor:write","reference","product-lock","all-sku-lock","search","outbox:80","outbox:81","sku-read","order-save","commit:writer"),f.events);
-        assertEquals(2,f.snapshots.size());
-        var first=f.json.readTree(f.snapshots.get(0).getPayload());var second=f.json.readTree(f.snapshots.get(1).getPayload());
-        assertEquals(14,first.size());assertEquals(14,second.size());
-        for(var payload:List.of(first,second)) {
-            assertEquals(90L,payload.get("productId").longValue());assertTrue(payload.get("categoryId").isNull());
-            assertEquals("fixture product",payload.get("productName").asText());assertEquals("ACTIVE",payload.get("status").asText());
-            assertTrue(payload.get("imageUrl").isNull());assertEquals(f.time.toString(),payload.get("createdAt").asText());
-            assertEquals("",payload.get("optionName").asText());
-        }
-        assertEquals(80L,first.get("skuId").longValue());assertEquals("CURRENT-80",first.get("skuCode").asText());assertEquals(100L,first.get("price").longValue());
-        assertEquals(81L,second.get("skuId").longValue());assertEquals("CURRENT-81",second.get("skuCode").asText());assertEquals(50L,second.get("price").longValue());
-        assertEquals(3,first.get("stockQuantity").intValue());assertEquals(8,second.get("stockQuantity").intValue());
-        assertEquals(11,first.get("totalStockQuantity").intValue());assertEquals(11,second.get("totalStockQuantity").intValue());
-        assertFalse(first.get("isPrimarySku").booleanValue());assertTrue(second.get("isPrimarySku").booleanValue());
-        assertEquals(first.get("updatedAt"),second.get("updatedAt"));assertEquals(f.time.toString(),first.get("updatedAt").asText());
-        for(var row:f.snapshots){assertEquals("product-sku",row.getAggregateType());assertEquals("SKU_UPDATED",row.getEventType());}
+        assertEquals(List.of("begin:writer","actor:write","reference","product-lock","all-sku-lock","search","sku-read","order-save","commit:writer"),f.events);
         assertEquals(81L,f.searchParameters.getFirst().get("skuId"));assertEquals("nori-9.12.3-v1",f.searchParameters.getFirst().get("version"));
         f.product.updateName("later product name");f.target.updatePrice(999L);
         assertEquals(created,f.service.get(7,33));
-        assertEquals(List.of("begin:reader","actor:read","order-read","commit:reader"),f.events.subList(11,15));
+        assertEquals(List.of("begin:reader","actor:read","order-read","commit:reader"),f.events.subList(9,13));
         var stored=f.orders.get(33L);assertSame(stored,stored.getOrderItems().getFirst().getOrder());
     }
 
@@ -58,7 +42,7 @@ class JpaDirectOrdersTest {
     void given__ineligible_current_actor__when__accessing_order_flow__then__reject_before_store_rows_or_followups(String state,String operation) {
         f.actor=switch(state){case "null"->null;case "mismatch"->new StoreOrderActors.Actor(8,true,false);case "inactive"->new StoreOrderActors.Actor(7,false,false);default->new StoreOrderActors.Actor(7,true,true);};
         assertThrows(OrderActorRejectedException.class,()->{if(operation.equals("create"))f.service.create(7,f.command(1));else f.service.get(7,33);});
-        verifyNoInteractions(f.products,f.skus,f.writerOrders,f.readerOrders,f.jdbc,f.outbox);
+        verifyNoInteractions(f.products,f.skus,f.writerOrders,f.readerOrders,f.jdbc);
         if(operation.equals("create")){verify(f.actors).currentForWrite(7);verify(f.actors,never()).currentForRead(anyLong());}
         else {verify(f.actors).currentForRead(7);verify(f.actors,never()).currentForWrite(anyLong());}
         assertEquals("rollback:"+(operation.equals("create")?"writer":"reader"),f.events.getLast());
@@ -67,7 +51,7 @@ class JpaDirectOrdersTest {
     @ParameterizedTest @ValueSource(ints={0,-1})
     void given__nonpositive_quantity__when__buying__then__reject_and_rollback_before_stock_queries(int quantity) {
         assertThrows(IllegalArgumentException.class,()->f.service.create(7,f.command(quantity)));
-        verifyNoInteractions(f.products,f.skus,f.writerOrders,f.jdbc,f.outbox);assertEquals("rollback:writer",f.events.getLast());
+        verifyNoInteractions(f.products,f.skus,f.writerOrders,f.jdbc);assertEquals("rollback:writer",f.events.getLast());
     }
 
     @ParameterizedTest @ValueSource(strings={"missing-sku","missing-product","hidden","sold-out","deleted","insufficient-stock"})
@@ -79,19 +63,19 @@ class JpaDirectOrdersTest {
         if(kind.equals("deleted"))f.product.updateStatus(ProductStatus.DELETED);
         Class<? extends RuntimeException> expected=kind.startsWith("missing")?IllegalArgumentException.class:IllegalStateException.class;
         assertThrows(expected,()->f.service.create(7,f.command(kind.equals("insufficient-stock")?6:1)));
-        assertEquals(5,f.target.getStockQuantity());verifyNoInteractions(f.writerOrders,f.jdbc,f.outbox);assertEquals("rollback:writer",f.events.getLast());
+        assertEquals(5,f.target.getStockQuantity());verifyNoInteractions(f.writerOrders,f.jdbc);assertEquals("rollback:writer",f.events.getLast());
     }
 
     @Test void given__long_price_overflow__when__buying__then__request_rollback_of_stock_and_followups_and_never_save_order() {
         f.target.updatePrice(Long.MAX_VALUE);
         var failure=assertThrows(IllegalArgumentException.class,()->f.service.create(7,f.command(2)));
         assertInstanceOf(ArithmeticException.class,failure.getCause());assertEquals("rollback:writer",f.events.getLast());
-        assertEquals(2,f.snapshots.size());assertEquals(1,f.searchParameters.size());verifyNoInteractions(f.writerOrders);
+        assertEquals(1,f.searchParameters.size());verifyNoInteractions(f.writerOrders);
         // This unit verifies the rollback request, not physical database restoration; Root owns the PG proof.
     }
 
-    @ParameterizedTest @ValueSource(strings={"search","outbox1","outbox2","order"})
-    void given__projection_or_outbox_or_order_failure__when__buying__then__propagate_and_request_one_writer_rollback(String stage) {
+    @ParameterizedTest @ValueSource(strings={"search","order"})
+    void given__projection_or_order_failure__when__buying__then__propagate_and_request_one_writer_rollback(String stage) {
         f.failAt=stage;assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,()->f.service.create(7,f.command(1)));
         assertEquals("rollback:writer",f.events.getLast());assertFalse(f.events.contains("commit:writer"));
         if(!stage.equals("order"))verifyNoInteractions(f.writerOrders);
@@ -106,20 +90,20 @@ class JpaDirectOrdersTest {
     void given__wrong_owner_or_missing_order__when__reading__then__source_bad_input_without_writer_work(boolean missing) {
         if(!missing){var order=Order.builder().userId(8L).orderUuid("other").totalAmount(1L).build();DirectOrderFixture.id(order,33);f.orders.put(33L,order);}
         assertThrows(IllegalArgumentException.class,()->f.service.get(7,33));
-        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);assertEquals("rollback:reader",f.events.getLast());
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc);assertEquals("rollback:reader",f.events.getLast());
     }
 
     @Test void given__a_repeated_direct_purchase__when__creating_twice__then__keep_source_new_order_semantics_without_an_idempotency_key() {
         var first=f.service.create(7,f.command(1));var second=f.service.create(7,f.command(1));
         assertNotEquals(first.orderId(),second.orderId());assertNotEquals(first.orderUuid(),second.orderUuid());
-        assertEquals(3,f.target.getStockQuantity());assertEquals(2,f.orders.size());assertEquals(4,f.snapshots.size());
+        assertEquals(3,f.target.getStockQuantity());assertEquals(2,f.orders.size());assertEquals(2,f.searchParameters.size());
     }
 
     @ParameterizedTest @ValueSource(strings={"write-in-ro","read-in-rw"})
     void given__miswired_transaction_mode__when__accessing__then__fail_closed_before_actor_or_store_rows(String kind) {
         if(kind.equals("write-in-ro"))f.write.setReadOnly(true);else f.read.setReadOnly(false);
         assertThrows(IllegalStateException.class,()->{if(kind.equals("write-in-ro"))f.service.create(7,f.command(1));else f.service.get(7,33);});
-        verifyNoInteractions(f.actors,f.products,f.skus,f.writerOrders,f.readerOrders,f.jdbc,f.outbox);
+        verifyNoInteractions(f.actors,f.products,f.skus,f.writerOrders,f.readerOrders,f.jdbc);
     }
 
     @ParameterizedTest @ValueSource(strings={"create","get"})
@@ -127,7 +111,7 @@ class JpaDirectOrdersTest {
         var absent=org.springframework.transaction.support.TransactionOperations.withoutTransaction();
         var service=new JpaDirectOrders(f.writerOrders,f.readerOrders,f.skus,f.stocks,f.actors,absent,absent);
         assertThrows(IllegalStateException.class,()->{if(operation.equals("create"))service.create(7,f.command(1));else service.get(7,33);});
-        verifyNoInteractions(f.actors,f.products,f.skus,f.writerOrders,f.readerOrders,f.jdbc,f.outbox);
+        verifyNoInteractions(f.actors,f.products,f.skus,f.writerOrders,f.readerOrders,f.jdbc);
     }
 
     @ParameterizedTest @NullSource @EnumSource(OrderStatus.class)
@@ -156,7 +140,7 @@ class JpaDirectOrdersTest {
         if(status==null)verify(f.readerOrders,never()).findByUserIdAndStatusOrderByCreatedAtDesc(anyLong(),any(),any());
         else verify(f.readerOrders,never()).findByUserIdOrderByCreatedAtDesc(anyLong(),any());
         verify(f.readerOrders).findWithItemsByUserIdAndIdIn(7L,List.of(77L));
-        verifyNoInteractions(f.writerOrders,f.skus,f.products,f.jdbc,f.outbox);
+        verifyNoInteractions(f.writerOrders,f.skus,f.products,f.jdbc);
         verify(f.actors,never()).currentForWrite(anyLong());
     }
 
@@ -164,7 +148,7 @@ class JpaDirectOrdersTest {
     void given__missing_or_ineligible_current_member__when__listing__then__reject_before_any_order_query(String state) {
         f.actor=switch(state){case "null"->null;case "mismatch"->new StoreOrderActors.Actor(8,true,false);case "inactive"->new StoreOrderActors.Actor(7,false,false);default->new StoreOrderActors.Actor(7,true,true);};
         assertThrows(OrderActorRejectedException.class,()->f.service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
-        verifyNoInteractions(f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        verifyNoInteractions(f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc);
         assertEquals(List.of("begin:reader","actor:read","rollback:reader"),f.events);
     }
 
@@ -177,7 +161,7 @@ class JpaDirectOrdersTest {
     @ParameterizedTest @MethodSource("invalidHistoryPages")
     void given__oversized_or_recursive_or_large_offset_query__when__listing__then__reject_before_transaction_or_actor(StoreMemberReads.Request request) {
         assertThrows(IllegalArgumentException.class,()->f.service.list(7,null,request));assertTrue(f.events.isEmpty());
-        verifyNoInteractions(f.actors,f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        verifyNoInteractions(f.actors,f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc);
     }
 
     @Test void given__valid_scalar_sorts__when__listing_empty_page__then__preserve_order_direction_and_ignore_case_without_relationship_paths() {
@@ -190,7 +174,7 @@ class JpaDirectOrdersTest {
         var result=f.service.list(7,null,new StoreMemberReads.Request(0,100,sort));
         assertTrue(result.content().isEmpty());assertEquals(0,result.totalElements());assertEquals(100,result.size());assertEquals(sort,result.sort());
         verify(f.readerOrders,never()).findWithItemsByUserIdAndIdIn(anyLong(),anyList());
-        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc);
     }
 
     @ParameterizedTest @ValueSource(strings={"no-tx","read-in-rw"})
@@ -198,7 +182,7 @@ class JpaDirectOrdersTest {
         var reads=kind.equals("no-tx")?org.springframework.transaction.support.TransactionOperations.withoutTransaction():f.write;
         var service=new JpaDirectOrders(f.writerOrders,f.readerOrders,f.skus,f.stocks,f.actors,f.write,reads);
         assertThrows(IllegalStateException.class,()->service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
-        verifyNoInteractions(f.actors,f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        verifyNoInteractions(f.actors,f.readerOrders,f.writerOrders,f.products,f.skus,f.jdbc);
     }
 
     @Test void given__history_query_failure__when__listing__then__propagate_and_rollback_read_transaction_without_writes() {
@@ -208,7 +192,7 @@ class JpaDirectOrdersTest {
         assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
                 ()->f.service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
         assertEquals(List.of("begin:reader","actor:read","history-page","rollback:reader"),f.events);
-        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc);
     }
 
     @Test void given__nonempty_parent_page_and_different_bulk_result_order__when__listing__then__fetch_only_verified_owner_page_ids_once_and_preserve_parent_order_and_metadata() {
@@ -226,7 +210,7 @@ class JpaDirectOrdersTest {
         assertEquals(List.of("begin:reader","actor:read","history-page","history-items","commit:reader"),f.events);
         verify(f.readerOrders).findWithItemsByUserIdAndIdIn(7L,List.of(88L,77L));
         verify(f.readerOrders,never()).findByUserIdOrderByCreatedAtDesc(anyLong(),any());
-        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc);
     }
 
     @Test void given__page_item_bulk_query_failure__when__listing__then__propagate_and_rollback_same_read_transaction_without_writes() {
@@ -241,7 +225,7 @@ class JpaDirectOrdersTest {
                 ()->f.service.list(7,null,new StoreMemberReads.Request(0,10,List.of())));
         assertEquals(List.of("begin:reader","actor:read","history-page","history-items","rollback:reader"),f.events);
         verify(f.readerOrders).findWithItemsByUserIdAndIdIn(7L,List.of(77L));
-        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc,f.outbox);
+        verifyNoInteractions(f.writerOrders,f.products,f.skus,f.jdbc);
     }
 
     private Order historyOrder(OrderStatus status) {

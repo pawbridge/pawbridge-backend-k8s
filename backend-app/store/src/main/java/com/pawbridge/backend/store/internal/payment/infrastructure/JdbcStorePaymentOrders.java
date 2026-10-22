@@ -19,9 +19,10 @@ public final class JdbcStorePaymentOrders implements StorePaymentOrders {
         return reads.execute(status -> {
             try {
                 return jdbc.queryForObject("""
-                        SELECT id,order_uuid,total_amount,status FROM pawbridge_store.orders WHERE order_uuid=?
+                        SELECT id,order_uuid,user_id,total_amount,status FROM pawbridge_store.orders WHERE order_uuid=?
                         """, (row, index) -> new Order(row.getObject("id", Long.class), row.getString("order_uuid"),
-                        row.getObject("total_amount", Long.class), row.getString("status")), orderUuid);
+                        row.getObject("user_id", Long.class), row.getObject("total_amount", Long.class),
+                        row.getString("status")), orderUuid);
             } catch (EmptyResultDataAccessException missing) {
                 throw new IllegalArgumentException("Order not found: " + orderUuid);
             }

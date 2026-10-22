@@ -87,6 +87,20 @@ class PaymentConfirmationHttpTest {
         assertThat(json.get("failure").isNull()).isTrue();
     }
 
+    @ParameterizedTest
+    @CsvSource({"foreign,403,본인의 주문만 결제할 수 있습니다.","not-pending,409,결제 대기 상태의 주문만 결제할 수 있습니다."})
+    void given__a_pre_provider_order_rejection__when__confirming__then__map_it_to_a_scoped_problem_response(String kind,int status,String detail) throws Exception {
+        when(payments.confirmPayment(eq(7L),any())).thenThrow(kind.equals("foreign")
+                ? new com.pawbridge.backend.payment.internal.confirmation.application.PaymentOrderAccessDeniedException()
+                : new com.pawbridge.backend.payment.internal.confirmation.application.PaymentOrderNotPayableException());
+        var result=mvc.perform(verified("POST","/api/payments/confirm")
+                .content("{\"paymentKey\":\"synthetic-payment-key\",\"orderId\":\"legacy-order-id\",\"amount\":200}"))
+                .andExpect(status().is(status)).andReturn();
+        var json=mapper.readTree(result.getResponse().getContentAsByteArray());
+        assertThat(json.path("status").asInt()).isEqualTo(status);
+        assertThat(json.path("detail").asText()).isEqualTo(detail);
+    }
+
     @Test
     void given__only_a_forged_identity_header__when__confirming__then__reject_before_the_payment_application() throws Exception {
         mvc.perform(command("POST","/api/payments/confirm").content("{}"))

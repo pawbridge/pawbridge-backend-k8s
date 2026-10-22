@@ -267,27 +267,17 @@ BEGIN
     AND NEW.analyzer_version<>'owned-fixture-v1' THEN
   RAISE EXCEPTION USING ERRCODE='23514',CONSTRAINT='owned_fixture_search_failure',MESSAGE='Owned synthetic search rejection';
  END IF;
- RETURN NEW;
-END;
-$$;
-CREATE TRIGGER owned_direct_order_search_failure BEFORE INSERT OR UPDATE ON product_search_documents
- FOR EACH ROW EXECUTE FUNCTION owned_direct_order_search_failure();
-CREATE FUNCTION owned_direct_order_outbox_failure() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
- IF NEW.aggregate_type='product-sku' AND NEW.aggregate_id='73007'
-    AND NEW.payload->>'price'='777777' THEN
-  RAISE EXCEPTION USING ERRCODE='23514',CONSTRAINT='owned_fixture_outbox_failure',MESSAGE='Owned synthetic outbox rejection';
- END IF;
  -- A test-owned control connection holds this advisory key only during the
  -- concurrency case. The source product/SKU locks remain held at this point.
- IF NEW.aggregate_type='product-sku' AND NEW.aggregate_id='73008' THEN
+ -- (Moved from the removed SKU_UPDATED outbox insert to the search document write.)
+ IF NEW.product_id=71007 THEN
   PERFORM pg_advisory_xact_lock(9273008);
  END IF;
  RETURN NEW;
 END;
 $$;
-CREATE TRIGGER owned_direct_order_outbox_failure BEFORE INSERT ON outbox
- FOR EACH ROW EXECUTE FUNCTION owned_direct_order_outbox_failure();
+CREATE TRIGGER owned_direct_order_search_failure BEFORE INSERT OR UPDATE ON product_search_documents
+ FOR EACH ROW EXECUTE FUNCTION owned_direct_order_search_failure();
 REVOKE ALL ON ALL TABLES IN SCHEMA pawbridge_store,pawbridge_user FROM PUBLIC;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA pawbridge_store,pawbridge_user FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA pawbridge_store,pawbridge_user FROM PUBLIC;
@@ -298,8 +288,9 @@ GRANT SELECT ON ALL TABLES IN SCHEMA pawbridge_store,pawbridge_user TO :"owned_w
 -- Only the column needed by PostgreSQL SELECT FOR UPDATE; no User role/profile mutation grant.
 GRANT UPDATE(user_id) ON pawbridge_user.users TO :"owned_writer";
 GRANT UPDATE ON pawbridge_store.products,pawbridge_store.product_skus TO :"owned_writer";
-GRANT INSERT,DELETE ON pawbridge_store.orders,pawbridge_store.order_items,pawbridge_store.outbox TO :"owned_writer";
+-- The application no longer writes the Store outbox; the writer keeps only the SELECT above on it.
+GRANT INSERT,DELETE ON pawbridge_store.orders,pawbridge_store.order_items TO :"owned_writer";
 GRANT INSERT,UPDATE,DELETE ON pawbridge_store.product_search_documents TO :"owned_writer";
-GRANT USAGE,SELECT ON SEQUENCE pawbridge_store.orders_id_seq,pawbridge_store.order_items_id_seq,pawbridge_store.outbox_id_seq TO :"owned_writer";
-GRANT EXECUTE ON FUNCTION pawbridge_store.owned_direct_order_search_failure(),pawbridge_store.owned_direct_order_outbox_failure() TO :"owned_writer";
+GRANT USAGE,SELECT ON SEQUENCE pawbridge_store.orders_id_seq,pawbridge_store.order_items_id_seq TO :"owned_writer";
+GRANT EXECUTE ON FUNCTION pawbridge_store.owned_direct_order_search_failure() TO :"owned_writer";
 COMMIT;

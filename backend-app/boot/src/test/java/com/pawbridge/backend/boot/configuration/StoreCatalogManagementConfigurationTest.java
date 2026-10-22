@@ -72,7 +72,6 @@ class StoreCatalogManagementConfigurationTest {
                     assertThat(factory.getPersistenceUnitInfo().getManagedClassNames()).containsExactlyInAnyOrder(
                             model+"BaseEntity",model+"Wishlist",model+"ProductSKU",model+"Product",model+"Category",model+"SKUValue",
                             model+"OptionValue",model+"OptionGroup",model+"Order",model+"OrderItem",
-                            "com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.model.Outbox",
                             "com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.Cart",
                             "com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.CartItem");
                     assertThat(factory.getJpaPropertyMap()).containsEntry("hibernate.boot.allow_jdbc_metadata_access",false)
@@ -96,7 +95,7 @@ class StoreCatalogManagementConfigurationTest {
                     assertThat(jdbc.getJdbcTemplate().getDataSource()).isSameAs(writer);assertThat(jdbc.getJdbcTemplate().getQueryTimeout()).isEqualTo(5);
                     terms.set(context.getBean("storeCatalogManagementSearchTerms",KoreanSearchTerms.class));assertThat(terms.get().document("말티즈")).isNotBlank();
                     for(Object service:List.of(products,options)) {
-                        Object snapshot=ReflectionTestUtils.getField(service,"snapshots");sameRepositoryWriter(ReflectionTestUtils.getField(snapshot,"outbox"),shared);
+                        Object snapshot=ReflectionTestUtils.getField(service,"snapshots");
                         Object documents=ReflectionTestUtils.getField(snapshot,"documents");assertThat(ReflectionTestUtils.getField(documents,"jdbc")).isSameAs(jdbc);
                     }
                     S3ProductImages images=context.getBean(S3ProductImages.class);

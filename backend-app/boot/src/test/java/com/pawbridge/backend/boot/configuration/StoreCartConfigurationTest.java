@@ -88,8 +88,7 @@ class StoreCartConfigurationTest {
                     String model = "com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.";
                     var managed = new ArrayList<>(List.of(model + "BaseEntity", model + "Wishlist", model + "ProductSKU",
                             model + "Product", model + "Category", model + "SKUValue", model + "OptionValue", model + "OptionGroup",
-                            model + "Order", model + "OrderItem",
-                            "com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.model.Outbox"));
+                            model + "Order", model + "OrderItem"));
                     if (carts) managed.addAll(List.of("com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.Cart",
                             "com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.CartItem"));
                     assertThat(factory.getPersistenceUnitInfo().getManagedClassNames()).containsExactlyInAnyOrderElementsOf(managed);

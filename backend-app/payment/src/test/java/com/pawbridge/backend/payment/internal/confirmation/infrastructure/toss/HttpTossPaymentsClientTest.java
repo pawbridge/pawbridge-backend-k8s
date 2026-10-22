@@ -38,6 +38,18 @@ class HttpTossPaymentsClientTest {
         server.verify();
     }
 
+    @Test void given__an_unknown_confirmation_result__when__looking_up__then__get_the_payment_by_key_with_the_same_basic_header() {
+        var builder=RestClient.builder().baseUrl("https://provider.invalid/v1");
+        var server=MockRestServiceServer.bindTo(builder).build();
+        var client=new HttpTossPaymentsClient(builder.build());
+        server.expect(requestTo("https://provider.invalid/v1/payments/synthetic-key"))
+                .andExpect(method(HttpMethod.GET)).andExpect(header("Authorization","Basic synthetic-only"))
+                .andRespond(withSuccess("{\"paymentKey\":\"synthetic-key\",\"orderId\":\"order-uuid\",\"status\":\"DONE\",\"totalAmount\":200}",MediaType.APPLICATION_JSON));
+        var result=client.getPayment("Basic synthetic-only","synthetic-key");
+        assertThat(result.getStatus()).isEqualTo("DONE");assertThat(result.getTotalAmount()).isEqualTo(200L);
+        server.verify();
+    }
+
     @Test void given__a_provider_http_failure__when__sending__then__propagate_to_the_original_business_error_branch() {
         var builder=RestClient.builder().baseUrl("https://provider.invalid/v1");
         var server=MockRestServiceServer.bindTo(builder).build();

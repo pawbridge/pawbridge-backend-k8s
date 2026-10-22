@@ -1,6 +1,5 @@
 package com.pawbridge.backend.store.internal.directorder.infrastructure;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.api.StoreOrderActors;
 import com.pawbridge.backend.store.api.StoreMemberReads;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
@@ -8,14 +7,12 @@ import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.directorder.application.OrderActorRejectedException;
 import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.projection.OrderResponse;
 import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repository.OrderRepository;
-import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repository.OutboxRepository;
 import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repository.ProductRepository;
 import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repository.ProductSKURepository;
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.Order;
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.OrderItem;
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.OrderStatus;
 import jakarta.persistence.EntityManager;
-import java.time.Clock;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -40,13 +37,12 @@ public final class JpaDirectOrders implements DirectOrders {
 
     public JpaDirectOrders(EntityManager sharedWriter,EntityManager sharedReader,TransactionOperations writes,
             TransactionOperations reads,StoreOrderActors actors,NamedParameterJdbcOperations writerSearchJdbc,
-            KoreanSearchTerms terms,ObjectMapper mapper) {
+            KoreanSearchTerms terms) {
         var writer=new JpaRepositoryFactory(sharedWriter);
         this.writerOrders=writer.getRepository(OrderRepository.class);
         this.readerOrders=new JpaRepositoryFactory(sharedReader).getRepository(OrderRepository.class);
         this.skus=writer.getRepository(ProductSKURepository.class);
-        var snapshots=new ProductSnapshots(writer.getRepository(OutboxRepository.class),mapper,
-                new PostgresqlSearchDocuments(writerSearchJdbc,terms),Clock.systemDefaultZone());
+        var snapshots=new ProductSnapshots(writerSearchJdbc,terms);
         this.stocks=new JpaStockAdjustments(writer.getRepository(ProductRepository.class),skus,snapshots);
         this.actors=actors;this.writes=writes;this.reads=reads;
     }

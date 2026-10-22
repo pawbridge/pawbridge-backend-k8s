@@ -805,7 +805,7 @@ READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수�
 
 `pawbridge.store-direct-orders.enabled=true`에서만 `POST /api/v1/orders/direct`를 조립한다. `GET /api/v1/orders/{orderId}`는 Direct 또는 Cart flag가 명시적으로 true일 때 공유 컨트롤러 한 개로 조립한다. 기본값과 `on` 별칭은 비활성이다. 검증된 JWT 회원 ID를 사용하고 현재 회원·삭제 대기를 확인한다. 주문·상품/SKU 잠금·전체 SKU Outbox·PostgreSQL 검색 반영은 같은 writer JPA 트랜잭션에 참여한다. 주문 상세는 같은 한정 persistence unit의 별도 읽기 전용 트랜잭션에서 조회한다. 기존 MyPage reader는 그대로 유지한다.
 
-기존 주문 응답과 구매 당시 상품명·가격·수량 스냅샷을 보존한다. 수량/금액 overflow는400, 기존 재고/상품 상태 오류는500이며 rollback charset CHECK에 한정한 원문400/C007도 유지한다. overflow·검색·Outbox·주문 저장 실패 시 재고까지 함께 롤백한다. 재요청은 새 주문이며 멱등키나 PENDING 자동 만료를 추가하지 않았다. 장바구니·Payment 및 외부 결제는 이 편입에 포함하지 않는다.
+기존 주문 응답과 구매 당시 상품명·가격·수량 스냅샷을 보존한다. 수량/금액 overflow는400, 기존 재고/상품 상태 오류는500이며 rollback charset CHECK에 한정한 원문400/C007도 유지한다. overflow·검색·주문 저장 실패 시 재고까지 함께 롤백한다(SKU_UPDATED outbox는 쓰지 않는다). 재요청은 새 주문이며 멱등키나 PENDING 자동 만료를 추가하지 않았다. 장바구니·Payment 및 외부 결제는 이 편입에 포함하지 않는다.
 
 로컬 합성 PG 시험은 소유 marker와 제한 writer를 검증한 전용 `P9_PG_SETTINGS` 파일로 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlDirectOrderTest`만 선택한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다. ordinary test에서 owned PG 태그는 제외된다. 동일 상품 동시 구매·실제 행 잠금·전체 롤백·감사 시각/스냅샷·정확한 cleanup은 합성 환경의 근거이며 운영 검증이 아니다.
 
@@ -839,7 +839,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 신뢰할 수 있는 JWT principal과 현재 회원·삭제 대기를 확인하고, 같은 writer 트랜잭션의 회원 행 잠금으로 해당 회원의 Cart 변경과 주문 소비를 직렬화한다. Cart 두 표는 기존 migration 모델을 사용하며 Redis dirty 동기화 대신 DB에 즉시 반영한다. 기존 MyPage 조회의 Cart 없음과 저장된 빈 Cart 구분을 유지한다. 새 pool·DDL·전역 JPA scan은 만들지 않는다.
 
-주문은 SKU ID만 먼저 추린 뒤 기존 상품/SKU 잠금·재고 차감·전체 SKU Outbox·검색 반영을 재사용한다. 잠금 후의 같은 현재 가격으로 합계와 OrderItem 스냅샷을 만든다. 이는 원문의 잠금 전 합계와 잠금 후 스냅샷 가격이 달라질 수 있던 경계를 강화한 변경이다. 주문 저장과 Cart 비우기까지 하나의 writer 커밋이며, Cart 삭제 후 커밋 실패도 재고·주문·이벤트·검색과 함께 롤백한다. 원문 배송 4필드에 새 필수·길이 규칙을 넣지 않는다.
+주문은 SKU ID만 먼저 추린 뒤 기존 상품/SKU 잠금·재고 차감·검색 반영을 재사용한다(SKU_UPDATED outbox는 제거). 잠금 후의 같은 현재 가격으로 합계와 OrderItem 스냅샷을 만든다. 이는 원문의 잠금 전 합계와 잠금 후 스냅샷 가격이 달라질 수 있던 경계를 강화한 변경이다. 주문 저장과 Cart 비우기까지 하나의 writer 커밋이며, Cart 삭제 후 커밋 실패도 재고·주문·검색과 함께 롤백한다. 원문 배송 4필드에 새 필수·길이 규칙을 넣지 않는다.
 
 누락 SKU만 남은 Cart는 400과 함께 보존한다. 유효·누락 SKU가 섞이면 기존처럼 유효 품목을 주문하고 전체 Cart를 비운다. 중복 SKU 저장 상태는 임의 보정 없이 실패하며, 금액·수량 overflow는 400이다. 새 멱등키나 PENDING 만료, 결제·환불 정책을 만들지 않는다. 동시에 같은 Cart를 주문하면 한 번 소비하지만, 두 주문 사이에 새 추가가 있으면 별도 주문이 생길 수 있다.
 
@@ -1044,7 +1044,7 @@ Unit, configuration, actual Security/JWT and architecture checks cover developme
 
 ## Store catalog management
 
-`pawbridge.store-catalog-management.enabled=true` explicitly assembles the original product create/update/delete, option group/value writes and image upload. The canonical write handlers require an ADMIN JWT. Product, SKU, option, outbox and search writes share the existing Store writer transaction and entity manager; the existing catalog read flag remains separate. Image uploads borrow the explicitly configured Post-owned S3 client and storage settings. This feature defaults off.
+`pawbridge.store-catalog-management.enabled=true` explicitly assembles the original product create/update/delete, option group/value writes and image upload. The canonical write handlers require an ADMIN JWT. Product, SKU, option and search writes share the existing Store writer transaction (the SKU_UPDATED outbox is no longer written) and entity manager; the existing catalog read flag remains separate. Image uploads borrow the explicitly configured Post-owned S3 client and storage settings. This feature defaults off.
 
 The selected 30 unit cases, 12 configuration cases and 101 Security/JWT MVC cases verify local business, shared-resource and request-boundary contracts. Mocked service/repository/storage results do not validate real PostgreSQL or R2 success. The Animal-parent Main/Security merge preserves the chatbot and observation configuration; a combined actual-Main runtime check is a separate final integration gate.
 
@@ -1062,21 +1062,48 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 
 ## 결제 확인과 Store 결제 결과 처리
 
-`pawbridge.payments.enabled=true`는 원문의 POST `/api/payments/confirm`을 명시적으로 조립한다. 인증된 사용자의 요청 DTO와 응답 형태를 유지하며, Store 주문 조회는 별도 reader 트랜잭션을 사용하고 Payment 저장은 기존 writer DataSource 위의 전용 JPA 단위를 사용한다. Toss 연결은 기존 endpoint 기본값과 주입형 RestClient를 사용한다. 키를 로그에 남기지 않으며 이 기능은 기본 비활성이다.
+`pawbridge.payments.enabled=true`는 POST `/api/payments/confirm`을 조립하고, 결제 결과를 Store 주문에 **직접 호출로** 반영한다(Kafka·outbox 없음). 요청·응답 형태는 원래와 같다. 이 기능은 기본 비활성이다.
 
-`pawbridge.store-payment-events.enabled=true`는 원문의 DONE/ABORTED/CANCELED 처리, 주문 결제·취소와 재고·검색·outbox 쓰기를 기존 Store writer에 연결한다. ranking은 기존 `memberChatRedis`가 있으면 차용하고, 없으면 명시한 Redis 설정으로 소유 factory를 구성한다. 이 모놀리스에는 Kafka 전송 계층이 없다(`spring-kafka` 의존성, `kafka-enabled` 속성, `@KafkaListener`와 consumer factory를 제거했다). 이전에도 listener는 `autoStartup=false`로 시작된 적이 없었고 producer는 없었으므로 동작은 같다. 기존 `StorePaymentEvents.handle(String)`은 현재 호출처가 없으며, 결제 결과 반영은 후속 PR에서 직접 호출로 바꿀 예정이다. 이 변경은 `boot/build.gradle`을 바꾸므로 구조 자체회귀 재사용 기준이 깨져 CI가 구조 검사를 직접 실행한다(실패가 아니다).
+흐름:
+1. 트랜잭션 밖: 짧은 읽기 TX로 이 주문의 DONE 결제를 찾고, 있으면 그 결과를 DONE으로 다시 응답한다(금액이 다르면 기존 오류). 없으면 reader로 주문을 조회해 **로그인 회원이 주문자인지(아니면 403)**, 금액이 같은지, **주문이 PENDING인지(아니면 409)** 확인한다. 이 검사는 모두 Toss 호출 전이다.
+2. Toss 승인 호출은 트랜잭션·쓰기 연결을 잡지 않은 상태에서 한다.
+3. 결과 반영은 Store writer 트랜잭션 하나다. 주문 행을 `SELECT ... FOR UPDATE`로 잠그고 PENDING·금액·이 주문의 기존 DONE 결제 여부를 다시 확인한 뒤 Payment INSERT와 주문 PAID를 함께 커밋한다. 일간 랭킹(Redis ZINCRBY)은 커밋 뒤(`afterCommit`)에 실행하고 실패해도 로그만 남긴다.
 
-단위·구성·실제 Security/JWT와 합성 HTTP 검증 근거를 보존했다. 최종 단일 조립에서 기존 actualMain2와 동일 소유 PostgreSQL의 SELECT3을 재검증했고, 선택한 구조 계약3과 현재 구조 guard도 통과했으며, 생성한 JAR의 실제 runtime162개 목록은 기존 CI 격리 경계를 통과했다. 전체 구조 자체회귀는 CI에서 별도로 실행해야 한다. 이 결과는 실 Toss·Redis·Kafka 운영 연결, 소비·ACK 성공, 결제 소유권·정상 상태·금액 정책 보완이나 운영 활성화 완료를 의미하지 않는다. 원문의 늦은 결제 결과·중복/경합·외부 보상·DB commit 뒤 실패 한계는 후속 보완으로 유보한다.
+| 경우 | 동작 |
+| --- | --- |
+| 승인 성공 | 결제 행 + 주문 PAID 한 번에 커밋, Toss 응답 그대로 200 |
+| 명확한 거절(Toss 4xx, S008 제외) | 주문이 PENDING이면 취소·재고 복구(검색 문서 포함) 후 200 `ABORTED` |
+| 결과 모름(타임아웃·연결 오류·Toss 5xx) | Toss 결제 조회 1회: DONE이면 성공 처리, ABORTED/EXPIRED/CANCELED면 거절 처리, 그래도 모르면 주문 PENDING 유지 + 보상 기록 + 500 |
+| S008(이미 처리됨) | 짧은 읽기 TX로 DB의 DONE 결제를 찾아 DONE 응답, 없으면 기존처럼 오류 |
+| 동시 요청 | 주문 행 잠금으로 직렬화. 같은 paymentKey가 이미 DONE이면 멱등 성공, 다른 결제로 이미 PAID면 이 결제를 Toss 취소 |
+| 반영 실패·재검사 거부 | 트랜잭션 밖에서 Toss 취소 후 500. 단 그 paymentKey가 DB에 DONE이면 취소하지 않고 DONE 응답. DB 확인이 안 되면 취소하지 않고 보상 기록 |
+| 쓰기 연결 획득 실패 | 100ms·200ms 간격으로 최대 3회 시도한 뒤 위 행으로 |
+| Toss 취소 실패 | 보상 기록(`CANCEL_FAILED`) + 500 |
+
+보상 기록은 `pawbridge_payment.payment_compensation_records`에 별도 짧은 TX로 저장하고(실패해도 응답 흐름은 그대로), 동시에 ERROR 로그 한 줄 `PAYMENT_COMPENSATION_REQUIRED paymentKey= orderId= amount= userId= stage= reason= recordId=`을 남긴다(저장 실패 시 `recordId=none`). Toss 원문·카드 정보·비밀값은 남기지 않는다.
+
+원래 MSA와 다른 점: 주문 소유자·상태 검사를 추가했다. 승인 호출 중 트랜잭션을 잡지 않으며 타임아웃·5xx는 조회로 확인한다(원래는 모든 예외를 실패로 보고 주문을 취소). 반영 실패 시 주문은 PENDING으로 남는다(원래는 PAYMENT_FAILED 이벤트로 취소). 랭킹은 커밋 뒤 실행한다. Payment와 Store의 outbox(`PAYMENT_*`, `ORDER_PAID`, `SKU_UPDATED`)는 더 이상 쓰지 않는다.
+
+구조: Payment 엔티티는 별도 JPA 단위 없이 Store writer 단위(`storeDirectOrderEntityManagerFactory`)에 `pawbridge.payments.enabled`일 때만 추가된다(`@Table(schema="pawbridge_payment")`). 같은 `storeDirectOrderJpaTransactionManager` 하나만 쓰므로 writer pool 최대 1에서도 트랜잭션이 중첩되지 않는다. Store의 `completePayment`/`failPayment`는 호출자 트랜잭션을 필수로 요구한다(`PROPAGATION_MANDATORY`). 모의 결제의 `processPayment`는 자체 트랜잭션을 유지한다.
+
+활성화 조건:
+- `pawbridge.store-payment-events.enabled=true`가 함께 필요하며 없으면 시작이 실패한다. 이 flag는 랭킹용 Redis(`spring.data.redis.host` 또는 `memberChatRedis`)를 요구한다.
+- 운영은 앱 계정 하나로 `pawbridge_store`와 `pawbridge_payment`를 모두 쓴다. writer 계정에 `pawbridge_payment`의 `payments` SELECT·INSERT, `payment_compensation_records` SELECT·INSERT와 `pawbridge_store.orders` 행 잠금·UPDATE, 재고·검색 문서 권한이 필요하다. reader는 `orders.user_id`를 읽는다.
+- 공유 writer pool 기본 최대 1개는 운영 결제에 쓸 수 없다. 크기를 늘린다.
+- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`payment-service/src/migration/resources/db/postgresql/V3__monolith_payment_compensation.sql`)을 전환 때 적용한다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
+- `toss.secret-key`(필수)와 `toss.base-url`.
+
+단위·구성·Security/JWT MVC 시험은 stub Toss와 합성 트랜잭션 기준이다. 실제 PostgreSQL 잠금·커밋, 실 Toss·Redis 연결과 운영 활성화는 검증하지 않았다.
 
 ### Store 모의 결제
 
 `pawbridge.store-mock-payment.enabled=true`(대소문자 무시, `on` 등 다른 값은 비활성)에서만 원문 store-service `OrderController`의 POST `/api/v1/orders/{orderId}/payment`를 조립한다. 기본 off다. 업무는 이미 편입된 `StorePaymentEvents.processPayment`를 그대로 호출하므로 `pawbridge.store-payment-events.enabled=true`도 함께 켜야 하며, 그 업무 빈이 없으면 앱이 시작 시 실패한다(조용한 403으로 대체하지 않는다). 원문 `payments.enabled`(Toss 결제 확인)와는 별개 경로라 그 플래그에 묶지 않았다.
 
-원문 Gateway는 `/api/orders/**`에 유효한 토큰만 요구했으므로 서명 검증한 회원이면 USER·ADMIN·SHELTER 모두 호출할 수 있다. 원문 그대로 주문 ID로 주문을 찾아 PENDING이 아니면 거부하고 PAID로 바꾼 뒤 같은 Store writer 트랜잭션에서 `order`/`ORDER_PAID` outbox(`orderId`·`userId`·`totalAmount`·`status`)를 INSERT한다. 응답은 본문 없는 200, 없는 주문은 400 `C001`, PENDING이 아닌 주문과 outbox 직렬화 실패는 500 `C004`, 숫자가 아닌 주문 ID는 400 `C005`다. Kafka/CDC로 outbox를 전달하는 기존 방식은 바꾸지 않는다.
+원문 Gateway는 `/api/orders/**`에 유효한 토큰만 요구했으므로 서명 검증한 회원이면 USER·ADMIN·SHELTER 모두 호출할 수 있다. 원문 그대로 주문 ID로 주문을 찾아 PENDING이 아니면 거부하고 Store writer 트랜잭션에서 PAID로 바꾼다. 원문의 `ORDER_PAID` outbox INSERT는 outbox 제거로 하지 않는다. 응답은 본문 없는 200, 없는 주문은 400 `C001`, PENDING이 아닌 주문은 500 `C004`, 숫자가 아닌 주문 ID는 400 `C005`다.
 
-원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **소유자·금액·실제 결제 확인 없이 아무 회원이나 다른 회원의 주문을 PAID로 바꾸고 ORDER_PAID 이벤트를 만들 수 있다.** 프런트는 이 경로를 쓰지 않으며 운영에서 켜지 않는 것을 전제로 한다. 주문 행 잠금이 없고 UPDATE가 모든 열을 다시 쓰므로 Toss 결제 결과 처리와 경합할 수 있다(Toss ABORTED가 CANCELLED로 바꾸고 재고를 복구한 뒤 모의 결제가 PAID로 덮어쓰면 재고가 복구된 PAID 주문과 ORDER_PAID 이벤트가 남고, 관리자 배송·상태 PATCH와 동시에 실행되면 바뀐 `delivery_status`를 이전 값으로 되돌릴 수 있다). 재고·랭킹은 바꾸지 않는다. 운영에서 켜면 주문 위조가 노출된다. 원문과 다른 점으로, 등록되지 않은 메서드·alias(`/api/orders/...`)·하위 경로는 원문 405/라우팅 대신 공통 보안 기본 거부 403이며, 원문 전역 advice의 문자셋 위반 C007 분기는 이 경로에서 입력 문자열이 없어 두지 않았다. 트랜잭션은 Store writer 기본 timeout 15초를 상속한다(원문은 timeout 없음).
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **소유자·금액·실제 결제 확인 없이 아무 회원이나 다른 회원의 주문을 PAID로 바꿀 수 있다.** 프런트는 이 경로를 쓰지 않으며 운영에서 켜지 않는 것을 전제로 한다. 주문 행 잠금이 없고 UPDATE가 모든 열을 다시 쓰므로 Toss 결제 결과 처리와 경합할 수 있다(Toss ABORTED가 CANCELLED로 바꾸고 재고를 복구한 뒤 모의 결제가 PAID로 덮어쓰면 재고가 복구된 PAID 주문이 남고, 관리자 배송·상태 PATCH와 동시에 실행되면 바뀐 `delivery_status`를 이전 값으로 되돌릴 수 있다). 재고·랭킹은 바꾸지 않는다. 운영에서 켜면 주문 위조가 노출된다. 원문과 다른 점으로, 등록되지 않은 메서드·alias(`/api/orders/...`)·하위 경로는 원문 405/라우팅 대신 공통 보안 기본 거부 403이며, 원문 전역 advice의 문자셋 위반 C007 분기는 이 경로에서 입력 문자열이 없어 두지 않았다. 트랜잭션은 Store writer 기본 timeout 15초를 상속한다(원문은 timeout 없음).
 
-활성화 전 선택한 writer에 `pawbridge_store` USAGE, `orders` SELECT·UPDATE(`@DynamicUpdate`가 없어 Hibernate가 갱신 가능한 모든 열과 `updated_at`을 다시 씀), `outbox` INSERT와 `outbox`의 `id` SELECT(IDENTITY 키라 Hibernate가 `insert ... returning id`를 실행하므로 RETURNING 열 SELECT 권한이 필요하며, 기존 직접 주문 합성 스키마는 `GRANT SELECT ON ALL TABLES`라 이 누락을 드러내지 못한다)가 필요하다. 이 경로가 `store-payment-events.enabled`를 요구하므로 해당 절의 Redis(`spring.data.redis.host` 또는 `memberChatRedis`) 전제도 함께 필요하다. 누적 F29 CI ACL(`backend-app/scripts/f29_ci.py`)에는 Store 권한이 없고, 기존 직접 주문 합성 권한도 `orders` UPDATE를 주지 않는다. Store writer는 공유 `writeDataSource`(기본 최대 1개·연결 대기 2초)를 쓰므로 다른 쓰기와 연결을 다툴 수 있다. 단위·구성·실제 Security/JWT MVC 시험은 mock 업무 기준이며 실제 PostgreSQL·Kafka 전달 검증이 아니다.
+활성화 전 선택한 writer에 `pawbridge_store` USAGE, `orders` SELECT·UPDATE(`@DynamicUpdate`가 없어 Hibernate가 갱신 가능한 모든 열과 `updated_at`을 다시 씀)가 필요하다(outbox 권한은 더 이상 필요 없다). 이 경로가 `store-payment-events.enabled`를 요구하므로 해당 절의 Redis(`spring.data.redis.host` 또는 `memberChatRedis`) 전제도 함께 필요하다. 누적 F29 CI ACL(`backend-app/scripts/f29_ci.py`)에는 Store 권한이 없고, 기존 직접 주문 합성 권한도 `orders` UPDATE를 주지 않는다. Store writer는 공유 `writeDataSource`(기본 최대 1개·연결 대기 2초)를 쓰므로 다른 쓰기와 연결을 다툴 수 있다. 단위·구성·실제 Security/JWT MVC 시험은 mock 업무 기준이며 실제 PostgreSQL 검증이 아니다.
 
 ### 실제 Main 조립과 격리 PostgreSQL 계약 검증
 

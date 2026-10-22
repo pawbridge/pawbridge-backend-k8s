@@ -54,8 +54,8 @@ class JpaCartOrdersTest {
         assertEquals(f.time,result.createdAt());UUID.fromString(result.orderUuid());assertEquals(2,result.items().size());
         assertEquals(100L,result.items().getFirst().price());assertEquals(2,result.items().getFirst().quantity());assertEquals(50L,result.items().get(1).price());
         assertEquals(3,f.target.getStockQuantity());assertEquals(5,f.sibling.getStockQuantity());assertTrue(cart.getItems().isEmpty());
-        assertEquals(2,f.snapshots.size());assertEquals(1,f.searchParameters.size());assertEquals(1,f.orders.size());
-        assertEquals(List.of("begin:writer","actor:write","cart","reference","reference","product-lock","all-sku-lock","search","outbox:80","outbox:81","sku-read-all","order-save","cart-clear","commit:writer"),f.events);
+        assertEquals(1,f.searchParameters.size());assertEquals(1,f.orders.size());
+        assertEquals(List.of("begin:writer","actor:write","cart","reference","reference","product-lock","all-sku-lock","search","sku-read-all","order-save","cart-clear","commit:writer"),f.events);
         verify(f.skus,never()).findById(anyLong());verify(f.actors,never()).currentForRead(anyLong());verifyNoInteractions(f.readerOrders);
         var saved=f.orders.get(result.orderId());for(var row:saved.getOrderItems())assertSame(saved,row.getOrder());
     }
@@ -68,14 +68,14 @@ class JpaCartOrdersTest {
     @ParameterizedTest @ValueSource(strings={"null","wrong","inactive","deleted"})
     void given__ineligible_current_actor__when__checking_out__then__reject_before_cart_or_store_rows(String kind) {
         f.actor=switch(kind){case "null"->null;case "wrong"->new StoreOrderActors.Actor(8,true,false);case "inactive"->new StoreOrderActors.Actor(7,false,false);default->new StoreOrderActors.Actor(7,true,true);};
-        assertThrows(OrderActorRejectedException.class,()->service.create(7,command));verifyNoInteractions(carts,f.products,f.skus,f.writerOrders,f.jdbc,f.outbox);assertEquals("rollback:writer",f.events.getLast());
+        assertThrows(OrderActorRejectedException.class,()->service.create(7,command));verifyNoInteractions(carts,f.products,f.skus,f.writerOrders,f.jdbc);assertEquals("rollback:writer",f.events.getLast());
     }
     @ParameterizedTest @ValueSource(strings={"missing","empty","only-stale"})
     void given__no_visible_cart_items__when__checking_out__then__original_empty_error_without_consumption_or_stock_work(String kind) {
         if(kind.equals("missing"))doReturn(Optional.empty()).when(carts).findByUserId(7L);
         if(kind.equals("only-stale"))item(999,2);
         var failure=assertThrows(IllegalArgumentException.class,()->service.create(7,command));assertEquals("Cart is empty",failure.getMessage());
-        verify(cart,never()).clearItems();verifyNoInteractions(f.products,f.writerOrders,f.jdbc,f.outbox);
+        verify(cart,never()).clearItems();verifyNoInteractions(f.products,f.writerOrders,f.jdbc);
         if(kind.equals("only-stale"))assertEquals(1,cart.getItems().size());
     }
     @Test void given__live_and_stale_cart_items__when__checking_out__then__purchase_visible_items_and_clear_whole_cart_like_original() {
@@ -87,7 +87,7 @@ class JpaCartOrdersTest {
     }
     @ParameterizedTest @ValueSource(ints={0,-1})
     void given__nonpositive_stored_quantity__when__checking_out__then__reuse_original_stock_validation(int quantity) {
-        item(80,quantity);assertThrows(IllegalArgumentException.class,()->service.create(7,command));verifyNoInteractions(f.products,f.writerOrders,f.jdbc,f.outbox);verify(cart,never()).clearItems();
+        item(80,quantity);assertThrows(IllegalArgumentException.class,()->service.create(7,command));verifyNoInteractions(f.products,f.writerOrders,f.jdbc);verify(cart,never()).clearItems();
     }
     @ParameterizedTest @ValueSource(strings={"inactive","stock","missing-under-lock"})
     void given__original_stock_rejection__when__checking_out__then__rollback_without_consuming_cart(String kind) {
@@ -102,9 +102,9 @@ class JpaCartOrdersTest {
         f.target.updatePrice(Long.MAX_VALUE);item(80,kind.equals("multiply")?2:1);
         if(kind.equals("sum")){f.sibling.updatePrice(1L);item(81,1);}
         var failure=assertThrows(IllegalArgumentException.class,()->service.create(7,command));assertInstanceOf(ArithmeticException.class,failure.getCause());
-        assertEquals(2,f.snapshots.size());assertEquals(1,f.searchParameters.size());verifyNoInteractions(f.writerOrders);verify(cart,never()).clearItems();assertEquals("rollback:writer",f.events.getLast());
+        assertEquals(1,f.searchParameters.size());verifyNoInteractions(f.writerOrders);verify(cart,never()).clearItems();assertEquals("rollback:writer",f.events.getLast());
     }
-    @ParameterizedTest @ValueSource(strings={"cart","search","outbox1","outbox2","read","order","commit"})
+    @ParameterizedTest @ValueSource(strings={"cart","search","read","order","commit"})
     void given__query_followup_order_or_commit_failure__when__checking_out__then__never_return_success(String stage) {
         item(80,1);f.failAt=stage;
         Class<? extends RuntimeException> type=stage.equals("commit")?TransactionSystemException.class:DataAccessResourceFailureException.class;
