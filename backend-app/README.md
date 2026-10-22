@@ -977,6 +977,24 @@ HTTP transport는 명시한 HTTPS 제공자만 사용하고 redirect를 따르�
 APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사례, 최종 새 합성 PG5사례(1.392초)는 서로 다른 실행 근거다. 최종 PG는 실제 source/search/Batch metadata DML 후 강제 rollback·physical commit 증가0, 원문 부분 복구·기존 행 보존, 두 실제 PID의 slot, stale10분, 정상 예약 종료를 확인했다. 제공자는 대역이며 실 APMS/운영 검증은 하지 않았다. 최초 SQL 개행 관측 오류와 원문 부분 commit을 전체 실패 원자성으로 오해한 두 시험 실패는 보존하고, 새 fixture에서 최소 정정 후 검증했다. 기존 DB를 reset하지 않았다.
 
 
+## 보호소 디렉터리 예약 수집
+
+원문 키 `shelter-directory.schedule-enabled=true`를 명시할 때만 원문 `ShelterDirectoryClient`·`ShelterDirectoryStore`·`ShelterDirectoryCollector`·`shelterDirectoryJob`과 단일 예약을 조립한다. 원문도 기본 false였으며 수동 실행 API는 없다. 서비스 키는 원문 `shelter-directory.service-key`(비어 있으면 실행 시 `SHELTER_DIRECTORY_UNAVAILABLE`), 주기는 원문 `shelter-directory.collection-cron`(기본 `0 0 4 * * *`, Asia/Seoul)이다. 이 스위치는 검색 분석기 조립 조건에도 추가했다. 다른 모듈과 공유하는 키는 없다.
+
+원문 동작을 그대로 옮겼다. 공공데이터 `shelterInfo_v2`를 1000행씩 최대30쪽 조회하고 빈 쪽에서 끝내며, 같은 등록번호의 다른 행·반복 쪽·빈 첫 쪽·형식 오류는 전체 실패로 처리한다. redirect를 따르지 않고 연결5초·요청10초·대기12초, 본문4MiB 상한을 둔다. 전체 snapshot을 받은 뒤에만 한 연결의 한 JDBC 트랜잭션으로 보호소 upsert·보호소 검색 문서·공개정보 JSON patch를 쓰고, 행마다 저장된 `sourceUpdatedDate`가 더 새로우면 건너뛰며 주소가 바뀌었는데 좌표가 없으면 기존 좌표를 지운다. 세션 advisory lock은 APMS 동물 수집과 같은 key1이라 서로 배타적이며, 이미 잡혀 있으면 `SHELTER_DIRECTORY_BUSY`로 실패한다.
+
+기존 writer DataSource·JdbcTransactionManager를 쓰고 새 pool·DDL은 없다. Batch metadata는 `pawbridge_animal.BATCH_`를 명시하고 metadata 탐색·자동 DDL·시작 시 Job 실행을 쓰지 않는다. 검색 writer는 기존 Animal 쓰기가 타입으로 주입받는 단일 bean과 충돌하지 않도록 store 내부 인스턴스로만 만든다. 원문 `SearchDocumentWriter.shelter(Connection, careRegNo)`를 추가해 수집 연결 밖의 두 번째 연결을 빌리지 않는다.
+
+활성화 전 확인 조건:
+- 공유 writer pool 기본 최대1·연결 대기2초다. 수집은 lock 획득부터 외부 조회(최대30회×12초)와 저장까지 그 연결을 계속 쥐므로, 그동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있다. `pawbridge.database.writer.maximum-pool-size`를 최소2 이상으로 명시하는 것은 켜기 전 확인 조건이며 시작 시 검사하지 않는다(이 수집 자체는 한 연결로 동작하므로 원문에 없던 조립 거부를 넣지 않았다). 원문에서는 shelter·여행(`0 */30`)·보호소 관측(`0 0 4`)이 Boot 기본 `@Scheduled` 스레드 하나를 나눠 순서대로 실행됐지만, 모놀리스는 기능별 scheduler를 두므로 04:00 Asia/Seoul에 동시에 시작할 수 있다. 함께 켜는 수집기의 연결 합계(shelter 1 + 여행 2 + 관측 1 + HTTP 쓰기)에 맞춰 pool을 잡거나 cron을 분리해야 한다.
+- writer 권한: `pawbridge_animal.shelters` SELECT·INSERT·UPDATE(검색 trigger 열 포함), `shelter_public_information` SELECT·INSERT·UPDATE, `shelter_search_documents` INSERT·UPDATE, Batch 6표·sequence, advisory lock 함수.
+- 이전 animal-service 예약을 먼저 멈춰 단일 소유권을 확보하고, 서비스 키·제공자 사용 조건을 확인한다. APMS 동물 수집과 같은 시각이면 한쪽이 BUSY로 실패한다.
+
+원문 결함은 고치지 않고 기록한다. 충돌 갱신은 `phone`을 바꾸지 않는다(최초 INSERT만 기록, 공개정보 JSON에는 반영). snapshot에서 사라진 보호소는 지우지 않는다. 전체 snapshot을 한 트랜잭션에서 모든 대상 행 `FOR UPDATE`로 잠근 채 쓰며 upsert 문에는 query timeout이 없다. 실패하면 Job이 FAILED로 끝나고 다음 예약까지 재시도하지 않으며, step 예외는 Spring Batch가 ERROR 로그와 `BATCH_*_EXECUTION` 종료 메시지로 남기고 launcher는 정상 반환한다. 종료 시 실행 중인 수집이 끝날 때까지 shutdown이 대기하므로 짧은 종료 유예 시간에서는 강제 종료될 수 있다. 원문 환경 변수 `SHELTER_DIRECTORY_CRON`은 `shelter-directory.collection-cron`에 연결되지 않아 기본 04:00이 적용된다. 원문은 `animal-query.backend=postgresql`일 때만 검색 문서를 썼지만 모놀리스 검색 writer는 분석기를 항상 사용하므로 검색 문서 쓰기가 새로 생긴다. 30쪽(3만 행)을 넘는 목록은 전체 실패다.
+
+단위 시험은 client 9·collector 6·store 4사례와 구성 시험(기본 off·`on` 별칭·같은 writer·Job/step·scheduler 계약)이다. 저장소·HTTP·DB는 mock이며 실제 공공데이터 API·PostgreSQL 잠금·권한·운영 활성화는 검증하지 않았다.
+
+
 ## APMS 사진 보관 예약 경로 편입
 
 `apms-photo-archive.enabled=true`를 명시할 때만 APMS 사진 발견·재시도·보관 작업을 조립한다. 기본 off에서는 archive writer/HTTP/S3/scheduler를 만들지 않으며, APMS 수집 자체나 Gallery 공개·내부 제공 기능을 자동 활성화하지 않는다. 수동 사진 업로드/삭제 API는 이 범위에 없다.
@@ -1087,3 +1105,21 @@ JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경�
 3. 증분 적용 뒤에는 writer의 `users` SELECT 열 집합과 `refresh_tokens` INSERT 열 집합이 F29 strict 검증의 정확 집합과 달라지므로, 같은 역할에 strict F29 준비·검증을 다시 실행하지 않는다. 다시 실행하려면 먼저 두 권한을 `REVOKE`한다.
 
 `OwnedPostgresqlLocalLoginWriterTest`(`owned-postgresql` 태그, 일반 `test`·CI에서는 제외)는 `f29_ci.py`의 strict 준비를 실행한 것이 아니라, auth-session 이후 로그인 관련 권한 부분집합을 재현한 새 합성 PostgreSQL에 증분을 적용한 상태를 한 번 확인했다. 증분 전 비밀번호 조회·첫 INSERT 거부(42501) 재현은 저장소 밖 준비 기록에만 남아 있다. 시험은 정확한 열 권한 집합, 실제 BCrypt 비밀번호 조회, 첫 로그인 INSERT와 재로그인 동일 행 UPDATE, sequence 권한 없이 identity 생성, writer의 추가 쓰기 거부, reader의 `password`·`refresh_tokens` 조회 거부를 확인했다. 이 fixture는 F29 전체 권한 재현이 아니며 writer의 `users` UPDATE·DELETE도 주지 않는다. reader의 `refresh_tokens` INSERT·UPDATE·DELETE 거부는 단언하지 않는다(이번 증분은 writer에만 적용된다). 시험은 이미 종료한 일회용 합성 서버의 식별값에 고정돼 있어 그대로 재실행할 수 없다. CI는 이 증분을 준비하거나 재검증하지 않으므로, 이후 `JdbcLocalLogin`의 SQL이 바뀌면 권한 불일치를 CI가 잡지 못한다. 실제 운영 DB 역할의 권한 결정과 LOCAL 로그인 활성화는 이 문서가 승인하는 범위가 아니다.
+
+### LOCAL 비밀번호 변경
+
+`pawbridge.user-password.enabled`는 기본 false이며 정확히 `true`(대소문자 무시)일 때만 원문 `PUT /api/v1/users/me/password`를 조립한다. `on` 등 다른 값은 비활성이다. 보안 체인은 같은 flag가 켜졌을 때만 이 정확한 PUT을 기존 Bearer 인증 대상에 넣는다. 원문 Gateway도 이 경로를 인증만 요구했으므로 USER·ADMIN·SHELTER 모두 허용하고, 요청의 `X-User-*` 헤더나 본문 userId가 아니라 검증된 JWT principal만 사용한다. 다른 메서드·뒤 슬래시·`/api/users/...` alias는 거부(403)하며 alias는 Gateway 책임으로 남긴다. LOCAL 로그인(`pawbridge.auth.local-enabled`)과는 독립 flag다.
+
+원문 DTO의 `currentPassword` NotBlank, `newPassword` NotBlank와 8~20자 영문·숫자·특수문자(`@$!%*#?&`) 패턴과 메시지를 유지한다. 검증 실패는 원문처럼 `field: message`를 `, `로 이은 400이고 거부된 값은 응답·로그에 남기지 않는다. 기존 writer `writeTransactionManager` 한 트랜잭션(timeout 10초, 기존 F13과 같은 값) 안에서 회원 조회→`provider`가 정확히 `LOCAL`이 아니면 400 `소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다.`→기본 강도 BCrypt로 현재 비밀번호 확인 실패 시 400 `현재 비밀번호가 일치하지 않습니다.`→원문 문자열 동일 시 400 `현재 비밀번호와 동일한 비밀번호로 변경할 수 없습니다.`→새 BCrypt 해시와 `updated_at`(UTC 바인딩) 두 열 UPDATE 순서를 유지한다. 회원 부재는 400 `존재하지 않는 회원입니다.`, 그 밖의 예외는 500 `서버 에러!`이며 성공은 200 `비밀번호가 변경되었습니다.`·data:null이다. BCrypt는 이 기능 안에서만 생성하고 전역 `PasswordEncoder` bean을 등록하지 않는다. 새 pool·DDL·의존성은 없다.
+
+원문 결함과 차이는 고치지 않고 활성화 전 확인 항목으로 남긴다. 비밀번호 변경 뒤에도 기존 refresh token과 access token을 폐기하지 않는다(원문과 같음). 회원 행 잠금이 없어 동시 변경은 마지막 쓰기가 남는다. 원문은 JPA 전체 행 flush였지만 후보는 `password`·`updated_at`만 갱신하므로 동시에 바뀐 다른 열을 덮지 않는다. 삭제 대기 등 회원 상태는 원문처럼 확인하지 않는다. 현재 비밀번호 확인에 시도 횟수 제한이 없어 탈취한 access token으로 온라인 대입이 가능하다(원문과 같음). 원문 검증 실패 handler는 `rejected value`를 포함한 예외 메시지를 error 로그에 남겨 패턴 검증에 실패한 새 비밀번호가 평문으로 기록될 수 있었으나, 후보는 이 로그를 재현하지 않는다.
+
+#### 비밀번호 변경 writer 권한 증분과 적용 순서
+
+누적 writer `pawbridge_f3_writer` 권한은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `UPDATE(user_id,nickname,updated_at,role,care_reg_no)`이고, LOCAL 로그인 증분을 적용했다면 `SELECT(password)`가 더해진다. 비밀번호 변경은 `provider`·`password` 조회와 `password` UPDATE가 추가로 필요하므로 이 권한만으로는 실패한다(SQLSTATE 42501). `boot/src/test/resources/owned-postgresql/user-password-writer-grants.sql`은 `SELECT(provider,password),UPDATE(password)`만 추가한다(이미 있는 `SELECT(password)` 재부여는 변화 없음). 기존 권한은 회수하지 않는다.
+
+1. 기존 strict F29 준비와 그 검증(필요하면 LOCAL 로그인 증분)을 먼저 끝낸다.
+2. 테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v password_writer=pawbridge_f3_writer -f user-password-writer-grants.sql`로 한 번 적용한다.
+3. 적용 뒤에는 writer `users` 열 집합이 F29 strict 정확 집합과 달라지므로 같은 역할에 strict F29를 다시 실행하지 않는다. 다시 실행하려면 먼저 추가 권한을 `REVOKE`한다.
+
+이 증분은 실제 PostgreSQL에서 실행·검증하지 않았고 CI도 준비·검증하지 않는다. 단위(JDBC 계약·순서·BCrypt)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며, 실제 PG 권한·운영 DB 역할 결정·기능 활성화는 이 문서가 승인하는 범위가 아니다.
