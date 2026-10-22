@@ -53,7 +53,14 @@ public class ReadSecurityConfiguration {
             @Value("${lost-gallery-feed.enabled:false}") String galleryFeedFlag,
             @Value("${pawbridge.animal-chatbot.enabled:false}") String chatbotFlag,
             @Value("${pawbridge.store-catalog-management.enabled:false}") String catalogManagementFlag,
-            @Value("${pawbridge.payments.enabled:false}") String paymentsEnabledFlag) throws Exception {
+            @Value("${pawbridge.payments.enabled:false}") String paymentsEnabledFlag,
+            @Value("${pawbridge.animal-images.enabled:false}") String animalImagesFlag) throws Exception {
+
+        var animalImagesEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(animalImagesFlag);
+        var animalImageWriting=new AndRequestMatcher(animalImagesEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/animals/images","POST"),
+                new AntPathRequestMatcher("/api/v1/animals/images/multiple","POST"),
+                new AntPathRequestMatcher("/api/v1/animals/images","DELETE")));
 
         var catalogManagementEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(catalogManagementFlag);
         var catalogManagementWriting=new AndRequestMatcher(catalogManagementEnabled,new OrRequestMatcher(
@@ -289,7 +296,7 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
         var adminRoutes = new OrRequestMatcher(shelterCommandAdmin, storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(catalogManagementWriting, paymentConfirmation,shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var postWriting = new OrRequestMatcher(animalImageWriting, catalogManagementWriting, paymentConfirmation,shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
