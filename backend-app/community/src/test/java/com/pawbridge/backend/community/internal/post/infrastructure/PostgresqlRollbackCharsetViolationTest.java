@@ -16,7 +16,7 @@ class PostgresqlRollbackCharsetViolationTest {
         assertTrue(PostgresqlRollbackCharsetViolation.matches(new DataIntegrityViolationException("synthetic",
                 error("23514", "pawbridge_community", "ck_rollback_charset_posts"))));
         BatchUpdateException batch = new BatchUpdateException();
-        batch.setNextException(error("23514", "pawbridge_community", "ck_rollback_charset_outbox_events"));
+        batch.setNextException(error("23514", "pawbridge_community", "ck_rollback_charset_comments"));
         assertTrue(PostgresqlRollbackCharsetViolation.matches(batch));
     }
 

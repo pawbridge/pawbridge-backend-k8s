@@ -13,7 +13,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.community.internal.post.application.PostSnapshot;
 import com.pawbridge.backend.community.internal.post.application.UnsupportedPostCharactersException;
@@ -32,7 +31,6 @@ import java.util.Calendar;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -107,14 +105,15 @@ class JdbcPostWriterTest {
     }
 
     @Test
-    void given__post_and_media__when__write__then__identity_json_event_and_weighted_projection_share_transaction() throws Exception {
+    void given__post_and_media__when__write__then__identity_json_and_weighted_projection_share_transaction_without_outbox() throws Exception {
         PostSnapshot post;
         try (JdbcPostWriter writer = writer()) {
             post = writer.create(input());
         }
 
         assertFalse(transactionActive);
-        assertEquals(3, calls.size());
+        assertEquals(2, calls.size());
+        assertTrue(calls.stream().noneMatch(call -> call.sql.contains("outbox_events")));
         StatementCall source = calls.get(0);
         assertTrue(source.sql.contains("pawbridge_community.posts"));
         assertTrue(source.sql.contains("RETURNING post_id"));
@@ -130,18 +129,7 @@ class JdbcPostWriterTest {
         assertEquals("UTC", source.calendars.get(6).getTimeZone().getID());
         assertEquals("UTC", source.calendars.get(7).getTimeZone().getID());
 
-        StatementCall outbox = calls.get(1);
-        assertTrue(outbox.sql.contains("pawbridge_community.outbox_events"));
-        assertEquals(UUID.fromString((String) outbox.values.get(1)).toString(), outbox.values.get(1));
-        assertEquals("Post", outbox.values.get(2));
-        assertEquals("42", outbox.values.get(3));
-        assertEquals("POST_CREATED", outbox.values.get(4));
-        JsonNode payload = mapper.readTree((String) outbox.values.get(5));
-        assertEquals(mapper.readTree(mapper.writeValueAsString(Map.of("postId", 42L, "authorId", 7L, "title", input().title(),
-                "content", input().content(), "boardType", "PROTECTION", "imageUrls", input().imageUrls()))), payload);
-        assertEquals("UTC", outbox.calendars.get(6).getTimeZone().getID());
-
-        StatementCall search = calls.get(2);
+        StatementCall search = calls.get(1);
         assertTrue(search.sql.contains("pawbridge_community.post_search_documents"));
         assertTrue(search.sql.contains("md5(?)"));
         assertTrue(search.sql.contains("setweight(to_tsvector('simple', ?), 'A')"));
@@ -155,22 +143,12 @@ class JdbcPostWriterTest {
     }
 
     @Test
-    void given__outbox_failure__when__write__then__failure_leaves_transaction_without_search_or_retry() {
+    void given__search_failure__when__write__then__failure_reaches_transaction_without_returning_success() {
         failAtStatement = 2;
         try (JdbcPostWriter writer = writer()) {
             assertSame(writeFailure, assertThrows(RuntimeException.class, () -> writer.create(input())));
         }
         assertEquals(2, calls.size());
-        assertFalse(transactionActive);
-    }
-
-    @Test
-    void given__search_failure__when__write__then__failure_reaches_transaction_without_returning_success() {
-        failAtStatement = 3;
-        try (JdbcPostWriter writer = writer()) {
-            assertSame(writeFailure, assertThrows(RuntimeException.class, () -> writer.create(input())));
-        }
-        assertEquals(3, calls.size());
         assertFalse(transactionActive);
     }
 

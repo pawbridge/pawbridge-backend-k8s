@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.community.internal.post.application.PostNotFoundException;
 import com.pawbridge.backend.community.internal.post.domain.PostNotOwnedException;
 import java.sql.Connection;
@@ -20,7 +19,6 @@ import java.util.Calendar;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -39,7 +37,6 @@ class JdbcPostDeletionTest {
     private final TransactionOperations transactions = mock(TransactionOperations.class);
     private final Connection connection = mock(Connection.class);
     private final ResultSet result = mock(ResultSet.class);
-    private final ObjectMapper mapper = new ObjectMapper();
     private final Clock clock = Clock.fixed(Instant.parse("2026-10-19T00:05:10.123456789Z"), ZoneId.of("Asia/Seoul"));
     private final List<StatementCall> calls = new ArrayList<>();
     private boolean transactionActive;
@@ -85,10 +82,11 @@ class JdbcPostDeletionTest {
     }
 
     @Test
-    void given__own_active_post__when__delete__then__lock_and_three_mutations_share_transaction_with_exact_event() throws Exception {
+    void given__own_active_post__when__delete__then__lock_and_two_mutations_share_transaction_without_outbox() throws Exception {
         deletion().delete(42L, 7L);
         assertFalse(transactionActive);
-        assertEquals(4, calls.size());
+        assertEquals(3, calls.size());
+        assertTrue(calls.stream().noneMatch(call -> call.sql.contains("outbox_events")));
         var lock = calls.get(0);
         assertTrue(lock.sql.contains("pawbridge_community.posts"));
         assertTrue(lock.sql.contains("deleted_at IS NULL"));
@@ -105,16 +103,8 @@ class JdbcPostDeletionTest {
         assertEquals(7L, source.values.get(4));
         assertEquals("UTC", source.calendars.get(1).getTimeZone().getID());
         assertEquals("UTC", source.calendars.get(2).getTimeZone().getID());
-        var outbox = calls.get(2);
-        assertTrue(outbox.sql.contains("pawbridge_community.outbox_events"));
-        assertEquals(UUID.fromString((String)outbox.values.get(1)).toString(), outbox.values.get(1));
-        assertEquals("Post", outbox.values.get(2));
-        assertEquals("42", outbox.values.get(3));
-        assertEquals("POST_DELETED", outbox.values.get(4));
-        assertEquals(mapper.readTree("{\"postId\":42}"), mapper.readTree((String)outbox.values.get(5)));
-        assertEquals("UTC", outbox.calendars.get(6).getTimeZone().getID());
-        assertTrue(calls.get(3).sql.contains("DELETE FROM pawbridge_community.post_search_documents WHERE post_id = ?"));
-        assertEquals(Map.of(1,42L), calls.get(3).values);
+        assertTrue(calls.get(2).sql.contains("DELETE FROM pawbridge_community.post_search_documents WHERE post_id = ?"));
+        assertEquals(Map.of(1,42L), calls.get(2).values);
     }
 
     @Test
@@ -134,14 +124,14 @@ class JdbcPostDeletionTest {
     }
 
     @Test
-    void given__conditional_update_affects_no_row__when__delete__then__no_event_or_search_mutation_follows() {
+    void given__conditional_update_affects_no_row__when__delete__then__no_search_mutation_follows() {
         updateCount = 0;
         assertThrows(PostNotFoundException.class, () -> deletion().delete(42L, 7L));
         assertEquals(2, calls.size());
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1,2,3,4})
+    @ValueSource(ints = {1,2,3})
     void given__lock_or_mutation_failure__when__delete__then__original_failure_leaves_transaction_without_retry(int failingStatement) {
         failAt = failingStatement;
         assertSame(failure, assertThrows(IllegalStateException.class, () -> deletion().delete(42L, 7L)));
@@ -165,12 +155,12 @@ class JdbcPostDeletionTest {
             }
         }).when(transactions).execute(ArgumentMatchers.<TransactionCallback<Void>>any());
         assertSame(unknown, assertThrows(TransactionSystemException.class, () -> deletion().delete(42L, 7L)));
-        assertEquals(4, calls.size());
+        assertEquals(3, calls.size());
         assertFalse(transactionActive);
         verify(transactions).execute(ArgumentMatchers.<TransactionCallback<Void>>any());
     }
 
-    private JdbcPostDeletion deletion() { return new JdbcPostDeletion(jdbc, transactions, mapper, clock); }
+    private JdbcPostDeletion deletion() { return new JdbcPostDeletion(jdbc, transactions, clock); }
     private static final class StatementCall {
         private final String sql;
         private final Map<Integer,Object> values = new LinkedHashMap<>();

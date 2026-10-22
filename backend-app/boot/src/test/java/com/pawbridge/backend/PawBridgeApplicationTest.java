@@ -95,7 +95,6 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.emailverification.application.EmailVerifications.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.signup.application.LocalSignup.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.passwordreset.application.PasswordReset.class)).isEmpty();
-                    assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage.class)).isEmpty();
                     assertThat(context.getBeansOfType(jakarta.persistence.EntityManagerFactory.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.data.jpa.repository.JpaRepository.class)).isEmpty();

@@ -70,6 +70,7 @@ final class F3PostgresqlFixture implements AutoCloseable {
     }
 
     @Override public void close() throws SQLException {
+        // Only the legacy oracle writes outbox rows now; the candidate never does. Clean them before their posts.
         execute("DELETE FROM pawbridge_community.outbox_events WHERE aggregate_type='Post' AND aggregate_id IN "
                 + "(SELECT post_id::text FROM pawbridge_community.posts WHERE author_id=" + AUTHOR + "); "
                 + "DELETE FROM pawbridge_community.posts WHERE author_id=" + AUTHOR);

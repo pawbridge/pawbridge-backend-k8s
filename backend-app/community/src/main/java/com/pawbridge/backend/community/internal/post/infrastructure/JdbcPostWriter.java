@@ -20,9 +20,7 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Calendar;
-import java.util.Map;
 import java.util.TimeZone;
-import java.util.UUID;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -32,11 +30,6 @@ public final class JdbcPostWriter implements PostWriter, PostModification, AutoC
                 (author_id, title, content, board_type, image_urls, created_at, updated_at)
             VALUES (?, ?, ?, ?, CAST(? AS json), ?, ?)
             RETURNING post_id
-            """;
-    private static final String INSERT_OUTBOX = """
-            INSERT INTO pawbridge_community.outbox_events
-                (event_id, aggregate_type, aggregate_id, type, payload, created_at)
-            VALUES (?, ?, ?, ?, CAST(? AS json), ?)
             """;
     private static final String INSERT_SEARCH_DOCUMENT = """
             INSERT INTO pawbridge_community.post_search_documents
@@ -102,12 +95,6 @@ public final class JdbcPostWriter implements PostWriter, PostModification, AutoC
         if (postId == null) {
             throw new IllegalStateException("Post insert returned no identity");
         }
-        String payload = json(Map.of(
-                "postId", postId, "authorId", post.authorId(), "title", post.title(),
-                "content", post.content(), "boardType", post.boardType().name(), "imageUrls", post.imageUrls()));
-        jdbc.update(connection -> prepare(connection, INSERT_OUTBOX,
-                UUID.randomUUID().toString(), "Post", Long.toString(postId), "POST_CREATED", payload,
-                LocalDateTime.now(clock)));
         writeSearchDocument(postId, post.title(), post.content());
         return new PostSnapshot(postId, post.authorId(), post.title(), post.content(), post.boardType().name(),
                 post.imageUrls(), now, now);
@@ -138,9 +125,6 @@ public final class JdbcPostWriter implements PostWriter, PostModification, AutoC
         String nextTitle = title == null ? current.title() : title;
         String nextContent = content == null ? current.content() : content;
         List<String> nextImages = imageUrls == null ? current.imageUrls() : imageUrls;
-        // Legacy Map.of rejects JSON literal null images; do not silently normalize that failure.
-        String payload = json(Map.of("postId", postId, "authorId", authorId, "title", nextTitle,
-                "content", nextContent, "boardType", current.boardType(), "imageUrls", nextImages));
         boolean changed = !Objects.equals(current.title(), nextTitle) || !Objects.equals(current.content(), nextContent)
                 || !Objects.equals(current.imageUrls(), nextImages);
         if (changed) {
@@ -148,9 +132,7 @@ public final class JdbcPostWriter implements PostWriter, PostModification, AutoC
                     json(nextImages), LocalDateTime.now(clock), postId, authorId));
             if (updated != 1) throw new PostNotFoundException();
         }
-        // Even an unchanged legacy PUT emits POST_UPDATED and refreshes its search projection.
-        jdbc.update(connection -> prepare(connection, INSERT_OUTBOX, UUID.randomUUID().toString(),
-                "Post", Long.toString(postId), "POST_UPDATED", payload, LocalDateTime.now(clock)));
+        // Even an unchanged PUT refreshes its search projection.
         writeSearchDocument(postId, nextTitle, nextContent);
         // The legacy immutable response is built before JPA dirty flush updates updatedAt at commit.
         return new PostSnapshot(postId, authorId, nextTitle, nextContent, current.boardType(), nextImages,

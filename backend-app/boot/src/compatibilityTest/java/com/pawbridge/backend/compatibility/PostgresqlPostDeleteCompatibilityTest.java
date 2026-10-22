@@ -29,7 +29,6 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -93,7 +92,7 @@ class PostgresqlPostDeleteCompatibilityTest {
         reads=new JdbcPostReader(readJdbc,readTx,mapper);
         var writeTx=new TransactionTemplate(new DataSourceTransactionManager(writer));writeTx.setTimeout(10);
         creates=new JdbcPostWriter(writeJdbc,writeTx,mapper,clock);
-        deletes=new JdbcPostDeletion(writeJdbc,writeTx,mapper,deletionClock);
+        deletes=new JdbcPostDeletion(writeJdbc,writeTx,deletionClock);
         // Legacy Hibernate emits a full UPDATE. Only its synthetic oracle uses admin; candidate retains column grants.
         var admin=new DriverManagerDataSource(fixture.reads().jdbcUrl(),
                 F3PostgresqlFixture.required("F2_TEST_ADMIN_USER"),F3PostgresqlFixture.required("F2_TEST_ADMIN_PASSWORD"));
@@ -118,7 +117,7 @@ class PostgresqlPostDeleteCompatibilityTest {
         finally { if(reader!=null)reader.close();if(writer!=null)writer.close();if(fixture!=null)fixture.close(); }
     }
 
-    @Test void given__live_post__when__deleting__then__retain_body_commit_one_event_remove_search_and_read_404() throws Exception {
+    @Test void given__live_post__when__deleting__then__retain_body_write_no_outbox_remove_search_and_read_404() throws Exception {
         var post=creates.create(input(List.of("https://fixture.invalid/f4/original")));
         String body=unchangedBody(post.postId());
         deletes.delete(post.postId(),F3PostgresqlFixture.AUTHOR);
@@ -126,22 +125,17 @@ class PostgresqlPostDeleteCompatibilityTest {
         assertThat(writeJdbc.queryForObject("SELECT deleted_at IS NOT NULL AND updated_at IS NOT NULL FROM pawbridge_community.posts WHERE post_id=?",Boolean.class,post.postId())).isTrue();
         assertThat(reads.findById(post.postId())).isEmpty();
         assertThat(searchCount(post.postId())).isZero();
-        Map<String,Object> event=writeJdbc.queryForMap("SELECT event_id,aggregate_type,aggregate_id,type,payload::text,created_at FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_DELETED'",Long.toString(post.postId()));
-        assertThat(UUID.fromString((String)event.get("event_id")).toString()).isEqualTo(event.get("event_id"));
-        assertThat(event).containsEntry("aggregate_type","Post").containsEntry("aggregate_id",Long.toString(post.postId())).containsEntry("type","POST_DELETED");
-        assertThat(event.get("created_at")).isNotNull();
-        assertThat(mapper.readTree((String)event.get("payload")))
-                .isEqualTo(mapper.readTree(mapper.writeValueAsString(Map.of("postId",post.postId()))));
+        assertThat(deletedEvents(post.postId())).isZero();
         assertThatThrownBy(()->deletes.delete(post.postId(),F3PostgresqlFixture.AUTHOR)).isInstanceOf(PostNotFoundException.class);
-        assertThat(deletedEvents(post.postId())).isOne();returned();
+        assertThat(deletedEvents(post.postId())).isZero();returned();
     }
 
-    @ParameterizedTest @ValueSource(strings={"outbox_events","post_search_documents"})
+    @ParameterizedTest @ValueSource(strings={"post_search_documents"})
     void given__later_sql_failure_after_media_attempt__when__deleting__then__rollback_every_db_change_and_next_request_recovers(String table) throws Exception {
         var post=creates.create(input(List.of("https://fixture.invalid/f4/original")));
         AtomicInteger mediaAttempts=new AtomicInteger();
         var request=new DeletePost(reads,urls->mediaAttempts.incrementAndGet(),deletes);
-        String permission=table.equals("outbox_events")?"INSERT":"DELETE";
+        String permission="DELETE";
         fixture.execute("REVOKE "+permission+" ON pawbridge_community."+table+" FROM "+F3PostgresqlFixture.WRITER);
         try {
             assertThatThrownBy(()->request.delete(post.postId(),F3PostgresqlFixture.AUTHOR)).isInstanceOf(DataAccessException.class);
@@ -150,7 +144,7 @@ class PostgresqlPostDeleteCompatibilityTest {
             assertThat(deletedEvents(post.postId())).isZero();assertThat(searchCount(post.postId())).isOne();returned();
         } finally { fixture.execute("GRANT "+permission+" ON pawbridge_community."+table+" TO "+F3PostgresqlFixture.WRITER); }
         request.delete(post.postId(),F3PostgresqlFixture.AUTHOR);
-        assertThat(mediaAttempts.get()).isEqualTo(2);assertThat(deletedEvents(post.postId())).isOne();
+        assertThat(mediaAttempts.get()).isEqualTo(2);assertThat(deletedEvents(post.postId())).isZero();
         assertThat(reads.findById(post.postId())).isEmpty();returned();
     }
 
@@ -168,7 +162,7 @@ class PostgresqlPostDeleteCompatibilityTest {
             var future=executor.submit(()->request.delete(post.postId(),F3PostgresqlFixture.AUTHOR));
             assertThat(entered.await(5,TimeUnit.SECONDS)).isTrue();returned();
             assertThat(future.isDone()).isFalse();release.countDown();future.get(10,TimeUnit.SECONDS);
-            assertThat(deletedEvents(post.postId())).isOne();returned();
+            assertThat(deletedEvents(post.postId())).isZero();returned();
         } finally { release.countDown();executor.shutdownNow(); }
     }
 
@@ -188,7 +182,7 @@ class PostgresqlPostDeleteCompatibilityTest {
             assertThat(blocked.isDone()).isFalse();assertThat(deletedEvents(post.postId())).isZero();
             directDeletion(first).delete(post.postId(),F3PostgresqlFixture.AUTHOR);
             assertThatThrownBy(()->blocked.get(10,TimeUnit.SECONDS)).isInstanceOf(ExecutionException.class).hasCauseInstanceOf(PostNotFoundException.class);
-            assertThat(deletedEvents(post.postId())).isOne();assertThat(searchCount(post.postId())).isZero();
+            assertThat(deletedEvents(post.postId())).isZero();assertThat(searchCount(post.postId())).isZero();
             assertThat(reads.findById(post.postId())).isEmpty();
         } finally { executor.shutdownNow(); }
         assertThat(writer.getMaximumPoolSize()).isOne();returned();
@@ -209,7 +203,7 @@ class PostgresqlPostDeleteCompatibilityTest {
         }
         Clock sameTime=Clock.fixed(observed.atZone(ZoneId.systemDefault()).toInstant(),ZoneId.systemDefault());
         var tx=new TransactionTemplate(new DataSourceTransactionManager(writer));tx.setTimeout(10);
-        new JdbcPostDeletion(writeJdbc,tx,mapper,sameTime).delete(candidate.postId(),F3PostgresqlFixture.AUTHOR);
+        new JdbcPostDeletion(writeJdbc,tx,sameTime).delete(candidate.postId(),F3PostgresqlFixture.AUTHOR);
         try(var session=legacy.openSession()) {
             var expected=session.find(Post.class,oracle.postId());var actual=session.find(Post.class,candidate.postId());
             assertThat(actual.getDeletedAt()).isEqualTo(expected.getDeletedAt());
@@ -252,6 +246,7 @@ class PostgresqlPostDeleteCompatibilityTest {
     }
 
     private PostToCreate input(List<String> images){return new PostToCreate(F3PostgresqlFixture.AUTHOR,"삭제 원본 제목","삭제 원본 본문",PostBoardType.COMMUNICATION,images);}
+    /** Explicit difference from the legacy service: the candidate never writes POST_DELETED outbox rows, so this is always zero. */
     private long deletedEvents(long id){return writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_DELETED'",Long.class,Long.toString(id));}
     private long searchCount(long id){return writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.post_search_documents WHERE post_id=?",Long.class,id);}
     private String unchangedBody(long id){return writeJdbc.queryForObject("SELECT (to_jsonb(p)-'deleted_at'-'updated_at')::text FROM pawbridge_community.posts p WHERE post_id=?",String.class,id);}
@@ -259,7 +254,7 @@ class PostgresqlPostDeleteCompatibilityTest {
     private JdbcPostDeletion directDeletion(Connection connection){
         var dataSource=new SingleConnectionDataSource(connection,true);
         var tx=new TransactionTemplate(new DataSourceTransactionManager(dataSource));tx.setTimeout(10);
-        return new JdbcPostDeletion(new JdbcTemplate(dataSource),tx,mapper,deletionClock);
+        return new JdbcPostDeletion(new JdbcTemplate(dataSource),tx,deletionClock);
     }
     private int backendPid(Connection connection)throws SQLException{
         try(var statement=connection.createStatement();var row=statement.executeQuery("SELECT pg_backend_pid()")){row.next();return row.getInt(1);}
