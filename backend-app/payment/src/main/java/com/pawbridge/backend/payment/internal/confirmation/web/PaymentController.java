@@ -15,7 +15,7 @@ public final class PaymentController {
     private final Payments payments;
     public PaymentController(Payments payments) { this.payments = payments; }
 
-    @PostMapping("/api/payments/confirm")
+    @PostMapping("/api/v1/payments/confirm")
     public ResponseEntity<TossPaymentResponse> confirmPayment(@AuthenticationPrincipal Long verifiedUserId,
             @Valid @RequestBody TossPaymentConfirmRequest request) {
         if (verifiedUserId == null) throw new AuthenticationCredentialsNotFoundException("An authenticated member is required");

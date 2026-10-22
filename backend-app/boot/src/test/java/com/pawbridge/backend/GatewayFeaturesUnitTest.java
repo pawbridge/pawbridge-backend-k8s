@@ -112,6 +112,7 @@ class GatewayFeaturesUnitTest {
 
     @ParameterizedTest
     @CsvSource({
+            "POST,/api/payments/confirm,/api/v1/payments/confirm", "GET,/api/payments/unknown,/api/v1/payments/unknown",
             "GET,/api/users/me,/api/v1/users/me", "PUT,/api/users/me/nickname,/api/v1/users/me/nickname",
             "POST,/api/auth/login,/api/v1/auth/login", "GET,/api/favorites/5/check,/api/v1/favorites/5/check",
             "GET,/api/animals,/api/v1/animals", "GET,/api/animals/7,/api/v1/animals/7", "POST,/api/animals,/api/v1/animals",
@@ -153,7 +154,7 @@ class GatewayFeaturesUnitTest {
             // the public upload must not become reachable through the old protected alias
             "POST,/api/animals/lost-candidates",
             // already served unchanged, or outside /api
-            "POST,/api/payments/confirm", "GET,/api/v1/animals", "POST,/api/v1/animals/lost-candidates", "GET,/internal/animals/lost-gallery",
+            "POST,/api/v1/payments/confirm", "GET,/api/v1/animals", "POST,/api/v1/animals/lost-candidates", "GET,/internal/animals/lost-gallery",
             "GET,/oauth2/authorization/google", "GET,/login/oauth2/code/google", "GET,/actuator/health", "GET,/api/v1", "GET,/apix/animals"})
     void given__path_or_method_the_gateway_did_not_rewrite__when__filtering__then__leave_it_alone(String method, String path) throws Exception {
         var seen = legacy(method, path);
