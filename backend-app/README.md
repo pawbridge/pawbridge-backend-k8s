@@ -962,13 +962,13 @@ APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사
 기존 writer DataSource·JdbcTransactionManager를 쓰고 새 pool·DDL은 없다. Batch metadata는 `pawbridge_animal.BATCH_`를 명시하고 metadata 탐색·자동 DDL·시작 시 Job 실행을 쓰지 않는다. 검색 writer는 기존 Animal 쓰기가 타입으로 주입받는 단일 bean과 충돌하지 않도록 store 내부 인스턴스로만 만든다. 원문 `SearchDocumentWriter.shelter(Connection, careRegNo)`를 추가해 수집 연결 밖의 두 번째 연결을 빌리지 않는다.
 
 활성화 전 확인 조건:
-- 공유 writer pool 기본 최대1·연결 대기2초다. 수집은 lock 획득부터 외부 조회(최대30회×12초)와 저장까지 그 연결을 계속 쥐므로, 그동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있다. `pawbridge.database.writer.maximum-pool-size`를 최소2 이상으로 명시해야 하며 이 값이 전체 동시 업무 용량을 보장하지는 않는다.
+- 공유 writer pool 기본 최대1·연결 대기2초다. 수집은 lock 획득부터 외부 조회(최대30회×12초)와 저장까지 그 연결을 계속 쥐므로, 여행 수집과 같이 writer 용량이 2 미만이면 시작 시 거부한다. `pawbridge.database.writer.maximum-pool-size`를 최소2 이상으로 명시해야 하며, 이 하한이 수집 중 다른 쓰기의 연결 대기를 없애거나 전체 동시 업무 용량을 보장하지는 않는다.
 - writer 권한: `pawbridge_animal.shelters` SELECT·INSERT·UPDATE(검색 trigger 열 포함), `shelter_public_information` SELECT·INSERT·UPDATE, `shelter_search_documents` INSERT·UPDATE, Batch 6표·sequence, advisory lock 함수.
 - 이전 animal-service 예약을 먼저 멈춰 단일 소유권을 확보하고, 서비스 키·제공자 사용 조건을 확인한다. APMS 동물 수집과 같은 시각이면 한쪽이 BUSY로 실패한다.
 
-원문 결함은 고치지 않고 기록한다. 충돌 갱신은 `phone`을 바꾸지 않는다(최초 INSERT만 기록, 공개정보 JSON에는 반영). snapshot에서 사라진 보호소는 지우지 않는다. 전체 snapshot을 한 트랜잭션에서 모든 대상 행 `FOR UPDATE`로 잠근 채 쓰며 upsert 문에는 query timeout이 없다. 실패하면 Job이 FAILED로 끝나고 다음 예약까지 재시도하지 않으며, 예외는 scheduler 기본 처리로만 남는다. 30쪽(3만 행)을 넘는 목록은 전체 실패다.
+원문 결함은 고치지 않고 기록한다. 충돌 갱신은 `phone`을 바꾸지 않는다(최초 INSERT만 기록, 공개정보 JSON에는 반영). snapshot에서 사라진 보호소는 지우지 않는다. 전체 snapshot을 한 트랜잭션에서 모든 대상 행 `FOR UPDATE`로 잠근 채 쓰며 upsert 문에는 query timeout이 없다. 실패하면 Job이 FAILED로 끝나고 다음 예약까지 재시도하지 않으며, 예외는 scheduler 기본 처리로만 남는다. 30쪽(3만 행)을 넘는 목록은 전체 실패다. 서비스 키를 항상 URL 인코딩하므로 공공데이터포털의 인코딩된 키(`%2F` 등)를 넣으면 이중 인코딩되어 모든 요청이 실패한다. 디코딩된 원래 키를 설정해야 한다.
 
-단위 시험은 client 9·collector 6·store 4사례와 구성 시험(기본 off·`on` 별칭·같은 writer·Job/step·scheduler 계약)이다. 저장소·HTTP·DB는 mock이며 실제 공공데이터 API·PostgreSQL 잠금·권한·운영 활성화는 검증하지 않았다.
+단위 시험은 client 9·collector 6·store 4사례와 구성 시험(기본 off·`on` 별칭·같은 writer·writer 용량2 하한·Job/step·scheduler 계약)이다. 저장소·HTTP·DB는 mock이며 실제 공공데이터 API·PostgreSQL 잠금·권한·운영 활성화는 검증하지 않았다.
 
 
 ## APMS 사진 보관 예약 경로 편입
