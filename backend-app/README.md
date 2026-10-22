@@ -872,9 +872,9 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 같은 `pawbridge.store-order-administration.enabled=true`에서 원문 `AdminOrderController`의 PATCH `/api/v1/admin/orders/{orderId}/status`(`{"status"}`)를 추가합니다. 원문은 목록·상세·주문 상태·배송 상태를 한 컨트롤러로 묶었으므로 별도 flag를 두지 않습니다. Gateway의 `PATCH:/api/admin/orders/*/status` ADMIN 전용 규칙과 같이 서명 관리자 JWT를 요구하고, 배송 변경과 같은 현재 DB `ROLE_ADMIN` 확인→User 행 잠금→Order 행 잠금 순서로 실행합니다. 응답은 원문 `OrderResponse` 형태와 200이며 대상 없음 400, null 상태 500과 rollback, 알 수 없는 enum·깨진 JSON의 500 family는 배송 변경과 같은 원문 계약입니다.
 
-원문 그대로 `status` 열 하나만 바꿉니다. 허용 전이 검사, 결제·환불·재고·검색·Outbox·이벤트 연동이 없어 PAID→PENDING, 결제 없이 PAID, CANCELLED 전환 시 재고·결제 미복구 같은 임의 전이가 가능합니다. 이 원문 결함은 고치지 않고 활성화 전 확인 항목으로 둡니다. 변경 로그(원문 info)는 남기지 않습니다.
+원문 그대로 `status` 열 하나만 바꿉니다. 허용 전이 검사, 결제·환불·재고·검색·Outbox·이벤트 연동이 없어 PAID→PENDING, 결제 없이 PAID, CANCELLED 전환 시 재고·결제 미복구 같은 임의 전이가 가능합니다. 이 원문 결함은 고치지 않고 활성화 전 확인 항목으로 둡니다. 변경 로그(원문 info)는 남기지 않습니다. Jackson 기본 설정이라 `{"status":1}`처럼 숫자 enum도 받아들입니다(원문과 같음). 주문을 잠그지 않는 결제 결과 처리(`JpaStorePaymentEvents`)와 동시에 실행되면 오래된 스냅샷이 관리자 변경을 덮거나 그 반대가 될 수 있으며 원문에도 잠금·`@Version`이 없습니다.
 
-활성화 전 writer에는 기존 관리자 주문 기능과 같은 권한(`pawbridge_store`·`pawbridge_user` USAGE, 대상 표 SELECT, `users` UPDATE(user_id) 행 잠금용, `orders` UPDATE — 이 기능은 `status`·auditing `updated_at`)이 필요합니다(`admin-order-owned-schema.sql`과 같음). 누적 F29 CI writer ACL에는 Store 주문 권한이 없으므로 그 역할로 켜면 권한 오류 500이 됩니다. 공유 writer pool 기본 최대 1개를 다른 쓰기와 함께 씁니다. 단위·MVC·Security 시험은 mock 저장소 기준이며 이 경로의 실제 PostgreSQL 검증은 추가하지 않았습니다.
+활성화 전 writer에는 기존 관리자 주문 기능과 같은 권한(`pawbridge_store`·`pawbridge_user` USAGE, 대상 표 SELECT, `users` UPDATE(user_id) 행 잠금용, `orders` 표 단위 UPDATE — `Order`에 `@DynamicUpdate`가 없어 JPA가 전체 열을 UPDATE하므로 열 단위 grant로는 실패합니다)이 필요합니다(`admin-order-owned-schema.sql`과 같음). 누적 F29 CI writer ACL에는 Store 주문 권한이 없으므로 그 역할로 켜면 권한 오류 500이 됩니다. 공유 writer pool 기본 최대 1개를 다른 쓰기와 함께 씁니다. 단위·MVC·Security 시험은 mock 저장소 기준이며 이 경로의 실제 PostgreSQL 검증은 추가하지 않았습니다. 금전 상태를 바꾸므로 CHECK 제약·표 단위 UPDATE grant·행 잠금을 배송 변경의 `OwnedPostgresqlStoreOrderAdministrationTest`와 같은 방식으로 검증한 뒤 켜야 합니다.
 
 ### 관리자 주문 목록의 품목 일괄 조회
 
