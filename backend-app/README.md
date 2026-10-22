@@ -792,18 +792,18 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 기존 reader pool을
 
 서명 검증한 JWT의 회원 ID만 사용한다. User 모듈은 같은 writer 트랜잭션에서 현재 회원 행을 잠그고 삭제 대기를 조회한다. Animal은 현재 DB의 `ROLE_ADMIN` 또는 보호소 등록번호가 일치하는 `ROLE_SHELTER`만 허용한다. JWT의 오래된 역할이나 `X-User-*` 헤더로 이 검사를 대체하지 않는다. 기존 조회·ADMIN 경로의 인가는 바꾸지 않는다.
 
-선택한 원문 JPA 모델·저장소·mapper·업무 로직을 infrastructure 안에서 재사용한다. 명시 writer EMF는 Animal/Shelter/OutboxEvent/BaseTimeEntity만 관리하고 전역 스캔·DDL·새 pool을 만들지 않는다. 원문 감사 listener와 서비스의 REQUIRED 경계를 유지하고 writer 격리는 READ_COMMITTED로 명시한다. JpaTM의 기본 제한은 15초다. 조회용 reader와 구분하고, User 조회와 검색 SQL도 같은 writer DataSource에 참여해야 한다. Nori 분석기는 조회·추천·명령 사이에서 하나를 공유하고 context와 함께 닫는다.
+선택한 원문 JPA 모델·저장소·mapper·업무 로직을 infrastructure 안에서 재사용한다. 명시 writer EMF는 Animal/Shelter/BaseTimeEntity만 관리하고 전역 스캔·DDL·새 pool을 만들지 않는다. 원문 감사 listener와 서비스의 REQUIRED 경계를 유지하고 writer 격리는 READ_COMMITTED로 명시한다. JpaTM의 기본 제한은 15초다. 조회용 reader와 구분하고, User 조회와 검색 SQL도 같은 writer DataSource에 참여해야 한다. Nori 분석기는 조회·추천·명령 사이에서 하나를 공유하고 context와 함께 닫는다.
 
-생성과 설명 변경은 원문 동물·검색 투영·Outbox를 함께 커밋한다. 비MANUAL 출처의 공고번호가 null/빈 값이면 쓰기 전에 고정 400으로 거부하며, MANUAL의 기본값·번호 생성과 정상 외부 번호는 유지한다. 상태 변경은 Outbox 저장 후 flush한 감사 시각으로 응답을 만든다. 상태 변경의 원문 이벤트와 삭제의 FK 동작도 유지하며 삭제 이벤트를 새로 만들지 않는다. 원문 payload eventId와 Outbox event_id는 별도 UUID다. 이 Outbox의 전체 전달기·CDC 교체, APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
+생성과 설명 변경은 원문 동물·검색 투영을 함께 커밋한다. 비MANUAL 출처의 공고번호가 null/빈 값이면 쓰기 전에 고정 400으로 거부하며, MANUAL의 기본값·번호 생성과 정상 외부 번호는 유지한다. 상태 변경은 flush한 감사 시각으로 응답을 만든다. 삭제의 FK 동작도 유지한다. 이 명령들은 더 이상 Animal outbox(`animal.created`·`animal.status.changed`·`animal.updated`)를 쓰지 않는다. 이 토픽의 소비자가 없었고 Debezium·Kafka·outbox는 모놀리스에서 제거하기로 결정했기 때문이며, 이벤트 큐는 나중에 필요할 때 다시 도입한다. APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
 
-초기 보완에서는 소유 합성 PostgreSQL 17.11의 실제 보안→MVC→JPA 16계약과 당시 코어 단위 48사례를 확인했다. 이후 동시성 보완의 현재 검증은 아래에서 구분한다. PG는 최초 실행의 15성공과 UTC Calendar로 비교를 교정한 상태 응답 1사례의 수정 전 RED·수정 후 GREEN으로 검증했으며, 비교 방식 교정 뒤 성공한 나머지를 반복하지 않았다. 서버의 시간대·값·허용 오차는 변경하지 않았고 응답/DB 감사 시각 차이는 1µs 미만이어야 한다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK/Outbox 실패의 rollback·정상 재시도, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
+초기 보완에서는 소유 합성 PostgreSQL 17.11의 실제 보안→MVC→JPA 16계약과 당시 코어 단위 48사례를 확인했다. 이후 동시성 보완의 현재 검증은 아래에서 구분한다. PG는 최초 실행의 15성공과 UTC Calendar로 비교를 교정한 상태 응답 1사례의 수정 전 RED·수정 후 GREEN으로 검증했으며, 비교 방식 교정 뒤 성공한 나머지를 반복하지 않았다. 서버의 시간대·값·허용 오차는 변경하지 않았고 응답/DB 감사 시각 차이는 1µs 미만이어야 한다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK 실패의 rollback, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
 
 전용 시험은 `P8_PG_SETTINGS`의 제한된 소유 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalCommandTest`로만 실행한다. SQL resource는 새 DB/marker 확인 후 소유 관리자가 한 번 준비하는 자료다. 실제 계정·키·접속값은 Git에 넣지 않는다. 일반 CI는 owned 태그를 제외하며 이 PG 시험을 실행했다고 표시하지 않는다. 기존 운영의 DML·행 잠금·감사 및 단일 실행기 소유권을 인계하기 전 flag와 공개 라우팅을 활성화하지 않는다.
 
 
 ### 동시 Animal 명령과 자동 공고번호
 
-현재 회원 행을 먼저 잠근 다음 같은 writer TX에서 Animal을 PESSIMISTIC_WRITE로 조회해 상태·설명 수정과 삭제를 직렬화한다. 두 사용자의 동시 수정이 서로의 필드를 덮어쓰지 않으며 기존 소유권 검사·Outbox·검색 투영의 원자성은 유지한다.
+현재 회원 행을 먼저 잠근 다음 같은 writer TX에서 Animal을 PESSIMISTIC_WRITE로 조회해 상태·설명 수정과 삭제를 직렬화한다. 두 사용자의 동시 수정이 서로의 필드를 덮어쓰지 않으며 기존 소유권 검사·검색 투영의 원자성은 유지한다.
 
 자동 MAN 번호는 실제 쓰기 TX와 명시 READ_COMMITTED 메타데이터가 있을 때만 생성한다. 날짜를 한 번 캡처하고 날짜별 PostgreSQL transaction advisory lock SQL을 실행한 다음 별도 statement로 정확한 6자리 suffix MAX를 읽는다. 중간 행 삭제 후 현존 최대값을 재사용하지 않고 999999를 초과하는 번호는 거부한다. 잠금과 MAX를 한 SQL/CTE로 합치지 않는다. 명시 제공 공고번호는 원문상 고유 식별자가 아니므로 기존 허용을 유지한다. 모든 번호의 전역 UNIQUE, 비협력 writer·임의 제공번호와의 경합, 삭제된 최고번호의 영구 재사용 금지를 보장하는 계약은 아니다.
 
@@ -1070,23 +1070,6 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 원문 `SearchRebuildScheduler`→`rebuildPage(100)`을 그대로 옮겼습니다. 한 writer TX(원문 timeout 10초) 안에서 ACTIVE 상품 중 문서가 없거나 SKU·이름·옵션·분석기 버전이 다른 행을 PK 순서로 최대100개 `FOR UPDATE OF p SKIP LOCKED`로 잠그고, 행마다 `product_search_source`를 다시 읽어 기존 Store 검색 문서 upsert와 Nori 분석기를 재사용합니다. 기존 writer DataSource/JdbcTransactionManager를 쓰고 JDBC 쿼리 timeout 5초는 원문 값입니다. 새 pool·EMF·DDL·GRANT는 없습니다. 공유 writer pool은 기본 최대 1개·연결 대기 2초이므로, 재구축 TX가 5초마다 최대 10초 연결을 점유하는 동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있습니다(원문은 Store 전용 pool 기본 5). 활성화 전 pool 크기를 확인합니다.
 
 단위·조립 시험은 SQL 문구·바인딩·TX 경계·조건 분기·실패 전파만 검증합니다. 실제 PG 잠금, writer 권한(`pawbridge_store` 스키마 USAGE, `products` SELECT·행 잠금용 UPDATE, `product_search_source` SELECT, `product_search_documents` SELECT·INSERT·UPDATE), 예약 실행·종료 대기는 미검증입니다. 구 Store 실행기의 재구축과 동시에 켜지 않으며, 활성화 전 권한과 실행기 소유권을 확인해야 합니다. 운영·DB 변경은 없습니다.
-
-
-### Animal outbox 보존 정리
-
-`pawbridge.animal-maintenance.enabled=true`와 원문 키 `pawbridge.jobs.cleanup-enabled=true`를 둘 다 명시할 때만 `pawbridge_animal.outbox_events` 정리 작업과 `animal-maintenance-` 단일 scheduler를 조립합니다. 원문 `OutboxCleanupScheduler`는 `pawbridge.jobs.cleanup-enabled`가 없으면 켜지는(`matchIfMissing=true`) 구조였지만, 이식본은 기본 off입니다. `pawbridge.jobs.cleanup-enabled`는 Community·User 정리도 함께 쓰는 원문 키이므로 이 키만 켜서는 아무것도 조립되지 않고, 각 모듈 flag를 켠 모듈의 정리만 실행됩니다. 다른 모듈의 작업을 대신 켜지 않습니다.
-
-원문 `@Scheduled(cron = "0 0 3 * * ?")`(zone 지정 없음, JVM 기본 시간대)와 `@Transactional` 한 건으로 `DELETE ... WHERE created_at < (현재 - 7일)`을 실행하는 동작을 그대로 옮겼습니다. 기존 writer JdbcTemplate·JdbcTransactionManager(`TransactionTemplate` 기본 timeout)를 쓰고 새 pool·DDL·GRANT는 없습니다. 재사용한 `writeJdbc`의 문장 timeout 5초가 이 DELETE에도 적용되는데 원문 JPA `@Modifying` 쿼리에는 timeout이 없었으므로(원문과 다른 상속 차이), 정리가 오래 멈췄다가 켜져 행이 많이 쌓인 경우 DELETE가 5초를 넘겨 취소·롤백되고 같은 이유로 매일 반복될 수 있습니다. 기준 시각은 Community·User 이식과 같이 JVM 시계로 계산해 UTC로 바인딩합니다. 원문 삭제 건수 info 로그(`[OUTBOX-CLEANUP] Deleted ...`)는 남기지 않아 정리가 실제로 돌았는지 볼 신호가 없고, 실패는 scheduler 오류 처리기에 클래스 이름만 남깁니다.
-
-**원문 결함(고치지 않음):** `outbox_events`에는 전달 여부 열이 없고 원문은 "status 무관" 7일 경과 행을 모두 지웁니다. Debezium CDC는 테이블이 아니라 WAL을 읽고 INSERT가 이미 WAL에 있으면 이후 DELETE는 EventRouter가 무시하므로, 지연만으로는 이벤트가 사라지지 않습니다. 이벤트가 사라지는 경로는 재스냅샷(`animal-outbox-connector.json`의 `snapshot.mode=when_needed`), replication slot 무효화(`max_slot_wal_keep_size`), 테이블을 직접 읽는 로컬 전달입니다. (찜 보상 전달기는 제거되어 `FavoriteCompensation` 행을 더 만들거나 읽지 않습니다.)
-
-활성화 전 확인 조건:
-- writer에 `pawbridge_animal` USAGE와 `outbox_events` DELETE 및 WHERE 비교에 쓰는 `created_at` SELECT가 필요합니다. `animal-command-owned-schema.sql`은 `outbox_events` SELECT·INSERT·DELETE를 주지만 누적 F29 CI writer ACL(`backend-app/scripts/f29_ci.py`)에는 `pawbridge_animal` 권한이 전혀 없어 그 역할로 켜면 권한 오류가 매일 scheduler 경고로만 남습니다.
-- 공유 writer pool은 기본 최대 1개·연결 대기 2초입니다. 03:00에 Community·User 정리가 같은 시각에 시작할 수 있으므로 함께 켜면 먼저 잡은 DELETE가 2초를 넘길 때 나머지가 연결 timeout으로 실패해 그날 정리가 건너뛰어질 수 있습니다(재시도 없음). 함께 켜지 않거나 pool을 늘립니다. cron은 zone이 없어 JVM 기본 시간대를 쓰므로 컨테이너 TZ가 UTC이면 03:00이 KST 12:00입니다.
-- 이전 animal-service의 `OutboxCleanupScheduler`(원문 기본 on)를 먼저 멈춰 단일 소유권을 확보합니다.
-- 재스냅샷·재처리가 필요하지 않은 것을 확인한 뒤에 켭니다.
-
-단위·구성 시험은 mock JdbcOperations·TransactionOperations 기준(SQL 문구·UTC 바인딩·7일 cutoff·TX 경계·gate 조합·schedule 계약)이며 실제 PostgreSQL 삭제·권한·실행은 검증하지 않았습니다.
 
 ## 결제 확인과 Store 결제 결과 처리
 

@@ -4,10 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.animal.api.AnimalCommandActors;
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Animal;
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.BaseTimeEntity;
-import com.pawbridge.backend.animal.internal.command.infrastructure.entity.OutboxEvent;
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Shelter;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository;
-import com.pawbridge.backend.animal.internal.command.infrastructure.repository.OutboxEventRepository;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository;
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter;
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandService;
@@ -67,7 +65,7 @@ class AnimalCommandConfigurationTest {
                     unit.set(emf);
                     assertThat(factory.getDataSource()).isSameAs(writer);
                     assertThat(factory.getPersistenceUnitInfo().getManagedClassNames()).containsExactlyInAnyOrder(
-                            Animal.class.getName(), Shelter.class.getName(), OutboxEvent.class.getName(), BaseTimeEntity.class.getName());
+                            Animal.class.getName(), Shelter.class.getName(), BaseTimeEntity.class.getName());
                     assertThat(factory.getJpaPropertyMap()).containsEntry("hibernate.boot.allow_jdbc_metadata_access", false)
                             .containsEntry("hibernate.hbm2ddl.auto", "none")
                             .containsEntry("jakarta.persistence.schema-generation.database.action", "none")
@@ -77,7 +75,6 @@ class AnimalCommandConfigurationTest {
                     assertThat(context.getBeansOfType(EntityManagerFactory.class)).hasSize(1);
                     assertThat(context.getBeansOfType(AnimalRepository.class)).hasSize(1);
                     assertThat(context.getBeansOfType(ShelterRepository.class)).hasSize(1);
-                    assertThat(context.getBeansOfType(OutboxEventRepository.class)).hasSize(1);
                     var manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager.class);
                     assertThat(manager.getDataSource()).isSameAs(writer);
                     assertThat(manager.getEntityManagerFactory()).isSameAs(emf);

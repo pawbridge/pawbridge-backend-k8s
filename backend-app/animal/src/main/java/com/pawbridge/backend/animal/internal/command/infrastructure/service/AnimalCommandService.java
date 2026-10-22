@@ -7,22 +7,14 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.response.AnimalDetailResponse;
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Animal;
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Shelter;
-import com.pawbridge.backend.animal.internal.command.infrastructure.enums.AnimalStatus;
 import com.pawbridge.backend.animal.internal.command.infrastructure.enums.ApiSource;
-import com.pawbridge.backend.animal.internal.command.infrastructure.event.AnimalCreatedEvent;
-import com.pawbridge.backend.animal.internal.command.infrastructure.event.AnimalStatusChangedEvent;
-import com.pawbridge.backend.animal.internal.command.infrastructure.event.AnimalUpdatedEvent;
 import com.pawbridge.backend.animal.internal.command.infrastructure.mapper.AnimalMapper;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository;
 import jakarta.persistence.EntityNotFoundException;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 import com.pawbridge.backend.animal.api.AnimalCommandActors;
 import com.pawbridge.backend.animal.api.AnimalCommandActors.Actor;
@@ -33,26 +25,21 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Selected original JSON commands; Root supplies one Animal JPA writer and current-account lookup. */
 public final class AnimalCommandService {
-    private static final String TOPIC_ANIMAL_CREATED = "animal.created";
-    private static final String TOPIC_ANIMAL_UPDATED = "animal.updated";
-    private static final String TOPIC_ANIMAL_STATUS_CHANGED = "animal.status.changed";
     private final SearchDocumentWriter searchDocuments;
     private final AnimalRepository animalRepository;
     private final ShelterRepository shelterRepository;
     private final AnimalMapper mapper;
-    private final OutboxService outboxService;
     private final NoticeNumberGenerator noticeNumberGenerator;
     private final AnimalCommandActors actors;
     private final TransactionTemplate writes;
 
     public AnimalCommandService(SearchDocumentWriter searchDocuments, AnimalRepository animals,
-            ShelterRepository shelters, AnimalMapper mapper, OutboxService outbox,
+            ShelterRepository shelters, AnimalMapper mapper,
             NoticeNumberGenerator noticeNumbers, AnimalCommandActors actors, JpaTransactionManager writerTransactions) {
         this.searchDocuments = Objects.requireNonNull(searchDocuments);
         this.animalRepository = Objects.requireNonNull(animals);
         this.shelterRepository = Objects.requireNonNull(shelters);
         this.mapper = Objects.requireNonNull(mapper);
-        this.outboxService = Objects.requireNonNull(outbox);
         this.noticeNumberGenerator = Objects.requireNonNull(noticeNumbers);
         this.actors = Objects.requireNonNull(actors);
         if (writerTransactions.getDataSource() != searchDocuments.dataSource())
@@ -135,42 +122,13 @@ public final class AnimalCommandService {
         Animal saved = animalRepository.save(animal);
         refreshSearch(saved.getId());
 
-        // Outbox에 이벤트 저장 (같은 트랜잭션)
-        AnimalCreatedEvent event = AnimalCreatedEvent.builder()
-                .eventId(UUID.randomUUID().toString())
-                .eventType("ANIMAL_CREATED")
-                .timestamp(LocalDateTime.now())
-                .animalId(saved.getId())
-                .species(saved.getSpecies().name())
-                .breed(saved.getBreed())
-                .status(saved.getStatus().name())
-                .shelterId(saved.getShelter().getId())
-                .build();
-        outboxService.saveEvent("Animal", String.valueOf(saved.getId()),
-                "ANIMAL_CREATED", TOPIC_ANIMAL_CREATED, event);
-
         // Entity → Response DTO
         return mapper.toDetailResponse(saved);
     }
 
     private AnimalDetailResponse updateStatus(Animal animal, UpdateAnimalStatusRequest request) {
 
-        AnimalStatus oldStatus = animal.getStatus();
         animal.updateStatus(request.getNewStatus());
-
-        // Outbox에 이벤트 저장 (같은 트랜잭션)
-        AnimalStatusChangedEvent event = AnimalStatusChangedEvent.builder()
-                .eventId(UUID.randomUUID().toString())
-                .eventType("ANIMAL_STATUS_CHANGED")
-                .timestamp(LocalDateTime.now())
-                .animalId(animal.getId())
-                .oldStatus(oldStatus.name())
-                .newStatus(animal.getStatus().name())
-                .animalName(animal.getApmsNoticeNo())
-                .species(animal.getSpecies().name())
-                .build();
-        outboxService.saveEvent("Animal", String.valueOf(animal.getId()),
-                "ANIMAL_STATUS_CHANGED", TOPIC_ANIMAL_STATUS_CHANGED, event);
 
         animalRepository.flush();
         return mapper.toDetailResponse(animal);
@@ -180,20 +138,6 @@ public final class AnimalCommandService {
 
         animal.updateDescription(request.getDescription());
         refreshSearch(animal.getId());
-
-        // Outbox에 이벤트 저장 (같은 트랜잭션)
-        Map<String, Object> updatedFields = new HashMap<>();
-        updatedFields.put("description", request.getDescription());
-
-        AnimalUpdatedEvent event = AnimalUpdatedEvent.builder()
-                .eventId(UUID.randomUUID().toString())
-                .eventType("ANIMAL_UPDATED")
-                .timestamp(LocalDateTime.now())
-                .animalId(animal.getId())
-                .updatedFields(updatedFields)
-                .build();
-        outboxService.saveEvent("Animal", String.valueOf(animal.getId()),
-                "ANIMAL_UPDATED", TOPIC_ANIMAL_UPDATED, event);
 
         return mapper.toDetailResponse(animal);
     }
