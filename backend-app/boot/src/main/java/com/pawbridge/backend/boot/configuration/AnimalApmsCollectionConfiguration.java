@@ -5,6 +5,7 @@ import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsBatchExecut
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsBatchProperties;
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsBatchRunner;
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsSyncPlanFactory;
+import com.pawbridge.backend.animal.internal.apms.web.ApmsBatchController;
 import com.pawbridge.backend.animal.internal.apms.infrastructure.client.ApmsApiClient;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository;
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter;
@@ -23,10 +24,12 @@ import org.springframework.batch.core.repository.support.JobRepositoryFactoryBea
 import org.springframework.batch.core.scope.JobScope;
 import org.springframework.batch.core.scope.StepScope;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.annotation.Import;
@@ -36,9 +39,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-/** APMS-only composition; the existing Animal writer remains the sole EMF and database pool owner. */
+/**
+ * APMS-only composition; the existing Animal writer remains the sole EMF and database pool owner.
+ * Assembled for the schedule or the original manual API; each entry point keeps its own flag.
+ */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(prefix = "apms.batch", name = "schedule-enabled", havingValue = "true")
+@Conditional(AnimalApmsCollectionConfiguration.ApmsEntryPoint.class)
 @EnableConfigurationProperties
 @Import({AnimalApmsJobConfiguration.class, AnimalJpaWriterConfiguration.class})
 public class AnimalApmsCollectionConfiguration {
@@ -163,9 +169,29 @@ public class AnimalApmsCollectionConfiguration {
 
     @Bean
     @DependsOn("apmsApiClient")
+    @ConditionalOnProperty(prefix = "apms.batch", name = "schedule-enabled", havingValue = "true")
     ApmsCollectionSchedule apmsCollectionSchedule(ApmsBatchRunner runner, ApmsScheduleSettings settings,
             @Qualifier("apmsBatchTaskExecutor") ApmsChunkExecutor requiredExecutor) {
         return new ApmsCollectionSchedule(runner, settings.cron());
+    }
+
+    @Bean
+    @DependsOn("apmsApiClient")
+    @ConditionalOnProperty(prefix = "pawbridge.apms-manual", name = "enabled", havingValue = "true")
+    ApmsBatchController apmsBatchController(ApmsBatchRunner runner,
+            @Qualifier("apmsBatchTaskExecutor") ApmsChunkExecutor requiredExecutor) {
+        return new ApmsBatchController(runner);
+    }
+
+    /** Either explicit entry point assembles the shared APMS job; neither is on by default. */
+    static final class ApmsEntryPoint extends AnyNestedCondition {
+        ApmsEntryPoint() { super(ConfigurationPhase.PARSE_CONFIGURATION); }
+
+        @ConditionalOnProperty(prefix = "apms.batch", name = "schedule-enabled", havingValue = "true")
+        static final class Schedule {}
+
+        @ConditionalOnProperty(prefix = "pawbridge.apms-manual", name = "enabled", havingValue = "true")
+        static final class ManualApi {}
     }
 
     /** Wait for submitted chunks without a timeout that would close the writer under live work. */
