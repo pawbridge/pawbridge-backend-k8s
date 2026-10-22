@@ -192,7 +192,7 @@ class PostgresqlPostUpdateCompatibilityTest {
     private PostToCreate input(List<String> images){return new PostToCreate(F3PostgresqlFixture.AUTHOR,"기존 제목","기존 본문",PostBoardType.COMMUNICATION,images);}
     private PostUpload upload(){return new PostUpload("one.png","image/png",1,()->new java.io.ByteArrayInputStream(new byte[]{1}));}
     /** Explicit difference from the legacy service: the candidate never writes POST_UPDATED outbox rows, so this is always zero. */
-    private long updatedEvents(long id){return writeJdbc.queryForObject("SELECT count(*) FROM pawbridge_community.outbox_events WHERE aggregate_id=? AND type='POST_UPDATED'",Long.class,Long.toString(id));}
+    private long updatedEvents(long id){try{return fixture.outboxEvents(Long.toString(id),"POST_UPDATED");}catch(java.sql.SQLException e){throw new IllegalStateException(e);}}
     private String business(long id){return writeJdbc.queryForObject("SELECT to_jsonb(p)::text||COALESCE((SELECT json_agg(d)::text FROM pawbridge_community.post_search_documents d WHERE d.post_id=p.post_id),'') FROM pawbridge_community.posts p WHERE post_id=?",String.class,id);}
     private HikariDataSource pool(String user,String password,int max,String name){var c=new HikariConfig();c.setJdbcUrl(fixture.reads().jdbcUrl());c.setUsername(user);c.setPassword(password);c.setMaximumPoolSize(max);c.setMinimumIdle(0);c.setConnectionTimeout(2000);c.setPoolName(name);return new HikariDataSource(c);}
     private Connection writerConnection()throws SQLException{return DriverManager.getConnection(fixture.reads().jdbcUrl(),F3PostgresqlFixture.WRITER,fixture.writerPassword());}
