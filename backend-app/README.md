@@ -1013,11 +1013,11 @@ Original DELETED patch/cart bypass, ignored SKU update fields, option mutation r
 
 ### Store 검색 재구축 예약
 
-`pawbridge.store-maintenance.enabled=true`와 원문 `pawbridge.search.rebuild-enabled=true`를 둘 다 명시할 때만 Store 상품 검색 문서 재구축 작업과 `store-maintenance-` 단일 scheduler를 조립합니다. 기본 off이며 원문도 `SEARCH_REBUILD_ENABLED` 기본 false였습니다. `pawbridge.search.rebuild-enabled`와 주기 `pawbridge.search.rebuild-delay-ms`(기본 5초)는 Community 재구축과 같은 원문 이름이므로, 실제로 어느 쪽이 도는지는 각 모듈 flag가 결정합니다.
+`pawbridge.store-maintenance.enabled=true`와 원문 `pawbridge.search.rebuild-enabled=true`를 둘 다 명시할 때만 Store 상품 검색 문서 재구축 작업과 `store-maintenance-` 단일 scheduler를 조립합니다. 기본 off이며 원문도 `SEARCH_REBUILD_ENABLED` 기본 false였습니다. `pawbridge.search.rebuild-enabled`와 주기 `pawbridge.search.rebuild-delay-ms`(기본 5초)는 Community 재구축과 같은 원문 이름이므로 두 모듈이 공유합니다. Community는 `pawbridge.community-maintenance.enabled` 하나로 정리와 재구축을 함께 조립하므로, 두 모듈 flag가 모두 켜진 상태에서 `rebuild-enabled=true`를 주면 Store와 Community 재구축이 함께 돌고 주기도 따로 정할 수 없습니다. 원문은 서비스별 프로세스여서 이 결합이 없었으며, 활성화 전 확인 조건으로 둡니다.
 
-원문 `SearchRebuildScheduler`→`rebuildPage(100)`을 그대로 옮겼습니다. 한 writer TX(원문 timeout 10초) 안에서 ACTIVE 상품 중 문서가 없거나 SKU·이름·옵션·분석기 버전이 다른 행을 PK 순서로 최대100개 `FOR UPDATE OF p SKIP LOCKED`로 잠그고, 행마다 `product_search_source`를 다시 읽어 기존 Store 검색 문서 upsert와 Nori 분석기를 재사용합니다. 기존 writer DataSource/JdbcTransactionManager를 쓰고 JDBC 쿼리 timeout 5초는 원문 값입니다. 새 pool·EMF·DDL·GRANT는 없습니다.
+원문 `SearchRebuildScheduler`→`rebuildPage(100)`을 그대로 옮겼습니다. 한 writer TX(원문 timeout 10초) 안에서 ACTIVE 상품 중 문서가 없거나 SKU·이름·옵션·분석기 버전이 다른 행을 PK 순서로 최대100개 `FOR UPDATE OF p SKIP LOCKED`로 잠그고, 행마다 `product_search_source`를 다시 읽어 기존 Store 검색 문서 upsert와 Nori 분석기를 재사용합니다. 기존 writer DataSource/JdbcTransactionManager를 쓰고 JDBC 쿼리 timeout 5초는 원문 값입니다. 새 pool·EMF·DDL·GRANT는 없습니다. 공유 writer pool은 기본 최대 1개·연결 대기 2초이므로, 재구축 TX가 5초마다 최대 10초 연결을 점유하는 동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있습니다(원문은 Store 전용 pool 기본 5). 활성화 전 pool 크기를 확인합니다.
 
-단위·조립 시험은 SQL 문구·바인딩·TX 경계·조건 분기·실패 전파만 검증합니다. 실제 PG 잠금, writer의 `products` 행 잠금(UPDATE 권한)·`product_search_source` 조회·문서 upsert 권한, 예약 실행·종료 대기는 미검증입니다. 구 Store 실행기의 재구축과 동시에 켜지 않으며, 활성화 전 권한과 실행기 소유권을 확인해야 합니다. 운영·DB 변경은 없습니다.
+단위·조립 시험은 SQL 문구·바인딩·TX 경계·조건 분기·실패 전파만 검증합니다. 실제 PG 잠금, writer 권한(`pawbridge_store` 스키마 USAGE, `products` SELECT·행 잠금용 UPDATE, `product_search_source` SELECT, `product_search_documents` SELECT·INSERT·UPDATE), 예약 실행·종료 대기는 미검증입니다. 구 Store 실행기의 재구축과 동시에 켜지 않으며, 활성화 전 권한과 실행기 소유권을 확인해야 합니다. 운영·DB 변경은 없습니다.
 
 
 ## 결제 확인과 Store 결제 결과 처리
