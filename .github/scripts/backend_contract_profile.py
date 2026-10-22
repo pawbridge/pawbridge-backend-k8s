@@ -1089,7 +1089,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '7b581fe71ac70b70441a1
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/EmailVerificationConfiguration.java': '2bbe1393ea038d927ee7869ca1c3a386a31d868bf4debdf7185dd64d8c74a0b8',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/LocalSignupConfiguration.java': 'b2a144d9f9f3f9b0e91fc591db9a973b742460a5bb064a4dc21abdc0eec43fd9',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PasswordResetConfiguration.java': 'caeb41484173fbce6d32f44ab30a472fd5364415f5411c665dddd15f0168aed5',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/LocalAuthConfigurationTest.java': 'b301eb56bf115dac94b367c14ded218c55f95557ad45aa3318b44d8d7172b415',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/LocalAuthConfigurationTest.java': '365a1f6863e5a14ded3005dfd583e122b66081e0d291ddb0d981c8d2ee3ddac8',
  'backend-app/boot/src/test/java/com/pawbridge/backend/LocalAuthDisabledHttpTest.java': '0cc77e6f390861d0dfaa4745463d1071cef8765219cc7c392d589b26360ad756',
  'backend-app/boot/src/test/java/com/pawbridge/backend/LocalAuthHttpTest.java': '365d081c77db74874875843459ce1a675318d43a1d95da1807382c89de8789f2',
  'backend-app/boot/src/test/resources/owned-postgresql/local-signup-writer-grants.sql': '72b622d530ef2adc22d312d59f96e7b9d40f5d5daf974a5eb0599643ab7b5e11',

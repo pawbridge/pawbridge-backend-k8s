@@ -24,6 +24,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -34,7 +35,9 @@ class LocalAuthConfigurationTest {
             "spring.data.redis.host=127.0.0.1", "spring.mail.username=noreply@example.test"};
 
     private ApplicationContextRunner runner() {
+        // Strict placeholder resolution, as in the real application, so missing inputs fail instead of staying literal.
         return new ApplicationContextRunner()
+                .withBean(PropertySourcesPlaceholderConfigurer.class, PropertySourcesPlaceholderConfigurer::new)
                 .withUserConfiguration(EmailVerificationConfiguration.class, LocalSignupConfiguration.class,
                         PasswordResetConfiguration.class);
     }
