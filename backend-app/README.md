@@ -1065,20 +1065,23 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 `pawbridge.payments.enabled=true`는 POST `/api/payments/confirm`을 조립하고, 결제 결과를 Store 주문에 **직접 호출로** 반영한다(Kafka·outbox 없음). 요청·응답 형태는 원래와 같다. 이 기능은 기본 비활성이다.
 
 흐름:
-1. 트랜잭션 밖: 짧은 읽기 TX로 이 주문의 DONE 결제를 찾고, 있으면 그 결과를 DONE으로 다시 응답한다(금액이 다르면 기존 오류). 없으면 reader로 주문을 조회해 **로그인 회원이 주문자인지(아니면 403)**, 금액이 같은지, **주문이 PENDING인지(아니면 409)** 확인한다. 이 검사는 모두 Toss 호출 전이다.
+1. 트랜잭션 밖: reader로 주문을 조회해 **로그인 회원이 주문자인지(아니면 403)** 먼저 확인한다. 그다음 짧은 읽기 TX로 이 주문의 DONE 결제를 찾아 있으면 DONE으로 다시 응답하고(금액이 다르면 기존 오류), 없으면 금액이 같은지, **주문이 PENDING인지(아니면 409)** 확인한다. 다른 회원은 기존 결제의 paymentKey를 받을 수 없다. 이 검사는 모두 Toss 호출 전이다.
 2. Toss 승인 호출은 트랜잭션·쓰기 연결을 잡지 않은 상태에서 한다.
 3. 결과 반영은 Store writer 트랜잭션 하나다. 주문 행을 `SELECT ... FOR UPDATE`로 잠그고 PENDING·금액·이 주문의 기존 DONE 결제 여부를 다시 확인한 뒤 Payment INSERT와 주문 PAID를 함께 커밋한다. 일간 랭킹(Redis ZINCRBY)은 커밋 뒤(`afterCommit`)에 실행하고 실패해도 로그만 남긴다.
 
 | 경우 | 동작 |
 | --- | --- |
 | 승인 성공 | 결제 행 + 주문 PAID 한 번에 커밋, Toss 응답 그대로 200 |
-| 명확한 거절(Toss 4xx, S008 제외) | 주문이 PENDING이면 취소·재고 복구(검색 문서 포함) 후 200 `ABORTED` |
+| 명확한 거절(Toss 업무 4xx) | 주문이 PENDING이면 취소·재고 복구(검색 문서 포함) 후 200 `ABORTED` |
+| Toss가 요청을 처리하지 않음(401, 429, 오류 코드가 없거나 `FORBIDDEN_REQUEST`·`UNAUTHORIZED_KEY`인 403) | 결제가 시도되지 않았으므로 주문 PENDING·재고 유지, 보상 기록 없음, 500 |
 | 결과 모름(타임아웃·연결 오류·Toss 5xx) | Toss 결제 조회 1회: DONE이면 성공 처리, ABORTED/EXPIRED/CANCELED면 거절 처리, 그래도 모르면 주문 PENDING 유지 + 보상 기록 + 500 |
 | S008(이미 처리됨) | 짧은 읽기 TX로 DB의 DONE 결제를 찾아 DONE 응답, 없으면 기존처럼 오류 |
 | 동시 요청 | 주문 행 잠금으로 직렬화. 같은 paymentKey가 이미 DONE이면 멱등 성공, 다른 결제로 이미 PAID면 이 결제를 Toss 취소 |
 | 반영 실패·재검사 거부 | 트랜잭션 밖에서 Toss 취소 후 500. 단 그 paymentKey가 DB에 DONE이면 취소하지 않고 DONE 응답. DB 확인이 안 되면 취소하지 않고 보상 기록 |
 | 쓰기 연결 획득 실패 | 100ms·200ms 간격으로 최대 3회 시도한 뒤 위 행으로 |
 | Toss 취소 실패 | 보상 기록(`CANCEL_FAILED`) + 500 |
+
+Toss는 카드·계좌 거절(`REJECT_*`, `INVALID_PASSWORD` 등)에도 403을 쓰므로 403은 응답 본문의 `code`로 구분한다. 업무 거절은 위 비업무 경우와 S008(`ALREADY_PROCESSED_PAYMENT`)을 뺀 4xx다.
 
 보상 기록은 `pawbridge_payment.payment_compensation_records`에 별도 짧은 TX로 저장하고(실패해도 응답 흐름은 그대로), 동시에 ERROR 로그 한 줄 `PAYMENT_COMPENSATION_REQUIRED paymentKey= orderId= amount= userId= stage= reason= recordId=`을 남긴다(저장 실패 시 `recordId=none`). Toss 원문·카드 정보·비밀값은 남기지 않는다.
 

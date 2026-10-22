@@ -99,6 +99,9 @@ class PaymentConfirmationHttpTest {
         var json=mapper.readTree(result.getResponse().getContentAsByteArray());
         assertThat(json.path("status").asInt()).isEqualTo(status);
         assertThat(json.path("detail").asText()).isEqualTo(detail);
+        // A non-owner (including on an already paid order) never receives a stored payment key.
+        assertThat(json.has("paymentKey")).isFalse();
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("synthetic-payment-key");
     }
 
     @Test

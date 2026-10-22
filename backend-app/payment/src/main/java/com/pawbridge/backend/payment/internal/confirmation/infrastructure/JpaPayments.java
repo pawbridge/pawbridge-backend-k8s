@@ -22,6 +22,8 @@ import java.util.Base64;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.transaction.CannotCreateTransactionException;
@@ -39,6 +41,8 @@ public final class JpaPayments implements Payments {
     private static final Log LOG = LogFactory.getLog(JpaPayments.class);
     private static final ZoneOffset RESPONSE_OFFSET = ZoneOffset.of("+09:00");
     private static final Set<String> LOOKUP_FAILURES = Set.of("ABORTED", "EXPIRED", "CANCELED");
+    private static final Set<String> NON_BUSINESS_403_CODES = Set.of("FORBIDDEN_REQUEST", "UNAUTHORIZED_KEY");
+    private static final Pattern ERROR_CODE = Pattern.compile("\"code\"\\s*:\\s*\"([A-Za-z0-9_]+)\"");
 
     /** Back-off between writer connection attempts; replaceable in tests. */
     @FunctionalInterface interface Pause { void pause(long millis) throws InterruptedException; }
@@ -81,7 +85,10 @@ public final class JpaPayments implements Payments {
     @Override public TossPaymentResponse confirmPayment(Long userId, TossPaymentConfirmRequest request) {
         String orderId = request.getOrderId();
         Long amount = request.getAmount();
-        // A. Outside any transaction: existing DONE re-response, then owner/amount/state checks before the provider.
+        // A. Outside any transaction: owner first (no stored payment is revealed to another member),
+        // then existing DONE re-response, then amount/state checks before the provider.
+        StorePaymentOrders.Order order = storeServiceClient.getOrder(orderId);
+        if (order.userId() == null || !order.userId().equals(userId)) throw new PaymentOrderAccessDeniedException();
         Optional<Payment> existing = reads.execute(status -> doneFor(orderId));
         if (existing != null && existing.isPresent()) {
             Payment payment = existing.get();
@@ -90,8 +97,6 @@ public final class JpaPayments implements Payments {
             }
             return stored(payment);
         }
-        StorePaymentOrders.Order order = storeServiceClient.getOrder(orderId);
-        if (order.userId() == null || !order.userId().equals(userId)) throw new PaymentOrderAccessDeniedException();
         if (order.totalAmount() == null || !order.totalAmount().equals(amount)) {
             throw new IllegalStateException("Payment Amount Mismatch");
         }
@@ -103,6 +108,11 @@ public final class JpaPayments implements Payments {
         } catch (RuntimeException failure) {
             // B. Classify the provider failure.
             if (alreadyProcessed(failure)) return previouslyRecorded(orderId, failure);
+            if (notProcessed(failure)) {
+                // Our request was refused (credentials, permission, rate limit); the customer's payment was not
+                // attempted, so the order stays PENDING, stock stays reserved and no money needs compensation.
+                throw new RuntimeException("Payment provider did not process the request. The order remains pending.", failure);
+            }
             if (clearRejection(failure)) return reject(request);
             response = null;
         }
@@ -262,8 +272,29 @@ public final class JpaPayments implements Payments {
         return text != null && (text.contains("S008") || text.contains("ALREADY_PROCESSED_PAYMENT"));
     }
 
+    /** Toss business rejection: 4xx other than 401/429 and other than a non-business 403 (see {@link #notProcessed}). */
     private static boolean clearRejection(RuntimeException failure) {
         return failure instanceof RestClientResponseException provider && provider.getStatusCode().is4xxClientError();
+    }
+
+    /**
+     * 401 (e.g. UNAUTHORIZED_KEY) and 429 (rate limit) mean Toss did not process our request. Toss also returns 403 for
+     * card/account declines (REJECT_*, INVALID_PASSWORD ...), so a 403 is a business rejection only when its error code
+     * is present and is not an authorization code (FORBIDDEN_REQUEST, UNAUTHORIZED_KEY).
+     */
+    static boolean notProcessed(RuntimeException failure) {
+        if (!(failure instanceof RestClientResponseException provider)) return false;
+        int status = provider.getStatusCode().value();
+        if (status == 401 || status == 429) return true;
+        if (status != 403) return false;
+        String code = errorCode(provider.getResponseBodyAsString());
+        return code == null || NON_BUSINESS_403_CODES.contains(code);
+    }
+
+    private static String errorCode(String body) {
+        if (body == null) return null;
+        Matcher matcher = ERROR_CODE.matcher(body);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private String authorization() {

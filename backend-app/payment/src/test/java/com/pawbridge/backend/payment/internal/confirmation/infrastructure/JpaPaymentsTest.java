@@ -44,7 +44,7 @@ class JpaPaymentsTest {
         f.provider(response);
         var result = f.service.confirmPayment(7L, f.request);
         assertThat(result).isSameAs(response);
-        assertThat(f.events).containsExactly("begin:ro", "commit", "order", "provider", "begin:rw", "complete:200", "done-check", "payment", "commit");
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:rw", "complete:200", "done-check", "payment", "commit");
         var payment = f.savedPayment;
         assertThat(payment.getUserId()).isEqualTo(7L);
         assertThat(payment.getOrderId()).isEqualTo("order-uuid");
@@ -58,8 +58,9 @@ class JpaPaymentsTest {
         verify(f.store, never()).failPayment(anyString());
     }
 
-    @Test void given__an_existing_done_payment__when__repeating_the_order_and_amount__then__return_the_stored_subset_without_store_or_provider() {
+    @Test void given__an_existing_done_payment__when__the_owner_repeats_the_order_and_amount__then__return_the_stored_subset_without_provider() {
         var f = new Fixture(); var existing = f.existing("stored-synthetic-key");
+        f.order(new StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PAID"));
         when(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE)).thenReturn(Optional.of(existing));
         var result = f.service.confirmPayment(7L, f.request);
         assertThat(result.getStatus()).isEqualTo("DONE");
@@ -67,8 +68,18 @@ class JpaPaymentsTest {
         assertThat(result.getTotalAmount()).isEqualTo(200L);
         assertThat(result.getRequestedAt()).isEqualTo(existing.getRequestedAt().atOffset(ZoneOffset.ofHours(9)));
         assertThat(result.getApprovedAt()).isEqualTo(existing.getApprovedAt().atOffset(ZoneOffset.ofHours(9)));
-        assertThat(f.events).containsExactly("begin:ro", "commit");
-        verifyNoInteractions(f.orders, f.toss, f.store);
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit");
+        verifyNoInteractions(f.toss, f.store);
+    }
+
+    @Test void given__another_members_already_paid_order__when__confirming__then__reject_403_before_revealing_the_stored_payment() {
+        var f = new Fixture(); f.order(new StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PAID"));
+        when(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE)).thenReturn(Optional.of(f.existing("stored-synthetic-key")));
+        assertThatThrownBy(() -> f.service.confirmPayment(8L, f.request)).isInstanceOf(PaymentOrderAccessDeniedException.class)
+                .hasMessageNotContaining("stored-synthetic-key");
+        assertThat(f.events).containsExactly("order");
+        verify(f.payments, never()).findFirstByOrderIdAndStatusOrderByIdAsc(anyString(), any());
+        verifyNoInteractions(f.toss, f.store);
     }
 
     @Test void given__an_existing_done_payment_with_a_different_amount__when__repeating__then__keep_the_original_mismatch_failure() {
@@ -76,7 +87,7 @@ class JpaPaymentsTest {
         when(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE)).thenReturn(Optional.of(existing));
         var request = TossPaymentConfirmRequest.builder().paymentKey("synthetic-key").orderId("order-uuid").amount(201L).build();
         assertThatThrownBy(() -> f.service.confirmPayment(7L, request)).isInstanceOf(IllegalStateException.class).hasMessage("Payment exists but amount mismatch");
-        verifyNoInteractions(f.orders, f.toss, f.store);
+        verifyNoInteractions(f.toss, f.store);
     }
 
     @Test void given__another_members_order__when__confirming__then__reject_before_the_provider() {
@@ -105,9 +116,30 @@ class JpaPaymentsTest {
         var result = f.service.confirmPayment(7L, f.request);
         assertThat(result.getStatus()).isEqualTo("ABORTED");
         assertThat(result.getOrderId()).isEqualTo("order-uuid"); assertThat(result.getPaymentKey()).isEqualTo("synthetic-key");
-        assertThat(f.events).containsExactly("begin:ro", "commit", "order", "provider", "begin:rw", "fail", "commit");
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:rw", "fail", "commit");
         verify(f.toss, never()).getPayment(anyString(), anyString()); verify(f.toss, never()).cancelPayment(anyString(), anyString(), any());
         verify(f.store, never()).completePayment(anyString(), anyLong()); verifyNoInteractions(f.compensations);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"401:UNAUTHORIZED_KEY", "429:PROVIDER_RATE_LIMIT", "403:FORBIDDEN_REQUEST", "403:"})
+    void given__toss_did_not_process_our_request__when__confirming__then__keep_the_order_pending_without_cancel_or_record(String input) {
+        var f = new Fixture(); var parts = input.split(":", -1);
+        var body = parts[1].isEmpty() ? "" : "{\"code\":\"" + parts[1] + "\",\"message\":\"synthetic\"}";
+        f.providerFails(HttpClientErrorException.create(HttpStatus.valueOf(Integer.parseInt(parts[0])), "synthetic", HttpHeaders.EMPTY,
+                body.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> f.service.confirmPayment(7L, f.request))
+                .hasMessage("Payment provider did not process the request. The order remains pending.");
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider");
+        verifyNoInteractions(f.store, f.compensations);
+        verify(f.toss, never()).getPayment(anyString(), anyString()); verify(f.toss, never()).cancelPayment(anyString(), anyString(), any());
+    }
+
+    @Test void given__a_403_card_decline__when__confirming__then__treat_it_as_a_business_rejection() {
+        var f = new Fixture();
+        f.providerFails(HttpClientErrorException.create(HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY,
+                "{\"code\":\"REJECT_CARD_PAYMENT\",\"message\":\"synthetic\"}".getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+        assertThat(f.service.confirmPayment(7L, f.request).getStatus()).isEqualTo("ABORTED");
+        verify(f.store).failPayment("order-uuid"); verifyNoInteractions(f.compensations);
     }
 
     @Test void given__already_processed_and_a_recorded_payment__when__confirming__then__return_the_stored_done_from_a_short_read() {
@@ -118,7 +150,7 @@ class JpaPaymentsTest {
                 "{\"code\":\"ALREADY_PROCESSED_PAYMENT\"}".getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
         var result = f.service.confirmPayment(7L, f.request);
         assertThat(result.getStatus()).isEqualTo("DONE"); assertThat(result.getPaymentKey()).isEqualTo("synthetic-key");
-        assertThat(f.events).containsExactly("begin:ro", "commit", "order", "provider", "begin:ro", "commit");
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:ro", "commit");
         verifyNoInteractions(f.store, f.compensations);
     }
 
@@ -135,7 +167,7 @@ class JpaPaymentsTest {
         when(f.toss.getPayment(anyString(), eq("synthetic-key"))).thenAnswer(call -> { f.outside("lookup"); return looked; });
         var result = f.service.confirmPayment(7L, f.request);
         assertThat(result).isSameAs(looked);
-        assertThat(f.events).containsExactly("begin:ro", "commit", "order", "provider", "lookup", "begin:rw", "complete:200", "done-check", "payment", "commit");
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "lookup", "begin:rw", "complete:200", "done-check", "payment", "commit");
         verifyNoInteractions(f.compensations);
     }
 
@@ -179,7 +211,7 @@ class JpaPaymentsTest {
     @Test void given__the_locked_order_is_no_longer_payable__when__applying__then__roll_back_and_cancel_the_provider_payment() {
         var f = new Fixture(); f.provider(f.done()); f.completion = Completion.REJECTED;
         assertThatThrownBy(() -> f.service.confirmPayment(7L, f.request)).hasMessage("Payment processed but failed to save record. Payment Cancelled.");
-        assertThat(f.events).containsExactly("begin:ro", "commit", "order", "provider", "begin:rw", "complete:200", "done-check", "rollback",
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:rw", "complete:200", "done-check", "rollback",
                 "begin:ro", "key-check", "commit", "cancel");
         verify(f.payments, never()).saveAndFlush(any()); verifyNoInteractions(f.compensations);
     }
@@ -297,7 +329,7 @@ class JpaPaymentsTest {
                     Clock.fixed(Instant.parse("2026-10-22T01:00:00Z"), ZoneId.of("Asia/Seoul")), pauses::add);
         }
         void order(StorePaymentOrders.Order value) {
-            when(orders.getOrder("order-uuid")).thenAnswer(call -> { outside("order"); return value; });
+            doAnswer(call -> { outside("order"); return value; }).when(orders).getOrder("order-uuid");
         }
         void provider(TossPaymentResponse response) {
             when(toss.confirmPayment(anyString(), any())).thenAnswer(call -> { outside("provider"); return response; });
