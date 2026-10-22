@@ -388,11 +388,11 @@ def smoke():
     bucket,prefix='f3-'+owner,'f3-'+owner+'/'
     controls={'X-F3-Owner':owner}
     base_env={k:os.environ[k] for k in ('PATH','JAVA_HOME','LANG','LC_ALL','HOME','TMPDIR') if k in os.environ}
-    app_env=dict(base_env,F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],F2_DB_USER=f3.APP,
-        F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],F2_POOL_MAX_SIZE='4',F3_DB_WRITER_USER=f3.WRITER,
-        F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
-        F3_STORAGE_BUCKET=bucket,F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',F3_STORAGE_OBJECT_PREFIX=prefix,
-        F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',F3_STORAGE_REGION='us-east-1')
+    app_env=dict(base_env,PAWBRIDGE_DB_URL=os.environ['F2_TEST_JDBC_URL'],PAWBRIDGE_DB_USER=f3.APP,
+        PAWBRIDGE_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],PAWBRIDGE_DB_POOL_MAX_SIZE='4',
+        PAWBRIDGE_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
+        PAWBRIDGE_STORAGE_BUCKET=bucket,PAWBRIDGE_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',PAWBRIDGE_STORAGE_OBJECT_PREFIX=prefix,
+        PAWBRIDGE_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',PAWBRIDGE_STORAGE_REGION='us-east-1')
     result=dict.fromkeys(COUNTERS,0)
     result.update(status='incomplete',timezone='Asia/Seoul',pool_maximum=4,
                   protected_database_changes=0,s3_requests=0,permitted_delta='one outgoing block and initially absent reserved member keys',snapshot_comparisons={})
@@ -512,7 +512,7 @@ def smoke():
         if any(v in text or v in stub_path.read_text() for v in forbidden):raise AssertionError('F25 child log exposed private values')
         if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')")!='0':raise AssertionError('F25 application connections remain')
         if {k:result[k] for k in COUNTERS}!=EXPECTED_JAR_COUNTS:raise AssertionError('F25 packaged request counts differ')
-        result.update(status='passed',shutdown_pools=2,remaining_application_connections=0)
+        result.update(status='passed',shutdown_pools=1,remaining_application_connections=0)
     finally:(EVIDENCE/'f25-packaged-result.txt').write_text(json.dumps(result,indent=2)+'\n')
     print('Hosted F25 create/duplicate/read/remove journey and protected snapshots passed')
 

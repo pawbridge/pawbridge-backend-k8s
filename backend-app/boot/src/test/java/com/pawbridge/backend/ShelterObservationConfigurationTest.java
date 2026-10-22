@@ -73,7 +73,7 @@ class ShelterObservationConfigurationTest {
     @Test
     void given__actual_main_and_explicit_observation_configuration__when__assembling_then_closing__then__reuse_writer_and_named_cron_without_startup_sql(CapturedOutput output) throws Exception {
         var values = F3TestInputs.values();
-        values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_observation_synthetic");
+        values.put("PAWBRIDGE_DB_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_observation_synthetic");
         var read = ReadDatabaseSettings.fromEnvironment(values::get);
         var write = PostWriteSettings.fromEnvironment(values::get);
         // Exercise the actual cron property consumer, several days away from execution in every test run.

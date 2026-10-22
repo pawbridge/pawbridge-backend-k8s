@@ -118,7 +118,7 @@ def start_ready_children(jar, app_env, base_env, owner, bucket, prefix,
             f3.verify_continue_handshake(endpoint, owner)
             app = subprocess.Popen(['java', '-Duser.timezone=Asia/Seoul', '-Xmx256m', '-jar', str(jar),
                 '--spring.main.banner-mode=off'],
-                env=dict(app_env, F2_PORT=str(app_port), F3_STORAGE_ENDPOINT=endpoint),
+                env=dict(app_env, PAWBRIDGE_SERVER_PORT=str(app_port), PAWBRIDGE_STORAGE_ENDPOINT=endpoint),
                 stdout=app_log, stderr=subprocess.STDOUT)
             f3.wait_ready(app, lambda: application_ready(app, app_path, app_offset, app_port, base),
                           'F4 packaged application')
@@ -165,14 +165,13 @@ def smoke():
     controls = {'X-F3-Owner': owner}
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR')
                 if key in os.environ}
-    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
-        F2_DB_USER=f3.APP, F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
-        F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
-        F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',
-        F3_STORAGE_OBJECT_PREFIX=prefix, F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',
-        F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
+    app_env = dict(base_env, PAWBRIDGE_DB_URL=os.environ['F2_TEST_JDBC_URL'],
+        PAWBRIDGE_DB_USER=f3.APP, PAWBRIDGE_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
+        PAWBRIDGE_DB_POOL_MAX_SIZE='4',
+        PAWBRIDGE_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
+        PAWBRIDGE_STORAGE_BUCKET=bucket, PAWBRIDGE_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',
+        PAWBRIDGE_STORAGE_OBJECT_PREFIX=prefix, PAWBRIDGE_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',
+        PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', PAWBRIDGE_STORAGE_REGION='us-east-1')
     base = ''
     state = lambda: f3.expect(endpoint, '/__f3__/state', 200, headers=controls)
     result = {'timezone': 'Asia/Seoul', 'pool_maximum': 4,
@@ -347,7 +346,7 @@ def smoke():
         raise AssertionError('F4 pool and HTTP graceful termination evidence is missing')
     if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
         raise AssertionError('F4 application database connections remain after termination')
-    result.update(status='passed', shutdown_pools=2, remaining_application_connections=0)
+    result.update(status='passed', shutdown_pools=1, remaining_application_connections=0)
     (EVIDENCE / 'f4-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')
     print('Hosted synthetic F4 owner deletion, best-effort SDK, rollback/recovery and graceful shutdown passed')
 

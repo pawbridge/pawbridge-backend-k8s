@@ -231,15 +231,14 @@ def smoke():
     # Explicit child environments exclude CI secrets and admin fixture credentials.
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR')
                 if key in os.environ}
-    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
-        F2_DB_USER=APP, F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F2_POOL_MAX_SIZE='4', F2_PORT=str(port()), F3_DB_WRITER_USER=WRITER,
-        F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], F3_STORAGE_ENDPOINT=endpoint,
-        F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',
-        F3_STORAGE_OBJECT_PREFIX=prefix, F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',
-        F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
-    base = 'http://127.0.0.1:' + app_env['F2_PORT']
+    app_env = dict(base_env, PAWBRIDGE_DB_URL=os.environ['F2_TEST_JDBC_URL'],
+        PAWBRIDGE_DB_USER=APP, PAWBRIDGE_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
+        PAWBRIDGE_DB_POOL_MAX_SIZE='4', PAWBRIDGE_SERVER_PORT=str(port()),
+        PAWBRIDGE_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], PAWBRIDGE_STORAGE_ENDPOINT=endpoint,
+        PAWBRIDGE_STORAGE_BUCKET=bucket, PAWBRIDGE_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',
+        PAWBRIDGE_STORAGE_OBJECT_PREFIX=prefix, PAWBRIDGE_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',
+        PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', PAWBRIDGE_STORAGE_REGION='us-east-1')
+    base = 'http://127.0.0.1:' + app_env['PAWBRIDGE_SERVER_PORT']
     state = lambda: expect(endpoint, '/__f3__/state', 200, headers=control_headers)
     logs = EVIDENCE / 'f3-packaged-startup.log'
     result = {'timezone': 'Asia/Seoul', 'pool_maximum': 4,
@@ -254,7 +253,7 @@ def smoke():
         try:
             wait_ready(stub, lambda: state()['owner'] == owner, 'S3 stub')
             verify_continue_handshake(endpoint, owner)
-            for missing_key in ('F2_JDBC_URL', 'F2_DB_PASSWORD', 'F3_JWT_SECRET', 'F3_STORAGE_ENDPOINT'):
+            for missing_key in ('PAWBRIDGE_DB_URL', 'PAWBRIDGE_DB_PASSWORD', 'PAWBRIDGE_JWT_SECRET', 'PAWBRIDGE_STORAGE_ENDPOINT'):
                 incomplete = {key: value for key, value in app_env.items() if key != missing_key}
                 failure = subprocess.run(['java', '-Xmx256m', '-jar', str(jar), '--spring.main.banner-mode=off'],
                     env=incomplete, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15, text=True)
@@ -428,7 +427,7 @@ def smoke():
                 (EVIDENCE / 'f3-packaged-result.txt').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     log_text = logs.read_text()
     if log_text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in log_text:
-        raise AssertionError('Both pools and HTTP graceful termination evidence is missing')
+        raise AssertionError('The single pool and HTTP graceful termination evidence is missing')
     if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
         raise AssertionError('Reader/writer connections remain after graceful termination')
     print('Hosted synthetic F3 POST/GET, auth effects, SDK uploads, rollback/recovery and graceful shutdown passed')

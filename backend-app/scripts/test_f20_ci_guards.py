@@ -274,7 +274,7 @@ class F20GuardTest(unittest.TestCase):
             self.assertEqual([0, 0, 1, 2, 3, 4, 5, 6, 7, 9], refreshed_at)
             self.assertEqual(1, start.call_count); self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(f20.OWNED)
             self.assertIn('page=-1', requests[5][0]); self.assertNotIn('Authorization', requests[8][1]['headers'])
-            self.assertEqual('POST', requests[9][1]['method']); self.assertEqual(2, result['shutdown_pools']); self.assertEqual(0, result['remaining_application_connections'])
+            self.assertEqual('POST', requests[9][1]['method']); self.assertEqual(1, result['shutdown_pools']); self.assertEqual(0, result['remaining_application_connections'])
             self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
 
     def test_given_stale_token_after_before_snapshot__when_request_is_due__then_no_request_stop_children_cleanup_and_incomplete(self):

@@ -121,14 +121,13 @@ def smoke():
     controls = {'X-F3-Owner': owner}
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR')
                 if key in os.environ}
-    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
-        F2_DB_USER=f3.APP, F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
-        F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], F3_STORAGE_BUCKET=bucket,
-        F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', F3_STORAGE_OBJECT_PREFIX=prefix,
-        F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',
-        F3_STORAGE_REGION='us-east-1')
+    app_env = dict(base_env, PAWBRIDGE_DB_URL=os.environ['F2_TEST_JDBC_URL'],
+        PAWBRIDGE_DB_USER=f3.APP, PAWBRIDGE_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
+        PAWBRIDGE_DB_POOL_MAX_SIZE='4',
+        PAWBRIDGE_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], PAWBRIDGE_STORAGE_BUCKET=bucket,
+        PAWBRIDGE_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', PAWBRIDGE_STORAGE_OBJECT_PREFIX=prefix,
+        PAWBRIDGE_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',
+        PAWBRIDGE_STORAGE_REGION='us-east-1')
     result = {'status': 'incomplete', 'timezone': 'Asia/Seoul',
               'pool_maximum': 4,
               'comment_post_checks': 0, 'comment_get_checks': 0, 'comment_delete_checks': 0,
@@ -317,8 +316,9 @@ def smoke():
             deleted_parent = create(POST + 1)['commentId']
             absent_parent = create(POST + 2)['commentId']
             f3.sql('UPDATE pawbridge_community.posts SET deleted_at=CURRENT_TIMESTAMP WHERE post_id=' + str(POST + 1)
-                   + '; DELETE FROM pawbridge_community.posts WHERE post_id=' + str(POST + 2)
-                   + '; REVOKE SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts FROM pawbridge_f2_reader')
+                   + '; DELETE FROM pawbridge_community.posts WHERE post_id=' + str(POST + 2))
+            # Standalone REVOKE so f3.sql also revokes the writer-role SELECT the shared app login inherits.
+            f3.sql('REVOKE SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts FROM pawbridge_f2_reader')
             try:
                 update(deleted_parent, 'F11 삭제 부모의 댓글')
                 update(absent_parent, 'F11 없는 부모의 댓글')
@@ -357,14 +357,14 @@ def smoke():
         raise AssertionError('F11 bounded journey exceeded its one-MiB-per-child log budget')
     text = f4.fresh_log(app_path, app_offset)
     if text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in text:
-        raise AssertionError('F11 normal HTTP/two-pool shutdown evidence missing')
+        raise AssertionError('F11 normal HTTP/single-pool shutdown evidence missing')
     if any(value in text for value in (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'],
             os.environ['F3_TEST_JWT_SECRET'], PRIVATE_BODY, *tokens.values())):
         raise AssertionError('F11 application log exposed credentials, tokens or request content')
     if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
             "('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
         raise AssertionError('F11 application connections remain after normal shutdown')
-    result.update(status='passed', shutdown_pools=2, remaining_application_connections=0)
+    result.update(status='passed', shutdown_pools=1, remaining_application_connections=0)
     (EVIDENCE / 'f11-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')
     print('Hosted F11 actual-JAR POST/GET/PUT/DELETE, dirty/no-op writes, recovery and shutdown passed')
 

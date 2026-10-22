@@ -303,11 +303,11 @@ class F19GuardTest(unittest.TestCase):
             for key in ('administrator_denied_checks', 'sql_failure_checks', 'authentication_checks', 'denied_route_checks'):
                 self.assertEqual(1, result[key])
             self.assertEqual(1, start.call_count); self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(f19.OWNED)
-            self.assertEqual(2, result['shutdown_pools']); self.assertEqual(0, result['remaining_application_connections'])
+            self.assertEqual(1, result['shutdown_pools']); self.assertEqual(0, result['remaining_application_connections'])
             self.assertEqual('Bearer private-user-token', requests[1][1]['headers']['Authorization'])
             self.assertEqual('ROLE_ADMIN', requests[1][1]['headers']['X-User-Role'])
             self.assertNotIn('Authorization', requests[4][1]['headers']); self.assertEqual('/api/v1/admin/users/stats/daily-signups/extra', requests[5][0])
-            self.assertEqual('4', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
+            self.assertEqual('4', start.call_args.args[1]['PAWBRIDGE_DB_POOL_MAX_SIZE'])
             self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
             self.assertNotIn('expected_count', result); self.assertNotIn('data', result)
 

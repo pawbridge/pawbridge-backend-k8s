@@ -139,13 +139,13 @@ class StoreCatalogManagementConfigurationTest {
     private static ApplicationContextRunner writerInputs(DataSource source){return runner().withBean("writeDataSource",DataSource.class,()->source)
             .withBean("writeJdbc",JdbcTemplate.class,()->new JdbcTemplate(source)).withBean(ObjectMapper.class,ObjectMapper::new);}
     private static PostWriteSettings settings(){
-        Map<String,String> readerValues=Map.of("F2_JDBC_URL","jdbc:postgresql://127.0.0.1:1/catalog_unit",
-                "F2_DB_USER","catalog_reader","F2_DB_PASSWORD","synthetic-reader");
+        Map<String,String> readerValues=Map.of("PAWBRIDGE_DB_URL","jdbc:postgresql://127.0.0.1:1/catalog_unit",
+                "PAWBRIDGE_DB_USER","catalog_reader","PAWBRIDGE_DB_PASSWORD","synthetic-reader");
         var reader=ReadDatabaseSettings.fromEnvironment(readerValues::get);
-        Map<String,String> values=Map.ofEntries(Map.entry("F3_DB_WRITER_USER","catalog_writer"),Map.entry("F3_DB_WRITER_PASSWORD","synthetic-writer"),
-                Map.entry("F3_JWT_SECRET","01234567890123456789012345678901"),Map.entry("F3_STORAGE_ENDPOINT","https://r2.invalid"),
-                Map.entry("F3_STORAGE_BUCKET","catalog-fixture"),Map.entry("F3_STORAGE_PUBLIC_BASE_URL","https://assets.invalid"),Map.entry("F3_STORAGE_OBJECT_PREFIX","posts"),
-                Map.entry("F3_STORAGE_ACCESS_KEY_ID","synthetic-access"),Map.entry("F3_STORAGE_SECRET_ACCESS_KEY","synthetic-secret"),Map.entry("F3_STORAGE_REGION","auto"));
+        Map<String,String> values=Map.ofEntries(
+                Map.entry("PAWBRIDGE_JWT_SECRET","01234567890123456789012345678901"),Map.entry("PAWBRIDGE_STORAGE_ENDPOINT","https://r2.invalid"),
+                Map.entry("PAWBRIDGE_STORAGE_BUCKET","catalog-fixture"),Map.entry("PAWBRIDGE_STORAGE_PUBLIC_BASE_URL","https://assets.invalid"),Map.entry("PAWBRIDGE_STORAGE_OBJECT_PREFIX","posts"),
+                Map.entry("PAWBRIDGE_STORAGE_ACCESS_KEY_ID","synthetic-access"),Map.entry("PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY","synthetic-secret"),Map.entry("PAWBRIDGE_STORAGE_REGION","auto"));
         return PostWriteSettings.fromEnvironment(values::get);
     }
 }

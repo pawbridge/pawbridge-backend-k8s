@@ -697,7 +697,7 @@ jobs:
           assert result['status'] == 'passed'
           assert result['list_get_checks'] >= 10
           assert result['list_get_database_changes'] == result['list_get_s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -772,7 +772,7 @@ jobs:
           assert result['status'] == 'passed'
           assert result['search_get_checks'] >= 14
           assert result['search_get_database_changes'] == result['search_get_s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -792,7 +792,7 @@ jobs:
           assert result['comment_get_checks'] >= 9
           assert result['denied_route_checks'] == 10
           assert result['comment_get_database_changes'] == result['comment_get_s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -814,7 +814,7 @@ jobs:
           assert result['comment_post_checks'] == result['comments_created'] + result['rejected_post_checks']
           assert result['comment_get_checks'] >= result['comments_created']
           assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -853,7 +853,7 @@ jobs:
           assert result['rejected_delete_checks'] >= 25
           assert result['comment_delete_checks'] == result['comments_deleted'] + result['rejected_delete_checks']
           assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -894,7 +894,7 @@ jobs:
           assert result['rejected_put_checks'] >= 28
           assert result['comment_put_checks'] == result['changed_put_checks'] + result['same_put_checks'] + result['rejected_put_checks']
           assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -932,7 +932,7 @@ jobs:
           assert result['profile_get_checks'] == result['successful_profile_checks'] + result['rejected_profile_checks']
           assert result['denied_route_checks'] >= 10
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -973,7 +973,7 @@ jobs:
           assert result['profile_get_checks'] >= 6
           assert result['community_get_checks'] == result['profile_get_checks']
           assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -1012,7 +1012,7 @@ jobs:
           assert result['rejected_get_checks'] >= 5
           assert result['favorite_get_checks'] == result['true_checks'] + result['false_checks'] + result['rejected_get_checks']
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PY
 
@@ -1052,7 +1052,7 @@ jobs:
           assert result['malformed_bearer_checks'] == 1
           assert result['home_get_checks'] == result['nonempty_checks'] + result['empty_checks'] + result['unavailable_checks']
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1094,7 +1094,7 @@ jobs:
           assert 'Boot tests only' in result['disabled_evidence']
           for phase in (enabled, disabled):
               assert phase['status'] == 'passed'
-              assert phase['shutdown_pools'] == 2
+              assert phase['shutdown_pools'] == 1
               assert phase['remaining_application_connections'] == 0
           assert result['database_changes'] == result['s3_requests'] == 0
           PYTHON
@@ -1135,7 +1135,7 @@ jobs:
           assert result['recipient_get_checks'] == result['successful_checks'] + result['rejected_checks']
           assert result['denied_route_checks'] == 2
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1179,7 +1179,7 @@ jobs:
           assert result['authentication_checks'] == 2
           assert result['denied_route_checks'] == 1
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1220,7 +1220,7 @@ jobs:
           assert result['administrator_denied_checks'] == result['sql_failure_checks'] == 1
           assert result['authentication_checks'] == result['denied_route_checks'] == 1
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1281,7 +1281,7 @@ jobs:
           assert result['member_unavailable_checks'] == result['storage_unavailable_checks'] == 1
           assert result['authentication_checks'] == result['denied_route_checks'] == 1
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1322,7 +1322,7 @@ jobs:
           assert {key: result[key] for key in f21.COUNTERS} == f21.EXPECTED_JAR_COUNTS
           assert result['notifications_get_checks'] == result['successful_checks'] + result['rejected_checks']
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1363,7 +1363,7 @@ jobs:
           assert {key: result[key] for key in f22.COUNTERS} == f22.EXPECTED_JAR_COUNTS
           assert result['detail_get_checks'] == result['successful_checks'] + result['rejected_checks']
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1404,7 +1404,7 @@ jobs:
           assert {key: result[key] for key in f23.COUNTERS} == f23.EXPECTED_JAR_COUNTS
           assert result['list_get_checks'] == result['successful_checks'] + result['rejected_checks']
           assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1445,7 +1445,7 @@ jobs:
           assert {key: result[key] for key in f24.COUNTERS} == f24.EXPECTED_JAR_COUNTS
           assert result['delete_checks'] == result['successful_delete_checks'] + result['rejected_delete_checks']
           assert result['protected_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1490,7 +1490,7 @@ jobs:
           assert result['put_checks'] == result['successful_put_checks'] + result['rejected_put_checks']
           assert result['request_checks'] == result['put_checks'] + result['get_checks'] + result['delete_checks']
           assert result['protected_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           comparisons = result['snapshot_comparisons']
           assert set(comparisons) == {'before_start', 'after_stop'}
@@ -1557,7 +1557,7 @@ jobs:
           assert result['stream_resources_stopped'] is True
           assert result['server_closed_open_streams'] == 2
           assert result['owned_cleanup_restored'] is True
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1613,7 +1613,7 @@ jobs:
           assert result['stream_resources_stopped'] is True
           assert result['server_closed_open_streams'] == 2
           assert result['owned_cleanup_restored'] is True
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1672,7 +1672,7 @@ jobs:
           assert result['stream_resources_stopped'] is True
           assert result['server_closed_open_streams'] == 2
           assert result['owned_cleanup_restored'] is True
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1732,7 +1732,7 @@ jobs:
           assert result['stream_resources_stopped'] is True
           assert result['server_closed_open_streams'] == 2
           assert result['owned_cleanup_restored'] is True
-          assert result['shutdown_pools'] == 2
+          assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
           PYTHON
 
@@ -1826,7 +1826,7 @@ jobs:
           assert result['member_commit_closed_streams'] == result['server_closed_open_streams'] == 1
           assert result['survivor_resync_checks'] == 2
           assert result['stream_resources_stopped'] is True and result['owned_cleanup_restored'] is True
-          assert result['shutdown_pools'] == 2 and result['remaining_application_connections'] == 0
+          assert result['shutdown_pools'] == 1 and result['remaining_application_connections'] == 0
           PYTHON
 
       - name: Add only administrator role and care registration column rights after member fixture preparation

@@ -405,7 +405,7 @@ def run(ci):
         text = ci.f4.fresh_log(app_path, offset); stub_text = stub_path.read_text()
         if (text.count('Start completed.') != 1 or text.count('Shutdown completed.') != 1 or 'Graceful shutdown complete' not in text
                 or text.count('Private note stream resources stopped') != 1 or 'Private note stream resources did not stop within budget' in text):
-            raise AssertionError('F29 stream/two-pool normal shutdown evidence is incomplete')
+            raise AssertionError('F29 stream/single-pool normal shutdown evidence is incomplete')
         forbidden = (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'], os.environ['F3_TEST_JWT_SECRET'],
                      BODY, RAW_BODY, json.dumps(BODY)[1:-1], request_hash(), 'F29 synthetic', *tokens.values(), *NAMES.values(),
                      *('f29-' + str(i) + '@fixture.invalid' for i in USERS))
@@ -413,7 +413,7 @@ def run(ci):
         if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
             raise AssertionError('F29 application connections remain after shutdown')
         if {k: result[k] for k in COUNTERS} != EXPECTED_JAR_COUNTS: raise AssertionError('F29 exact send journey counts differ')
-        result.update(status='passed', shutdown_pools=2, remaining_application_connections=0,
+        result.update(status='passed', shutdown_pools=1, remaining_application_connections=0,
                       stream_resources_stopped=True, owned_cleanup_restored=True)
     finally:
         receipt.write_text(json.dumps(result, indent=2) + '\n')
@@ -850,13 +850,13 @@ def run_member_cleanup(ci):
         text = ci.f4.fresh_log(app_path, offset); stub_text = stub_path.read_text()
         if (text.count('Start completed.') != 1 or text.count('Shutdown completed.') != 1 or 'Graceful shutdown complete' not in text
                 or text.count('Private note stream resources stopped') != 1 or 'Private note stream resources did not stop within budget' in text):
-            raise AssertionError('Member cleanup stream/two-pool shutdown evidence is incomplete')
+            raise AssertionError('Member cleanup stream/single-pool shutdown evidence is incomplete')
         if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
             raise AssertionError('Member cleanup application connections remain after shutdown')
         if {k: result[k] for k in MEMBER_COUNTERS} != MEMBER_EXPECTED_COUNTS:
             raise AssertionError('Member cleanup exact late journey counts differ')
         result.update(status='passed', owned_cleanup_restored=True, stream_resources_stopped=True,
-                      shutdown_pools=2, remaining_application_connections=0)
+                      shutdown_pools=1, remaining_application_connections=0)
     finally:
         import sys
         failed = sys.exc_info()[0] is not None

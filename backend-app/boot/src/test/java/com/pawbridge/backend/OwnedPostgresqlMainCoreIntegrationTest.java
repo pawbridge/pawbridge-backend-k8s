@@ -85,12 +85,10 @@ class OwnedPostgresqlMainCoreIntegrationTest {
                 check(input != null && sha(input.readAllBytes()).equals(SQL_SHA), "Exact frozen P22 schema is required");
             }
             var values = F3TestInputs.values();
-            values.put("F2_JDBC_URL", settings.url());
-            values.put("F2_DB_USER", settings.reader());
-            values.put("F2_DB_PASSWORD", settings.password());
-            values.put("F2_POOL_MAX_SIZE", "1");
-            values.put("F3_DB_WRITER_USER", settings.writer());
-            values.put("F3_DB_WRITER_PASSWORD", settings.writerPassword());
+            values.put("PAWBRIDGE_DB_URL", settings.url());
+            values.put("PAWBRIDGE_DB_USER", settings.reader());
+            values.put("PAWBRIDGE_DB_PASSWORD", settings.password());
+            values.put("PAWBRIDGE_DB_POOL_MAX_SIZE", "1");
             var read = ReadDatabaseSettings.fromEnvironment(values::get);
             var write = PostWriteSettings.fromEnvironment(values::get);
             context = new GenericWebApplicationContext();

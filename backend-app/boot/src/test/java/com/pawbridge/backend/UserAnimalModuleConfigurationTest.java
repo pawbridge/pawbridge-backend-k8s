@@ -89,7 +89,7 @@ class UserAnimalModuleConfigurationTest {
                         assertThat(ReflectionTestUtils.getField(context.getBean(UserAnimalActivities.AnimalLookup.class),"animals")).isSameAs(api);
                         var memberReads=(TransactionTemplate)ReflectionTestUtils.getField(api,"reads");
                         assertThat(memberReads.getTransactionManager()).isSameAs(context.getBean("transactionManager"));
-                        assertThat(memberReads.isReadOnly()).isTrue();assertThat(memberReads.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                        assertThat(memberReads.isReadOnly()).isTrue();assertThat(memberReads.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
                         assertThat(((TransactionTemplate)ReflectionTestUtils.getField(context.getBean(UserAnimalActivities.class),"write")).getTransactionManager()).isSameAs(context.getBean("writeTransactionManager"));
                     } else assertThat(context.getBeansOfType(AnimalMemberReads.class)).isEmpty();
                     assertThat(context.getBeansOfType(DataSource.class)).hasSize(1);

@@ -36,11 +36,11 @@ class PostWriteSettingsTest {
     @Test
     void given__unsafe_inputs__when__validating__then__reject_before_listener_or_external_clients() {
         Map<String,String> invalid=Map.of(
-                "F3_JWT_SECRET","private-short-value",
-                "F3_STORAGE_ENDPOINT","http://private-user:private-value@localhost:39001",
-                "F3_STORAGE_PUBLIC_BASE_URL","https://fixture.invalid/?private=detail",
-                "F3_STORAGE_OBJECT_PREFIX","../unowned/",
-                "F3_STORAGE_BUCKET","invalid/private-value");
+                "PAWBRIDGE_JWT_SECRET","private-short-value",
+                "PAWBRIDGE_STORAGE_ENDPOINT","http://private-user:private-value@localhost:39001",
+                "PAWBRIDGE_STORAGE_PUBLIC_BASE_URL","https://fixture.invalid/?private=detail",
+                "PAWBRIDGE_STORAGE_OBJECT_PREFIX","../unowned/",
+                "PAWBRIDGE_STORAGE_BUCKET","invalid/private-value");
         invalid.forEach((key,value)-> {
             var values=F3TestInputs.values(); values.put(key,value);
             assertThatThrownBy(()->PostWriteSettings.fromEnvironment(values::get))

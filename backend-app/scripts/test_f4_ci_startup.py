@@ -140,7 +140,7 @@ class F4StartupTest(unittest.TestCase):
         if command[0] == 'java':
             kind = 'app'
             mode = self.modes[self.attempt - 1]
-            port = options['env']['F2_PORT']
+            port = options['env']['PAWBRIDGE_SERVER_PORT']
             if mode == 'app-bind':
                 child.poll.return_value = 1
                 self.app_log.append('Port ' + port + ' was already in use.')

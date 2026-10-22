@@ -168,7 +168,7 @@ class PawBridgeCoreIntegrationTest {
 
     private static WebApplicationContextRunner runner(Resources resources) {
         var values = F3TestInputs.values();
-        values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_main_synthetic");
+        values.put("PAWBRIDGE_DB_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_main_synthetic");
         var read = ReadDatabaseSettings.fromEnvironment(values::get);
         var write = PostWriteSettings.fromEnvironment(values::get);
         return new WebApplicationContextRunner().withUserConfiguration(PawBridgeApplication.class)

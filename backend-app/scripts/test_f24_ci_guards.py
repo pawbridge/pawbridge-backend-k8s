@@ -770,7 +770,7 @@ class F24GuardTest(unittest.TestCase):
             f24.smoke()
             receipt = json.loads((h['evidence'] / 'f24-packaged-result.txt').read_text())
             self.assertEqual(MOCK_COUNTS, {key: receipt[key] for key in f24.COUNTERS})
-            self.assertEqual(('passed', 2, 0), (receipt['status'], receipt['shutdown_pools'], receipt['remaining_application_connections']))
+            self.assertEqual(('passed', 1, 0), (receipt['status'], receipt['shutdown_pools'], receipt['remaining_application_connections']))
             methods = [kwargs['method'] for _, kwargs in h['requests']]
             self.assertEqual((12, 8, 3, 1), (len(methods), methods.count('DELETE'), methods.count('GET'), methods.count('PUT')))
             h['cleanup'].assert_called_once_with(f24.OWNED, (f24.MISSING,))
