@@ -18,16 +18,16 @@ final class F3TestInputs {
 
     static Map<String,String> values() {
         var values = new HashMap<String,String>();
-        values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:5432/pawbridge_f2_ci");
-        values.put("F2_DB_USER", "fixture-reader"); values.put("F2_DB_PASSWORD", "synthetic-reader-only");
-        values.put("F3_JWT_SECRET", JWT_SECRET);
-        values.put("F3_STORAGE_ENDPOINT", "http://127.0.0.1:39001");
-        values.put("F3_STORAGE_BUCKET", "f3-test-bucket");
-        values.put("F3_STORAGE_PUBLIC_BASE_URL", "https://fixture.invalid");
-        values.put("F3_STORAGE_OBJECT_PREFIX", "f3-test/");
-        values.put("F3_STORAGE_ACCESS_KEY_ID", "synthetic-access");
-        values.put("F3_STORAGE_SECRET_ACCESS_KEY", "synthetic-secret-only");
-        values.put("F3_STORAGE_REGION", "us-east-1");
+        values.put("PAWBRIDGE_DB_URL", "jdbc:postgresql://127.0.0.1:5432/pawbridge_f2_ci");
+        values.put("PAWBRIDGE_DB_USER", "fixture-reader"); values.put("PAWBRIDGE_DB_PASSWORD", "synthetic-reader-only");
+        values.put("PAWBRIDGE_JWT_SECRET", JWT_SECRET);
+        values.put("PAWBRIDGE_STORAGE_ENDPOINT", "http://127.0.0.1:39001");
+        values.put("PAWBRIDGE_STORAGE_BUCKET", "f3-test-bucket");
+        values.put("PAWBRIDGE_STORAGE_PUBLIC_BASE_URL", "https://fixture.invalid");
+        values.put("PAWBRIDGE_STORAGE_OBJECT_PREFIX", "f3-test/");
+        values.put("PAWBRIDGE_STORAGE_ACCESS_KEY_ID", "synthetic-access");
+        values.put("PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY", "synthetic-secret-only");
+        values.put("PAWBRIDGE_STORAGE_REGION", "us-east-1");
         return values;
     }
 

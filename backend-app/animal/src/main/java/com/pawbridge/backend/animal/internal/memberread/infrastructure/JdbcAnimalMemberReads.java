@@ -54,15 +54,15 @@ public final class JdbcAnimalMemberReads implements AnimalMemberReads {
     private final AnimalShelterReads shelters;
 
     public JdbcAnimalMemberReads(DataSource source, PlatformTransactionManager manager, AnimalShelterReads shelters) {
-        this(new NamedParameterJdbcTemplate(source), independentRead(manager), shelters);
+        this(new NamedParameterJdbcTemplate(source), memberRead(manager), shelters);
     }
     JdbcAnimalMemberReads(NamedParameterJdbcOperations jdbc, TransactionOperations reads, AnimalShelterReads shelters) {
         this.jdbc = jdbc; this.reads = reads; this.shelters = shelters;
     }
-    private static TransactionTemplate independentRead(PlatformTransactionManager manager) {
+    private static TransactionTemplate memberRead(PlatformTransactionManager manager) {
         TransactionTemplate transaction = new TransactionTemplate(manager);
         transaction.setReadOnly(true);
-        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
         return transaction;
     }
     @Override public Shelter findByCareRegNo(String careRegNo) { return shelters.findByCareRegNo(careRegNo); }

@@ -24,7 +24,7 @@ public final class MembershipLockedAnimalShelterReads implements AnimalShelterRe
         DataSource source = jdbc.getDataSource();
         requireWriter(source);
         Object binding = TransactionSynchronizationManager.getResource(source);
-        // Preserve the existing independent full-detail/public-information lookup first.
+        // Look up the shelter first through the delegate, which joins this transaction on the shared pool; lock the membership row below.
         Shelter found = delegate.findByCareRegNo(careRegNo);
         requireWriter(source);
         if (jdbc.getDataSource() != source

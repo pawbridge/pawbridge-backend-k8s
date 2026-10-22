@@ -5,7 +5,7 @@ import java.util.function.Function;
 
 /** Explicit candidate inputs; there is no production address or credential fallback. */
 public final class ReadDatabaseSettings {
-    /** Single shared pool for reads and writes; F2_POOL_MAX_SIZE overrides within 1..50. */
+    /** Single shared pool for reads and writes; PAWBRIDGE_DB_POOL_MAX_SIZE overrides within 1..50. */
     public static final int DEFAULT_POOL_MAX_SIZE = 10;
     public static final int MAX_POOL_MAX_SIZE = 50;
     private final String jdbcUrl;
@@ -21,17 +21,17 @@ public final class ReadDatabaseSettings {
     }
 
     public static ReadDatabaseSettings fromEnvironment(Function<String, String> values) {
-        String url = required(values, "F2_JDBC_URL");
+        String url = required(values, "PAWBRIDGE_DB_URL");
         validateUrl(url);
-        String username = required(values, "F2_DB_USER");
-        String password = required(values, "F2_DB_PASSWORD");
-        String requestedSize = values.apply("F2_POOL_MAX_SIZE");
+        String username = required(values, "PAWBRIDGE_DB_USER");
+        String password = required(values, "PAWBRIDGE_DB_PASSWORD");
+        String requestedSize = values.apply("PAWBRIDGE_DB_POOL_MAX_SIZE");
         int maximum = DEFAULT_POOL_MAX_SIZE;
         if (requestedSize != null) {
             try { maximum = Integer.parseInt(requestedSize); }
-            catch (NumberFormatException ignored) { throw invalid("F2_POOL_MAX_SIZE"); }
+            catch (NumberFormatException ignored) { throw invalid("PAWBRIDGE_DB_POOL_MAX_SIZE"); }
         }
-        if (maximum < 1 || maximum > MAX_POOL_MAX_SIZE) { throw invalid("F2_POOL_MAX_SIZE"); }
+        if (maximum < 1 || maximum > MAX_POOL_MAX_SIZE) { throw invalid("PAWBRIDGE_DB_POOL_MAX_SIZE"); }
         return new ReadDatabaseSettings(url, username, password, maximum);
     }
 
@@ -49,7 +49,7 @@ public final class ReadDatabaseSettings {
                     || uri.getFragment() != null || uri.getPath() == null
                     || !uri.getPath().matches("/[a-zA-Z0-9_]+") || uri.getPort() == 0
                     || uri.getPort() > 65535) { throw new IllegalArgumentException(); }
-        } catch (IllegalArgumentException ignored) { throw invalid("F2_JDBC_URL"); }
+        } catch (IllegalArgumentException ignored) { throw invalid("PAWBRIDGE_DB_URL"); }
     }
 
     private static IllegalArgumentException invalid(String key) {

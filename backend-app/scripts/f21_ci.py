@@ -452,11 +452,11 @@ def smoke():
     bucket, prefix = 'f3-' + owner, 'f3-' + owner + '/'
     controls = {'X-F3-Owner': owner}
     base_env = {k: os.environ[k] for k in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR') if k in os.environ}
-    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'], F2_DB_USER=f3.APP,
-        F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
-        F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
-        F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', F3_STORAGE_OBJECT_PREFIX=prefix,
-        F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
+    app_env = dict(base_env, PAWBRIDGE_DB_URL=os.environ['F2_TEST_JDBC_URL'], PAWBRIDGE_DB_USER=f3.APP,
+        PAWBRIDGE_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], PAWBRIDGE_DB_POOL_MAX_SIZE='4',
+        PAWBRIDGE_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
+        PAWBRIDGE_STORAGE_BUCKET=bucket, PAWBRIDGE_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', PAWBRIDGE_STORAGE_OBJECT_PREFIX=prefix,
+        PAWBRIDGE_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', PAWBRIDGE_STORAGE_REGION='us-east-1')
     result = dict.fromkeys(COUNTERS, 0)
     result.update(status='incomplete', timezone='Asia/Seoul', pool_maximum=4,
                   database_changes=0, s3_requests=0)
@@ -535,7 +535,7 @@ def smoke():
             raise AssertionError('F21 exceeded the one-MiB-per-child log budget')
         text = f4.fresh_log(app_path, app_offset)
         if text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in text:
-            raise AssertionError('F21 normal HTTP/two-pool shutdown evidence is missing')
+            raise AssertionError('F21 normal HTTP/single-pool shutdown evidence is missing')
         forbidden = (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'], os.environ['F3_TEST_JWT_SECRET'],
                      BODY, 'F21 synthetic', *(name for name in NAMES.values() if name.strip()), *tokens.values(),
                      *('f21-' + str(i) + '@fixture.invalid' for i in USERS))
@@ -544,7 +544,7 @@ def smoke():
             raise AssertionError('F21 application connections remain after shutdown')
         if {key: result[key] for key in COUNTERS} != EXPECTED_JAR_COUNTS:
             raise AssertionError('F21 packaged request counts differ from the reviewed measured contract')
-        result.update(status='passed', shutdown_pools=2, remaining_application_connections=0)
+        result.update(status='passed', shutdown_pools=1, remaining_application_connections=0)
     finally:
         (EVIDENCE / 'f21-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')
     print('Hosted F21 notification/cursor/unread journey and unchanged sixteen-table/S3 snapshots passed')

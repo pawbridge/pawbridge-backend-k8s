@@ -187,14 +187,14 @@ class JdbcAnimalMemberReadsTest {
         var value=new AnimalShelterReads.Shelter(7L,"r","센터"); when(shelters.findByCareRegNo(" r ")).thenReturn(value);
         assertThat(reads.findByCareRegNo(" r ")).isSameAs(value); verifyNoInteractions(jdbc);
     }
-    @Test void givenPublicConstructor__whenReadScopeStarts__thenRequestIndependentDefaultReadOnlyTxBeforeValidation() {
+    @Test void givenPublicConstructor__whenReadScopeStarts__thenRequestDefaultReadOnlyTxBeforeValidation() {
         PlatformTransactionManager manager=mock(PlatformTransactionManager.class); DataSource source=mock(DataSource.class);
         when(manager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         var publicReads=new JdbcAnimalMemberReads(source,manager,shelters);
         assertThatThrownBy(()->publicReads.byShelter(7L,new PageRequest(Integer.MAX_VALUE,20,"id,asc"))).isInstanceOf(AnimalMemberReadUnavailableException.class);
         var definition=ArgumentCaptor.forClass(TransactionDefinition.class); verify(manager).getTransaction(definition.capture());
         assertThat(definition.getValue().isReadOnly()).isTrue();
-        assertThat(definition.getValue().getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        assertThat(definition.getValue().getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
         assertThat(definition.getValue().getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
         assertThat(definition.getValue().getTimeout()).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT);
         verify(manager).rollback(any()); verifyNoInteractions(source);

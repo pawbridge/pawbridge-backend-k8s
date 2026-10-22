@@ -429,7 +429,7 @@ class F25GuardTest(unittest.TestCase):
     def test_given_mocked_eighteen_request_journey__when_smoking__then_exact_delta_and_recovery_controls_finish_before_pass(self):
         with tempfile.TemporaryDirectory() as d,packaged_harness(d) as h:
             f25.smoke();value=json.loads((h['evidence']/'f25-packaged-result.txt').read_text())
-            self.assertEqual(MOCK_COUNTS,{k:value[k] for k in f25.COUNTERS});self.assertEqual(('passed',2,0),(value['status'],value['shutdown_pools'],value['remaining_application_connections']))
+            self.assertEqual(MOCK_COUNTS,{k:value[k] for k in f25.COUNTERS});self.assertEqual(('passed', 1, 0),(value['status'],value['shutdown_pools'],value['remaining_application_connections']))
             methods=[k['method'] for _,k in h['requests']];self.assertEqual((18,8,7,3),(len(methods),methods.count('PUT'),methods.count('GET'),methods.count('DELETE')))
             self.assertEqual('/api/v1/notes/stream/extra',h['requests'][16][0])
             self.assertEqual('/api/v1/notes/blocks/'+str(f25.OTHER)+'/extra',h['requests'][-1][0]);self.assertNotIn('Authorization',h['requests'][15][1]['headers'])

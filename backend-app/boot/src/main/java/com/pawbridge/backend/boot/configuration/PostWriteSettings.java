@@ -14,18 +14,18 @@ public final class PostWriteSettings {
 
     private PostWriteSettings(Function<String, String> values) {
         try {
-            jwtKey = Keys.hmacShaKeyFor(required(values, "F3_JWT_SECRET").getBytes(StandardCharsets.UTF_8));
-        } catch (RuntimeException failure) { throw invalid("F3_JWT_SECRET"); }
-        endpoint = address(required(values, "F3_STORAGE_ENDPOINT"), "F3_STORAGE_ENDPOINT", true);
-        bucket = required(values, "F3_STORAGE_BUCKET");
-        if (!bucket.matches("[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")) throw invalid("F3_STORAGE_BUCKET");
-        publicBaseUrl = required(values, "F3_STORAGE_PUBLIC_BASE_URL");
-        address(publicBaseUrl, "F3_STORAGE_PUBLIC_BASE_URL", false);
-        objectPrefix = required(values, "F3_STORAGE_OBJECT_PREFIX");
-        if (!objectPrefix.matches("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/?")) throw invalid("F3_STORAGE_OBJECT_PREFIX");
-        accessKey = required(values, "F3_STORAGE_ACCESS_KEY_ID");
-        secretKey = required(values, "F3_STORAGE_SECRET_ACCESS_KEY");
-        region = required(values, "F3_STORAGE_REGION");
+            jwtKey = Keys.hmacShaKeyFor(required(values, "PAWBRIDGE_JWT_SECRET").getBytes(StandardCharsets.UTF_8));
+        } catch (RuntimeException failure) { throw invalid("PAWBRIDGE_JWT_SECRET"); }
+        endpoint = address(required(values, "PAWBRIDGE_STORAGE_ENDPOINT"), "PAWBRIDGE_STORAGE_ENDPOINT", true);
+        bucket = required(values, "PAWBRIDGE_STORAGE_BUCKET");
+        if (!bucket.matches("[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")) throw invalid("PAWBRIDGE_STORAGE_BUCKET");
+        publicBaseUrl = required(values, "PAWBRIDGE_STORAGE_PUBLIC_BASE_URL");
+        address(publicBaseUrl, "PAWBRIDGE_STORAGE_PUBLIC_BASE_URL", false);
+        objectPrefix = required(values, "PAWBRIDGE_STORAGE_OBJECT_PREFIX");
+        if (!objectPrefix.matches("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/?")) throw invalid("PAWBRIDGE_STORAGE_OBJECT_PREFIX");
+        accessKey = required(values, "PAWBRIDGE_STORAGE_ACCESS_KEY_ID");
+        secretKey = required(values, "PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY");
+        region = required(values, "PAWBRIDGE_STORAGE_REGION");
     }
 
     public static PostWriteSettings fromEnvironment(Function<String, String> values) {

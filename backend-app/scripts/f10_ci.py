@@ -106,14 +106,13 @@ def smoke():
     controls = {'X-F3-Owner': owner}
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR')
                 if key in os.environ}
-    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
-        F2_DB_USER=f3.APP, F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
-        F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
-        F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], F3_STORAGE_BUCKET=bucket,
-        F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', F3_STORAGE_OBJECT_PREFIX=prefix,
-        F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',
-        F3_STORAGE_REGION='us-east-1')
+    app_env = dict(base_env, PAWBRIDGE_DB_URL=os.environ['F2_TEST_JDBC_URL'],
+        PAWBRIDGE_DB_USER=f3.APP, PAWBRIDGE_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
+        PAWBRIDGE_DB_POOL_MAX_SIZE='4',
+        PAWBRIDGE_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], PAWBRIDGE_STORAGE_BUCKET=bucket,
+        PAWBRIDGE_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', PAWBRIDGE_STORAGE_OBJECT_PREFIX=prefix,
+        PAWBRIDGE_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',
+        PAWBRIDGE_STORAGE_REGION='us-east-1')
     result = {'status': 'incomplete', 'timezone': 'Asia/Seoul',
               'pool_maximum': 4,
               'comment_post_checks': 0, 'comment_get_checks': 0, 'comment_delete_checks': 0,
@@ -251,15 +250,17 @@ def smoke():
             delete(absent_parent)
 
             independent = create()
-            f3.sql('DELETE FROM pawbridge_user.users WHERE user_id=42; '
-                   'REVOKE SELECT(nickname) ON pawbridge_user.users FROM pawbridge_f2_reader; '
+            # REVOKE/GRANT SELECT must be standalone statements so f3.sql also revokes/restores the
+            # overlapping writer-role privilege inherited by the single shared app login.
+            f3.sql('DELETE FROM pawbridge_user.users WHERE user_id=42')
+            f3.sql('REVOKE SELECT(nickname) ON pawbridge_user.users FROM pawbridge_f2_reader; '
                    'REVOKE SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts FROM pawbridge_f2_reader')
             try:
                 delete(independent)
             finally:
                 f3.sql('GRANT SELECT(nickname) ON pawbridge_user.users TO pawbridge_f2_reader; '
-                       'GRANT SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts TO pawbridge_f2_reader; '
-                       'INSERT INTO pawbridge_user.users(user_id,nickname) VALUES(42,' + f4.literal(NICKNAME) + ')')
+                       'GRANT SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts TO pawbridge_f2_reader')
+                f3.sql('INSERT INTO pawbridge_user.users(user_id,nickname) VALUES(42,' + f4.literal(NICKNAME) + ')')
 
             for privilege in ('SELECT(author_id)', 'SELECT(deleted_at)', 'UPDATE(deleted_at)', 'UPDATE(updated_at)'):
                 comment_id = create()
@@ -283,14 +284,14 @@ def smoke():
         raise AssertionError('F10 bounded journey exceeded its one-MiB-per-child log budget')
     text = f4.fresh_log(app_path, app_offset)
     if text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in text:
-        raise AssertionError('F10 normal HTTP/two-pool shutdown evidence missing')
+        raise AssertionError('F10 normal HTTP/single-pool shutdown evidence missing')
     if any(value in text for value in (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'],
             os.environ['F3_TEST_JWT_SECRET'], 'F10_PRIVATE_BODY_DO_NOT_LOG', *tokens.values())):
         raise AssertionError('F10 application log exposed credentials, tokens or request content')
     if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
             "('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
         raise AssertionError('F10 application connections remain after normal shutdown')
-    result.update(status='passed', shutdown_pools=2, remaining_application_connections=0)
+    result.update(status='passed', shutdown_pools=1, remaining_application_connections=0)
     (EVIDENCE / 'f10-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')
     print('Hosted F10 actual-JAR POST/GET/DELETE, two-column soft delete, rollback recovery and shutdown passed')
 

@@ -72,7 +72,7 @@ class PaymentConfirmationConfigurationTest {
     @Test
     void given__actual_main_and_explicit_synthetic_payment__when__assembling_and_closing__then__share_named_resources_without_startup_io_or_secret_logs(CapturedOutput output) {
         var values = F3TestInputs.values();
-        values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_payment_synthetic");
+        values.put("PAWBRIDGE_DB_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_payment_synthetic");
         var read = ReadDatabaseSettings.fromEnvironment(values::get);
         var write = PostWriteSettings.fromEnvironment(values::get);
         var factoryRef = new AtomicReference<EntityManagerFactory>();

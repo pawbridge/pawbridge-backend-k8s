@@ -277,7 +277,7 @@ class F16GuardTest(unittest.TestCase):
             enabled, disabled = result['enabled'], result['disabled']
             for key, value in {'visit_get_checks': 5, 'positive_checks': 3, 'zero_checks': 1, 'unavailable_checks': 1, 'malformed_bearer_checks': 1}.items(): self.assertEqual(value, enabled[key])
             self.assertEqual(1, disabled['visit_get_checks']); self.assertEqual(1, disabled['disabled_404_checks'])
-            for phase in (enabled, disabled): self.assertEqual(2, phase['shutdown_pools']); self.assertEqual(0, phase['remaining_application_connections'])
+            for phase in (enabled, disabled): self.assertEqual(1, phase['shutdown_pools']); self.assertEqual(0, phase['remaining_application_connections'])
             self.assertEqual(f16.DISABLED_EVIDENCE, result['disabled_evidence']); self.assertNotIn('sql_attempts', disabled)
             self.assertEqual(2, cleanup.call_count)
 

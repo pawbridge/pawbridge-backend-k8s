@@ -25,7 +25,7 @@ class SingleDataSourceConfigurationTest {
     void given__default_or_explicit_capacity__when__creating_the_single_pool__then__share_one_read_write_pool_without_startup_connection(
             String requested, int maximum, int minimumIdle) {
         var values = settings();
-        if (!requested.equals("absent")) values.put("F2_POOL_MAX_SIZE", requested);
+        if (!requested.equals("absent")) values.put("PAWBRIDGE_DB_POOL_MAX_SIZE", requested);
         try (var pool = new ReadConfiguration().dataSource(ReadDatabaseSettings.fromEnvironment(values::get))) {
             assertThat(pool.getPoolName()).isEqualTo("pawbridge-db");
             assertThat(pool.getUsername()).isEqualTo("synthetic_app");
@@ -42,9 +42,9 @@ class SingleDataSourceConfigurationTest {
     @ValueSource(strings = {"0", "51", "invalid"})
     void given__out_of_range_capacity__when__validating__then__reject_before_pool_construction(String requested) {
         var values = settings();
-        values.put("F2_POOL_MAX_SIZE", requested);
+        values.put("PAWBRIDGE_DB_POOL_MAX_SIZE", requested);
         assertThatThrownBy(() -> ReadDatabaseSettings.fromEnvironment(values::get))
-                .hasMessage("Missing or invalid explicit setting: F2_POOL_MAX_SIZE");
+                .hasMessage("Missing or invalid explicit setting: PAWBRIDGE_DB_POOL_MAX_SIZE");
     }
 
     @Test
@@ -72,7 +72,7 @@ class SingleDataSourceConfigurationTest {
     }
 
     private static Map<String, String> settings() {
-        return new HashMap<>(Map.of("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pb_never_connected",
-                "F2_DB_USER", "synthetic_app", "F2_DB_PASSWORD", "synthetic"));
+        return new HashMap<>(Map.of("PAWBRIDGE_DB_URL", "jdbc:postgresql://127.0.0.1:1/pb_never_connected",
+                "PAWBRIDGE_DB_USER", "synthetic_app", "PAWBRIDGE_DB_PASSWORD", "synthetic"));
     }
 }

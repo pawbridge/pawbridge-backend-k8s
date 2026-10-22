@@ -285,11 +285,11 @@ def smoke():
     bucket, prefix = 'f3-' + owner, 'f3-' + owner + '/'
     controls = {'X-F3-Owner': owner}
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR') if key in os.environ}
-    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'], F2_DB_USER=f3.APP,
-        F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
-        F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
-        F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', F3_STORAGE_OBJECT_PREFIX=prefix,
-        F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
+    app_env = dict(base_env, PAWBRIDGE_DB_URL=os.environ['F2_TEST_JDBC_URL'], PAWBRIDGE_DB_USER=f3.APP,
+        PAWBRIDGE_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], PAWBRIDGE_DB_POOL_MAX_SIZE='4',
+        PAWBRIDGE_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
+        PAWBRIDGE_STORAGE_BUCKET=bucket, PAWBRIDGE_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', PAWBRIDGE_STORAGE_OBJECT_PREFIX=prefix,
+        PAWBRIDGE_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', PAWBRIDGE_STORAGE_REGION='us-east-1')
     result = {'status': 'incomplete', 'timezone': 'Asia/Seoul', 'pool_maximum': 4,
               'block_list_get_checks': 0, 'successful_checks': 0, 'rejected_checks': 0, 'page_checks': 0,
               'empty_page_checks': 0, 'invalid_page_checks': 0, 'member_unavailable_checks': 0,
@@ -375,7 +375,7 @@ def smoke():
             raise AssertionError('F20 exceeded its one-MiB-per-child log budget')
         text = f4.fresh_log(app_path, app_offset)
         if text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in text:
-            raise AssertionError('F20 normal HTTP/two-pool shutdown evidence missing')
+            raise AssertionError('F20 normal HTTP/single-pool shutdown evidence missing')
         forbidden = (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'], os.environ['F3_TEST_JWT_SECRET'],
                      'F20caller', 'F20normal', 'F20pending', 'F20 synthetic', *tokens.values(),
                      *('f20-' + str(identity) + '@fixture.invalid' for identity in USERS))
@@ -383,7 +383,7 @@ def smoke():
             raise AssertionError('F20 application log exposed credentials, tokens or synthetic personal fields')
         if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
             raise AssertionError('F20 application connections remain after normal shutdown')
-        result.update(status='passed', shutdown_pools=2, remaining_application_connections=0)
+        result.update(status='passed', shutdown_pools=1, remaining_application_connections=0)
     finally:
         (EVIDENCE / 'f20-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')
     print('Hosted F20 pages, original display/time, source-specific recovery and unchanged snapshots passed')
