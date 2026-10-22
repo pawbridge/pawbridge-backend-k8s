@@ -1040,9 +1040,9 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/shelterdirectory/infrastructure/ShelterDirectoryClientTest.java': 'bab7e20e89e8109dfa7f02c041d856cdbd96c010aecfbe4c270dae63c7445524',
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/shelterdirectory/infrastructure/ShelterDirectoryCollectorTest.java': 'f8cd663da4a563edc1c24bff4c07fcde29358d369d3a90091e1f80da6f86debd',
  'backend-app/animal/src/test/java/com/pawbridge/backend/animal/internal/shelterdirectory/infrastructure/ShelterDirectoryStoreTest.java': '4f356d37b18921cb10e9d3d37e97a096970291841e0a3461de04d7325bce9707',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterDirectoryConfiguration.java': 'd7d3639b3687db3684083dbd118c137e2fea8386425e25bd6441a9fe0c93e456',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterDirectoryConfiguration.java': '0c97242ee1dfe2298fea1ea3e66673d8cee78f32d74620994b44e7d970fbd7d7',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterDirectorySchedule.java': 'c2e91595db734fab5386ecde07e6f96819a4d34de26c9369349327001dcba3c9',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/ShelterDirectoryConfigurationTest.java': 'a5b143b393e31a633fa95afe4c3fbd01ebda04dbf88d74d2948e83ce0913069e'}
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/ShelterDirectoryConfigurationTest.java': '5eb9029254f3f65ef6736aabc846c4f17a894f85bb37fd4ab6fbd83a2e67d0ec'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39577223965

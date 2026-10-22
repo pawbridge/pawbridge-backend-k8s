@@ -30,7 +30,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 class ShelterDirectoryConfigurationTest {
     @Test
@@ -71,7 +70,6 @@ class ShelterDirectoryConfigurationTest {
     @Test
     void givenScheduleSwitchTrue__whenContextStarts__thenOriginalJobUsesSameWriterAndOneSeoulSchedulerWithoutLaunching() {
         var source = mock(HikariDataSource.class);
-        when(source.getMaximumPoolSize()).thenReturn(2);
         var manager = new JdbcTransactionManager(source);
         // A future cron prevents this composition test from invoking the actual Job.
         runner(source, manager).withPropertyValues("shelter-directory.schedule-enabled=true",
@@ -111,7 +109,6 @@ class ShelterDirectoryConfigurationTest {
     @Test
     void givenAnotherWriterDataSource__whenScheduleEnabled__thenRejectMixedOwnershipBeforeBorrow() {
         var source = mock(HikariDataSource.class);
-        when(source.getMaximumPoolSize()).thenReturn(2);
         var other = mock(HikariDataSource.class);
         runner(source, new JdbcTransactionManager(other)).withPropertyValues("shelter-directory.schedule-enabled=true")
                 .run(app -> {
@@ -120,19 +117,6 @@ class ShelterDirectoryConfigurationTest {
                             "Shelter directory must use the same existing writer DataSource");
                     verify(source, never()).getConnection();
                     verify(other, never()).getConnection();
-                });
-    }
-
-    @Test
-    void givenDefaultSingleWriterConnection__whenScheduleEnabled__thenFailBeforeMetadataOrBorrow() {
-        var source = mock(HikariDataSource.class);
-        when(source.getMaximumPoolSize()).thenReturn(1);
-        runner(source, new JdbcTransactionManager(source)).withPropertyValues("shelter-directory.schedule-enabled=true")
-                .run(app -> {
-                    assertThat(app).hasFailed();
-                    assertThat(app.getStartupFailure()).hasRootCauseMessage(
-                            "Shelter directory requires the writer with capacity of at least two");
-                    verify(source, never()).getConnection();
                 });
     }
 

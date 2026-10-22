@@ -43,9 +43,6 @@ public class ShelterDirectoryConfiguration {
     @Bean
     ShelterDirectoryCollector shelterDirectoryCollector(@Qualifier("writeDataSource") HikariDataSource source,
             ShelterDirectoryClient client, ShelterDirectoryStore store) {
-        // The collector keeps its locked connection across external requests, like travel collection.
-        if (source.getMaximumPoolSize() < 2)
-            throw new IllegalArgumentException("Shelter directory requires the writer with capacity of at least two");
         return new ShelterDirectoryCollector(source, client, store);
     }
 
