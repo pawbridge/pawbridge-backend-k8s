@@ -159,7 +159,6 @@ class OwnedPostgresqlStoreCartOrderTest {
             }
             for (Map.Entry<Long,Long> entry : SKU_PRODUCTS.entrySet()) if (products.contains(entry.getValue())) {
                 long sku = entry.getKey(); Map<String,Object> value = originalSkus.get(sku);
-                jdbc.update("DELETE FROM pawbridge_store.outbox WHERE aggregate_type='product-sku' AND aggregate_id=?",Long.toString(sku));
                 jdbc.update("UPDATE pawbridge_store.product_skus SET price=?,stock_quantity=?,created_at=?,updated_at=? WHERE id=?",
                         value.get("price"),value.get("stock_quantity"),value.get("created_at"),value.get("updated_at"),sku);
             }
@@ -212,11 +211,7 @@ class OwnedPostgresqlStoreCartOrderTest {
                     "Purchased item must retain the locked price snapshot");
             check(count("SELECT count(*) FROM pawbridge_store.product_search_documents WHERE product_id=71001 AND analyzer_version<>'owned-fixture-v1'")==1,
                     "The selected product search projection must commit in the same writer transaction");
-            List<Map<String,Object>> snapshots=events(73001,73002);check(snapshots.size()==2,"Every SKU of the touched product must publish its snapshot");
-            for(Map<String,Object> event:snapshots){JsonNode payload=JSON.readTree(event.get("payload").toString());
-                check(event.get("aggregate_type").equals("product-sku")&&event.get("event_type").equals("SKU_UPDATED")
-                        &&payload.path("productId").asLong()==71001&&payload.path("totalStockQuantity").asInt()==10,
-                        "Snapshot routing and the product-wide remaining stock must be preserved");}
+            check(events(73001,73002).isEmpty(),"The SKU_UPDATED outbox was removed; checkout must not write Store outbox rows");
             check(send(mvc,"GET",CART,token(BUYER),null,200).isEmpty(),"Checkout must consume the entire buyer Cart");
             jdbc.update("UPDATE pawbridge_store.product_skus SET price=2700 WHERE id=?",NORMAL);
             JsonNode own=send(mvc,"GET",GET+id,token(BUYER),null,200);

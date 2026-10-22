@@ -75,8 +75,7 @@ class StoreDirectOrderConfigurationTest {
                 assertThat(factory.getPersistenceUnitInfo().getManagedClassNames()).containsExactlyInAnyOrder(
                         model + "BaseEntity", model + "Wishlist", model + "ProductSKU", model + "Product",
                         model + "Category", model + "SKUValue", model + "OptionValue", model + "OptionGroup",
-                        model + "Order", model + "OrderItem",
-                        "com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.model.Outbox");
+                        model + "Order", model + "OrderItem");
                 assertThat(factory.getJpaPropertyMap()).containsEntry("hibernate.boot.allow_jdbc_metadata_access", false)
                         .containsEntry("hibernate.hbm2ddl.auto", "none")
                         .containsEntry("jakarta.persistence.schema-generation.database.action", "none")

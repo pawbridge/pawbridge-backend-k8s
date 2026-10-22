@@ -1,6 +1,5 @@
 package com.pawbridge.backend.store.internal.directorder.infrastructure;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.api.StoreOrderActors;
 import com.pawbridge.backend.store.internal.cart.infrastructure.jpa.repository.CartRepository;
 import com.pawbridge.backend.store.internal.directorder.application.CartOrders;
@@ -13,7 +12,6 @@ import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
-import java.time.Clock;
 import java.util.LinkedHashMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -22,7 +20,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-/** Existing stock/outbox/search business; Cart consumption and Order creation share the same writer TX. */
+/** Existing stock/search business; Cart consumption and Order creation share the same writer TX. */
 public final class JpaCartOrders implements CartOrders {
     private final CartRepository carts;
     private final OrderRepository orders;
@@ -32,13 +30,12 @@ public final class JpaCartOrders implements CartOrders {
     private final TransactionOperations writes;
 
     public JpaCartOrders(EntityManager sharedEntityManager,TransactionOperations writes,StoreOrderActors actors,
-            NamedParameterJdbcOperations writerSearchJdbc,KoreanSearchTerms terms,ObjectMapper mapper) {
+            NamedParameterJdbcOperations writerSearchJdbc,KoreanSearchTerms terms) {
         var factory=new JpaRepositoryFactory(sharedEntityManager);
         this.carts=factory.getRepository(CartRepository.class);
         this.orders=factory.getRepository(OrderRepository.class);
         this.skus=factory.getRepository(ProductSKURepository.class);
-        var snapshots=new ProductSnapshots(factory.getRepository(OutboxRepository.class),mapper,
-                new PostgresqlSearchDocuments(writerSearchJdbc,terms),Clock.systemDefaultZone());
+        var snapshots=new ProductSnapshots(writerSearchJdbc,terms);
         this.stocks=new JpaStockAdjustments(factory.getRepository(ProductRepository.class),skus,snapshots);
         this.actors=actors;this.writes=writes;
     }

@@ -1,6 +1,5 @@
 package com.pawbridge.backend.boot.configuration;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.api.StorePaymentEvents;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import com.pawbridge.backend.store.internal.directorder.infrastructure.JpaStockAdjustments;
@@ -20,9 +19,11 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** Default-off original Store payment result business; no message transport is registered here. */
+/** Default-off Store payment business called directly by Payment and the mock route; no message transport is registered here. */
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.store-payment-events",name="enabled",havingValue="true")
 @Import({StoreOrderSupportConfiguration.class,StorePaymentTransportConfiguration.class})
@@ -32,10 +33,9 @@ public class StorePaymentEventsConfiguration {
     @Bean StorePaymentEvents.StockRestorer storePaymentEventStocks(
             @Qualifier("storeDirectOrderEntityManager") EntityManager writer,
             @Qualifier("storeDirectOrderSearchJdbc") NamedParameterJdbcTemplate search,
-            @Qualifier("storeDirectOrderSearchTerms") KoreanSearchTerms terms,
-            ObjectMapper mapper) {
+            @Qualifier("storeDirectOrderSearchTerms") KoreanSearchTerms terms) {
         var repositories=new JpaRepositoryFactory(writer);
-        var snapshots=new ProductSnapshots(writer,search,terms,mapper);
+        var snapshots=new ProductSnapshots(search,terms);
         return new SharedWriterStockRestorer(new JpaStockAdjustments(repositories.getRepository(ProductRepository.class),
                 repositories.getRepository(ProductSKURepository.class),snapshots));
     }
@@ -53,10 +53,14 @@ public class StorePaymentEventsConfiguration {
     @Bean StorePaymentEvents storePaymentEvents(
             @Qualifier("storeDirectOrderEntityManager") EntityManager writer,
             @Qualifier("storeDirectOrderWrites") TransactionTemplate writes,
+            @Qualifier("storeDirectOrderJpaTransactionManager") JpaTransactionManager manager,
             @Qualifier("storePaymentEventStocks") StorePaymentEvents.StockRestorer stocks,
             @Qualifier("storePaymentEventRanking") StorePaymentEvents.Ranking ranking,
-            ObjectMapper mapper,@Qualifier("storePaymentEventClock") Clock clock) {
-        return new JpaStorePaymentEvents(writer,writes,stocks,ranking,mapper,clock);
+            @Qualifier("storePaymentEventClock") Clock clock) {
+        // completePayment/failPayment must join the caller's Store writer transaction (Payment owns it).
+        var mandatory=new TransactionTemplate(manager);
+        mandatory.setPropagationBehavior(TransactionDefinition.PROPAGATION_MANDATORY);
+        return new JpaStorePaymentEvents(writer,writes,mandatory,stocks,ranking,clock);
     }
 
     static final class SharedWriterStockRestorer implements StorePaymentEvents.StockRestorer {

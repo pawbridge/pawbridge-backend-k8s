@@ -1,7 +1,7 @@
 package com.pawbridge.backend.store.api;
 
-/** Original Payment-facing UUID lookup, without a new ownership or order-state policy. */
+/** Payment-facing UUID lookup; Payment checks the owner, amount and state before contacting the provider. */
 public interface StorePaymentOrders {
-    record Order(Long orderId, String orderUuid, Long totalAmount, String status) { }
+    record Order(Long orderId, String orderUuid, Long userId, Long totalAmount, String status) { }
     Order getOrder(String orderUuid);
 }

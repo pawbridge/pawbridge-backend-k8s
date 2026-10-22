@@ -1,6 +1,5 @@
 package com.pawbridge.backend.boot.configuration;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogCategories;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogOptions;
@@ -36,16 +35,16 @@ public class StoreCatalogManagementConfiguration {
     JpaCatalogProducts storeCatalogProducts(@Qualifier("storeDirectOrderEntityManager") EntityManager sharedWriter,
             @Qualifier("storeDirectOrderWrites") TransactionTemplate writes,
             @Qualifier("storeCatalogManagementSearchJdbc") NamedParameterJdbcTemplate search,
-            @Qualifier("storeCatalogManagementSearchTerms") KoreanSearchTerms terms,ObjectMapper mapper) {
-        return new JpaCatalogProducts(sharedWriter,writes,search,terms,mapper);
+            @Qualifier("storeCatalogManagementSearchTerms") KoreanSearchTerms terms) {
+        return new JpaCatalogProducts(sharedWriter,writes,search,terms);
     }
 
     @Bean
     JpaCatalogOptions storeCatalogOptions(@Qualifier("storeDirectOrderEntityManager") EntityManager sharedWriter,
             @Qualifier("storeDirectOrderWrites") TransactionTemplate writes,
             @Qualifier("storeCatalogManagementSearchJdbc") NamedParameterJdbcTemplate search,
-            @Qualifier("storeCatalogManagementSearchTerms") KoreanSearchTerms terms,ObjectMapper mapper) {
-        return new JpaCatalogOptions(sharedWriter,writes,search,terms,mapper);
+            @Qualifier("storeCatalogManagementSearchTerms") KoreanSearchTerms terms) {
+        return new JpaCatalogOptions(sharedWriter,writes,search,terms);
     }
 
     @Bean

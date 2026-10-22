@@ -50,12 +50,15 @@ class StorePaymentEventsConfigurationTest {
             assertThat(writes.getTransactionManager()).isSameAs(context.getBean("storeDirectOrderJpaTransactionManager"));
             assertThat(context.getBean("storeDirectOrderJpaTransactionManager",JpaTransactionManager.class).getDataSource()).isSameAs(writer);
             assertThat(shared.getEntityManagerFactory()).isSameAs(factory);
-            for(String repository:List.of("orders","outbox"))assertThat(repositoryEntityManager(field(service,repository)).getEntityManagerFactory()).isSameAs(factory);
+            assertThat(repositoryEntityManager(field(service,"orders")).getEntityManagerFactory()).isSameAs(factory);
+            var mandatory=(TransactionTemplate)field(service,"mandatoryWrites");
+            assertThat(mandatory.getTransactionManager()).isSameAs(context.getBean("storeDirectOrderJpaTransactionManager"));
+            assertThat(mandatory.getPropagationBehavior()).isEqualTo(org.springframework.transaction.TransactionDefinition.PROPAGATION_MANDATORY);
+            assertThat(mandatory.isReadOnly()).isFalse();
             var bridge=context.getBean("storePaymentEventStocks",StorePaymentEvents.StockRestorer.class);
             var stock=field(bridge,"delegate");var snapshots=field(stock,"snapshots");var documents=field(snapshots,"documents");
             assertThat(repositoryEntityManager(field(stock,"products")).getEntityManagerFactory()).isSameAs(factory);
             assertThat(repositoryEntityManager(field(stock,"skus")).getEntityManagerFactory()).isSameAs(factory);
-            assertThat(repositoryEntityManager(field(snapshots,"outbox")).getEntityManagerFactory()).isSameAs(factory);
             assertThat(field(documents,"jdbc")).isSameAs(context.getBean("storeDirectOrderSearchJdbc"));
             assertThat(((NamedParameterJdbcTemplate)field(documents,"jdbc")).getJdbcTemplate().getDataSource()).isSameAs(writer);
             assertThat(field(documents,"terms")).isSameAs(context.getBean("storeDirectOrderSearchTerms"));

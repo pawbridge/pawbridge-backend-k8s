@@ -1,6 +1,5 @@
 package com.pawbridge.backend.store.internal.catalogwrite.infrastructure;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.jpa.repository.*;
 import com.pawbridge.backend.store.internal.catalogwrite.web.*;
@@ -24,13 +23,13 @@ public final class JpaCatalogOptions {
     private final TransactionOperations writes;
 
     public JpaCatalogOptions(EntityManager sharedWriter,TransactionOperations writes,
-            NamedParameterJdbcOperations search,KoreanSearchTerms terms,ObjectMapper mapper) {
+            NamedParameterJdbcOperations search,KoreanSearchTerms terms) {
         var repositories=new JpaRepositoryFactory(sharedWriter);
         this.groups=repositories.getRepository(OptionGroupRepository.class);
         this.values=repositories.getRepository(OptionValueRepository.class);
         this.products=repositories.getRepository(ProductRepository.class);
         this.skus=repositories.getRepository(ProductSKURepository.class);
-        this.snapshots=new ProductSnapshots(sharedWriter,search,terms,mapper);
+        this.snapshots=new ProductSnapshots(search,terms);
         this.writes=writes;
     }
 

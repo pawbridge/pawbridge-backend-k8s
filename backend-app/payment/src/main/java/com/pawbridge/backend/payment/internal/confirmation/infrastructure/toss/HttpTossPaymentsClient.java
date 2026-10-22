@@ -20,4 +20,9 @@ public final class HttpTossPaymentsClient implements TossPaymentsClient {
         return client.post().uri("/payments/{paymentKey}/cancel", paymentKey).header("Authorization", authorization)
                 .contentType(MediaType.APPLICATION_JSON).body(request).retrieve().body(TossPaymentResponse.class);
     }
+
+    @Override public TossPaymentResponse getPayment(String authorization, String paymentKey) {
+        return client.get().uri("/payments/{paymentKey}", paymentKey).header("Authorization", authorization)
+                .retrieve().body(TossPaymentResponse.class);
+    }
 }

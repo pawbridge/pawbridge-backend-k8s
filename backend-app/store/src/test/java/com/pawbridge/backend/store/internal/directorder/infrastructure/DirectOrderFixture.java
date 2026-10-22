@@ -3,13 +3,9 @@ package com.pawbridge.backend.store.internal.directorder.infrastructure;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.pawbridge.backend.store.api.StoreOrderActors;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders;
-import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.model.Outbox;
 import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repository.*;
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.*;
 import java.time.*;
@@ -28,15 +24,12 @@ final class DirectOrderFixture implements AutoCloseable {
     final OrderRepository writerOrders=mock(OrderRepository.class),readerOrders=mock(OrderRepository.class);
     final ProductRepository products=mock(ProductRepository.class);
     final ProductSKURepository skus=mock(ProductSKURepository.class);
-    final OutboxRepository outbox=mock(OutboxRepository.class);
     final NamedParameterJdbcOperations jdbc=mock(NamedParameterJdbcOperations.class);
     final StoreOrderActors actors=mock(StoreOrderActors.class);
     final KoreanSearchTerms terms=new KoreanSearchTerms();
-    final ObjectMapper json=new ObjectMapper().registerModule(new JavaTimeModule()).disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     final Product product=Product.builder().name("fixture product").status(ProductStatus.ACTIVE).build();
     final ProductSKU target=ProductSKU.builder().product(product).skuCode("CURRENT-80").price(100L).stockQuantity(5).build();
     final ProductSKU sibling=ProductSKU.builder().product(product).skuCode("CURRENT-81").price(50L).stockQuantity(8).build();
-    final List<Outbox> snapshots=new ArrayList<>();
     final Map<Long,Order> orders=new LinkedHashMap<>();
     final List<Map<String,?>> searchParameters=new ArrayList<>();
     final LocalDateTime time=LocalDateTime.of(2026,10,20,22,0,1,123456789);
@@ -45,7 +38,6 @@ final class DirectOrderFixture implements AutoCloseable {
     final JpaDirectOrders service;
     StoreOrderActors.Actor actor=new StoreOrderActors.Actor(7,true,false);
     String failAt="";
-    int outboxCalls;
     long identity=33;
     DirectOrderFixture() {
         write.setName("writer");read.setName("reader");read.setReadOnly(true);
@@ -59,10 +51,9 @@ final class DirectOrderFixture implements AutoCloseable {
         when(skus.findAllByProductIdWithLock(90L)).thenAnswer(call->{writer();events.add("all-sku-lock");return List.of(target,sibling);});
         when(skus.findById(80L)).thenAnswer(call->{writer();events.add("sku-read");return Optional.of(target);});
         when(jdbc.update(anyString(),anyMap())).thenAnswer(call->{writer();events.add("search");if(failAt.equals("search"))throw failure();searchParameters.add(new HashMap<>(call.getArgument(1)));return 1;});
-        when(outbox.save(any(Outbox.class))).thenAnswer(call->{writer();Outbox row=call.getArgument(0);events.add("outbox:"+row.getAggregateId());outboxCalls++;if(failAt.equals("outbox"+outboxCalls))throw failure();snapshots.add(row);return row;});
         when(writerOrders.save(any(Order.class))).thenAnswer(call->{writer();events.add("order-save");if(failAt.equals("order"))throw failure();Order order=call.getArgument(0);id(order,identity++);ReflectionTestUtils.setField(order,"createdAt",time);orders.put(order.getId(),order);return order;});
         when(readerOrders.findById(anyLong())).thenAnswer(call->{reader();events.add("order-read");return Optional.ofNullable(orders.get(call.getArgument(0)));});
-        publisher=new ProductSnapshots(outbox,json,new PostgresqlSearchDocuments(jdbc,terms),Clock.fixed(time.toInstant(ZoneOffset.ofHours(9)),ZoneId.of("Asia/Seoul")));
+        publisher=new ProductSnapshots(new PostgresqlSearchDocuments(jdbc,terms));
         stocks=new JpaStockAdjustments(products,skus,publisher);
         service=new JpaDirectOrders(writerOrders,readerOrders,skus,stocks,actors,write,read);
     }

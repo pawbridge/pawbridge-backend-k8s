@@ -22,20 +22,28 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Configuration(proxyBeanMethods = false)
 @Import(JpaAuditingConfiguration.class)
 public class StoreJpaWriterConfiguration {
+    private static final String PAYMENT_MODEL = "com.pawbridge.backend.payment.internal.confirmation.infrastructure.jpa.model.";
+    static final String[] PAYMENT_TYPES = {PAYMENT_MODEL + "BaseEntity", PAYMENT_MODEL + "Payment",
+            PAYMENT_MODEL + "PaymentCompensationRecord"};
+
     @Bean
     LocalContainerEntityManagerFactoryBean storeDirectOrderEntityManagerFactory(
             @Qualifier("writeDataSource") DataSource source,
             @Value("${pawbridge.store-carts.enabled:false}") String cartFlag,
-            @Value("${pawbridge.store-catalog-management.enabled:false}") String catalogFlag) {
+            @Value("${pawbridge.store-catalog-management.enabled:false}") String catalogFlag,
+            @Value("${pawbridge.payments.enabled:false}") String paymentFlag) {
         boolean carts = "true".equalsIgnoreCase(cartFlag) || "true".equalsIgnoreCase(catalogFlag);
+        boolean payments = "true".equalsIgnoreCase(paymentFlag);
         String[] managed = Arrays.copyOf(StoreMemberJpaConfiguration.MANAGED_TYPES,
-                StoreMemberJpaConfiguration.MANAGED_TYPES.length + (carts ? 3 : 1));
+                StoreMemberJpaConfiguration.MANAGED_TYPES.length + (carts ? 2 : 0) + (payments ? PAYMENT_TYPES.length : 0));
         int next = StoreMemberJpaConfiguration.MANAGED_TYPES.length;
-        managed[next++] = "com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.model.Outbox";
         if (carts) {
             managed[next++] = "com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.Cart";
-            managed[next] = "com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.CartItem";
+            managed[next++] = "com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.CartItem";
         }
+        // Payment rows live in pawbridge_payment (explicit @Table schema) but share this writer unit and manager,
+        // so the payment row and the order change commit in one transaction on one connection.
+        if (payments) System.arraycopy(PAYMENT_TYPES, 0, managed, next, PAYMENT_TYPES.length);
         return StoreMemberJpaConfiguration.newFactory(source, "pawbridge-store-direct-order-writer", managed);
     }
 

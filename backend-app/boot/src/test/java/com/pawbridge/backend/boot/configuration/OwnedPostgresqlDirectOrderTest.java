@@ -150,7 +150,6 @@ class OwnedPostgresqlDirectOrderTest {
             }
             for (Map.Entry<Long,Long> entry : SKU_PRODUCTS.entrySet()) if (products.contains(entry.getValue())) {
                 long sku = entry.getKey(); Map<String,Object> value = originalSkus.get(sku);
-                jdbc.update("DELETE FROM pawbridge_store.outbox WHERE aggregate_type='product-sku' AND aggregate_id=?",Long.toString(sku));
                 jdbc.update("UPDATE pawbridge_store.product_skus SET price=?,stock_quantity=?,created_at=?,updated_at=? WHERE id=?",
                         value.get("price"),value.get("stock_quantity"),value.get("created_at"),value.get("updated_at"),sku);
             }
@@ -174,7 +173,7 @@ class OwnedPostgresqlDirectOrderTest {
     void closeOnlyTheOwnedPool() { if (pool!=null) { pool.close(); check(pool.isClosed(),"The owned application pool must close"); } }
 
     @Test
-    void givenVerifiedBuyerAndForgedHeaders_whenBuyingThenReading_thenKeepFullPendingSchemaAllSkuEventsAndPurchaseSnapshots() {
+    void givenVerifiedBuyerAndForgedHeaders_whenBuyingThenReading_thenKeepFullPendingSchemaAndPurchaseSnapshotsWithoutOutbox() {
         http(pool,(mvc,context) -> {
             OwnedBody request=body(BUYER,NORMAL,2); request.value().put("userId",990001L);
             JsonNode created=send(mvc,"POST",CREATE,token(BUYER),request.value(),201); long id=remember(created,request.owner());
@@ -188,15 +187,7 @@ class OwnedPostgresqlDirectOrderTest {
             Map<String,Object> stored=jdbc.queryForMap("SELECT * FROM pawbridge_store.orders WHERE id=?",id);
             check(stored.get("created_at")!=null && stored.get("updated_at")!=null && !created.path("createdAt").isNull(),"Actual JPA auditing must populate the persisted order");
             check(stock(NORMAL)==6 && stock(73001)==5,"Only the requested SKU quantity must decrease");
-            List<Map<String,Object>> events=events(73001,73002); check(events.size()==2,"The entire product SKU set must publish snapshots");
-            for (Map<String,Object> event:events) {
-                JsonNode payload=JSON.readTree(event.get("payload").toString()); long sku=payload.path("skuId").asLong();
-                check("product-sku".equals(event.get("aggregate_type")) && "SKU_UPDATED".equals(event.get("event_type"))
-                        && Long.toString(sku).equals(event.get("aggregate_id")) && payload.path("productId").asLong()==71001
-                        && payload.path("totalStockQuantity").asInt()==11 && payload.path("stockQuantity").asInt()==(sku==73001?5:6)
-                        && payload.path("isPrimarySku").asBoolean()==(sku==73001) && event.get("created_at")!=null,
-                        "Each original SKU snapshot must retain aggregate routing, total stock and primary designation");
-            }
+            check(events(73001,73002).isEmpty(),"The SKU_UPDATED outbox was removed; buying must not write Store outbox rows");
             Map<String,Object> document=jdbc.queryForMap("SELECT * FROM pawbridge_store.product_search_documents WHERE product_id=71001");
             check(((Number)document.get("sku_id")).longValue()==73001 && KoreanSearchTerms.VERSION.equals(document.get("analyzer_version")),"Search must select the same lowest-price representative SKU");
             jdbc.update("UPDATE pawbridge_store.product_skus SET price=3333 WHERE id=?",NORMAL);
@@ -242,15 +233,14 @@ class OwnedPostgresqlDirectOrderTest {
         });
     }
 
-    @ParameterizedTest @ValueSource(strings={"search","outbox","constraint"})
-    void givenSearchOutboxOrOriginalNotNullFailure_whenBuyingThenRetrying_thenRollBackAndRecoverNormally(String failure) {
+    @ParameterizedTest @ValueSource(strings={"search","constraint"})
+    void givenSearchOrOriginalNotNullFailure_whenBuyingThenRetrying_thenRollBackAndRecoverNormally(String failure) {
         http(pool,(mvc,context) -> {
-            long sku=failure.equals("search")?73006:failure.equals("outbox")?73007:NORMAL;
+            long sku=failure.equals("search")?73006:NORMAL;
             OwnedBody request=body(BUYER,sku,1); if(failure.equals("constraint")) request.value().put("receiverName",null);
             Map<String,Fingerprint> before=fingerprint(); JsonNode error=send(mvc,"POST",CREATE,token(BUYER),request.value(),500);
-            check("C004".equals(error.path("code").asText()) && fingerprint().equals(before),"Search, arbitrary synthetic 23514 Outbox and real NOT NULL errors must remain atomic 500");
+            check("C004".equals(error.path("code").asText()) && fingerprint().equals(before),"Search and real NOT NULL errors must remain atomic 500");
             if(failure.equals("search")) jdbc.update("UPDATE pawbridge_store.products SET name='owned recovered search' WHERE id=71005");
-            if(failure.equals("outbox")) jdbc.update("UPDATE pawbridge_store.product_skus SET price=1234 WHERE id=73007");
             OwnedBody retry=body(BUYER,sku,1); JsonNode created=send(mvc,"POST",CREATE,token(BUYER),retry.value(),201);
             long id=remember(created,retry.owner()); check(sameOrder(created,send(mvc,"GET",GET+id,token(BUYER),null,200),id),"A valid retry must recover through the real service");
             check(stock(sku)==((Number)originalSkus.get(sku).get("stock_quantity")).intValue()-1,"Only the recovered request may consume stock");
@@ -315,7 +305,7 @@ class OwnedPostgresqlDirectOrderTest {
                         statuses.sort(Integer::compareTo);
                         check(statuses.equals(List.of(201,500)) && stock(CONCURRENT)==0
                                 && count("SELECT count(*) FROM pawbridge_store.order_items WHERE product_sku_id=?",CONCURRENT)==1
-                                && events(CONCURRENT).size()==1,"The contended source locks must allow one order, one event and no negative stock");
+                                && events(CONCURRENT).isEmpty(),"The contended source locks must allow one order, no outbox event and no negative stock");
                     } finally {
                         for(Future<?> future:futures) if(!future.isDone()) future.cancel(true);
                         executor.shutdownNow(); check(executor.awaitTermination(5,TimeUnit.SECONDS),"Every owned request thread must terminate before cleanup");

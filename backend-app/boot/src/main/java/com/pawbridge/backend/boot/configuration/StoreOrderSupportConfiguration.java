@@ -1,6 +1,5 @@
 package com.pawbridge.backend.boot.configuration;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.store.api.StoreOrderActors;
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms;
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders;
@@ -36,8 +35,8 @@ public class StoreOrderSupportConfiguration {
             @Qualifier("storeDirectOrderWrites") TransactionTemplate writes,
             @Qualifier("storeDirectOrderReads") TransactionTemplate reads, StoreOrderActors actors,
             @Qualifier("storeDirectOrderSearchJdbc") NamedParameterJdbcTemplate search,
-            @Qualifier("storeDirectOrderSearchTerms") KoreanSearchTerms terms, ObjectMapper mapper) {
-        return new JpaDirectOrders(entityManager, entityManager, writes, reads, actors, search, terms, mapper);
+            @Qualifier("storeDirectOrderSearchTerms") KoreanSearchTerms terms) {
+        return new JpaDirectOrders(entityManager, entityManager, writes, reads, actors, search, terms);
     }
 
     @Bean OrderReadController orderReadController(DirectOrders orders) { return new OrderReadController(orders); }

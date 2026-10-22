@@ -60,7 +60,7 @@ class StoreOrderAdministrationConfigurationTest {
                     unit.set(context.getBean("storeDirectOrderEntityManagerFactory",EntityManagerFactory.class));
                     var factory=context.getBean("&storeDirectOrderEntityManagerFactory",LocalContainerEntityManagerFactoryBean.class);
                     assertThat(factory.getDataSource()).isSameAs(writer).isNotSameAs(reader);
-                    assertThat(factory.getPersistenceUnitInfo().getManagedClassNames()).hasSize(carts?13:11);
+                    assertThat(factory.getPersistenceUnitInfo().getManagedClassNames()).hasSize(carts?12:10);
                     assertThat(factory.getJpaPropertyMap()).containsEntry("hibernate.boot.allow_jdbc_metadata_access",false)
                             .containsEntry("hibernate.hbm2ddl.auto","none").containsEntry("hibernate.default_schema","pawbridge_store");
                     var manager=context.getBean("storeDirectOrderJpaTransactionManager",JpaTransactionManager.class);

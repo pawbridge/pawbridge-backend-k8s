@@ -18,7 +18,7 @@ import static org.mockito.Mockito.*;
 
 class JdbcStorePaymentOrdersTest {
     @ParameterizedTest @ValueSource(booleans = {false, true})
-    void given__an_original_uuid_row_with_nullable_amount_and_status__when__looking_up__then__return_four_fields_in_reader_transaction(boolean nullable) throws Exception {
+    void given__an_original_uuid_row_with_nullable_amount_and_status__when__looking_up__then__return_five_fields_in_reader_transaction(boolean nullable) throws Exception {
         var jdbc = mock(JdbcTemplate.class);
         var manager = mock(PlatformTransactionManager.class);
         var status = mock(TransactionStatus.class);
@@ -27,17 +27,18 @@ class JdbcStorePaymentOrdersTest {
         var row = mock(ResultSet.class);
         when(row.getObject("id", Long.class)).thenReturn(8L);
         when(row.getString("order_uuid")).thenReturn("synthetic-order");
+        when(row.getObject("user_id", Long.class)).thenReturn(7L);
         when(row.getObject("total_amount", Long.class)).thenReturn(nullable ? null : 200L);
         when(row.getString("status")).thenReturn(nullable ? null : "PENDING");
         doAnswer(call -> {
             String sql = call.getArgument(0);
-            assertThat(sql).contains("SELECT id,order_uuid,total_amount,status FROM pawbridge_store.orders WHERE order_uuid=?")
-                    .doesNotContain("user_id", "PENDING", "FOR UPDATE");
+            assertThat(sql).contains("SELECT id,order_uuid,user_id,total_amount,status FROM pawbridge_store.orders WHERE order_uuid=?")
+                    .doesNotContain("PENDING", "FOR UPDATE");
             RowMapper<StorePaymentOrders.Order> mapper = call.getArgument(1);
             return mapper.mapRow(row, 0);
         }).when(jdbc).queryForObject(anyString(), any(RowMapper.class), eq("synthetic-order"));
         var result = new JdbcStorePaymentOrders(jdbc, reads).getOrder("synthetic-order");
-        assertThat(result).isEqualTo(new StorePaymentOrders.Order(8L, "synthetic-order", nullable ? null : 200L, nullable ? null : "PENDING"));
+        assertThat(result).isEqualTo(new StorePaymentOrders.Order(8L, "synthetic-order", 7L, nullable ? null : 200L, nullable ? null : "PENDING"));
         var order = inOrder(manager, jdbc);
         order.verify(manager).getTransaction(reads);
         order.verify(jdbc).queryForObject(anyString(), any(RowMapper.class), eq("synthetic-order"));
@@ -57,7 +58,7 @@ class JdbcStorePaymentOrdersTest {
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.hasResource(reader)).isTrue();
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.hasResource(writer)).isTrue();
             assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isTrue();
-            return new StorePaymentOrders.Order(8L, "synthetic-order", 200L, "PENDING");
+            return new StorePaymentOrders.Order(8L, "synthetic-order", 7L, 200L, "PENDING");
         });
         var orders = new JdbcStorePaymentOrders(jdbc, reads);
         writes.execute(status -> {
