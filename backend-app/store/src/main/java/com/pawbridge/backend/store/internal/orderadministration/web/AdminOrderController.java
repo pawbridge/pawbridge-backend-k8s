@@ -32,5 +32,8 @@ public final class AdminOrderController {
     @PatchMapping("/{orderId}/delivery-status") public ResponseEntity<DirectOrders.OrderDetails> update(@AuthenticationPrincipal Long user,@PathVariable("orderId") long id,@RequestBody DeliveryStatusUpdateRequest request) {
         return ResponseEntity.ok(orders.updateDelivery(current(user),id,request.getDeliveryStatus()==null?null:request.getDeliveryStatus().name()));
     }
+    @PatchMapping("/{orderId}/status") public ResponseEntity<DirectOrders.OrderDetails> updateStatus(@AuthenticationPrincipal Long user,@PathVariable("orderId") long id,@RequestBody OrderStatusUpdateRequest request) {
+        return ResponseEntity.ok(orders.updateStatus(current(user),id,request.getStatus()==null?null:request.getStatus().name()));
+    }
     private static long current(Long user) {if(user==null)throw new AuthenticationCredentialsNotFoundException("An authenticated member is required");return user;}
 }
