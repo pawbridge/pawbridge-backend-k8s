@@ -73,7 +73,10 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/option-groups/{groupId}","DELETE"),
                 new AntPathRequestMatcher("/api/v1/option-groups/{groupId}/values","POST"),
                 new AntPathRequestMatcher("/api/v1/option-groups/values/{valueId}","PUT"),
-                new AntPathRequestMatcher("/api/v1/option-groups/values/{valueId}","DELETE")));
+                new AntPathRequestMatcher("/api/v1/option-groups/values/{valueId}","DELETE"),
+                new AntPathRequestMatcher("/api/v1/categories","POST"),
+                new AntPathRequestMatcher("/api/v1/categories/{categoryId}","PUT"),
+                new AntPathRequestMatcher("/api/v1/categories/{categoryId}","DELETE")));
 
         var paymentEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(paymentsEnabledFlag);
         var paymentConfirmation=new AndRequestMatcher(paymentEnabled,new AntPathRequestMatcher("/api/payments/confirm","POST"));
