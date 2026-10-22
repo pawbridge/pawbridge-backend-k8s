@@ -15,13 +15,16 @@ public final class ModuleAnimalShelterReads implements AnimalShelterReads {
         this.shelters = shelters;
         this.reads = new TransactionTemplate(readerManager);
         reads.setReadOnly(true);
-        reads.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        // REQUIRED, not REQUIRES_NEW: every manager now shares one pool, so a new transaction inside User approval's
+        // writer transaction would hold a second pooled connection. Joining reads the same READ COMMITTED data
+        // (approval writes no Animal rows before this lookup) and any failure already aborts the approval.
+        reads.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
     @Override
     public Shelter findByCareRegNo(String careRegNo) {
         try {
-            // The old HTTP lookup had its own Animal transaction, even inside User approval's write TX.
+            // Without an outer transaction this is its own read-only transaction; inside approval it joins it.
             return reads.execute(transaction -> {
                 var result = shelters.findByCareRegNo(careRegNo);
                 return result == null ? null : new Shelter(result.id(), result.careRegNo(), result.name());

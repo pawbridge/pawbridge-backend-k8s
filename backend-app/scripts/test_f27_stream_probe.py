@@ -224,7 +224,7 @@ class F27StreamProbeTest(unittest.TestCase):
                 require_measurements=Mock(), COUNTERS=probe.COUNTERS, EXPECTED_JAR_COUNTS=probe.EXPECTED_JAR_COUNTS,
                 database_snapshot=lambda: copy.deepcopy(state), owned_sql=lambda *_: '0',
                 f4=types.SimpleNamespace(start_ready_children=lambda *_: (app, stub, 'base', 'endpoint', 1, 0)),
-                f3=types.SimpleNamespace(WRITER='writer', expect=lambda *_a, **_k: dict(counts={}, requests=[], objects={}), request=request,
+                f3=types.SimpleNamespace(WRITER='writer', APP='app', expect=lambda *_a, **_k: dict(counts={}, requests=[], objects={}), request=request,
                     stop_owned_child=lambda child, _label: events.append('stop-app' if child is app else 'stop-stub') or 143))
             env = dict(GITHUB_SHA='a' * 40, F2_TEST_JDBC_URL='synthetic', F2_TEST_DB_USER='reader', F2_TEST_DB_PASSWORD='p1',
                        F3_TEST_WRITER_PASSWORD='p2', F3_TEST_JWT_SECRET=KEY)

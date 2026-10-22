@@ -38,7 +38,7 @@ class PostMultipartHttpTest {
             String method,boolean oversized) {
         var values=F3TestInputs.values();
         var reads=ReadDatabaseSettings.fromEnvironment(values::get);
-        var writes=PostWriteSettings.fromEnvironment(values::get,reads);
+        var writes=PostWriteSettings.fromEnvironment(values::get);
         new WebApplicationContextRunner()
                 .withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(PawBridgeApplication.class)
@@ -86,7 +86,7 @@ class PostMultipartHttpTest {
                             assertThat(event.getArgumentArray()).hasSize(1).allSatisfy(value->assertThat(value).isInstanceOf(String.class));
                             assertThat(event.getFormattedMessage()).doesNotContain(PRIVATE_DETAIL,token,"Bearer ");
                         });
-                        assertThat(context.getBeansOfType(HikariDataSource.class)).hasSize(2).allSatisfy((name,pool)->{
+                        assertThat(context.getBeansOfType(HikariDataSource.class)).hasSize(1).allSatisfy((name,pool)->{
                             assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                             assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();
                         });

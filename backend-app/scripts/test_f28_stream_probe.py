@@ -302,12 +302,12 @@ class F28StreamProbeTest(unittest.TestCase):
                     if count != (0 if self.other else pushes[0]): raise AssertionError('controlled hint differs')
                 def wait_eof(self): events.append('server-eof')
                 def close(self): events.append('stream-close')
-            log = 'Start completed.\n' * 2 + 'Shutdown completed.\n' * 2 + 'Graceful shutdown complete\nPrivate note stream resources stopped\n'
+            log = 'Start completed.\n' + 'Shutdown completed.\n' + 'Graceful shutdown complete\nPrivate note stream resources stopped\n'
             ci = types.SimpleNamespace(require_fixture=lambda: '42-1', SOURCE='f' * 40, EVIDENCE=root, ROOT=root,
                 require_measurements=Mock(), COUNTERS=probe.COUNTERS, EXPECTED_JAR_COUNTS=probe.EXPECTED_JAR_COUNTS,
                 database_snapshot=lambda: copy.deepcopy(state), owned_sql=lambda *_: '0', denied_privilege=denied,
                 f4=types.SimpleNamespace(start_ready_children=lambda *_: (app, stub, 'base', 'endpoint', 1, 0), fresh_log=lambda *_: log),
-                f3=types.SimpleNamespace(WRITER='writer', expect=expect, request=request, stop_owned_child=stop))
+                f3=types.SimpleNamespace(WRITER='writer', APP='app', expect=expect, request=request, stop_owned_child=stop))
             env = dict(GITHUB_SHA='a' * 40, F2_TEST_JDBC_URL='synthetic', F2_TEST_DB_USER='reader', F2_TEST_DB_PASSWORD='p1',
                        F3_TEST_WRITER_PASSWORD='p2', F3_TEST_JWT_SECRET=KEY)
             with patch.dict(os.environ, env), patch.object(probe, 'load_tokens', side_effect=tokens), \

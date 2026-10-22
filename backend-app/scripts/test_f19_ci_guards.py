@@ -307,7 +307,7 @@ class F19GuardTest(unittest.TestCase):
             self.assertEqual('Bearer private-user-token', requests[1][1]['headers']['Authorization'])
             self.assertEqual('ROLE_ADMIN', requests[1][1]['headers']['X-User-Role'])
             self.assertNotIn('Authorization', requests[4][1]['headers']); self.assertEqual('/api/v1/admin/users/stats/daily-signups/extra', requests[5][0])
-            self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
+            self.assertEqual('4', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
             self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
             self.assertNotIn('expected_count', result); self.assertNotIn('data', result)
 
@@ -369,7 +369,7 @@ class F19GuardTest(unittest.TestCase):
             seed.assert_not_called(); cleanup.assert_not_called(); self.assertEqual([], requests); self.assertEqual(2, stop.call_count)
 
     def test_given_secret_or_missing_shutdown_evidence__when_finishing__then_do_not_claim_pass(self):
-        for text in ('Shutdown completed. Graceful shutdown complete',
+        for text in ('Graceful shutdown complete',
                      'private-admin-token Shutdown completed. Shutdown completed. Graceful shutdown complete'):
             with tempfile.TemporaryDirectory() as directory, packaged_harness(directory, log=text) as (evidence, _, _, _, _, _, _):
                 with self.assertRaises(AssertionError):

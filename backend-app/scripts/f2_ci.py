@@ -167,10 +167,10 @@ def smoke():
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
     env = dict(clean, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'], F2_DB_USER=os.environ['F2_TEST_DB_USER'],
-               F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'], F2_POOL_MAX_SIZE='1', F2_PORT=str(port))
+               F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'], F2_POOL_MAX_SIZE='4', F2_PORT=str(port))
     base = 'http://127.0.0.1:' + str(port)
     log_path = EVIDENCE / 'packaged-startup.log'
-    result = {'unconfigured_exit': missing.returncode, 'timezone': 'Asia/Seoul', 'pool_maximum': 1}
+    result = {'unconfigured_exit': missing.returncode, 'timezone': 'Asia/Seoul', 'pool_maximum': 4}
     with log_path.open('w') as log:
         process = subprocess.Popen(['java', '-Duser.timezone=Asia/Seoul', '-Xmx256m', '-jar', str(jar),
                                     '--spring.main.banner-mode=off'], env=env, stdout=log, stderr=subprocess.STDOUT)

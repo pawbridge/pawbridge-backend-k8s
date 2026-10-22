@@ -107,7 +107,7 @@ def exercise_journey(directory,fail_after_commit=False,extra_log=''):
     def opening(*_):
         value=stream();opened.append(value);return value
     def start(*args):
-        args[-1].write_text('Start completed.\n'*2+'Shutdown completed.\n'*2+'Graceful shutdown complete\nPrivate note stream resources stopped\n'+extra_log)
+        args[-1].write_text('Start completed.\n'+'Shutdown completed.\n'+'Graceful shutdown complete\nPrivate note stream resources stopped\n'+extra_log)
         return app,stub,'http://127.0.0.1:1','http://127.0.0.1:2',1,0
     def stop(child,_):
         if child is app:
@@ -134,7 +134,7 @@ def exercise_journey(directory,fail_after_commit=False,extra_log=''):
         result=(dict(code=status,message=message,data=None) if security else {'message':message}) if message else dict(code=200,message=probe.SUCCESS,data=data)
         return status,json.dumps(result).encode(),{'Cache-Control':probe.prior.SECURITY_CACHE if security else 'no-store'}
     ci.f2=types.SimpleNamespace(require_hosted=lambda:'42-1')
-    ci.f3=types.SimpleNamespace(WRITER='writer',expect=Mock(return_value=dict(counts={'GET':0},objects={},requests=[])),
+    ci.f3=types.SimpleNamespace(WRITER='writer',APP='app',expect=Mock(return_value=dict(counts={'GET':0},objects={},requests=[])),
                                request=Mock(side_effect=request),stop_owned_child=Mock(side_effect=stop))
     ci.f4=types.SimpleNamespace(start_ready_children=Mock(side_effect=start),fresh_log=lambda path,_:path.read_text())
     with patch.object(probe,'seed',side_effect=seed),patch.object(probe,'cleanup',side_effect=cleanup), \

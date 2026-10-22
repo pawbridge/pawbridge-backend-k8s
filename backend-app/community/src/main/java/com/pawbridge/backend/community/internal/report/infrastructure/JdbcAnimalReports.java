@@ -100,8 +100,10 @@ public final class JdbcAnimalReports implements AnimalReports {
         return nickname(readTransaction.execute(status->find(reader,id)));
     }
 
+    // The User nickname read runs after the writer transaction: on the shared pool a failing read inside
+    // it would mark the report transaction rollback-only instead of falling back to the placeholder name.
     @Override public Details create(Draft request,List<PostUpload> photos,Long authorId) {
-        return writeTransaction.execute(status->{
+        return nickname(writeTransaction.execute(status->{
             validate(request,photos);
             if(authorId==null || authorId<=0) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
             List<String> images=uploads.upload(photos);
@@ -117,16 +119,16 @@ public final class JdbcAnimalReports implements AnimalReports {
                         next.distinguishingFeatures(),next.direction(),next.province(),next.district(),
                         next.animalType()==null?null:next.animalType().name(),now,now);
                 if(id==null)throw new IllegalStateException("Report insert returned no identity");
-                return nickname(details(id,authorId,next,images,now,now));
+                return details(id,authorId,next,images,now,now);
             } catch(RuntimeException failure) {
                 // Original saveAndFlush/body failures clean uploads; proxy commit failures do not.
                 media.remove(images); throw failure;
             }
-        });
+        }));
     }
 
     @Override public Details update(long id,Draft request,List<PostUpload> photos,Long authorId) {
-        return writeTransaction.execute(status->{
+        return nickname(writeTransaction.execute(status->{
             validate(request,photos);
             if(photos!=null && !photos.isEmpty())throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "등록 후 사진 교체는 아직 지원하지 않습니다.");
@@ -143,8 +145,8 @@ public final class JdbcAnimalReports implements AnimalReports {
                     next.animalName(),next.coatColor(),next.animalSize(),next.distinguishingFeatures(),next.direction(),
                     next.province(),next.district(),next.animalType()==null?null:next.animalType().name(),now(),id);
             // JPA auditing flush occurs after the original response is built: retain its prior updatedAt.
-            return nickname(result);
-        });
+            return result;
+        }));
     }
 
     @Override public void delete(long id,Long authorId) {

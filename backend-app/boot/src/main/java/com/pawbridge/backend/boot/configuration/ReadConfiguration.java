@@ -34,19 +34,24 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Configuration(proxyBeanMethods = false)
 @Import(ReadSecurityConfiguration.class)
 public class ReadConfiguration {
-    @Bean(destroyMethod = "close")
+    /**
+     * The monolith's only connection pool. The historical reader/writer bean names stay as aliases so
+     * every JdbcTemplate, transaction manager and EntityManagerFactory resolves this same instance.
+     * Read-only protection is applied per transaction (readOnly templates + enforceReadOnly), not per pool.
+     */
+    @Bean(name = {"dataSource", "writeDataSource", "storeWishlistWriteDataSource"}, destroyMethod = "close")
     HikariDataSource dataSource(ReadDatabaseSettings settings) {
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(settings.jdbcUrl());
         config.setUsername(settings.username());
         config.setPassword(settings.password());
-        config.setPoolName("pawbridge-post-read");
+        config.setPoolName("pawbridge-db");
         config.setMaximumPoolSize(settings.maximumPoolSize());
-        config.setMinimumIdle(0);
-        config.setConnectionTimeout(2000);
+        config.setMinimumIdle(Math.min(2, settings.maximumPoolSize()));
+        config.setConnectionTimeout(5000);
         config.setValidationTimeout(1000);
         config.setInitializationFailTimeout(-1);
-        config.setReadOnly(true);
+        config.setReadOnly(false);
         return new HikariDataSource(config);
     }
 

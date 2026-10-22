@@ -122,15 +122,15 @@ def smoke():
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR')
                 if key in os.environ}
     app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
-        F2_DB_USER=os.environ['F2_TEST_DB_USER'], F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'],
-        F2_POOL_MAX_SIZE='1', F3_DB_WRITER_USER=f3.WRITER,
+        F2_DB_USER=f3.APP, F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
+        F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
         F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
         F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], F3_STORAGE_BUCKET=bucket,
         F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', F3_STORAGE_OBJECT_PREFIX=prefix,
         F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',
         F3_STORAGE_REGION='us-east-1')
     result = {'status': 'incomplete', 'timezone': 'Asia/Seoul',
-              'reader_pool_maximum': 1, 'writer_pool_maximum': 1,
+              'pool_maximum': 4,
               'comment_post_checks': 0, 'comment_get_checks': 0, 'comment_delete_checks': 0,
               'comment_put_checks': 0, 'changed_put_checks': 0, 'same_put_checks': 0,
               'rejected_put_checks': 0, 'unrelated_database_changes': 0, 's3_requests': 0}
@@ -152,7 +152,7 @@ def smoke():
 
     def returned():
         if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
-                "('pawbridge_f2_reader','pawbridge_f3_writer') AND "
+                "('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') AND "
                 "(state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
             raise AssertionError('F11 request left a DB transaction active')
 
@@ -356,13 +356,13 @@ def smoke():
     if app_path.stat().st_size > 1024 * 1024 or stub_path.stat().st_size > 1024 * 1024:
         raise AssertionError('F11 bounded journey exceeded its one-MiB-per-child log budget')
     text = f4.fresh_log(app_path, app_offset)
-    if text.count('Shutdown completed.') < 2 or 'Graceful shutdown complete' not in text:
+    if text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in text:
         raise AssertionError('F11 normal HTTP/two-pool shutdown evidence missing')
     if any(value in text for value in (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'],
             os.environ['F3_TEST_JWT_SECRET'], PRIVATE_BODY, *tokens.values())):
         raise AssertionError('F11 application log exposed credentials, tokens or request content')
     if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
-            "('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+            "('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
         raise AssertionError('F11 application connections remain after normal shutdown')
     result.update(status='passed', shutdown_pools=2, remaining_application_connections=0)
     (EVIDENCE / 'f11-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')

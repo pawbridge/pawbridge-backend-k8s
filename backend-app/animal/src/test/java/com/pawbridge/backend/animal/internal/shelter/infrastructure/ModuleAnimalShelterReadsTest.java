@@ -8,6 +8,10 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.jdbc.support.JdbcTransactionManager;
+import java.sql.Connection;
+import javax.sql.DataSource;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -30,11 +34,11 @@ class ModuleAnimalShelterReadsTest {
     }
 
     @Test
-    void givenModuleBoundary__whenCreatingAnimalReadScope__thenRequestIndependentReadOnlyDefaultIsolationAndTimeout() {
+    void givenModuleBoundary__whenCreatingAnimalReadScope__thenJoinOrStartReadOnlyDefaultIsolationAndTimeoutWithoutASecondConnection() {
         reads.findByCareRegNo("r");
         var definition = ArgumentCaptor.forClass(TransactionDefinition.class);
         verify(manager).getTransaction(definition.capture());
-        assertThat(definition.getValue().getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        assertThat(definition.getValue().getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
         assertThat(definition.getValue().isReadOnly()).isTrue();
         assertThat(definition.getValue().getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
         assertThat(definition.getValue().getTimeout()).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT);
@@ -53,5 +57,22 @@ class ModuleAnimalShelterReadsTest {
     void givenEmptySourceBody__whenDelegating__thenKeepNullForExistingCallerUnavailableChecks() {
         assertThat(reads.findByCareRegNo("r")).isNull();
         verify(source).findByCareRegNo("r");
+    }
+
+    @Test
+    void givenApprovalWriterTransactionOnTheSharedPool__whenLookingUp__thenJoinItWithoutBorrowingASecondConnection() throws Exception {
+        DataSource pool = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        when(pool.getConnection()).thenReturn(connection);
+        when(connection.getAutoCommit()).thenReturn(true);
+        var readerManager = new JdbcTransactionManager(pool);
+        readerManager.setEnforceReadOnly(true);
+        when(source.findByCareRegNo("r")).thenReturn(new ShelterReads.Details(9L, "r", "보호소", null, null,
+                null, null, null, null, null, null, null, null, null));
+        var shared = new ModuleAnimalShelterReads(source, readerManager);
+        var found = new TransactionTemplate(new JdbcTransactionManager(pool)).execute(status -> shared.findByCareRegNo("r"));
+        assertThat(found).isEqualTo(new AnimalShelterReads.Shelter(9L, "r", "보호소"));
+        verify(pool, times(1)).getConnection();
+        verify(connection, times(1)).commit();
     }
 }

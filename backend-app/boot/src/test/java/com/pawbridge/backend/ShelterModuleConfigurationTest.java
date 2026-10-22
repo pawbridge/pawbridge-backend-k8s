@@ -57,7 +57,7 @@ class ShelterModuleConfigurationTest {
                     var delegate=ReflectionTestUtils.getField(api,"shelters");assertThat(delegate).isInstanceOf(JdbcShelterReads.class);
                     var reads=(TransactionTemplate)ReflectionTestUtils.getField(api,"reads");
                     assertThat(reads.getTransactionManager()).isSameAs(readerManager);assertThat(reads.isReadOnly()).isTrue();
-                    assertThat(reads.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    assertThat(reads.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
                     var lookup=context.getBean(ShelterMembership.ShelterLookup.class);assertThat(lookup).isInstanceOf(ModuleShelterLookup.class);
                     assertThat(ReflectionTestUtils.getField(lookup,"shelters")).isSameAs(api);
                     assertThat(((TransactionTemplate)ReflectionTestUtils.getField(context.getBean(ShelterMembership.class),"write")).getTransactionManager()).isSameAs(writerManager);

@@ -211,7 +211,7 @@ class F18GuardTest(unittest.TestCase):
             self.assertEqual(1, result['member_unavailable_checks']); self.assertEqual(1, result['storage_unavailable_checks'])
             self.assertEqual(13, len(requests)); self.assertEqual(1, start.call_count); self.assertEqual(2, stop.call_count)
             cleanup.assert_called_once_with(f18.IDS); self.assertEqual(2, result['shutdown_pools']); self.assertEqual(0, result['remaining_application_connections'])
-            self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
+            self.assertEqual('4', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
             self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1]); self.assertNotIn('DAILY_VISITORS_SIGNING_KEY', start.call_args.args[1])
             parsed = [urllib.parse.parse_qs(urllib.parse.urlsplit(path).query, keep_blank_values=True) for path, _ in requests]
             self.assertEqual({}, parsed[2]); self.assertEqual({'memberIds': ['']}, parsed[3])

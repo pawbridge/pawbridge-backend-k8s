@@ -316,7 +316,7 @@ def run(ci):
             storage = ci.f3.expect(endpoint, '/__f3__/state', 200, headers={'X-F3-Owner': owner})
             return ci.database_snapshot(), storage['counts'], storage['objects'], storage['requests']
         def returned():
-            if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
+            if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
                 raise AssertionError('F29 completed request or open stream retained a transaction')
         def delivery():
             recipient.assert_notes(getattr(recipient, 'acknowledged_records', [])); sender.assert_notes([])
@@ -403,14 +403,14 @@ def run(ci):
         ci.require_fixture()
         if app_path.stat().st_size > 1024 * 1024 or stub_path.stat().st_size > 1024 * 1024: raise AssertionError('F29 child log budget exceeded')
         text = ci.f4.fresh_log(app_path, offset); stub_text = stub_path.read_text()
-        if (text.count('Start completed.') != 2 or text.count('Shutdown completed.') != 2 or 'Graceful shutdown complete' not in text
+        if (text.count('Start completed.') != 1 or text.count('Shutdown completed.') != 1 or 'Graceful shutdown complete' not in text
                 or text.count('Private note stream resources stopped') != 1 or 'Private note stream resources did not stop within budget' in text):
             raise AssertionError('F29 stream/two-pool normal shutdown evidence is incomplete')
         forbidden = (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'], os.environ['F3_TEST_JWT_SECRET'],
                      BODY, RAW_BODY, json.dumps(BODY)[1:-1], request_hash(), 'F29 synthetic', *tokens.values(), *NAMES.values(),
                      *('f29-' + str(i) + '@fixture.invalid' for i in USERS))
         if any(v and (v in text or v in stub_text) for v in forbidden): raise AssertionError('F29 child log exposed a private input')
-        if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+        if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
             raise AssertionError('F29 application connections remain after shutdown')
         if {k: result[k] for k in COUNTERS} != EXPECTED_JAR_COUNTS: raise AssertionError('F29 exact send journey counts differ')
         result.update(status='passed', shutdown_pools=2, remaining_application_connections=0,
@@ -748,7 +748,7 @@ def run_member_cleanup(ci):
             storage = ci.f3.expect(endpoint, '/__f3__/state', 200, headers={'X-F3-Owner': owner})
             return ci.member_database_snapshot(), storage['counts'], storage['objects'], storage['requests']
         def returned():
-            if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
+            if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
                 raise AssertionError('Member cleanup completed request or stream retained a transaction')
         def stream_counts(own, other, own_eof=False):
             victim.assert_resync(own); survivor.assert_resync(other)
@@ -848,10 +848,10 @@ def run_member_cleanup(ci):
         if app_path.stat().st_size > 1024 * 1024 or stub_path.stat().st_size > 1024 * 1024:
             raise AssertionError('Member cleanup child log budget exceeded')
         text = ci.f4.fresh_log(app_path, offset); stub_text = stub_path.read_text()
-        if (text.count('Start completed.') != 2 or text.count('Shutdown completed.') != 2 or 'Graceful shutdown complete' not in text
+        if (text.count('Start completed.') != 1 or text.count('Shutdown completed.') != 1 or 'Graceful shutdown complete' not in text
                 or text.count('Private note stream resources stopped') != 1 or 'Private note stream resources did not stop within budget' in text):
             raise AssertionError('Member cleanup stream/two-pool shutdown evidence is incomplete')
-        if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+        if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
             raise AssertionError('Member cleanup application connections remain after shutdown')
         if {k: result[k] for k in MEMBER_COUNTERS} != MEMBER_EXPECTED_COUNTS:
             raise AssertionError('Member cleanup exact late journey counts differ')

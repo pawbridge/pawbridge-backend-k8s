@@ -146,6 +146,6 @@ class StoreCatalogManagementConfigurationTest {
                 Map.entry("F3_JWT_SECRET","01234567890123456789012345678901"),Map.entry("F3_STORAGE_ENDPOINT","https://r2.invalid"),
                 Map.entry("F3_STORAGE_BUCKET","catalog-fixture"),Map.entry("F3_STORAGE_PUBLIC_BASE_URL","https://assets.invalid"),Map.entry("F3_STORAGE_OBJECT_PREFIX","posts"),
                 Map.entry("F3_STORAGE_ACCESS_KEY_ID","synthetic-access"),Map.entry("F3_STORAGE_SECRET_ACCESS_KEY","synthetic-secret"),Map.entry("F3_STORAGE_REGION","auto"));
-        return PostWriteSettings.fromEnvironment(values::get,reader);
+        return PostWriteSettings.fromEnvironment(values::get);
     }
 }

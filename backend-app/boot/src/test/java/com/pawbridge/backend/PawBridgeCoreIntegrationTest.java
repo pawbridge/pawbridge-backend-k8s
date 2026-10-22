@@ -57,7 +57,7 @@ class PawBridgeCoreIntegrationTest {
         var resources = new Resources();
         runner(resources).run(context -> {
             assertThat(context).hasNotFailed().hasSingleBean(SecurityFilterChain.class);
-            assertThat(context.getBeansOfType(DataSource.class)).containsOnlyKeys("dataSource", "writeDataSource");
+            assertThat(context.getBeansOfType(DataSource.class)).containsOnlyKeys("dataSource");
             assertThat(context.getBeansOfType(EntityManagerFactory.class)).containsOnlyKeys(
                     "storeMemberEntityManagerFactory", "animalCommandEntityManagerFactory", "storeDirectOrderEntityManagerFactory");
             assertThat(context.getBeansOfType(PlatformTransactionManager.class)).containsOnlyKeys("transactionManager",
@@ -65,11 +65,11 @@ class PawBridgeCoreIntegrationTest {
                     "storeDirectOrderJpaTransactionManager");
             var reader = context.getBean("dataSource", HikariDataSource.class);
             var writer = context.getBean("writeDataSource", HikariDataSource.class);
-            assertThat(reader).isNotSameAs(writer);
-            assertThat(reader.isReadOnly()).isTrue();
-            assertThat(writer.isReadOnly()).isFalse();
+            // One shared pool: the historical writer name is an alias of the same instance.
+            assertThat(writer).isSameAs(reader);
+            assertThat(reader.isReadOnly()).isFalse();
             for (String prefix : List.of("storeMember", "animalCommand", "storeDirectOrder")) {
-                DataSource expected = prefix.equals("storeMember") ? reader : writer;
+                DataSource expected = reader;
                 var factory = context.getBean(prefix + "EntityManagerFactory", EntityManagerFactory.class);
                 assertThat(context.getBean("&" + prefix + "EntityManagerFactory",
                         LocalContainerEntityManagerFactoryBean.class).getDataSource()).isSameAs(expected);
@@ -156,7 +156,7 @@ class PawBridgeCoreIntegrationTest {
                 assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();
             }
         });
-        assertThat(resources.pools).hasSize(2).allSatisfy(pool -> assertThat(pool.isClosed()).isTrue());
+        assertThat(resources.pools).hasSize(1).allSatisfy(pool -> assertThat(pool.isClosed()).isTrue());
         assertThat(resources.factories).hasSize(3).allSatisfy(factory -> assertThat(factory.isOpen()).isFalse());
         assertThat(resources.animalAnalyzers).hasSize(1);
         assertThatThrownBy(() -> resources.animalAnalyzers.getFirst().tokens("진돗개")).isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
@@ -166,27 +166,11 @@ class PawBridgeCoreIntegrationTest {
         assertThat(resources.timedOut.get()).isZero();
     }
 
-    @Test
-    void given__invalid_writer_capacity_with_same_main_modules__when__startup_rejects__then__reject_before_creating_resources_or_borrowing() {
-        var resources = new Resources();
-        runner(resources).withPropertyValues("pawbridge.database.writer.maximum-pool-size=0").run(context -> {
-            assertThat(context).hasFailed();
-            assertThat(context.getStartupFailure()).hasRootCauseInstanceOf(IllegalArgumentException.class)
-                    .hasStackTraceContaining("Writer pool capacity must be positive");
-        });
-        assertThat(resources.pools).isEmpty();
-        assertThat(resources.factories).isEmpty();
-        assertThat(resources.animalAnalyzers).isEmpty();
-        assertThat(resources.storeAnalyzers).isEmpty();
-        assertThat(resources.borrowed.get()).isZero();
-        assertThat(resources.timedOut.get()).isZero();
-    }
-
     private static WebApplicationContextRunner runner(Resources resources) {
         var values = F3TestInputs.values();
         values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_main_synthetic");
         var read = ReadDatabaseSettings.fromEnvironment(values::get);
-        var write = PostWriteSettings.fromEnvironment(values::get, read);
+        var write = PostWriteSettings.fromEnvironment(values::get);
         return new WebApplicationContextRunner().withUserConfiguration(PawBridgeApplication.class)
                 .withInitializer(context -> {
                     context.getBeanFactory().registerSingleton("readDatabaseSettings", read);

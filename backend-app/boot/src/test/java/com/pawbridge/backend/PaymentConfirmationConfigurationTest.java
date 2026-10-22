@@ -74,7 +74,7 @@ class PaymentConfirmationConfigurationTest {
         var values = F3TestInputs.values();
         values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_payment_synthetic");
         var read = ReadDatabaseSettings.fromEnvironment(values::get);
-        var write = PostWriteSettings.fromEnvironment(values::get, read);
+        var write = PostWriteSettings.fromEnvironment(values::get);
         var factoryRef = new AtomicReference<EntityManagerFactory>();
         var clientRef = new AtomicReference<HttpClient>();
         var poolsRef = new AtomicReference<List<HikariDataSource>>();
@@ -99,7 +99,7 @@ class PaymentConfirmationConfigurationTest {
                     assertThat(context).hasNotFailed().hasSingleBean(Payments.class).hasSingleBean(PaymentController.class)
                             .hasSingleBean(PaymentInputExceptionHandler.class).hasSingleBean(AuditingHandler.class)
                             .hasSingleBean(StorePaymentEvents.class);
-                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).containsOnlyKeys("dataSource", "writeDataSource");
+                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).containsOnlyKeys("dataSource");
                     // One Store writer unit and manager; no payment-only EMF/TM that could nest on the one-connection writer pool.
                     assertThat(context.getBeansOfType(EntityManagerFactory.class)).containsOnlyKeys("storeDirectOrderEntityManagerFactory");
                     assertThat(context.getBeansOfType(PlatformTransactionManager.class)).containsOnlyKeys(
@@ -145,7 +145,7 @@ class PaymentConfirmationConfigurationTest {
                     assertThat(reads.isReadOnly()).isTrue();
                     assertThat(reads.getTransactionManager()).isSameAs(context.getBean("transactionManager")).isNotSameAs(manager);
                     assertThat(((JdbcTemplate) ReflectionTestUtils.getField(orders, "jdbc")).getDataSource())
-                            .isSameAs(context.getBean("dataSource")).isNotSameAs(context.getBean("writeDataSource"));
+                            .isSameAs(context.getBean("dataSource")).isSameAs(context.getBean("writeDataSource"));
                     assertThat(ReflectionTestUtils.getField(context.getBean(PaymentController.class), "payments")).isSameAs(payments);
                     var client = context.getBean("paymentTossHttpClient", HttpClient.class); clientRef.set(client);
                     assertThat(client.connectTimeout()).contains(Duration.ofSeconds(10));

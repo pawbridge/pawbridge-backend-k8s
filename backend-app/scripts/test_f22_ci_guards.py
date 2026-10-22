@@ -280,7 +280,7 @@ class F22GuardTest(unittest.TestCase):
             self.assertNotIn('Authorization', requests[6][1]['headers']); self.assertEqual('/api/v1/notes/stream/extra', requests[7][0])
             self.assertEqual('PUT', requests[8][1]['method']); self.assertEqual('/api/v1/notes/' + f22.INBOX + '/read/extra', requests[8][0])
             self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(f22.OWNED)
-            self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
+            self.assertEqual('4', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
 
     def test_given_stale_token_after_snapshot__when_request_due__then_zero_requests_two_children_stop_owned_cleanup_incomplete(self):
         with tempfile.TemporaryDirectory() as directory, packaged_harness(directory) as (evidence, requests, sql, start, stop, cleanup, seed):

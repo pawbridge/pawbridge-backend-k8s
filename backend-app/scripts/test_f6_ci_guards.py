@@ -83,5 +83,29 @@ class F6GuardTest(unittest.TestCase):
             self.assertFalse(evidence.exists())
 
 
+    def test_given_single_app_role__when_injecting_select_fault__then_revoke_and_restore_only_the_other_roles_overlap(self):
+        calls = []
+        def raw(query, input_text=None):
+            calls.append(query)
+            if query == "SELECT has_table_privilege('pawbridge_f3_writer','pawbridge_community.posts','SELECT')":
+                return 't'
+            return 'f'
+        with patch.object(f6.f3, '_raw_sql', side_effect=raw), patch.dict(f6.f3._APP_OVERLAP_RESTORES, {}, clear=True):
+            f6.f3.sql('REVOKE SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts FROM pawbridge_f2_reader')
+            f6.f3.sql('GRANT SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts TO pawbridge_f2_reader')
+            f6.f3.sql('REVOKE SELECT(nickname) ON pawbridge_user.users FROM pawbridge_f2_reader')
+            f6.f3.sql('GRANT SELECT(nickname) ON pawbridge_user.users TO pawbridge_f2_reader')
+            f6.f3.sql('DELETE FROM pawbridge_user.users WHERE user_id=42; REVOKE SELECT(nickname) ON pawbridge_user.users FROM pawbridge_f2_reader')
+        mutations = [query for query in calls if not query.startswith('SELECT ')]
+        self.assertEqual(['REVOKE SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts FROM pawbridge_f2_reader',
+                          'REVOKE SELECT ON pawbridge_community.posts FROM pawbridge_f3_writer',
+                          'GRANT SELECT(' + f6.POST_COLUMNS + ') ON pawbridge_community.posts TO pawbridge_f2_reader',
+                          'GRANT SELECT ON pawbridge_community.posts TO pawbridge_f3_writer',
+                          'REVOKE SELECT(nickname) ON pawbridge_user.users FROM pawbridge_f2_reader',
+                          'GRANT SELECT(nickname) ON pawbridge_user.users TO pawbridge_f2_reader',
+                          'DELETE FROM pawbridge_user.users WHERE user_id=42; REVOKE SELECT(nickname) ON pawbridge_user.users FROM pawbridge_f2_reader'],
+                         mutations)
+        self.assertIn("SELECT has_column_privilege('pawbridge_f3_writer','pawbridge_user.users','nickname','SELECT')", calls)
+
 if __name__ == '__main__':
     unittest.main()

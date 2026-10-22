@@ -244,7 +244,7 @@ class F15GuardTest(unittest.TestCase):
                                   'unavailable_checks': 1, 'malformed_bearer_checks': 1, 'shutdown_pools': 2,
                                   'remaining_application_connections': 0, 'database_changes': 0, 's3_requests': 0}.items():
                 self.assertEqual(expected, result[key])
-            self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertEqual(2, stop.call_count)
+            self.assertEqual('4', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertEqual(2, stop.call_count)
             cleanup.assert_called_once_with()
 
     def test_given_permission_request_failure__when_unwinding__then_restore_acl_stop_both_and_cleanup_owned_rows(self):
