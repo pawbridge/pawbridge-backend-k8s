@@ -1073,6 +1073,22 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 단위·조립 시험은 SQL 문구·바인딩·TX 경계·조건 분기·실패 전파만 검증합니다. 실제 PG 잠금, writer 권한(`pawbridge_store` 스키마 USAGE, `products` SELECT·행 잠금용 UPDATE, `product_search_source` SELECT, `product_search_documents` SELECT·INSERT·UPDATE), 예약 실행·종료 대기는 미검증입니다. 구 Store 실행기의 재구축과 동시에 켜지 않으며, 활성화 전 권한과 실행기 소유권을 확인해야 합니다. 운영·DB 변경은 없습니다.
 
 
+### Animal outbox 보존 정리
+
+`pawbridge.animal-maintenance.enabled=true`와 원문 키 `pawbridge.jobs.cleanup-enabled=true`를 둘 다 명시할 때만 `pawbridge_animal.outbox_events` 정리 작업과 `animal-maintenance-` 단일 scheduler를 조립합니다. 원문 `OutboxCleanupScheduler`는 `pawbridge.jobs.cleanup-enabled`가 없으면 켜지는(`matchIfMissing=true`) 구조였지만, 이식본은 기본 off입니다. `pawbridge.jobs.cleanup-enabled`는 Community·User 정리도 함께 쓰는 원문 키이므로 이 키만 켜서는 아무것도 조립되지 않고, 각 모듈 flag를 켠 모듈의 정리만 실행됩니다. 다른 모듈의 작업을 대신 켜지 않습니다.
+
+원문 `@Scheduled(cron = "0 0 3 * * ?")`(zone 지정 없음, JVM 기본 시간대)와 `@Transactional` 한 건으로 `DELETE ... WHERE created_at < (현재 - 7일)`을 실행하는 동작을 그대로 옮겼습니다. 기존 writer JdbcTemplate·JdbcTransactionManager(`TransactionTemplate` 기본 timeout)를 쓰고 새 pool·DDL·GRANT는 없습니다. 재사용한 `writeJdbc`의 문장 timeout 5초가 이 DELETE에도 적용되는데 원문 JPA `@Modifying` 쿼리에는 timeout이 없었으므로(원문과 다른 상속 차이), 정리가 오래 멈췄다가 켜져 행이 많이 쌓인 경우 DELETE가 5초를 넘겨 취소·롤백되고 같은 이유로 매일 반복될 수 있습니다. 기준 시각은 Community·User 이식과 같이 JVM 시계로 계산해 UTC로 바인딩합니다. 원문 삭제 건수 info 로그(`[OUTBOX-CLEANUP] Deleted ...`)는 남기지 않아 정리가 실제로 돌았는지 볼 신호가 없고, 실패는 scheduler 오류 처리기에 클래스 이름만 남깁니다.
+
+**원문 결함(고치지 않음):** `outbox_events`에는 전달 여부 열이 없고 원문은 "status 무관" 7일 경과 행을 모두 지웁니다. Debezium CDC는 테이블이 아니라 WAL을 읽고 INSERT가 이미 WAL에 있으면 이후 DELETE는 EventRouter가 무시하므로, 지연만으로는 이벤트가 사라지지 않습니다. 이벤트가 사라지는 경로는 재스냅샷(`animal-outbox-connector.json`의 `snapshot.mode=when_needed`), replication slot 무효화(`max_slot_wal_keep_size`), 테이블을 직접 읽는 로컬 전달입니다. 모놀리스의 찜 보상 전달(`JdbcAnimalFavoriteEvents`)은 `outbox_events`의 `FavoriteCompensation` 행 중 `processed_events`에 `LOCAL_COMPENSATION_DELIVERED`가 없는 행을 전달 대상으로 삼으므로, 전달이 7일 넘게 밀린 보상 이벤트도 이 정리로 영구 삭제됩니다. 기존 `FavoriteDeliveryConfiguration` 시작 가드는 User 정리(`user-maintenance.enabled`)와 `jobs.cleanup-enabled`의 조합만 거부하고 `animal-maintenance.enabled`는 검사하지 않으므로, 로컬 찜 보상 전달(`favorite-delivery.enabled`)과 이 정리를 함께 켜도 시작이 거부되지 않습니다. 이 가드 확장은 원문 동작이 아니라 개선이므로 이 변경에 넣지 않았고 활성화 전 확인 조건으로 둡니다.
+
+활성화 전 확인 조건:
+- writer에 `pawbridge_animal` USAGE와 `outbox_events` DELETE 및 WHERE 비교에 쓰는 `created_at` SELECT가 필요합니다(`favorite-delivery-owned-schema.sql`의 Animal outbox 권한은 SELECT·INSERT뿐이라 DELETE가 없습니다). `animal-command-owned-schema.sql`은 `outbox_events` SELECT·INSERT·DELETE를 주지만 누적 F29 CI writer ACL(`backend-app/scripts/f29_ci.py`)에는 `pawbridge_animal` 권한이 전혀 없어 그 역할로 켜면 권한 오류가 매일 scheduler 경고로만 남습니다.
+- 공유 writer pool은 기본 최대 1개·연결 대기 2초입니다. 03:00에 Community·User 정리가 같은 시각에 시작할 수 있으므로 함께 켜면 먼저 잡은 DELETE가 2초를 넘길 때 나머지가 연결 timeout으로 실패해 그날 정리가 건너뛰어질 수 있습니다(재시도 없음). 함께 켜지 않거나 pool을 늘립니다. cron은 zone이 없어 JVM 기본 시간대를 쓰므로 컨테이너 TZ가 UTC이면 03:00이 KST 12:00입니다.
+- 이전 animal-service의 `OutboxCleanupScheduler`(원문 기본 on)를 먼저 멈춰 단일 소유권을 확보합니다.
+- `FavoriteCompensation` 미전달 행이 없고 재스냅샷·재처리가 필요하지 않은 것을 확인한 뒤에 켭니다.
+
+단위·구성 시험은 mock JdbcOperations·TransactionOperations 기준(SQL 문구·UTC 바인딩·7일 cutoff·TX 경계·gate 조합·schedule 계약)이며 실제 PostgreSQL 삭제·권한·실행은 검증하지 않았습니다.
+
 ## 결제 확인과 Store 결제 결과 처리
 
 `pawbridge.payments.enabled=true`는 원문의 POST `/api/payments/confirm`을 명시적으로 조립한다. 인증된 사용자의 요청 DTO와 응답 형태를 유지하며, Store 주문 조회는 별도 reader 트랜잭션을 사용하고 Payment 저장은 기존 writer DataSource 위의 전용 JPA 단위를 사용한다. Toss 연결은 기존 endpoint 기본값과 주입형 RestClient를 사용한다. 키를 로그에 남기지 않으며 이 기능은 기본 비활성이다.
