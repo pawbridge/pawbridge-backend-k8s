@@ -969,6 +969,24 @@ HTTP transport는 명시한 HTTPS 제공자만 사용하고 redirect를 따르�
 APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사례, 최종 새 합성 PG5사례(1.392초)는 서로 다른 실행 근거다. 최종 PG는 실제 source/search/Batch metadata DML 후 강제 rollback·physical commit 증가0, 원문 부분 복구·기존 행 보존, 두 실제 PID의 slot, stale10분, 정상 예약 종료를 확인했다. 제공자는 대역이며 실 APMS/운영 검증은 하지 않았다. 최초 SQL 개행 관측 오류와 원문 부분 commit을 전체 실패 원자성으로 오해한 두 시험 실패는 보존하고, 새 fixture에서 최소 정정 후 검증했다. 기존 DB를 reset하지 않았다.
 
 
+## 보호소 디렉터리 예약 수집
+
+원문 키 `shelter-directory.schedule-enabled=true`를 명시할 때만 원문 `ShelterDirectoryClient`·`ShelterDirectoryStore`·`ShelterDirectoryCollector`·`shelterDirectoryJob`과 단일 예약을 조립한다. 원문도 기본 false였으며 수동 실행 API는 없다. 서비스 키는 원문 `shelter-directory.service-key`(비어 있으면 실행 시 `SHELTER_DIRECTORY_UNAVAILABLE`), 주기는 원문 `shelter-directory.collection-cron`(기본 `0 0 4 * * *`, Asia/Seoul)이다. 이 스위치는 검색 분석기 조립 조건에도 추가했다. 다른 모듈과 공유하는 키는 없다.
+
+원문 동작을 그대로 옮겼다. 공공데이터 `shelterInfo_v2`를 1000행씩 최대30쪽 조회하고 빈 쪽에서 끝내며, 같은 등록번호의 다른 행·반복 쪽·빈 첫 쪽·형식 오류는 전체 실패로 처리한다. redirect를 따르지 않고 연결5초·요청10초·대기12초, 본문4MiB 상한을 둔다. 전체 snapshot을 받은 뒤에만 한 연결의 한 JDBC 트랜잭션으로 보호소 upsert·보호소 검색 문서·공개정보 JSON patch를 쓰고, 행마다 저장된 `sourceUpdatedDate`가 더 새로우면 건너뛰며 주소가 바뀌었는데 좌표가 없으면 기존 좌표를 지운다. 세션 advisory lock은 APMS 동물 수집과 같은 key1이라 서로 배타적이며, 이미 잡혀 있으면 `SHELTER_DIRECTORY_BUSY`로 실패한다.
+
+기존 writer DataSource·JdbcTransactionManager를 쓰고 새 pool·DDL은 없다. Batch metadata는 `pawbridge_animal.BATCH_`를 명시하고 metadata 탐색·자동 DDL·시작 시 Job 실행을 쓰지 않는다. 검색 writer는 기존 Animal 쓰기가 타입으로 주입받는 단일 bean과 충돌하지 않도록 store 내부 인스턴스로만 만든다. 원문 `SearchDocumentWriter.shelter(Connection, careRegNo)`를 추가해 수집 연결 밖의 두 번째 연결을 빌리지 않는다.
+
+활성화 전 확인 조건:
+- 공유 writer pool 기본 최대1·연결 대기2초다. 수집은 lock 획득부터 외부 조회(최대30회×12초)와 저장까지 그 연결을 계속 쥐므로, 그동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있다. `pawbridge.database.writer.maximum-pool-size`를 최소2 이상으로 명시하는 것은 켜기 전 확인 조건이며 시작 시 검사하지 않는다(이 수집 자체는 한 연결로 동작하므로 원문에 없던 조립 거부를 넣지 않았다). 원문에서는 shelter·여행(`0 */30`)·보호소 관측(`0 0 4`)이 Boot 기본 `@Scheduled` 스레드 하나를 나눠 순서대로 실행됐지만, 모놀리스는 기능별 scheduler를 두므로 04:00 Asia/Seoul에 동시에 시작할 수 있다. 함께 켜는 수집기의 연결 합계(shelter 1 + 여행 2 + 관측 1 + HTTP 쓰기)에 맞춰 pool을 잡거나 cron을 분리해야 한다.
+- writer 권한: `pawbridge_animal.shelters` SELECT·INSERT·UPDATE(검색 trigger 열 포함), `shelter_public_information` SELECT·INSERT·UPDATE, `shelter_search_documents` INSERT·UPDATE, Batch 6표·sequence, advisory lock 함수.
+- 이전 animal-service 예약을 먼저 멈춰 단일 소유권을 확보하고, 서비스 키·제공자 사용 조건을 확인한다. APMS 동물 수집과 같은 시각이면 한쪽이 BUSY로 실패한다.
+
+원문 결함은 고치지 않고 기록한다. 충돌 갱신은 `phone`을 바꾸지 않는다(최초 INSERT만 기록, 공개정보 JSON에는 반영). snapshot에서 사라진 보호소는 지우지 않는다. 전체 snapshot을 한 트랜잭션에서 모든 대상 행 `FOR UPDATE`로 잠근 채 쓰며 upsert 문에는 query timeout이 없다. 실패하면 Job이 FAILED로 끝나고 다음 예약까지 재시도하지 않으며, step 예외는 Spring Batch가 ERROR 로그와 `BATCH_*_EXECUTION` 종료 메시지로 남기고 launcher는 정상 반환한다. 종료 시 실행 중인 수집이 끝날 때까지 shutdown이 대기하므로 짧은 종료 유예 시간에서는 강제 종료될 수 있다. 원문 환경 변수 `SHELTER_DIRECTORY_CRON`은 `shelter-directory.collection-cron`에 연결되지 않아 기본 04:00이 적용된다. 원문은 `animal-query.backend=postgresql`일 때만 검색 문서를 썼지만 모놀리스 검색 writer는 분석기를 항상 사용하므로 검색 문서 쓰기가 새로 생긴다. 30쪽(3만 행)을 넘는 목록은 전체 실패다.
+
+단위 시험은 client 9·collector 6·store 4사례와 구성 시험(기본 off·`on` 별칭·같은 writer·Job/step·scheduler 계약)이다. 저장소·HTTP·DB는 mock이며 실제 공공데이터 API·PostgreSQL 잠금·권한·운영 활성화는 검증하지 않았다.
+
+
 ## APMS 사진 보관 예약 경로 편입
 
 `apms-photo-archive.enabled=true`를 명시할 때만 APMS 사진 발견·재시도·보관 작업을 조립한다. 기본 off에서는 archive writer/HTTP/S3/scheduler를 만들지 않으며, APMS 수집 자체나 Gallery 공개·내부 제공 기능을 자동 활성화하지 않는다. 수동 사진 업로드/삭제 API는 이 범위에 없다.
