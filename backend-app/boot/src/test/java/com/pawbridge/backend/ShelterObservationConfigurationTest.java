@@ -89,7 +89,7 @@ class ShelterObservationConfigurationTest {
                 }).withPropertyValues(ENABLED, BACKEND, "pawbridge.shelter-observations.cron=" + futureCron,
                         "spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.chat.enabled=false",
                         "pawbridge.jobs.cleanup-enabled=false", "pawbridge.user-maintenance.enabled=false",
-                        "pawbridge.community-maintenance.enabled=false", "pawbridge.favorite-delivery.enabled=false",
+                        "pawbridge.community-maintenance.enabled=false",
                         "pawbridge.auth.google-enabled=false", "pawbridge.auth.sessions-enabled=false",
                         "pawbridge.visits.enabled=false", "pawbridge.visits.collection-enabled=false",
                         "pawbridge.animal-query.projection-schedule-enabled=false", "apms.batch.schedule-enabled=false",
