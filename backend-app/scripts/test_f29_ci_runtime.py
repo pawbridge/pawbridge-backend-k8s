@@ -90,7 +90,7 @@ class FakeCi:
         self.raw_paths = (app_path, stub_path)
         if self.stop_fails: self.late_writer = os.dup(app_log.fileno())
         if self.log_private_input: app_log.write(probe.MEMBER_BODY + '\n')
-        app_log.write('Start completed.\nStart completed.\nShutdown completed.\nShutdown completed.\nGraceful shutdown complete\nPrivate note stream resources stopped\n'); app_log.flush()
+        app_log.write('Start completed.\nShutdown completed.\nGraceful shutdown complete\nPrivate note stream resources stopped\n'); app_log.flush()
         return 'app', 'stub', 'mock-base', 'mock-storage', 1, 0
     def stop(self, child, label):
         self.stopped.append(child)

@@ -49,17 +49,27 @@ F17과 F18의 새 RO TX에서 연결 생성·시스템 완료·deadline 실패�
 
 ## DB·실행 설정
 
-읽기용 DataSource·transaction manager와 쓰기용 DataSource·transaction manager를 명시적으로 구분한다. 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`, `pawbridge_community.home_videos`, `pawbridge_community.daily_visit_count`, `pawbridge_user.contact_deletions`, `pawbridge_community.private_note_blocks`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
+### DB 커넥션 풀 (단일 풀)
+
+모놀리스는 HikariCP 풀 하나(`pawbridge-db`)만 만든다. 예전 읽기 풀(`dataSource`)·쓰기 풀(`writeDataSource`)·위시리스트 전용 풀(`storeWishlistWriteDataSource`)은 같은 인스턴스를 가리키는 bean 이름(별칭)으로만 남아 있다. 모든 JdbcTemplate·JdbcTransactionManager·JPA EntityManagerFactory/JpaTransactionManager가 이 풀 하나를 쓴다.
+
+- 풀 설정: 최대 `F2_POOL_MAX_SIZE`(기본 10, 1~50), 최소 유휴 2(최대가 그보다 작으면 최대값), 연결 대기 5초, 검증 1초, 시작 시 DB 미연결 허용(initializationFailTimeout -1), 풀 readOnly 없음.
+- 계정: `F2_DB_USER`/`F2_DB_PASSWORD` 하나로 읽기·쓰기를 모두 한다. 운영에서는 앱 계정 하나에 다섯 schema(`pawbridge_user`, `pawbridge_community`, `pawbridge_animal`, `pawbridge_store`, `pawbridge_payment`)의 필요한 권한을 준다. `F3_DB_WRITER_USER/PASSWORD`, `STORE_WISHLIST_DB_WRITER_USER/PASSWORD`, `pawbridge.database.writer.maximum-pool-size`는 더 이상 읽지 않는다(전달돼도 무시). 환경 변수 이름 `F2_*`는 다음 변경에서 `PAWBRIDGE_DB_*`로 바꿀 예정이다.
+- 읽기 보호: 풀이 아니라 트랜잭션 단위로 한다. 읽기 템플릿(`readOnlyTransaction`·`searchReadOnlyTransaction` 등)은 readOnly이고 `transactionManager`는 `enforceReadOnly`라서 PostgreSQL에 `SET TRANSACTION READ ONLY`를 보낸다. 읽기 템플릿 timeout 3초/5초, `writeTransaction` 10초 등 기존 값은 그대로다.
+- 중첩 트랜잭션: 읽기 TM과 쓰기 TM이 같은 DataSource를 쓰므로 쓰기 트랜잭션 안의 REQUIRED 읽기 템플릿은 같은 연결에 참여한다(readOnly·timeout은 바깥 값이 적용됨). REQUIRES_NEW 읽기(`ModuleAnimalShelterReads`, `JdbcAnimalMemberReads`)는 같은 풀에서 두 번째 연결을 잡으므로 풀 크기를 1로 두지 않는다. 서로 다른 JPA TM이나 JDBC TM 안에서 JPA TM을 시작하는 중첩은 같은 DataSource에서 실패하므로 만들지 않는다.
+- 앞선 F 단계 설명의 reader/writer 별도 계정·풀 크기(reader 기본 2, writer 기본 1) 문구는 당시 기록이다. 현재 구성은 이 절이 기준이다. CI 계약 스크립트는 기존 reader·writer 역할을 그대로 두고, 앱만 두 역할을 상속한 로그인 역할 `pawbridge_app`(`f3_fixture.sql`)으로 접속하며 `F2_POOL_MAX_SIZE='4'`를 쓴다.
+
+읽기용 transaction manager와 쓰기용 transaction manager를 명시적으로 구분한다(DataSource는 위 단일 풀). 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`, `pawbridge_community.home_videos`, `pawbridge_community.daily_visit_count`, `pawbridge_user.contact_deletions`, `pawbridge_community.private_note_blocks`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
 
 | 환경 변수 | 의미 |
 |---|---|
 | F2_JDBC_URL | 명시적 PostgreSQL JDBC URL. 계정/쿼리 옵션을 URL에 넣지 않음 |
-| F2_DB_USER | 대상 두 schema의 필요한 열을 읽을 계정 |
+| F2_DB_USER | 앱 단일 계정(읽기·쓰기). 필요한 schema 권한만 부여 |
 | F2_DB_PASSWORD | 해당 계정 암호. 이미지/소스에 포함하지 않음 |
-| F2_POOL_MAX_SIZE | 후보 시험 pool 상한, 기본 2; 운영 pool 확정값 아님 |
+| F2_POOL_MAX_SIZE | 단일 pool 상한, 기본 10, 허용 1~50 |
 | F2_PORT | loopback HTTP 포트. 기본 0(임의 포트) |
 
-필수 설정이 없으면 main은 Spring 기동/DB 접속 전에 실패한다. 운영 기본 주소나 기존 .env를 자동 탐색하지 않는다. 조회에는 readOnly tx와 SQL READ ONLY를 적용하며 CI reader 계정도 SELECT-only로 제한한다. 앱 classpath에 SQL 초기화·Flyway·기존 migration/consumer/스케줄러·Feign·JPA·Redis·Kafka·ES·OAuth를 추가하지 않는다. F3의 S3 SDK는 명시적 endpoint·region·정적 credential만 사용한다. 기본 AWS credential/region 탐색 체인이나 기존 Secret 파일을 사용하지 않는다.
+필수 설정이 없으면 main은 Spring 기동/DB 접속 전에 실패한다. 운영 기본 주소나 기존 .env를 자동 탐색하지 않는다. 조회에는 readOnly tx와 SQL READ ONLY를 적용한다. 앱 classpath에 SQL 초기화·Flyway·기존 migration/consumer/스케줄러·Feign·JPA·Redis·Kafka·ES·OAuth를 추가하지 않는다. F3의 S3 SDK는 명시적 endpoint·region·정적 credential만 사용한다. 기본 AWS credential/region 탐색 체인이나 기존 Secret 파일을 사용하지 않는다.
 
 DB의 `TIMESTAMP(6)`와 기존 Hibernate UTC JDBC 추출 의미를 보존하도록 mapper를 비교한다. 문자열에 Z를 붙이거나 무조건 9시간을 더하지 않는다. 이 후보를 운영으로 연결하기 전에는 운영 DB 권한·기존/신규 JVM timezone·총 pool 예산과 라우팅 인계를 별도 검증해야 한다.
 
@@ -69,11 +79,10 @@ DB의 `TIMESTAMP(6)`와 기존 Hibernate UTC JDBC 추출 의미를 보존하도�
 
 일반 게시판 3종만 작성하고 MISSING/REPORT는 업로드 전에 전용 등록 안내로 거부한다. 기존에 적용되지 않던 NotBlank 등 새 입력 규칙은 추가하지 않는다. 작성 순서는 게시판 검증 → S3 업로드 → 독립된 짧은 User 닉네임 조회 → writer 트랜잭션 → 응답이다. 예상 밖 닉네임 오류가 DB commit 뒤에 발생하지 않도록 기존 HTTP 호출 순서를 조정했다. User 부재·명시적 unavailable fallback은 F2와 같으며, 닉네임과 게시글의 동일 시점 snapshot을 보장하지 않는다.
 
-writer는 같은 명시적 JDBC URL에 별도 계정·pool max1/minIdle0으로 연결한다. reader 기본 max2와 합쳐 후보 기본 상한은 3이며 운영 pool 예산을 확정한 수치는 아니다. 두 연결·JDBC·TM은 qualifier로 조립한다. F3 게시글 작성 조합에는 application 외곽 트랜잭션·REQUIRES_NEW·XA를 추가하지 않는다. `posts`, `post_search_documents`의 2개 쓰기는 writer의 단일 트랜잭션에 참여한다. 구 시스템의 POST_CREATED `outbox_events` 쓰기는 의도적으로 제거했다(Debezium·Kafka·outbox를 모놀리스에서 제거하기로 결정했고 유일한 소비자였던 community-service ES 색인은 운영에서 쓰지 않았다. 이벤트 큐는 필요할 때 다시 도입한다). 후보 writer 역할에는 `outbox_events` 권한이 필요 없고 비교 시험은 구 oracle의 outbox 행을 비교 대상에서 제외하며 후보가 outbox를 쓰지 않는 것만 확인한다. Nori 9.12.3·검색 가중치·UTC JDBC 바인딩 의미는 보존한다. F3 범위에는 검색 조회나 이벤트 소비자를 추가하지 않으며 검색 조회는 아래 F7 계약으로 구분한다.
+쓰기 JDBC·TM은 위 단일 풀(`writeDataSource` 별칭)을 쓰며 qualifier로 조립한다. F3 게시글 작성 조합에는 application 외곽 트랜잭션·REQUIRES_NEW·XA를 추가하지 않는다. `posts`, `post_search_documents`의 2개 쓰기는 writer의 단일 트랜잭션에 참여한다. 구 시스템의 POST_CREATED `outbox_events` 쓰기는 의도적으로 제거했다(Debezium·Kafka·outbox를 모놀리스에서 제거하기로 결정했고 유일한 소비자였던 community-service ES 색인은 운영에서 쓰지 않았다. 이벤트 큐는 필요할 때 다시 도입한다). 후보 writer 역할에는 `outbox_events` 권한이 필요 없고 비교 시험은 구 oracle의 outbox 행을 비교 대상에서 제외하며 후보가 outbox를 쓰지 않는 것만 확인한다. Nori 9.12.3·검색 가중치·UTC JDBC 바인딩 의미는 보존한다. F3 범위에는 검색 조회나 이벤트 소비자를 추가하지 않으며 검색 조회는 아래 F7 계약으로 구분한다.
 
 | 추가 필수 환경 변수 | 의미 |
 |---|---|
-| F3_DB_WRITER_USER / F3_DB_WRITER_PASSWORD | reader와 다른 최소 쓰기 계정. F3~F12는 User 쓰기를 거부하며 F13은 nickname/updated_at 두 열 UPDATE만 허용. DDL·소유권 권한 없음 |
 | F3_JWT_SECRET | 기존 발급기 검증용 UTF-8 HMAC 키. 출력·이미지 포함 금지 |
 | F3_STORAGE_ENDPOINT / F3_STORAGE_REGION | 명시적인 S3 호환 endpoint와 region |
 | F3_STORAGE_BUCKET / F3_STORAGE_PUBLIC_BASE_URL | 업로드 bucket과 반환 URL 기준 |
@@ -728,7 +737,7 @@ User→Store 모듈 연결과 Animal 보호소/통계를 실제 함께 조립한
 
 `pawbridge.store-wishlist.enabled`는 기본 false입니다. 명시 활성화 시 정확 POST/DELETE `/api/v1/wishlists` 두 경로만 기존 JWT 인증에 연결하며 인증 principal의 회원 ID만 사용합니다. body/query/임의 X-User 헤더는 회원 ID로 신뢰하지 않습니다. 원래 소유권 검사가 없던 ID 삭제 HTTP는 등록하지 않습니다.
 
-별도 명시 `STORE_WISHLIST_DB_WRITER_USER`/`STORE_WISHLIST_DB_WRITER_PASSWORD`만 쓰는 max1/minIdle0 writer를 같은 검증된 DB URL에 조립하고 reader 계정 재사용을 거부합니다. pool close 소유권·query5/TX10초·Clock.systemDefaultZone을 명시합니다. 실제 비밀값/계정/GRANT는 변경하지 않습니다. 회원/SKU 중복 선검사·현재 상품/옵션 응답·JVM시간 auditing·원래 오류 순서를 보존합니다. 유일제약 없는 동시 중복 추가는 기존 한계/활성화 gate이며 무조건 안전하다고 주장하지 않습니다.
+전용 계정·풀 없이 공유 단일 풀(`storeWishlistWriteDataSource` 별칭)을 쓰고 자체 JdbcTemplate·TM으로 query5/TX10초·Clock.systemDefaultZone을 명시합니다. 실제 비밀값/계정/GRANT는 변경하지 않습니다. 회원/SKU 중복 선검사·현재 상품/옵션 응답·JVM시간 auditing·원래 오류 순서를 보존합니다. 유일제약 없는 동시 중복 추가는 기존 한계/활성화 gate이며 무조건 안전하다고 주장하지 않습니다.
 
 source25사례·일반 독립검수와 새 합집합 Boot22사례·production compile/Business600 검사가8초에 성공했습니다. 원래 Boot22와 합집합22를44고유사례로 합산하지 않습니다. 위시리스트 source12 조립 단계에서 공통 App/보안/Storebuild 외 다른803부모파일과 source6을 보존했습니다. ID삭제 소유정책·실제PG/RETURNING/시간정밀도·writer 최소권한/identity sequence·commit/rollback·동시성·실제pool 종료는 미검증이며 활성화 전 확인해야 합니다. 운영·DB·결제/재고/Outbox/Redis·기존 데이터 변경은 없습니다.
 
@@ -948,7 +957,7 @@ APMS 번호는 원문 번호 그대로 검색하며 기존 Shelter JOIN과 NON_N
 
 `tourapi.enabled`와 `tourapi.schedule-enabled`는 기본 off다. 기존 여행 GET 조회 플래그와 독립이며 조회만 켜도 외부 클라이언트·수집 Job·예약은 생기지 않는다. 수집은 원문 PostgreSQL 사업 흐름과 별도 API 키·일별 operation 예산·페이지와 checkpoint 원자성·실패 재개·RUNNING 고아 기록 거부를 재사용한다. 새 requestId 실행은 Batch restart와 다르며 Batch COMPLETED만으로 catalog PARTIAL·QUOTA를 전량 성공으로 보지 않는다.
 
-기존 공유 writer DataSource·JdbcTemplate·JdbcTransactionManager를 사용하고 새 pool을 만들지 않는다. writer 기본 용량 1은 유지한다. 세션 advisory lock이 연결 하나를 유지하므로 활성화 전에 `pawbridge.database.writer.maximum-pool-size`를 명시해 최소 2를 확보해야 한다. 이 최소값은 전체 동시 업무 용량 보장이 아니며 합성 시험 용량 4도 운영 권장값이 아니다. PostgreSQL Batch 메타는 `pawbridge_animal.BATCH_`를 명시하고 DB metadata 탐색·자동 DDL/스키마 초기화·시작 시 Job 자동 실행을 사용하지 않는다.
+기존 공유 writer DataSource·JdbcTemplate·JdbcTransactionManager를 사용하고 새 pool을 만들지 않는다. 공유 단일 풀(기본 10)을 쓴다. 세션 advisory lock이 연결 하나를 유지하므로 풀 최대는 최소 2여야 하며(시작 시 검사) 이 최소값은 전체 동시 업무 용량 보장이 아니다. PostgreSQL Batch 메타는 `pawbridge_animal.BATCH_`를 명시하고 DB metadata 탐색·자동 DDL/스키마 초기화·시작 시 Job 자동 실행을 사용하지 않는다.
 
 수집과 예약을 모두 선택하면 Asia/Seoul 기준 기본 30분 cron을 단일 scheduler가 소유한다. 원문 NOT_SUPPORTED tasklet과 짧은 Catalog 쓰기 TX를 유지한다. 정상 종료 설정은 새 지연·주기 실행을 막고 실행 중 작업을 기다리도록 구성하지만 Spring scheduled 취소·실제 외부 요청·프로세스 강제 종료를 포함한 무조건 완주/복구는 보장하지 않는다. 모든 HTTP 뒤 저장에 lock 재확인이 있다고 주장하지 않는다. 실제 활성화에는 이전 실행기 중단·단일 소유권·풀 용량·키/제공자 사용 조건·lock 상실과 고아 기록 대응을 별도로 확인해야 한다.
 
@@ -994,7 +1003,7 @@ APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사
 기존 writer DataSource·JdbcTransactionManager를 쓰고 새 pool·DDL은 없다. Batch metadata는 `pawbridge_animal.BATCH_`를 명시하고 metadata 탐색·자동 DDL·시작 시 Job 실행을 쓰지 않는다. 검색 writer는 기존 Animal 쓰기가 타입으로 주입받는 단일 bean과 충돌하지 않도록 store 내부 인스턴스로만 만든다. 원문 `SearchDocumentWriter.shelter(Connection, careRegNo)`를 추가해 수집 연결 밖의 두 번째 연결을 빌리지 않는다.
 
 활성화 전 확인 조건:
-- 공유 writer pool 기본 최대1·연결 대기2초다. 수집은 lock 획득부터 외부 조회(최대30회×12초)와 저장까지 그 연결을 계속 쥐므로, 그동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있다. `pawbridge.database.writer.maximum-pool-size`를 최소2 이상으로 명시하는 것은 켜기 전 확인 조건이며 시작 시 검사하지 않는다(이 수집 자체는 한 연결로 동작하므로 원문에 없던 조립 거부를 넣지 않았다). 원문에서는 shelter·여행(`0 */30`)·보호소 관측(`0 0 4`)이 Boot 기본 `@Scheduled` 스레드 하나를 나눠 순서대로 실행됐지만, 모놀리스는 기능별 scheduler를 두므로 04:00 Asia/Seoul에 동시에 시작할 수 있다. 함께 켜는 수집기의 연결 합계(shelter 1 + 여행 2 + 관측 1 + HTTP 쓰기)에 맞춰 pool을 잡거나 cron을 분리해야 한다.
+- 공유 단일 pool(기본 최대10·연결 대기5초)을 쓴다. 수집은 lock 획득부터 외부 조회(최대30회×12초)와 저장까지 그 연결을 계속 쥐므로 그만큼 다른 요청이 쓸 연결이 줄어든다. 원문에서는 shelter·여행(`0 */30`)·보호소 관측(`0 0 4`)이 Boot 기본 `@Scheduled` 스레드 하나를 나눠 순서대로 실행됐지만, 모놀리스는 기능별 scheduler를 두므로 04:00 Asia/Seoul에 동시에 시작할 수 있다. 함께 켜는 수집기의 연결 합계(shelter 1 + 여행 2 + 관측 1 + HTTP 쓰기)에 맞춰 pool을 잡거나 cron을 분리해야 한다.
 - writer 권한: `pawbridge_animal.shelters` SELECT·INSERT·UPDATE(검색 trigger 열 포함), `shelter_public_information` SELECT·INSERT·UPDATE, `shelter_search_documents` INSERT·UPDATE, Batch 6표·sequence, advisory lock 함수.
 - 이전 animal-service 예약을 먼저 멈춰 단일 소유권을 확보하고, 서비스 키·제공자 사용 조건을 확인한다. APMS 동물 수집과 같은 시각이면 한쪽이 BUSY로 실패한다.
 
@@ -1039,7 +1048,7 @@ Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유�
 
 ## 실제 Main 코어 조립 검증
 
-`PawBridgeCoreIntegrationTest`는 실제 `PawBridgeApplication`에서 User의 Animal/Store module 조회와 Animal 명령·Store 바로 주문 writer를 함께 활성화한다. 업무·actor·facade·DataSource 대역 없이 named reader/writer pool2, JPA factory3와 transaction manager5의 실제 소비자 연결, 인증·역할·메서드 거부7경로, 소유 writer TX 밖 actor 거부, DB borrow0과 정상 close를 검증한다. writer 용량0은 자원을 만들기 전 fail-fast하며 늦은 startup 실패의 자원 정리를 검증한 것은 아니다.
+`PawBridgeCoreIntegrationTest`는 실제 `PawBridgeApplication`에서 User의 Animal/Store module 조회와 Animal 명령·Store 바로 주문 writer를 함께 활성화한다. 업무·actor·facade·DataSource 대역 없이 단일 pool1(`dataSource`·`writeDataSource` 같은 인스턴스), JPA factory3와 transaction manager5의 실제 소비자 연결, 인증·역할·메서드 거부7경로, 소유 writer TX 밖 actor 거부, DB borrow0과 정상 close를 검증한다.
 
 기존 각 기능의 별도 DB 검증은 보존한다. 이 코어 조합 시험은 정상 인증 DB 응답·실 Redis/OAuth/R2·외부 수집·예약 인수·운영 준비 완료를 의미하지 않는다. 외부 기능과 예약은 이 시험에서 비활성이다.
 
@@ -1103,7 +1112,7 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 활성화 조건:
 - `pawbridge.store-payment-events.enabled=true`가 함께 필요하며 없으면 시작이 실패한다. 이 flag는 랭킹용 Redis(`spring.data.redis.host` 또는 `memberChatRedis`)를 요구한다.
 - 운영은 앱 계정 하나로 `pawbridge_store`와 `pawbridge_payment`를 모두 쓴다. writer 계정에 `pawbridge_payment` 스키마 USAGE, `payments` SELECT·INSERT, `payment_compensation_records` SELECT·INSERT와 `pawbridge_store.orders` 행 잠금·UPDATE, 재고·검색 문서 권한이 필요하다. reader는 `orders.user_id`를 읽는다.
-- 공유 writer pool 기본 최대 1개는 운영 결제에 쓸 수 없다. 크기를 늘린다.
+- 공유 단일 pool(기본 최대 10)을 쓴다. 운영 동시 결제량에 맞춰 `F2_POOL_MAX_SIZE`를 정한다.
 - 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`infrastructure/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 Flyway 위치·CI 픽스처 밖에 있어 자동으로 실행되지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
 - `toss.secret-key`(필수)와 `toss.base-url`.
 

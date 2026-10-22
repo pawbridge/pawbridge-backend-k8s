@@ -254,7 +254,7 @@ class F26StreamProbeTest(unittest.TestCase):
             ci = types.SimpleNamespace(require_fixture=lambda: '42-1', SOURCE='f' * 40, EVIDENCE=root,
                 require_measurements=Mock(), COUNTERS=probe.COUNTERS, EXPECTED_JAR_COUNTS=probe.EXPECTED_JAR_COUNTS, ROOT=root,
                 database_snapshot=lambda: {}, f4=types.SimpleNamespace(start_ready_children=lambda *_: (app, stub, 'base', 'endpoint', 1, 0)),
-                f3=types.SimpleNamespace(WRITER='writer', expect=lambda *_a, **_k: dict(counts={}, requests=[], objects={}),
+                f3=types.SimpleNamespace(WRITER='writer', APP='app', expect=lambda *_a, **_k: dict(counts={}, requests=[], objects={}),
                     stop_owned_child=lambda child, _label: stopped.append(child) or 143))
             env = dict(GITHUB_SHA='a' * 40, F2_TEST_JDBC_URL='synthetic', F2_TEST_DB_USER='reader', F2_TEST_DB_PASSWORD='p1',
                        F3_TEST_WRITER_PASSWORD='p2', F3_TEST_JWT_SECRET=KEY)

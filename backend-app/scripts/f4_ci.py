@@ -166,8 +166,8 @@ def smoke():
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR')
                 if key in os.environ}
     app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
-        F2_DB_USER=os.environ['F2_TEST_DB_USER'], F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'],
-        F2_POOL_MAX_SIZE='2', F3_DB_WRITER_USER=f3.WRITER,
+        F2_DB_USER=f3.APP, F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
+        F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
         F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
         F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
         F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',
@@ -175,7 +175,7 @@ def smoke():
         F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
     base = ''
     state = lambda: f3.expect(endpoint, '/__f3__/state', 200, headers=controls)
-    result = {'timezone': 'Asia/Seoul', 'reader_pool_maximum': 2, 'writer_pool_maximum': 1,
+    result = {'timezone': 'Asia/Seoul', 'pool_maximum': 4,
               'synthetic_database': f2.DATABASE, 'status': 'incomplete'}
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     logs = EVIDENCE / 'f4-packaged-startup.log'
@@ -331,7 +331,7 @@ def smoke():
                 delete(item['postId'], token=tokens['ROLE_USER'])
                 deleted(item['postId'], original)
             delete(foreign['postId'], 401)  # An earlier authenticated request cannot leak its principal.
-            if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
+            if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
                 raise AssertionError('F4 HTTP response leaked an application transaction')
             result['packaged_post_delete_get_auth_best_effort_rollback_recovery'] = 'passed'
         finally:
@@ -343,9 +343,9 @@ def smoke():
                     result['stub_sigterm_exit'] = f3.stop_owned_child(stub, 'F4 S3 stub')
                 (EVIDENCE / 'f4-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')
     text = fresh_log(logs, app_offset)
-    if text.count('Shutdown completed.') < 2 or 'Graceful shutdown complete' not in text:
+    if text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in text:
         raise AssertionError('F4 pool and HTTP graceful termination evidence is missing')
-    if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+    if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
         raise AssertionError('F4 application database connections remain after termination')
     result.update(status='passed', shutdown_pools=2, remaining_application_connections=0)
     (EVIDENCE / 'f4-packaged-result.txt').write_text(json.dumps(result, indent=2) + '\n')

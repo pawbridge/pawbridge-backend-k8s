@@ -63,7 +63,7 @@ public class PawBridgeApplication {
     public static void main(String[] args) {
         // Validate explicit inputs before Spring can open a listener or a database connection.
         ReadDatabaseSettings settings = ReadDatabaseSettings.fromEnvironment(System::getenv);
-        PostWriteSettings writeSettings = PostWriteSettings.fromEnvironment(System::getenv, settings);
+        PostWriteSettings writeSettings = PostWriteSettings.fromEnvironment(System::getenv);
         SpringApplication application = new SpringApplication(PawBridgeApplication.class);
         application.addInitializers(context -> {
             context.getBeanFactory().registerSingleton("readDatabaseSettings", settings);

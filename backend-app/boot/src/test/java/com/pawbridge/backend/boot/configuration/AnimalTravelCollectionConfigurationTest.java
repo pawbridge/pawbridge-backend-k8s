@@ -10,7 +10,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Arrays;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -20,7 +19,6 @@ import org.springframework.batch.core.job.SimpleJob;
 import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.tasklet.TaskletStep;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -39,7 +37,6 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -198,45 +195,5 @@ class AnimalTravelCollectionConfigurationTest {
                     assertThat(dependencies.value()).containsExactlyInAnyOrder("writeDataSource", "petTravelCollectionJob");
                     verify(source, never()).getConnection();
                 });
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {1, 2})
-    void givenDefaultOrExplicitWriterCapacity__whenCreatingSharedWriter__thenRetainLazyEmptyPoolAndRequestedCapacity(int capacity) throws Exception {
-        var values = settings();
-        var reader = ReadDatabaseSettings.fromEnvironment(values::get);
-        var writer = PostWriteSettings.fromEnvironment(values::get, reader);
-        var method = PostWriteConfiguration.class.getDeclaredMethod("writeDataSource",
-                ReadDatabaseSettings.class, PostWriteSettings.class, int.class);
-        assertThat(method.getParameters()[2].getAnnotation(Value.class).value())
-                .isEqualTo("${pawbridge.database.writer.maximum-pool-size:1}");
-        try (var source = new PostWriteConfiguration().writeDataSource(reader, writer, capacity)) {
-            assertThat(source.getMaximumPoolSize()).isEqualTo(capacity);
-            assertThat(source.getMinimumIdle()).isZero();
-            assertThat(source.getInitializationFailTimeout()).isNegative();
-            assertThat(source.getHikariPoolMXBean().getTotalConnections()).isZero();
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = {0, -1})
-    void givenNonPositiveWriterCapacity__whenCreatingSharedWriter__thenRejectBeforePoolConstruction(int capacity) {
-        var values = settings();
-        var reader = ReadDatabaseSettings.fromEnvironment(values::get);
-        var writer = PostWriteSettings.fromEnvironment(values::get, reader);
-        assertThatIllegalArgumentException().isThrownBy(
-                () -> new PostWriteConfiguration().writeDataSource(reader, writer, capacity))
-                .withMessage("Writer pool capacity must be positive");
-    }
-
-    private Map<String, String> settings() {
-        return Map.ofEntries(Map.entry("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pb_never_connected"),
-                Map.entry("F2_DB_USER", "synthetic_reader"), Map.entry("F2_DB_PASSWORD", "synthetic"),
-                Map.entry("F3_DB_WRITER_USER", "synthetic_writer"), Map.entry("F3_DB_WRITER_PASSWORD", "synthetic"),
-                Map.entry("F3_JWT_SECRET", "synthetic-test-key-with-thirty-two-characters"),
-                Map.entry("F3_STORAGE_ENDPOINT", "http://127.0.0.1:1"), Map.entry("F3_STORAGE_BUCKET", "synthetic-bucket"),
-                Map.entry("F3_STORAGE_PUBLIC_BASE_URL", "https://storage.invalid"), Map.entry("F3_STORAGE_OBJECT_PREFIX", "synthetic"),
-                Map.entry("F3_STORAGE_ACCESS_KEY_ID", "synthetic"), Map.entry("F3_STORAGE_SECRET_ACCESS_KEY", "synthetic"),
-                Map.entry("F3_STORAGE_REGION", "synthetic-region"));
     }
 }

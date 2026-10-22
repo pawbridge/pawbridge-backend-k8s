@@ -8,14 +8,11 @@ import javax.crypto.SecretKey;
 
 /** Explicit candidate-only inputs. Values and keys are never rendered in diagnostics. */
 public final class PostWriteSettings {
-    private final String username, password, bucket, publicBaseUrl, objectPrefix, accessKey, secretKey, region;
+    private final String bucket, publicBaseUrl, objectPrefix, accessKey, secretKey, region;
     private final URI endpoint;
     private final SecretKey jwtKey;
 
-    private PostWriteSettings(Function<String, String> values, ReadDatabaseSettings reader) {
-        username = required(values, "F3_DB_WRITER_USER");
-        if (username.equals(reader.username())) throw invalid("F3_DB_WRITER_USER");
-        password = required(values, "F3_DB_WRITER_PASSWORD");
+    private PostWriteSettings(Function<String, String> values) {
         try {
             jwtKey = Keys.hmacShaKeyFor(required(values, "F3_JWT_SECRET").getBytes(StandardCharsets.UTF_8));
         } catch (RuntimeException failure) { throw invalid("F3_JWT_SECRET"); }
@@ -31,8 +28,8 @@ public final class PostWriteSettings {
         region = required(values, "F3_STORAGE_REGION");
     }
 
-    public static PostWriteSettings fromEnvironment(Function<String, String> values, ReadDatabaseSettings reader) {
-        return new PostWriteSettings(values, reader);
+    public static PostWriteSettings fromEnvironment(Function<String, String> values) {
+        return new PostWriteSettings(values);
     }
 
     private static String required(Function<String, String> values, String key) {
@@ -56,8 +53,6 @@ public final class PostWriteSettings {
         return new IllegalArgumentException("Missing or invalid explicit setting: " + key);
     }
 
-    public String username() { return username; }
-    public String password() { return password; }
     public SecretKey jwtKey() { return jwtKey; }
     public URI endpoint() { return endpoint; }
     public String bucket() { return bucket; }

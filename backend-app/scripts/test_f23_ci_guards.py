@@ -244,7 +244,7 @@ class F23GuardTest(unittest.TestCase):
             self.assertEqual('POST', requests[10][1]['method']); self.assertEqual('/api/v1/notes/unexposed/send', requests[10][0])
             self.assertEqual('/api/v1/notes/' + f23.INBOX[-1], requests[11][0])
             self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(f23.OWNED)
-            self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
+            self.assertEqual('4', start.call_args.args[1]['F2_POOL_MAX_SIZE']); self.assertNotIn('DAILY_VISITORS_ENABLED', start.call_args.args[1])
 
     def test_given_stale_token_after_snapshot__when_request_due__then_zero_requests_two_children_stop_owned_cleanup_incomplete(self):
         with tempfile.TemporaryDirectory() as directory, packaged_harness(directory) as (evidence, requests, sql, start, stop, cleanup, seed):

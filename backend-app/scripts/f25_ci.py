@@ -388,13 +388,13 @@ def smoke():
     bucket,prefix='f3-'+owner,'f3-'+owner+'/'
     controls={'X-F3-Owner':owner}
     base_env={k:os.environ[k] for k in ('PATH','JAVA_HOME','LANG','LC_ALL','HOME','TMPDIR') if k in os.environ}
-    app_env=dict(base_env,F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],F2_DB_USER=os.environ['F2_TEST_DB_USER'],
-        F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'],F2_POOL_MAX_SIZE='1',F3_DB_WRITER_USER=f3.WRITER,
+    app_env=dict(base_env,F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],F2_DB_USER=f3.APP,
+        F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],F2_POOL_MAX_SIZE='4',F3_DB_WRITER_USER=f3.WRITER,
         F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
         F3_STORAGE_BUCKET=bucket,F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',F3_STORAGE_OBJECT_PREFIX=prefix,
         F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access',F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret',F3_STORAGE_REGION='us-east-1')
     result=dict.fromkeys(COUNTERS,0)
-    result.update(status='incomplete',timezone='Asia/Seoul',reader_pool_maximum=1,writer_pool_maximum=1,
+    result.update(status='incomplete',timezone='Asia/Seoul',pool_maximum=4,
                   protected_database_changes=0,s3_requests=0,permitted_delta='one outgoing block and initially absent reserved member keys',snapshot_comparisons={})
     EVIDENCE.mkdir(parents=True,exist_ok=True)
     app_path,stub_path=EVIDENCE/'f25-packaged-startup.log',EVIDENCE/'f25-s3-stub.log'
@@ -445,7 +445,7 @@ def smoke():
                 if type(body.get('data',{}).get('userId')) is not int or type(body.get('data',{}).get('active')) is not bool or type(body.get('data',{}).get('deletionPending')) is not bool:raise AssertionError('F25 recipient identifiers or flags differ')
             else:wanted={'message':message} if layer=='business' else {'code':status,'message':message,'data':None}
             if body!=wanted:raise AssertionError('F25 exact payload differs')
-        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)")!='0':raise AssertionError('F25 request left an active transaction')
+        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)")!='0':raise AssertionError('F25 request left an active transaction')
         verified_database=copy.deepcopy(after[0])
         result['request_checks']+=1
         if method=='PUT':
@@ -505,12 +505,12 @@ def smoke():
             raise AssertionError('F25 quiescent snapshot comparison evidence is incomplete')
         if app_path.stat().st_size>1024*1024 or stub_path.stat().st_size>1024*1024:raise AssertionError('F25 child log budget exceeded')
         text=f4.fresh_log(app_path,offset)
-        if text.count('Shutdown completed.')!=2 or 'Graceful shutdown complete' not in text:raise AssertionError('F25 exact two-pool graceful shutdown evidence missing')
+        if text.count('Shutdown completed.')!=1 or 'Graceful shutdown complete' not in text:raise AssertionError('F25 exact single-pool graceful shutdown evidence missing')
         forbidden=(os.environ['F2_TEST_DB_PASSWORD'],os.environ['F3_TEST_WRITER_PASSWORD'],os.environ['F3_TEST_JWT_SECRET'],
                    'F25 synthetic',*tokens.values(),*(name.strip() for name in NAMES.values() if name.strip()),
                    *('f25-'+str(i)+'@fixture.invalid' for i in USERS))
         if any(v in text or v in stub_path.read_text() for v in forbidden):raise AssertionError('F25 child log exposed private values')
-        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')")!='0':raise AssertionError('F25 application connections remain')
+        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')")!='0':raise AssertionError('F25 application connections remain')
         if {k:result[k] for k in COUNTERS}!=EXPECTED_JAR_COUNTS:raise AssertionError('F25 packaged request counts differ')
         result.update(status='passed',shutdown_pools=2,remaining_application_connections=0)
     finally:(EVIDENCE/'f25-packaged-result.txt').write_text(json.dumps(result,indent=2)+'\n')

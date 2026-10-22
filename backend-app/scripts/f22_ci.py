@@ -291,13 +291,13 @@ def smoke():
     bucket, prefix = 'f3-' + owner, 'f3-' + owner + '/'
     controls = {'X-F3-Owner': owner}
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR') if key in os.environ}
-    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'], F2_DB_USER=os.environ['F2_TEST_DB_USER'],
-        F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'], F2_POOL_MAX_SIZE='1', F3_DB_WRITER_USER=f3.WRITER,
+    app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'], F2_DB_USER=f3.APP,
+        F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=f3.WRITER,
         F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
         F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', F3_STORAGE_OBJECT_PREFIX=prefix,
         F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
     result = dict.fromkeys(COUNTERS, 0)
-    result.update(status='incomplete', timezone='Asia/Seoul', reader_pool_maximum=1, writer_pool_maximum=1,
+    result.update(status='incomplete', timezone='Asia/Seoul', pool_maximum=4,
                   database_changes=0, s3_requests=0)
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     app_path, stub_path = EVIDENCE / 'f22-packaged-startup.log', EVIDENCE / 'f22-s3-stub.log'
@@ -324,7 +324,7 @@ def smoke():
         if status == 200 and (type(response['data']['favorite']) is not bool or type(response['data']['canReply']) is not bool
                 or (response['data']['counterpartId'] is not None and type(response['data']['counterpartId']) is not int)):
             raise AssertionError('F22 numeric/boolean JSON values differ from original types')
-        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') "
+        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') "
                      "AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
             raise AssertionError('F22 request left an active DB transaction')
         if method == 'GET':
@@ -367,13 +367,13 @@ def smoke():
         if app_path.stat().st_size > 1024 * 1024 or stub_path.stat().st_size > 1024 * 1024:
             raise AssertionError('F22 exceeded the one-MiB-per-child log budget')
         text = f4.fresh_log(app_path, app_offset)
-        if text.count('Shutdown completed.') < 2 or 'Graceful shutdown complete' not in text:
+        if text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in text:
             raise AssertionError('F22 normal HTTP/two-pool shutdown evidence is missing')
         forbidden = (os.environ['F2_TEST_DB_PASSWORD'], os.environ['F3_TEST_WRITER_PASSWORD'], os.environ['F3_TEST_JWT_SECRET'],
                      BODY, 'F22 synthetic', *(name.strip() for name in NAMES.values() if name.strip()), *tokens.values(),
                      *('f22-' + str(i) + '@fixture.invalid' for i in USERS))
         if any(value in text for value in forbidden): raise AssertionError('F22 log exposed credentials, tokens or synthetic private data')
-        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+        if owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
             raise AssertionError('F22 application connections remain after shutdown')
         if {key: result[key] for key in COUNTERS} != EXPECTED_JAR_COUNTS:
             raise AssertionError('F22 packaged request counts differ from the reviewed contract')

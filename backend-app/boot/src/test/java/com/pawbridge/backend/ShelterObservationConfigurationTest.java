@@ -75,7 +75,7 @@ class ShelterObservationConfigurationTest {
         var values = F3TestInputs.values();
         values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:1/pawbridge_observation_synthetic");
         var read = ReadDatabaseSettings.fromEnvironment(values::get);
-        var write = PostWriteSettings.fromEnvironment(values::get, read);
+        var write = PostWriteSettings.fromEnvironment(values::get);
         // Exercise the actual cron property consumer, several days away from execution in every test run.
         var futureDate = LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(3);
         var futureCron = "0 0 4 " + futureDate.getDayOfMonth() + " " + futureDate.getMonthValue() + " *";
@@ -113,7 +113,8 @@ class ShelterObservationConfigurationTest {
                     assertThat(transaction.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT);
                     assertThat(ReflectionTestUtils.getField(context.getBean(ShelterObservationConfiguration.ShelterObservationJob.class), "recorder"))
                             .isSameAs(recorder);
-                    assertThat(context.getBeansOfType(DataSource.class)).containsOnlyKeys("dataSource", "writeDataSource");
+                    assertThat(context.getBeansOfType(DataSource.class)).containsOnlyKeys("dataSource");
+                    assertThat(context.getBean("writeDataSource")).isSameAs(context.getBean("dataSource"));
                     assertThat(context.getBeansOfType(JdbcTransactionManager.class)).containsOnlyKeys("transactionManager", "writeTransactionManager");
                     assertThat(context.getBeansOfType(jakarta.persistence.EntityManagerFactory.class)).isEmpty();
                     poolsRef.set(List.copyOf(context.getBeansOfType(HikariDataSource.class).values()));
@@ -132,7 +133,7 @@ class ShelterObservationConfigurationTest {
                     assertThat(ReflectionTestUtils.getField(scheduler, "waitForTasksToCompleteOnShutdown")).isEqualTo(true);
                     assertThat(ReflectionTestUtils.getField(scheduler, "awaitTerminationMillis")).isEqualTo(35000L);
                     assertThat(context.getBeanFactory().getDependenciesForBean("shelterObservationScheduler"))
-                            .contains("writeDataSource", "shelterObservationRecorder");
+                            .contains("dataSource", "shelterObservationRecorder");
                     var tasks = context.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks();
                     assertThat(tasks).hasSize(1);
                     assertThat(tasks.iterator().next().getTask()).isInstanceOf(CronTask.class);
@@ -151,7 +152,7 @@ class ShelterObservationConfigurationTest {
                 });
         assertThat(delayedRef.get().isCancelled()).isTrue();
         assertThat(schedulerRef.get().getScheduledThreadPoolExecutor().isTerminated()).isTrue();
-        assertThat(poolsRef.get()).hasSize(2).allSatisfy(pool -> assertThat(pool.isClosed()).isTrue());
+        assertThat(poolsRef.get()).hasSize(1).allSatisfy(pool -> assertThat(pool.isClosed()).isTrue());
     }
 
     @Test

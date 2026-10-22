@@ -1,7 +1,6 @@
 package com.pawbridge.backend;
 
 import com.pawbridge.backend.boot.configuration.PostWriteSettings;
-import com.pawbridge.backend.boot.configuration.ReadDatabaseSettings;
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -21,7 +20,6 @@ final class F3TestInputs {
         var values = new HashMap<String,String>();
         values.put("F2_JDBC_URL", "jdbc:postgresql://127.0.0.1:5432/pawbridge_f2_ci");
         values.put("F2_DB_USER", "fixture-reader"); values.put("F2_DB_PASSWORD", "synthetic-reader-only");
-        values.put("F3_DB_WRITER_USER", "fixture-writer"); values.put("F3_DB_WRITER_PASSWORD", "synthetic-writer-only");
         values.put("F3_JWT_SECRET", JWT_SECRET);
         values.put("F3_STORAGE_ENDPOINT", "http://127.0.0.1:39001");
         values.put("F3_STORAGE_BUCKET", "f3-test-bucket");
@@ -35,7 +33,7 @@ final class F3TestInputs {
 
     static PostWriteSettings settings() {
         var inputs = values();
-        return PostWriteSettings.fromEnvironment(inputs::get, ReadDatabaseSettings.fromEnvironment(inputs::get));
+        return PostWriteSettings.fromEnvironment(inputs::get);
     }
 
     static String token(long userId, String role) {

@@ -4,11 +4,9 @@ import com.pawbridge.backend.store.internal.wishlist.application.WishlistCommand
 import com.pawbridge.backend.store.internal.wishlist.infrastructure.JdbcWishlistCommands;
 import com.pawbridge.backend.store.internal.wishlist.web.WishlistCommandController;
 import com.pawbridge.backend.store.internal.wishlist.web.WishlistCommandExceptionHandler;
-import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.time.Clock;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,19 +19,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.store-wishlist",name="enabled",havingValue="true",matchIfMissing=false)
 public class StoreWishlistConfiguration {
-    @Bean(destroyMethod="close")
-    HikariDataSource storeWishlistWriteDataSource(ReadDatabaseSettings reader,
-            @Value("${STORE_WISHLIST_DB_WRITER_USER:}") String username,
-            @Value("${STORE_WISHLIST_DB_WRITER_PASSWORD:}") String password) {
-        if(username.isBlank() || username.equals(reader.username()))
-            throw new IllegalArgumentException("Missing or invalid explicit setting: STORE_WISHLIST_DB_WRITER_USER");
-        if(password.isBlank()) throw new IllegalArgumentException("Missing or invalid explicit setting: STORE_WISHLIST_DB_WRITER_PASSWORD");
-        HikariConfig config=new HikariConfig();
-        config.setJdbcUrl(reader.jdbcUrl());config.setUsername(username);config.setPassword(password);
-        config.setPoolName("pawbridge-store-wishlist-write");config.setMaximumPoolSize(1);config.setMinimumIdle(0);
-        config.setConnectionTimeout(2000);config.setValidationTimeout(1000);config.setInitializationFailTimeout(-1);config.setReadOnly(false);
-        return new HikariDataSource(config);
-    }
     @Bean JdbcTemplate storeWishlistWriteJdbc(@Qualifier("storeWishlistWriteDataSource") HikariDataSource source) {
         JdbcTemplate jdbc=new JdbcTemplate(source);jdbc.setQueryTimeout(5);return jdbc;
     }

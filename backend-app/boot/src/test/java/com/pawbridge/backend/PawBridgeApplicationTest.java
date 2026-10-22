@@ -27,7 +27,7 @@ class PawBridgeApplicationTest {
         var settings = ReadDatabaseSettings.fromEnvironment(inputs::get);
         assertThat(settings.jdbcUrl()).isEqualTo(inputs.get("F2_JDBC_URL"));
         assertThat(settings.username()).isEqualTo(inputs.get("F2_DB_USER"));
-        assertThat(settings.maximumPoolSize()).isEqualTo(2);
+        assertThat(settings.maximumPoolSize()).isEqualTo(10);
         assertThat(settings.toString()).doesNotContain(inputs.get("F2_DB_PASSWORD"));
     }
 
@@ -39,7 +39,7 @@ class PawBridgeApplicationTest {
             assertThatThrownBy(() -> ReadDatabaseSettings.fromEnvironment(values::get))
                     .hasMessage("Missing or invalid explicit setting: F2_JDBC_URL");
         }
-        for (String size : new String[]{"0", "11", "invalid"}) {
+        for (String size : new String[]{"0", "51", "invalid"}) {
             Map<String, String> values = inputs(); values.put("F2_POOL_MAX_SIZE", size);
             assertThatThrownBy(() -> ReadDatabaseSettings.fromEnvironment(values::get))
                     .hasMessage("Missing or invalid explicit setting: F2_POOL_MAX_SIZE");
@@ -50,7 +50,7 @@ class PawBridgeApplicationTest {
     void given__reports_explicitly_enabled__when__context_starts__then__reuse_existing_jdbc_transactions_and_clock() {
         var values=F3TestInputs.values();
         var settings=ReadDatabaseSettings.fromEnvironment(values::get);
-        var writeSettings=com.pawbridge.backend.boot.configuration.PostWriteSettings.fromEnvironment(values::get,settings);
+        var writeSettings=com.pawbridge.backend.boot.configuration.PostWriteSettings.fromEnvironment(values::get);
         new WebApplicationContextRunner().withUserConfiguration(PawBridgeApplication.class)
                 .withInitializer(context->{
                     context.getBeanFactory().registerSingleton("readDatabaseSettings",settings);
@@ -67,7 +67,7 @@ class PawBridgeApplicationTest {
                     assertThat(org.springframework.test.util.ReflectionTestUtils.getField(reports,"clock")).isSameAs(context.getBean("readClock"));
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.web.AnimalReportController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.report.web.AnimalReportExceptionHandler.class)).hasSize(1);
-                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
+                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(1);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                 });
     }
@@ -76,7 +76,7 @@ class PawBridgeApplicationTest {
     void given__explicit_candidate_assembly__when__context_starts__then__only_explicit_read_and_write_dependencies_are_assembled() {
         var values = F3TestInputs.values();
         var settings = ReadDatabaseSettings.fromEnvironment(values::get);
-        var writeSettings = com.pawbridge.backend.boot.configuration.PostWriteSettings.fromEnvironment(values::get,settings);
+        var writeSettings = com.pawbridge.backend.boot.configuration.PostWriteSettings.fromEnvironment(values::get);
         new org.springframework.boot.test.context.runner.WebApplicationContextRunner()
                 .withUserConfiguration(PawBridgeApplication.class)
                 .withInitializer(context -> {
@@ -144,7 +144,7 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBean("readOnlyTransaction", org.springframework.transaction.support.TransactionTemplate.class).getIsolationLevel()).isEqualTo(org.springframework.transaction.TransactionDefinition.ISOLATION_DEFAULT);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostStatisticsController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostStatisticsExceptionHandler.class)).hasSize(1);
-                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(2);
+                    assertThat(context.getBeansOfType(javax.sql.DataSource.class)).hasSize(1);
                     assertThat(context.getBeansOfType(org.springframework.transaction.PlatformTransactionManager.class)).hasSize(2);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.application.HomeVideoManagement.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.homevideo.infrastructure.YouTubeVideoClient.class)).isEmpty();
@@ -261,10 +261,17 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostUpdateController.class)).hasSize(1);
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.web.AdminPostDeleteController.class)).hasSize(1);
                     var pools = context.getBeansOfType(com.zaxxer.hikari.HikariDataSource.class);
-                    assertThat(pools.get("dataSource").isReadOnly()).isTrue();
-                    assertThat(pools.get("dataSource").getMaximumPoolSize()).isEqualTo(2);
-                    assertThat(pools.get("writeDataSource").isReadOnly()).isFalse();
-                    assertThat(pools.get("writeDataSource").getMaximumPoolSize()).isEqualTo(1);
+                    assertThat(pools).containsOnlyKeys("dataSource");
+                    var pool = pools.get("dataSource");
+                    assertThat(context.getBean("writeDataSource")).isSameAs(pool);
+                    assertThat(context.getBean("storeWishlistWriteDataSource")).isSameAs(pool);
+                    assertThat(pool.getPoolName()).isEqualTo("pawbridge-db");
+                    assertThat(pool.isReadOnly()).isFalse();
+                    assertThat(pool.getMaximumPoolSize()).isEqualTo(10);
+                    assertThat(pool.getMinimumIdle()).isEqualTo(2);
+                    assertThat(pool.getConnectionTimeout()).isEqualTo(5000);
+                    assertThat(pool.getValidationTimeout()).isEqualTo(1000);
+                    assertThat(pool.getInitializationFailTimeout()).isEqualTo(-1);
                     var readJdbc = context.getBean("readJdbc", org.springframework.jdbc.core.JdbcTemplate.class);
                     var searchJdbc = context.getBean("searchJdbc", org.springframework.jdbc.core.JdbcTemplate.class);
                     assertThat(readJdbc.getQueryTimeout()).isEqualTo(3);
@@ -284,9 +291,9 @@ class PawBridgeApplicationTest {
                     var writeJdbc = context.getBean("writeJdbc", org.springframework.jdbc.core.JdbcTemplate.class);
                     var writeManager = context.getBean("writeTransactionManager", org.springframework.jdbc.support.JdbcTransactionManager.class);
                     var sharedWriteTransaction = context.getBean("writeTransaction", org.springframework.transaction.support.TransactionTemplate.class);
-                    assertThat(writeJdbc.getDataSource()).isSameAs(pools.get("writeDataSource"));
+                    assertThat(writeJdbc.getDataSource()).isSameAs(pool);
                     assertThat(writeJdbc.getQueryTimeout()).isEqualTo(5);
-                    assertThat(writeManager.getDataSource()).isSameAs(pools.get("writeDataSource"));
+                    assertThat(writeManager.getDataSource()).isSameAs(pool);
                     assertThat(sharedWriteTransaction.getTransactionManager()).isSameAs(writeManager);
                     assertThat(sharedWriteTransaction.getTimeout()).isEqualTo(10);
                     var blockRemoval = context.getBean(com.pawbridge.backend.community.internal.note.application.NoteBlockRemoval.class);
@@ -414,10 +421,7 @@ class PawBridgeApplicationTest {
                     assertThat(context.getBeansOfType(com.pawbridge.backend.boot.configuration.NoteExpiryConfiguration.NoteExpiryJob.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class)).isEmpty();
                     assertThat(context.getBeansOfType(org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor.class)).isEmpty();
-                    pools.values().forEach(pool -> {
-                        assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
-                        assertThat(pool.getHikariPoolMXBean().getTotalConnections()).isZero();
-                    });
+                    assertThat(pool.getHikariPoolMXBean().getActiveConnections()).isZero();
                 });
     }
 

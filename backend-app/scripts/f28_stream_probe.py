@@ -259,7 +259,7 @@ def run(ci):
     owner = ci.require_fixture()
     result = dict.fromkeys(COUNTERS, 0)
     result.update(status='incomplete', owner=owner, source_sha=ci.SOURCE, runtime_sha=os.environ.get('GITHUB_SHA'),
-                  timezone='Asia/Seoul', reader_pool_maximum=1, writer_pool_maximum=1,
+                  timezone='Asia/Seoul', pool_maximum=4,
                   protected_database_changes=0, s3_requests=0, token_evidence='two normal actual issuer tokens only',
                   permitted_delta='three own mailboxes, two orphan notes, one owned request link and one owned reply link')
     ci.EVIDENCE.mkdir(parents=True, exist_ok=True)
@@ -282,8 +282,8 @@ def run(ci):
             raise SystemExit('F28 requires the full seventeen-table snapshot')
         bucket, prefix = 'f3-' + owner, 'f3-' + owner + '/'
         base_env = {k: os.environ[k] for k in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR') if k in os.environ}
-        app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'], F2_DB_USER=os.environ['F2_TEST_DB_USER'],
-            F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'], F2_POOL_MAX_SIZE='1', F3_DB_WRITER_USER=ci.f3.WRITER,
+        app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'], F2_DB_USER=ci.f3.APP,
+            F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F2_POOL_MAX_SIZE='4', F3_DB_WRITER_USER=ci.f3.WRITER,
             F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'], F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'],
             F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid', F3_STORAGE_OBJECT_PREFIX=prefix,
             F3_STORAGE_ACCESS_KEY_ID='f3-synthetic-access', F3_STORAGE_SECRET_ACCESS_KEY='f3-synthetic-secret', F3_STORAGE_REGION='us-east-1')
@@ -297,7 +297,7 @@ def run(ci):
             return ci.database_snapshot(), state['counts'], state['objects'], len(state['requests'])
 
         def no_transaction():
-            if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
+            if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
                 raise AssertionError('F28 stream or completed request retained a database transaction')
 
         def check(path, *, method='GET', status=200, authenticated=True, identity=CALLER,
@@ -407,7 +407,7 @@ def run(ci):
         ci.require_fixture()
         if app_path.stat().st_size > 1024 * 1024 or stub_path.stat().st_size > 1024 * 1024: raise AssertionError('F28 child log budget exceeded')
         text = ci.f4.fresh_log(app_path, offset)
-        if (text.count('Start completed.') != 2 or text.count('Shutdown completed.') != 2 or 'Graceful shutdown complete' not in text
+        if (text.count('Start completed.') != 1 or text.count('Shutdown completed.') != 1 or 'Graceful shutdown complete' not in text
                 or text.count('Private note stream resources stopped') != 1 or 'Private note stream resources did not stop within budget' in text
                 or result.get('server_closed_open_streams') != 2):
             raise AssertionError('F28 opened-SSE/two-pool normal shutdown evidence is incomplete')
@@ -416,7 +416,7 @@ def run(ci):
                      *('f28-' + str(i) + '@fixture.invalid' for i in USERS))
         all_app_text, stub_text = app_path.read_text(), stub_path.read_text()
         if any(v and (v in all_app_text or v in stub_text) for v in forbidden): raise AssertionError('F28 child log exposed a private input')
-        if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+        if ci.owned_sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
             raise AssertionError('F28 application connections remain after shutdown')
         if {k: result[k] for k in COUNTERS} != EXPECTED_JAR_COUNTS: raise AssertionError('F28 exact packaged journey counts differ')
         result.update(status='passed', shutdown_pools=2, remaining_application_connections=0,

@@ -146,7 +146,7 @@ def packaged_harness(directory, failure=None, mutation=None, wire=None, after_sn
             patch.object(f25.f21,'check_receipt'),patch.object(f25,'database_snapshot',side_effect=snapshot),
             patch.object(f25,'old_reference_snapshot',side_effect=snapshot),
             patch.object(f25.f3,'request',side_effect=request),patch.object(f25.f3,'expect',side_effect=storage),
-            patch.object(f25.f4,'fresh_log',return_value=shutdown if shutdown is not None else 'Shutdown completed. Shutdown completed. Graceful shutdown complete')):
+            patch.object(f25.f4,'fresh_log',return_value=shutdown if shutdown is not None else 'Shutdown completed. Graceful shutdown complete')):
             stack.enter_context(patcher)
         handles={}
         for name,owner,attribute,side in [('seed',f25,'prepare_business_rows',seed),('observe',f25,'observe_created_members',observe),
@@ -489,7 +489,7 @@ class F25GuardTest(unittest.TestCase):
                 self.assertEqual('incomplete',json.loads((h['evidence']/'f25-packaged-result.txt').read_text())['status'])
 
     def test_given_incomplete_shutdown_connection_or_private_or_unbounded_logs__when_finishing__then_no_passed_receipt(self):
-        for options in ({'shutdown':'Graceful shutdown complete'},{'remaining':'1'},{'shutdown':'Shutdown completed. Shutdown completed. Graceful shutdown complete private-reader'},{'biglog':True},{'stub_private':True}):
+        for options in ({'shutdown':'Graceful shutdown complete'},{'remaining':'1'},{'shutdown':'Shutdown completed. Graceful shutdown complete private-reader'},{'biglog':True},{'stub_private':True}):
             with self.subTest(options=options),tempfile.TemporaryDirectory() as d,packaged_harness(d,**options) as h:
                 with self.assertRaises(AssertionError):f25.smoke()
                 self.assertEqual(2,h['stop'].call_count);h['cleanup'].assert_called_once_with(f25.OWNED,f25.USERS)

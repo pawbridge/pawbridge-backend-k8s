@@ -314,7 +314,7 @@ class F21GuardTest(unittest.TestCase):
             self.assertNotIn('Authorization', requests[7][1]['headers']); self.assertEqual('POST', requests[8][1]['method'])
             self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(f21.OWNED)
             self.assertEqual(2, result['shutdown_pools']); self.assertEqual(0, result['remaining_application_connections'])
-            self.assertEqual('1', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
+            self.assertEqual('4', start.call_args.args[1]['F2_POOL_MAX_SIZE'])
             for key in ('DAILY_VISITORS_ENABLED', 'SPRING_TASK_SCHEDULING_ENABLED'): self.assertNotIn(key, start.call_args.args[1])
 
     def test_given_stale_used_token_after_snapshot__when_request_due__then_request_zero_children_stopped_owned_cleanup_and_incomplete(self):

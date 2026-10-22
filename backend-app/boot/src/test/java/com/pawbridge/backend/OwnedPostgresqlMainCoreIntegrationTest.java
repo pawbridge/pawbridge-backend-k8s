@@ -92,7 +92,7 @@ class OwnedPostgresqlMainCoreIntegrationTest {
             values.put("F3_DB_WRITER_USER", settings.writer());
             values.put("F3_DB_WRITER_PASSWORD", settings.writerPassword());
             var read = ReadDatabaseSettings.fromEnvironment(values::get);
-            var write = PostWriteSettings.fromEnvironment(values::get, read);
+            var write = PostWriteSettings.fromEnvironment(values::get);
             context = new GenericWebApplicationContext();
             context.setServletContext(new MockServletContext());
             TestPropertyValues.of(CORE_FLAGS).applyTo(context);

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import secrets
 import signal
 import socket
@@ -20,10 +21,56 @@ import f2_ci as f2
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = 'pawbridge-f3-ci-only-v1'
 WRITER = 'pawbridge_f3_writer'
+APP = 'pawbridge_app'  # single shared pool login: member of the reader and writer roles
 EVIDENCE = ROOT / 'build/ci'
 
 
+READER = 'pawbridge_f2_reader'
+# The app role inherits both roles, so a SELECT fault injected on one role is only effective while the
+# other role lacks the same privilege. Matching REVOKE/GRANT SELECT queries also revoke/restore exactly
+# the overlapping privilege of the other role (table-level or per column), recorded per relation/role.
+_SELECT_ACL = re.compile(r'(REVOKE|GRANT) SELECT(?:\(([a-z_,]+)\))? ON ([a-z_]+\.[a-z_]+) (?:FROM|TO) '
+                         r'(pawbridge_f2_reader|pawbridge_f3_writer)')
+_APP_OVERLAP_RESTORES = {}
+
+
+def _other_role_overlap(relation, columns, role):
+    other = WRITER if role == READER else READER
+    if _raw_sql("SELECT has_table_privilege('" + other + "','" + relation + "','SELECT')") == 't':
+        return (['REVOKE SELECT ON ' + relation + ' FROM ' + other],
+                ['GRANT SELECT ON ' + relation + ' TO ' + other])
+    revokes, restores = [], []
+    for column in (columns.split(',') if columns else ()):
+        if _raw_sql("SELECT has_column_privilege('" + other + "','" + relation + "','" + column + "','SELECT')") == 't':
+            revokes.append('REVOKE SELECT(' + column + ') ON ' + relation + ' FROM ' + other)
+            restores.append('GRANT SELECT(' + column + ') ON ' + relation + ' TO ' + other)
+    return revokes, restores
+
+
 def sql(query='', input_text=None):
+    statements = [part.strip() for part in query.split(';') if part.strip()] if input_text is None else []
+    matches = [_SELECT_ACL.fullmatch(part) for part in statements]
+    if not statements or not all(matches):
+        return _raw_sql(query, input_text)
+    companions = []
+    for match in matches:
+        action, columns, relation, role = match.groups()
+        if action == 'REVOKE' and (relation, role) not in _APP_OVERLAP_RESTORES:
+            revokes, restores = _other_role_overlap(relation, columns, role)
+            if revokes:
+                companions += revokes
+                _APP_OVERLAP_RESTORES[(relation, role)] = restores
+    result = _raw_sql(query)
+    for match in matches:
+        action, _, relation, role = match.groups()
+        if action == 'GRANT':
+            companions += _APP_OVERLAP_RESTORES.pop((relation, role), [])
+    if companions:
+        _raw_sql('; '.join(companions))
+    return result
+
+
+def _raw_sql(query='', input_text=None):
     f2.require_fixture()
     environment = dict(os.environ, PGPASSWORD=os.environ['F2_TEST_ADMIN_PASSWORD'])
     args = ['docker', 'exec', '--env', 'PGPASSWORD']
@@ -185,8 +232,8 @@ def smoke():
     base_env = {key: os.environ[key] for key in ('PATH', 'JAVA_HOME', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR')
                 if key in os.environ}
     app_env = dict(base_env, F2_JDBC_URL=os.environ['F2_TEST_JDBC_URL'],
-        F2_DB_USER=os.environ['F2_TEST_DB_USER'], F2_DB_PASSWORD=os.environ['F2_TEST_DB_PASSWORD'],
-        F2_POOL_MAX_SIZE='2', F2_PORT=str(port()), F3_DB_WRITER_USER=WRITER,
+        F2_DB_USER=APP, F2_DB_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
+        F2_POOL_MAX_SIZE='4', F2_PORT=str(port()), F3_DB_WRITER_USER=WRITER,
         F3_DB_WRITER_PASSWORD=os.environ['F3_TEST_WRITER_PASSWORD'],
         F3_JWT_SECRET=os.environ['F3_TEST_JWT_SECRET'], F3_STORAGE_ENDPOINT=endpoint,
         F3_STORAGE_BUCKET=bucket, F3_STORAGE_PUBLIC_BASE_URL='https://fixture.invalid',
@@ -195,7 +242,7 @@ def smoke():
     base = 'http://127.0.0.1:' + app_env['F2_PORT']
     state = lambda: expect(endpoint, '/__f3__/state', 200, headers=control_headers)
     logs = EVIDENCE / 'f3-packaged-startup.log'
-    result = {'timezone': 'Asia/Seoul', 'reader_pool_maximum': 2, 'writer_pool_maximum': 1,
+    result = {'timezone': 'Asia/Seoul', 'pool_maximum': 4,
               'synthetic_database': f2.DATABASE, 'baseline': 'F2 compatibility tests run separately'}
     with (EVIDENCE / 'f3-s3-stub.log').open('w') as stub_log, logs.open('w') as app_log:
         stub = subprocess.Popen([sys.executable, str(ROOT / 'scripts/f3_s3_stub.py'), '--host', '127.0.0.1',
@@ -207,7 +254,7 @@ def smoke():
         try:
             wait_ready(stub, lambda: state()['owner'] == owner, 'S3 stub')
             verify_continue_handshake(endpoint, owner)
-            for missing_key in ('F2_JDBC_URL', 'F3_DB_WRITER_PASSWORD', 'F3_JWT_SECRET', 'F3_STORAGE_ENDPOINT'):
+            for missing_key in ('F2_JDBC_URL', 'F2_DB_PASSWORD', 'F3_JWT_SECRET', 'F3_STORAGE_ENDPOINT'):
                 incomplete = {key: value for key, value in app_env.items() if key != missing_key}
                 failure = subprocess.run(['java', '-Xmx256m', '-jar', str(jar), '--spring.main.banner-mode=off'],
                     env=incomplete, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=15, text=True)
@@ -217,7 +264,7 @@ def smoke():
                 (EVIDENCE / ('f3-missing-' + missing_key + '.log')).write_text(failure.stdout)
             if state()['counts']['PUT'] != 0:
                 raise AssertionError('Fail-fast startup contacted storage')
-            if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+            if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
                 raise AssertionError('Fail-fast startup opened an application database connection')
             app = subprocess.Popen(['java', '-Duser.timezone=Asia/Seoul', '-Xmx256m', '-jar', str(jar),
                 '--spring.main.banner-mode=off'], env=app_env, stdout=app_log, stderr=subprocess.STDOUT)
@@ -363,7 +410,7 @@ def smoke():
                 expect(base, internal, 404)
             if expect(base, '/api/posts/read/42', 200) != expect(base, '/api/v1/posts/read/42', 200):
                 raise AssertionError('Legacy post read alias differs from the v1 route')
-            if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
+            if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
                 raise AssertionError('Reader/writer transaction leaked after HTTP response')
             result['packaged_post_get_auth_upload_rollback_recovery'] = 'passed'
         except Exception:
@@ -380,9 +427,9 @@ def smoke():
                 result['stub_sigterm_exit'] = stop_owned_child(stub, 'S3 stub')
                 (EVIDENCE / 'f3-packaged-result.txt').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     log_text = logs.read_text()
-    if log_text.count('Shutdown completed.') < 2 or 'Graceful shutdown complete' not in log_text:
+    if log_text.count('Shutdown completed.') < 1 or 'Graceful shutdown complete' not in log_text:
         raise AssertionError('Both pools and HTTP graceful termination evidence is missing')
-    if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
+    if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer')") != '0':
         raise AssertionError('Reader/writer connections remain after graceful termination')
     print('Hosted synthetic F3 POST/GET, auth effects, SDK uploads, rollback/recovery and graceful shutdown passed')
 
