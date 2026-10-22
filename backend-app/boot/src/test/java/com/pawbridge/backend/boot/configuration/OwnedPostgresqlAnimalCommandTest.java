@@ -88,7 +88,7 @@ class OwnedPostgresqlAnimalCommandTest {
     private static final Map<String, String> TABLE_KEYS = Map.of(
             "pawbridge_user.users", "user_id", "pawbridge_user.contact_deletions", "user_id",
             "pawbridge_animal.shelters", "id", "pawbridge_animal.animals", "id",
-            "pawbridge_animal.outbox_events", "id", "pawbridge_animal.chatbot_sessions", "id",
+            "pawbridge_animal.chatbot_sessions", "id",
             "pawbridge_animal.animal_search_documents", "animal_id",
             "pawbridge_animal.shelter_search_documents", "shelter_id");
     private final Set<Long> ownedIds = new LinkedHashSet<>();
@@ -150,7 +150,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    void givenCurrentDatabaseAdministratorAndStaleUserJwt_whenCreating_thenPersistManualAuditSearchAndDistinctOutboxIds() {
+    void givenCurrentDatabaseAdministratorAndStaleUserJwt_whenCreating_thenPersistManualAuditAndSearch() {
         http((mvc, context) -> {
             JsonNode created = create(mvc, ADMIN, null, "owned-care-b", "synthetic breed");
             long id = created.path("id").asLong();
@@ -163,7 +163,6 @@ class OwnedPostgresqlAnimalCommandTest {
             check(((Number) animal.get("shelter_id")).longValue() == 990011L,
                     "The current database administrator may create for another shelter despite a stale User JWT role");
             projection(id, 1);
-            assertEvents(id, List.of("animal.created"));
             released();
         });
     }
@@ -182,14 +181,14 @@ class OwnedPostgresqlAnimalCommandTest {
                         && "수동 등록 외 데이터는 공고번호가 필요합니다.".equals(rejected.path("message").asText())
                         && rejected.has("data") && rejected.path("data").isNull(),
                         "A missing APMS notice must return the fixed validation error");
-                check(fingerprint().equals(before), "Rejected APMS input must preserve all eight fixture tables");
+                check(fingerprint().equals(before), "Rejected APMS input must preserve all seven fixture tables");
                 released();
             }
         });
     }
 
     @Test
-    void givenCurrentOwningShelterAndApmsAnimal_whenUsingAllFourJsonCommands_thenKeepOriginalEventsAuditAndSearchRevision() {
+    void givenCurrentOwningShelterAndApmsAnimal_whenUsingAllFourJsonCommands_thenKeepOriginalAuditAndSearchRevision() {
         http((mvc, context) -> {
             String notice = "OWNED-P8-FOUR-COMMANDS";
             Map<String, Object> body = body(notice, "owned-care-a", "synthetic breed"); body.put("apiSource", "APMS_ANIMAL");
@@ -216,19 +215,10 @@ class OwnedPostgresqlAnimalCommandTest {
             send(mvc, "PATCH", ROOT + "/" + id + "/description", token(SHELTER), "{\"description\":\"새로운 보호 설명\"}", 200);
             check("새로운 보호 설명".equals(animal(id).get("description")), "The original description command must persist");
             projection(id, 2);
-            assertEvents(id, List.of("animal.created", "animal.status.changed", "animal.updated"));
-            var events = events(id);
-            JsonNode changed = JSON.readTree((String) events.get(1).get("payload"));
-            check("PROTECT".equals(changed.path("oldStatus").asText()) && "ADOPTED".equals(changed.path("newStatus").asText())
-                    && notice.equals(changed.path("animalName").asText()), "The original status payload fields must remain exact");
-            JsonNode described = JSON.readTree((String) events.get(2).get("payload"));
-            check("새로운 보호 설명".equals(described.path("updatedFields").path("description").asText()),
-                    "The original updatedFields event shape must survive");
             send(mvc, "DELETE", ROOT + "/" + id, token(SHELTER), null, 204);
             check(count("SELECT count(*) FROM pawbridge_animal.animals WHERE id=?", id) == 0
                     && count("SELECT count(*) FROM pawbridge_animal.animal_search_documents WHERE animal_id=?", id) == 0,
                     "Delete and the original search-document FK cascade must commit together");
-            check(events(id).size() == 3, "The original delete command must not invent another Outbox event");
             released();
         });
     }
@@ -295,20 +285,6 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    void givenTheExplicitSyntheticOutboxFailure_whenCreatingThenRetrying_thenRollBackAnimalSearchAndEventBeforeNormalRecovery() {
-        http((mvc, context) -> {
-            Map<String, Fingerprint> before = fingerprint();
-            send(mvc, "POST", ROOT, token(SHELTER),
-                    JSON.writeValueAsString(body("OWNED-P8-RETRY", "owned-care-a", "OWNED-P8-FAIL-OUTBOX")), 500);
-            check(fingerprint().equals(before), "An Outbox failure after Animal/search writes must roll all three back");
-            long id = create(mvc, SHELTER, "OWNED-P8-RETRY", "owned-care-a", "normal retry breed").path("id").asLong();
-            check(count("SELECT count(*) FROM pawbridge_animal.animals WHERE apms_notice_no=?", "OWNED-P8-RETRY") == 1,
-                    "A normal retry after rollback must create exactly one owned Animal");
-            projection(id, 1); assertEvents(id, List.of("animal.created")); released();
-        });
-    }
-
-    @Test
     void givenTheActualServiceWriterTemplate_whenLockingTheCurrentUser_thenUseWritableReadCommittedAndOnePoolConnectionUntilCompletion() {
         http((mvc, context) -> {
             var writes = (TransactionTemplate) ReflectionTestUtils.getField(context.getBean(AnimalCommandService.class), "writes");
@@ -370,10 +346,6 @@ class OwnedPostgresqlAnimalCommandTest {
                     && "concurrent synthetic description".equals(responses.get(1).path("description").asText()),
                     "Each successful response must contain its own mutation");
             projection(id, 2);
-            var rows = events(id);
-            check(rows.size() == 3 && rows.stream().filter(row -> "animal.status.changed".equals(row.get("topic"))).count() == 1
-                    && rows.stream().filter(row -> "animal.updated".equals(row.get("topic"))).count() == 1,
-                    "Both committed updates must keep exactly one original event each");
             released();
         });
     }
@@ -414,7 +386,6 @@ class OwnedPostgresqlAnimalCommandTest {
             check(jdbc.queryForObject("SELECT count(*) FROM pawbridge_animal.animals WHERE apms_notice_no IN (?,?)", Long.class, a, b) == 2,
                     "The two successful creates must persist two differently numbered rows");
             projection(first, 1); projection(second, 1);
-            assertEvents(first, List.of("animal.created")); assertEvents(second, List.of("animal.created"));
             released();
         });
     }
@@ -478,12 +449,11 @@ class OwnedPostgresqlAnimalCommandTest {
         for (long id : discovered)
             check(id > 0 && id != FOREIGN_ANIMAL, "Cleanup cannot select an invalid or foreign fixture Animal");
         for (long id : discovered) {
-            jdbc.update("DELETE FROM pawbridge_animal.outbox_events WHERE aggregate_type='Animal' AND aggregate_id=?", Long.toString(id));
             jdbc.update("DELETE FROM pawbridge_animal.animals WHERE id=?", id);
         }
         ownedIds.clear(); ownedKeys.clear();
         // Identity sequence consumption on failed/rolled-back inserts is deliberately outside this fingerprint.
-        check(fingerprint().equals(baseline), "All eight tables, including foreign seeds, must return to their baseline");
+        check(fingerprint().equals(baseline), "All seven tables, including foreign seeds, must return to their baseline");
         check(unique, "Each generated request key must identify at most one Animal");
         released();
     }
@@ -579,23 +549,6 @@ class OwnedPostgresqlAnimalCommandTest {
                 && ((Number) value.get("source_revision")).longValue() == revision
                 && Boolean.FALSE.equals(value.get("search_dirty")) && KoreanSearchAnalyzer.VERSION.equals(value.get("analyzer_version"))
                 && !((String) value.get("tokens")).isBlank(), "The persisted Nori projection and source revision must commit together");
-    }
-    private List<Map<String, Object>> events(long id) {
-        return jdbc.queryForList("SELECT * FROM pawbridge_animal.outbox_events WHERE aggregate_type='Animal' AND aggregate_id=? ORDER BY id", Long.toString(id));
-    }
-    private void assertEvents(long id, List<String> topics) throws Exception {
-        List<Map<String, Object>> events = events(id);
-        check(events.size() == topics.size(), "Only the original command events must be recorded");
-        Set<String> uuids = new LinkedHashSet<>();
-        for (int index = 0; index < events.size(); index++) {
-            Map<String, Object> event = events.get(index); JsonNode payload = JSON.readTree((String) event.get("payload"));
-            String outboxId = (String) event.get("event_id"), payloadId = payload.path("eventId").asText();
-            UUID.fromString(outboxId); UUID.fromString(payloadId);
-            check(!outboxId.equals(payloadId) && uuids.add(outboxId) && uuids.add(payloadId), "Payload and Outbox UUIDs must remain distinct");
-            check(topics.get(index).equals(event.get("topic")) && event.get("event_type").equals(payload.path("eventType").asText())
-                    && payload.path("animalId").asLong() == id && event.get("created_at") != null
-                    && !payload.path("timestamp").asText().isBlank(), "The original route, event envelope and real audit fields must persist");
-        }
     }
     private long count(String sql, Object value) { return jdbc.queryForObject(sql, Long.class, value); }
     private Map<String, Fingerprint> fingerprint() {

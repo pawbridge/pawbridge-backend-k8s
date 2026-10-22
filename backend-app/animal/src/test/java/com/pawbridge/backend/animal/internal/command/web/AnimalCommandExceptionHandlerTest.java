@@ -23,7 +23,7 @@ class AnimalCommandExceptionHandlerTest {
         assertThat(response.getBody().message()).isEqualTo(PostgresqlRollbackCharsetViolation.MESSAGE);
     }
     @Test void charset_violation_is_400_through_commit_and_batch_next_exception_wrappers() {
-        var batch=new BatchUpdateException();batch.setNextException(error("pawbridge_animal","ck_rollback_charset_outbox_events","23514"));
+        var batch=new BatchUpdateException();batch.setNextException(error("pawbridge_animal","ck_rollback_charset_shelters","23514"));
         var response=handler.unexpected(new RuntimeException("commit",batch));
         assertThat(response.getStatusCode().value()).isEqualTo(400);
     }

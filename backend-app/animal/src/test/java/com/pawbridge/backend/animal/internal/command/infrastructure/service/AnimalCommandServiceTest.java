@@ -1,7 +1,5 @@
 package com.pawbridge.backend.animal.internal.command.infrastructure.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.pawbridge.backend.animal.api.AnimalCommandActors;
 import com.pawbridge.backend.animal.api.AnimalCommandActors.Actor;
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.*;
@@ -25,7 +23,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionStatus;
@@ -39,12 +36,10 @@ import static org.mockito.Mockito.*;
 class AnimalCommandServiceTest {
     final AnimalRepository animals = mock(AnimalRepository.class);
     final ShelterRepository shelters = mock(ShelterRepository.class);
-    final OutboxEventRepository events = mock(OutboxEventRepository.class);
     final AnimalCommandActors actors = mock(AnimalCommandActors.class);
     final SearchDocumentWriter search = mock(SearchDocumentWriter.class);
     final JpaTransactionManager manager = mock(JpaTransactionManager.class);
     final TransactionStatus transaction = mock(TransactionStatus.class);
-    final ObjectMapper json = new ObjectMapper().registerModule(new JavaTimeModule());
     final Shelter shelter = Shelter.builder().id(7L).careRegNo("care-7").name("보호소").build();
     final Animal animal = Animal.builder().id(42L).shelter(shelter).species(Species.DOG)
             .status(AnimalStatus.PROTECT).apiSource(ApiSource.APMS_ANIMAL).apmsNoticeNo("기존-공고").build();
@@ -74,7 +69,7 @@ class AnimalCommandServiceTest {
             ReflectionTestUtils.setField(created, "id", 43L);
             return created;
         });
-        service = service(json);
+        service = service();
     }
 
     @AfterEach void transaction_metadata_does_not_leak() {
@@ -99,9 +94,9 @@ class AnimalCommandServiceTest {
         return template;
     }
 
-    AnimalCommandService service(ObjectMapper mapper) {
+    AnimalCommandService service() {
         return new AnimalCommandService(search, animals, shelters, new AnimalMapper(),
-                new OutboxService(events, mapper), new NoticeNumberGenerator(animals), actors, manager);
+                new NoticeNumberGenerator(animals), actors, manager);
     }
 
     CreateAnimalRequest request() {
@@ -111,21 +106,14 @@ class AnimalCommandServiceTest {
                 .breed("믹스견").description("보호 중").build();
     }
 
-    OutboxEvent event() { var captured=ArgumentCaptor.forClass(OutboxEvent.class); verify(events).save(captured.capture()); return captured.getValue(); }
-
-    @Test void create_defaults_manual_and_refreshes_search_before_original_outbox() throws Exception {
+    @Test void create_defaults_manual_and_refreshes_search() {
         var response = service.create(11L, request());
         assertThat(response.getId()).isEqualTo(43L);
         assertThat(response.getApiSource()).isEqualTo(ApiSource.MANUAL);
         assertThat(response.getApmsNoticeNo()).matches("MAN-\\d{6}-000001");
-        var order=inOrder(actors, animals, search, events, manager);
+        var order=inOrder(actors, animals, search, manager);
         order.verify(actors).find(11L); order.verify(animals).save(any()); order.verify(animals).flush();
-        order.verify(search).animal(43L); order.verify(events).save(any()); order.verify(manager).commit(transaction);
-        var event=event();var payload=json.readTree(event.getPayload());
-        assertThat(event.getAggregateType()).isEqualTo("Animal"); assertThat(event.getAggregateId()).isEqualTo("43");
-        assertThat(event.getEventType()).isEqualTo("ANIMAL_CREATED");assertThat(event.getTopic()).isEqualTo("animal.created");
-        assertThat(payload.get("shelterId").asLong()).isEqualTo(7);
-        assertThat(payload.get("eventId").asText()).isNotEqualTo(event.getEventId());
+        order.verify(search).animal(43L); order.verify(manager).commit(transaction);
     }
 
     @Test void administrator_can_create_for_other_shelter_and_preserve_apms_source_and_notice() {
@@ -145,18 +133,18 @@ class AnimalCommandServiceTest {
     }
 
     @ParameterizedTest @MethodSource("nonManualSourcesAndMissingNotices")
-    void non_manual_without_notice_is_rejected_before_animal_search_outbox_or_generated_number(ApiSource source, String notice) {
+    void non_manual_without_notice_is_rejected_before_animal_search_or_generated_number(ApiSource source, String notice) {
         var request=request();request.setApiSource(source);request.setApmsNoticeNo(notice);
         var mapping=spy(new AnimalMapper());
         var numbers=spy(new NoticeNumberGenerator(animals));
         var command=new AnimalCommandService(search,animals,shelters,mapping,
-                new OutboxService(events,json),numbers,actors,manager);
+                numbers,actors,manager);
 
         assertThatThrownBy(()->command.create(11L,request)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("수동 등록 외 데이터는 공고번호가 필요합니다.");
         assertThat(request.getApiSource()).isEqualTo(source);
         assertThat(request.getApmsNoticeNo()).isEqualTo(notice);
-        verifyNoInteractions(animals,events,mapping,numbers);
+        verifyNoInteractions(animals,mapping,numbers);
         verify(search,never()).animal(anyLong());
         verify(manager).rollback(transaction);verify(manager,never()).commit(any());
     }
@@ -202,49 +190,41 @@ class AnimalCommandServiceTest {
 
         assertThat(result.getStatus()).isEqualTo(AnimalStatus.ADOPTED);
         assertThat(result.getUpdatedAt()).isEqualTo(after).isNotEqualTo(before);
-        verify(events).save(any());verify(manager).commit(transaction);
+        verify(manager).commit(transaction);
         verify(search,never()).animal(anyLong());
     }
 
     @Test void status_flush_failure_rolls_back_and_does_not_map_or_return_success_response() {
         var mapping=spy(new AnimalMapper());
         var command=new AnimalCommandService(search,animals,shelters,mapping,
-                new OutboxService(events,json),new NoticeNumberGenerator(animals),actors,manager);
+                new NoticeNumberGenerator(animals),actors,manager);
         var failure=new org.springframework.dao.DataIntegrityViolationException("synthetic flush failure");
         doThrow(failure).when(animals).flush();
         var request=new UpdateAnimalStatusRequest();request.setNewStatus(AnimalStatus.ADOPTED);
 
         assertThatThrownBy(()->command.updateStatus(11L,42L,request)).isSameAs(failure);
 
-        verify(events).save(any());
         verify(mapping,never()).toDetailResponse(any());
         verify(manager).rollback(transaction);verify(manager,never()).commit(any());
         verify(search,never()).animal(anyLong());
     }
 
-    @Test void status_updates_apms_animal_and_emits_original_payload_even_when_status_is_unchanged() throws Exception {
+    @Test void status_updates_apms_animal_even_when_status_is_unchanged() {
         var request=new UpdateAnimalStatusRequest(); request.setNewStatus(AnimalStatus.PROTECT);
         var response=service.updateStatus(11L,42L,request);
         assertThat(response.getStatus()).isEqualTo(AnimalStatus.PROTECT);
-        var event=event();var payload=json.readTree(event.getPayload());
-        assertThat(event.getTopic()).isEqualTo("animal.status.changed");
-        assertThat(payload.get("oldStatus").asText()).isEqualTo("PROTECT");
-        assertThat(payload.get("newStatus").asText()).isEqualTo("PROTECT");
-        assertThat(payload.get("animalName").asText()).isEqualTo("기존-공고");
         verify(search,never()).animal(anyLong()); verify(manager).commit(transaction);
     }
 
-    @Test void description_updates_apms_animal_and_refreshes_search_before_outbox() throws Exception {
+    @Test void description_updates_apms_animal_and_refreshes_search() {
         var request=new UpdateAnimalDescriptionRequest();request.setDescription("새 설명");
         assertThat(service.updateDescription(11L,42L,request).getDescription()).isEqualTo("새 설명");
-        var event=event();assertThat(event.getTopic()).isEqualTo("animal.updated");
-        assertThat(json.readTree(event.getPayload()).get("updatedFields").get("description").asText()).isEqualTo("새 설명");
-        var order=inOrder(animals,search,events,manager);order.verify(animals).flush();order.verify(search).animal(42L);
-        order.verify(events).save(any());order.verify(manager).commit(transaction);
+        var order=inOrder(animals,search,manager);order.verify(animals).flush();order.verify(search).animal(42L);
+        order.verify(manager).commit(transaction);
     }
 
-    @Test void delete_checks_current_owner_and_has_no_new_outbox_or_search_cleanup() {
-        service.delete(11L,42L);verify(animals).deleteById(42L);verifyNoInteractions(events);
+    @Test void delete_checks_current_owner_and_has_no_search_cleanup() {
+        service.delete(11L,42L);verify(animals).deleteById(42L);
         verify(search,never()).animal(anyLong());verify(manager).commit(transaction);
     }
 
@@ -259,7 +239,7 @@ class AnimalCommandServiceTest {
     void unavailable_or_unauthorized_current_actor_cannot_create(Actor actor) {
         when(actors.find(11L)).thenReturn(actor);
         assertThatThrownBy(()->service.create(11L,request())).isInstanceOf(AnimalCommandForbiddenException.class);
-        verifyNoInteractions(animals,shelters,events); verify(search,never()).animal(anyLong());
+        verifyNoInteractions(animals,shelters); verify(search,never()).animal(anyLong());
         verify(manager).rollback(transaction);
     }
 
@@ -267,7 +247,7 @@ class AnimalCommandServiceTest {
     void unprefixed_role_aliases_are_denied(String role) {
         when(actors.find(11L)).thenReturn(new Actor(11L,role,"care-7",true,false));
         assertThatThrownBy(()->service.create(11L,request())).isInstanceOf(AnimalCommandForbiddenException.class);
-        verifyNoInteractions(animals,shelters,events);verify(search,never()).animal(anyLong());
+        verifyNoInteractions(animals,shelters);verify(search,never()).animal(anyLong());
         verify(manager).rollback(transaction);
     }
 
@@ -275,51 +255,44 @@ class AnimalCommandServiceTest {
     void another_shelter_cannot_mutate_any_command(String command) {
         when(actors.find(11L)).thenReturn(new Actor(11L,"ROLE_SHELTER","other-care",true,false));
         assertThatThrownBy(()->invoke(command,11L)).isInstanceOf(AnimalCommandForbiddenException.class);
-        verify(animals,never()).save(any());verify(animals,never()).deleteById(any());verifyNoInteractions(events);
+        verify(animals,never()).save(any());verify(animals,never()).deleteById(any());
         verify(search,never()).animal(anyLong());assertThat(animal.getDescription()).isNull();
         assertThat(animal.getStatus()).isEqualTo(AnimalStatus.PROTECT);verify(manager).rollback(transaction);
     }
 
     @Test void missing_principal_cannot_invoke_delete() {
         assertThatThrownBy(()->service.delete(null,42L)).isInstanceOf(AnimalCommandForbiddenException.class);
-        verifyNoInteractions(actors,animals,events);verify(manager).rollback(transaction);
+        verifyNoInteractions(actors,animals);verify(manager).rollback(transaction);
     }
 
     @ParameterizedTest @ValueSource(strings={"status","description","delete"})
     void missing_animal_keeps_original_entity_not_found_failure(String command) {
         when(animals.findByIdForUpdate(42L)).thenReturn(Optional.empty());
         assertThatThrownBy(()->invoke(command,11L)).isInstanceOf(EntityNotFoundException.class);
-        verifyNoInteractions(events);verify(manager).rollback(transaction);
+        verify(manager).rollback(transaction);
     }
 
     @Test void missing_shelter_keeps_original_failure_before_save() {
         when(shelters.findByCareRegNo("care-7")).thenReturn(Optional.empty());
         assertThatThrownBy(()->service.create(11L,request())).isInstanceOf(EntityNotFoundException.class);
-        verifyNoInteractions(animals,events);verify(manager).rollback(transaction);
+        verifyNoInteractions(animals);verify(manager).rollback(transaction);
     }
 
-    @Test void search_failure_rolls_back_without_recording_outbox() {
+    @Test void search_failure_rolls_back_the_writer_transaction() {
         doThrow(new IllegalStateException("projection failed")).when(search).animal(43L);
         assertThatThrownBy(()->service.create(11L,request())).isInstanceOf(IllegalStateException.class);
-        verifyNoInteractions(events);verify(manager).rollback(transaction);verify(manager,never()).commit(any());
-    }
-
-    @Test void outbox_serialization_failure_rolls_back_the_writer_transaction() throws Exception {
-        ObjectMapper failing=mock(ObjectMapper.class);
-        when(failing.writeValueAsString(any())).thenThrow(new com.fasterxml.jackson.core.JsonProcessingException("serialize"){});
-        assertThatThrownBy(()->service(failing).create(11L,request())).isInstanceOf(RuntimeException.class).hasMessage("Failed to serialize event payload");
-        verifyNoInteractions(events);verify(manager).rollback(transaction);verify(manager,never()).commit(any());
+        verify(manager).rollback(transaction);verify(manager,never()).commit(any());
     }
 
     @Test void delete_fk_failure_propagates_and_rolls_back() {
         doThrow(new org.springframework.dao.DataIntegrityViolationException("referenced")).when(animals).deleteById(42L);
         assertThatThrownBy(()->service.delete(11L,42L)).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
-        verify(manager).rollback(transaction);verifyNoInteractions(events);
+        verify(manager).rollback(transaction);
     }
 
     @Test void search_and_jpa_using_different_writer_sources_fail_before_work() {
         when(manager.getDataSource()).thenReturn(mock(DataSource.class));
-        assertThatThrownBy(()->service(json)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(()->service()).isInstanceOf(IllegalArgumentException.class);
     }
 
     @ParameterizedTest @ValueSource(strings={"status","description","delete"})
@@ -343,7 +316,7 @@ class AnimalCommandServiceTest {
         order.verify(animals).lockManualNoticePrefix(0x5042414E,day);
         order.verify(animals).findMaxManualNoticeSuffix(prefix+"%","^"+prefix+"([0-9]{6})$");
         verify(animals,never()).save(any());verify(animals,never()).flush();
-        verifyNoInteractions(events);verify(search,never()).animal(anyLong());
+        verify(search,never()).animal(anyLong());
         verify(manager).commit(transaction);
     }
 
@@ -353,14 +326,14 @@ class AnimalCommandServiceTest {
                 .execute(status -> new NoticeNumberGenerator(animals).generate()))
                 .isInstanceOf(IllegalStateException.class).hasMessage("수동 등록 공고번호의 일일 한도를 초과했습니다.");
         verify(animals,never()).save(any());verify(animals,never()).flush();
-        verifyNoInteractions(events);verify(search,never()).animal(anyLong());
+        verify(search,never()).animal(anyLong());
         verify(manager).rollback(transaction);verify(manager,never()).commit(any());
     }
 
     @Test void notice_generation_outside_transaction_fails_before_any_repository_call() {
         assertThatThrownBy(() -> new NoticeNumberGenerator(animals).generate())
                 .isInstanceOf(IllegalStateException.class).hasMessage("수동 공고번호는 쓰기 트랜잭션 안에서 생성해야 합니다.");
-        verifyNoInteractions(animals,events);verify(search,never()).animal(anyLong());
+        verifyNoInteractions(animals);verify(search,never()).animal(anyLong());
     }
 
     @ParameterizedTest @ValueSource(ints={-1,1,4,8})
@@ -369,7 +342,7 @@ class AnimalCommandServiceTest {
                 .execute(status -> new NoticeNumberGenerator(animals).generate()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("수동 공고번호에는 명시적인 READ_COMMITTED 격리 수준이 필요합니다.");
-        verifyNoInteractions(animals,events);verify(search,never()).animal(anyLong());
+        verifyNoInteractions(animals);verify(search,never()).animal(anyLong());
         verify(manager).rollback(transaction);verify(manager,never()).commit(any());
     }
 
@@ -378,7 +351,7 @@ class AnimalCommandServiceTest {
         template.setReadOnly(true);
         assertThatThrownBy(() -> template.execute(status -> new NoticeNumberGenerator(animals).generate()))
                 .isInstanceOf(IllegalStateException.class).hasMessage("수동 공고번호는 쓰기 트랜잭션 안에서 생성해야 합니다.");
-        verifyNoInteractions(animals,events);verify(search,never()).animal(anyLong());
+        verifyNoInteractions(animals);verify(search,never()).animal(anyLong());
         verify(manager).rollback(transaction);verify(manager,never()).commit(any());
     }
 

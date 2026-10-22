@@ -2,7 +2,6 @@ package com.pawbridge.backend.boot.configuration;
 
 import com.pawbridge.backend.animal.api.AnimalCommandActors;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository;
-import com.pawbridge.backend.animal.internal.command.infrastructure.repository.OutboxEventRepository;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository;
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter;
 import com.pawbridge.backend.animal.internal.discovery.infrastructure.KoreanSearchAnalyzer;
@@ -37,7 +36,7 @@ public class AnimalJpaWriterConfiguration {
         factory.setDataSource(source);
         factory.setPersistenceUnitName("pawbridge-animal-command-writer");
         var managed = new java.util.ArrayList<String>(java.util.List.of(MODEL + "Animal", MODEL + "Shelter",
-                MODEL + "OutboxEvent", MODEL + "BaseTimeEntity"));
+                MODEL + "BaseTimeEntity"));
         if ("true".equalsIgnoreCase(chatbotFlag)) {
             managed.add("com.pawbridge.backend.animal.internal.chatbot.infrastructure.entity.ChatbotSession");
             managed.add("com.pawbridge.backend.animal.internal.chatbot.infrastructure.entity.ChatbotMessage");
@@ -86,11 +85,6 @@ public class AnimalJpaWriterConfiguration {
     @Bean
     ShelterRepository animalCommandShelters(@Qualifier("animalCommandRepositoryFactory") JpaRepositoryFactory repositories) {
         return repositories.getRepository(ShelterRepository.class);
-    }
-
-    @Bean
-    OutboxEventRepository animalCommandOutboxRepository(@Qualifier("animalCommandRepositoryFactory") JpaRepositoryFactory repositories) {
-        return repositories.getRepository(OutboxEventRepository.class);
     }
 
     @Bean
