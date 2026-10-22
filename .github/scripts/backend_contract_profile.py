@@ -349,7 +349,7 @@ POST_READS_WORKFLOW_SHA256 = 'd9321b62cc0c148ecaec8e0592a1cb57fddf7a5fde5fcac4d5
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01eef7d3466f5ff57fec56f67823a7beff6284c5b9d7f6',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': 'fbdbbcf2417657c775a8d2f24c3b066331d60d5d94955dfe370bfd362ea6afe2',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '6ee2a00cdb1f71dcfd09d8b35fcc4b5590a57a9e2414cbabf8292f24562fba5b',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -361,7 +361,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberChatTransportConfiguration.java': 'aa0c151315ac9d7d6e14003d0211a71808eca0be0e5661d03d0fea5588527f95',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/MemberCleanupConfiguration.java': '38763164bc1f510d7d1e019b5600cfa170e6f50b01471a6e020b9bc5b3364e2e',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteConfiguration.java': 'c3e8c62ce0457be98e18cb4cbca31a762699f50ee396c678fcffd7382987362f',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': 'b3d4a1a3c17065816d68dd85829716e33878d3fe03435587fef66d492668d0cd',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadSecurityConfiguration.java': '951f9f3d503ee5925c3870e615e6785b8375ad9b25cf6b8e92adc92bebbcec93',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '5998ca012795207e034ee0cb19e657820e98faf78609184b35f49171d612d5fc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'dda638d643fc686e44102314be4d0d6d88b36a07e910fd074615950d6a3f21d1',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '7016adb41e6e20e7400999aab42eabef66c18de3739b63878e22bf0cd889dd31',
@@ -377,7 +377,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatProtocolTest.java': 'fdbeeba7aa7da996e0b40ce0fe71af8005ec0d8fe3418f3621a82584726934f3',
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatSessionLifecycleTest.java': '8e1d8a6b05a1b114461bcf39fa11c0e90500a407f079dd3a6252d3a55362edf0',
  'backend-app/boot/src/test/java/com/pawbridge/backend/MemberChatTransportHttpTest.java': '11fb099240fc857c3a0311ef90d5f70df04f291b3393440639e147a558543ecd',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '8ed1ec46a6294e846564547e76cc4c2e3c7a4282429e7503fb30a28aa4968377',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeApplicationTest.java': '91d4f52232aca2b95722543cf1b883795e60aea6b24cc797d67fb5fe1dc54018',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostDeleteHttpTest.java': 'ca8bec58cfbc8251b772cbcaaef91d8dfa14d5d525dc9510440c39df7e2d1cd6',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostListHttpTest.java': 'c23bff985fd2dc3a8ef48cc5d9f4bb2d6bfecc91d69cc985cb0d74c4ddbb2f37',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostSearchHttpTest.java': '009c20bb4daf58dba55e2ae670eb2c8c77723f37b3f9f72ae30a726a0caabae8',
@@ -1075,7 +1075,12 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '8bbc11e2d1bb5db82d01e
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterDirectorySchedule.java': 'c2e91595db734fab5386ecde07e6f96819a4d34de26c9369349327001dcba3c9',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/ShelterDirectoryConfigurationTest.java': '5eb9029254f3f65ef6736aabc846c4f17a894f85bb37fd4ab6fbd83a2e67d0ec',
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreAdminOrderStatusHttpTest.java': 'd9c0301f4de4f71bbe0c778b9a495787bb449b0919129331f5350ccaf8432d03',
- 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/orderadministration/web/OrderStatusUpdateRequest.java': '64b52b3210795b99371f431c4bc5676408f54fce2fd97f401e0b197a15718a81'}
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/orderadministration/web/OrderStatusUpdateRequest.java': '64b52b3210795b99371f431c4bc5676408f54fce2fd97f401e0b197a15718a81',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreMockPaymentConfiguration.java': 'e34fcdcbeeb293864c3f773d6eff31a85b52a0a7bf4f69ccb00b6e746c50ec8d',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/StoreMockPaymentHttpTest.java': '3d379527cff8887d30b34c8ab75e2cc54bab14a019d238a69e7dfa6e6ef7d1df',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreMockPaymentConfigurationTest.java': 'ca0f76b90f951892431713c52e3c53ecac63398e03b9db973044e5e9a5834b8c',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/web/MockOrderPaymentController.java': 'baa902e892b1caff45d56a996e9e7235b87950a9ff25b0c617f23beb1fa19b6f',
+ 'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/payment/web/MockOrderPaymentExceptionHandler.java': 'd3ecc1feb1c591e0c50314f554cb55ad8a448daf599741ea5fabaf0d9bd27413'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39577223965
@@ -1426,7 +1431,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 730
+                or len(POST_READS_APP_HASHES) != 735
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

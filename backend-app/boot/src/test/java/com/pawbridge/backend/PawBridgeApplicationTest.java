@@ -89,6 +89,7 @@ class PawBridgeApplicationTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.directorder.infrastructure.JdbcProductSearchRebuild.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentController.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.animal.internal.shelterdirectory.infrastructure.ShelterDirectoryCollector.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.password.application.ChangeUserPassword.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention.class)).isEmpty();
