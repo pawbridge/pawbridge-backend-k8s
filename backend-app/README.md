@@ -862,11 +862,19 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 ## 관리자 주문 조회·배송 관리
 
-`pawbridge.store-order-administration.enabled=true`일 때 관리자 주문 목록·필터/상세 조회와 배송 상태 변경의 세 API만 등록합니다. 기본값은 비활성이며 `on` 등 별칭은 허용하지 않습니다. 기존 Store writer EMF·DataSource·트랜잭션과 auditing을 공유합니다. 관리자 구성만으로 개인 주문 조회, 장바구니 또는 결제 API를 활성화하지 않습니다.
+`pawbridge.store-order-administration.enabled=true`일 때 관리자 주문 목록·필터/상세 조회와 배송 상태 변경의 세 API, 그리고 아래 주문 상태 변경 API를 등록합니다. 기본값은 비활성이며 `on` 등 별칭은 허용하지 않습니다. 기존 Store writer EMF·DataSource·트랜잭션과 auditing을 공유합니다. 관리자 구성만으로 개인 주문 조회, 장바구니 또는 결제 API를 활성화하지 않습니다.
 
 서명 검증된 관리자 JWT와 현재 DB의 정확한 `ROLE_ADMIN`을 모두 요구하며 삭제 대기·누락 계정은 거부합니다. 조회는 짧은 읽기 전용 트랜잭션, 변경은 같은 writer의 User 행 잠금 뒤 Order 행 잠금으로 실행합니다. 목록 크기는 1~100, 정렬은 명시된 Order의 scalar 필드로 제한합니다. 배송 변경은 주문의 결제 상태·금액·품목·재고·Outbox를 바꾸지 않습니다. 원문 계약인 단건 없음 404, 배송 변경 대상 없음 400, null 배송 상태의 500과 rollback을 유지합니다. null은 같은 쓰기 트랜잭션에서 현재 관리자와 주문을 확인한 뒤 DB 변경 전에 고정 오류로 거부해, DB 제약 오류에 수취 정보가 기록되는 경로를 막습니다.
 
 새 합성 DB 검증은 `P13_PG_SETTINGS`의 비공개 설정을 사용하는 `OwnedPostgresqlStoreOrderAdministrationTest`로 분리합니다. 이 소스 편입은 운영 활성화나 Payment·취소·환불·재입고 계약 완료가 아닙니다.
+
+### 관리자 주문 상태 변경
+
+같은 `pawbridge.store-order-administration.enabled=true`에서 원문 `AdminOrderController`의 PATCH `/api/v1/admin/orders/{orderId}/status`(`{"status"}`)를 추가합니다. 원문은 목록·상세·주문 상태·배송 상태를 한 컨트롤러로 묶었으므로 별도 flag를 두지 않습니다. Gateway의 `PATCH:/api/admin/orders/*/status` ADMIN 전용 규칙과 같이 서명 관리자 JWT를 요구하고, 배송 변경과 같은 현재 DB `ROLE_ADMIN` 확인→User 행 잠금→Order 행 잠금 순서로 실행합니다. 응답은 원문 `OrderResponse` 형태와 200이며 대상 없음 400, null 상태 500과 rollback, 알 수 없는 enum·깨진 JSON의 500 family는 배송 변경과 같은 원문 계약입니다.
+
+원문 그대로 `status` 열 하나만 바꿉니다. 허용 전이 검사, 결제·환불·재고·검색·Outbox·이벤트 연동이 없어 PAID→PENDING, 결제 없이 PAID, CANCELLED 전환 시 재고·결제 미복구 같은 임의 전이가 가능합니다. 이 원문 결함은 고치지 않고 활성화 전 확인 항목으로 둡니다. 변경 로그(원문 info)는 남기지 않습니다. Jackson 기본 설정이라 `{"status":1}`처럼 숫자 enum도 받아들입니다(원문과 같음). 주문을 잠그지 않는 결제 결과 처리(`JpaStorePaymentEvents`)와 동시에 실행되면 오래된 스냅샷이 관리자 변경을 덮거나 그 반대가 될 수 있으며 원문에도 잠금·`@Version`이 없습니다.
+
+활성화 전 writer에는 기존 관리자 주문 기능과 같은 권한(`pawbridge_store`·`pawbridge_user` USAGE, 대상 표 SELECT, `users` UPDATE(user_id) 행 잠금용, `orders` 표 단위 UPDATE — `Order`에 `@DynamicUpdate`가 없어 JPA가 전체 열을 UPDATE하므로 열 단위 grant로는 실패합니다)이 필요합니다(`admin-order-owned-schema.sql`과 같음). 누적 F29 CI writer ACL에는 Store 주문 권한이 없으므로 그 역할로 켜면 권한 오류 500이 됩니다. 공유 writer pool 기본 최대 1개를 다른 쓰기와 함께 씁니다. 단위·MVC·Security 시험은 mock 저장소 기준이며 이 경로의 실제 PostgreSQL 검증은 추가하지 않았습니다. 금전 상태를 바꾸므로 CHECK 제약·표 단위 UPDATE grant·행 잠금을 배송 변경의 `OwnedPostgresqlStoreOrderAdministrationTest`와 같은 방식으로 검증한 뒤 켜야 합니다.
 
 ### 관리자 주문 목록의 품목 일괄 조회
 
@@ -881,6 +889,22 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 원문 PostgreSQL의 여행 카탈로그 7개 테이블과 응답·가용 상태·이미지 이용 조건을 사용하며, 응답 중 TourAPI·R2·AI 호출을 하지 않습니다. 수집·스케줄러·갱신 API는 이 구성에 포함하지 않습니다. 새 합성 DB 검증은 SELECT 전용 reader와 `P14_PG_SETTINGS`를 사용하는 `OwnedPostgresqlAnimalTravelTest`로 분리합니다. 기존 수집기의 실행 소유권 인계와 실제 운영 활성화는 별도 미완료 항목입니다.
 
+
+### Animal 이미지 업로드·삭제
+
+`pawbridge.animal-images.enabled=true`에서만 원문 `ImageController`의 세 경로를 조립한다. 기본 off이며 `on` 등 true 이외 별칭은 비활성이다. 저장소 client·bucket·공개 URL은 Post 소유 설정을 빌려 쓰고 닫지 않는다. 새 pool·DDL·의존성은 없다.
+
+| 메서드 | 경로 | 결과 |
+| --- | --- | --- |
+| POST | `/api/v1/animals/images` (`file`) | `{"imageUrl"}`, 200 |
+| POST | `/api/v1/animals/images/multiple` (`files`, 최대5) | `{"imageUrls","count"}`, 200 |
+| DELETE | `/api/v1/animals/images?imageUrl=` | `{"message":"이미지가 삭제되었습니다."}`, 200 |
+
+허용 대상은 이전 Gateway 규칙을 따르되 판정 근거는 기존 Animal 쓰기와 같은 현재 DB 역할이다. 단건 업로드와 삭제는 non-USER 경로였으므로 서명 검증한 회원 ID로 기존 writer 트랜잭션에서 현재 회원을 조회해 ADMIN·SHELTER만 허용하고(403 `권한이 부족합니다.`), 조회를 커밋한 뒤 저장소를 호출한다. 원문 Gateway는 JWT 역할 claim으로 판정했으므로 토큰 발급 뒤 역할이 바뀐 회원, 회원 행이 없거나 삭제 대기인 회원(403), writer DB 장애(500)에서 결과가 다르다. 역할 검사는 인자 바인딩 뒤에 실행되므로 USER의 형식 오류 요청은 원문 403 대신 400/500을 받을 수 있고, 비-multipart 요청은 공통 Post multipart advice의 500 `서버 에러!`를 받는다(원문 500 `서버 내부 오류가 발생했습니다.`). 다중 업로드는 Gateway 역할 규칙에 걸리지 않던 2단 경로라 인증만 요구한다. `/api/animals/...` alias는 Gateway 책임으로 남긴다.
+
+원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 `animals/{uuid}{확장자}` 키, 부분 업로드 실패 시 앞 객체 유지, 삭제 실패·외부 URL 무시와 200 응답을 유지한다. 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다.
+
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있고, 원문의 삭제 실패 error 로그는 남기지 않는다. 이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 역할 조회는 기존 Animal 쓰기와 같은 `JdbcAnimalCommandActors`이므로 선택한 writer에 `pawbridge_user` USAGE, `users`·`contact_deletions` SELECT, `FOR UPDATE`용 `users` UPDATE(user_id)가 필요하다(`animal-command-owned-schema.sql`과 같음). 누적 F29 CI writer ACL은 `contact_deletions`에 INSERT(user_id)만 주므로 그 역할로 켜면 단건 업로드·삭제가 권한 오류 500으로 실패한다. 활성화 전 권한을 별도로 부여·검증한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
 
 ### 보호소 관리 쓰기와 회원 승인 직렬화
 
@@ -940,7 +964,7 @@ owned 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P17_PG_SETTINGS`와 정확한 `P17
 
 ## APMS 예약 수집에서 동물·보호소 검색 반영까지
 
-`apms.batch.schedule-enabled=true`를 명시할 때만 예약·수집 Job·HTTP transport를 함께 조립한다. 기본 off이며 수동 실행 API는 포함하지 않는다. 원문 `query-v2`/`updated-v1` 계획·30일 재조회 overlap·부분 성공·COUNT_MISMATCH·10분 stale 회복과 세션 advisory lock key1을 보존한다. 계획 시계는 Asia/Seoul, Batch heartbeat 비교 시계는 실제 Batch metadata의 JVM 기본 시간대에 맞춰 분리한다.
+`apms.batch.schedule-enabled=true`를 명시할 때만 예약·수집 Job·HTTP transport를 함께 조립한다. 기본 off이며 수동 실행 API는 아래 별도 flag로만 추가한다. 원문 `query-v2`/`updated-v1` 계획·30일 재조회 overlap·부분 성공·COUNT_MISMATCH·10분 stale 회복과 세션 advisory lock key1을 보존한다. 계획 시계는 Asia/Seoul, Batch heartbeat 비교 시계는 실제 Batch metadata의 JVM 기본 시간대에 맞춰 분리한다.
 
 기존 Animal writer DataSource·EntityManagerFactory·JpaTransactionManager·검색 writer를 공유하며 새 pool·엔티티·DDL·Outbox 발행을 만들지 않는다. 외부 snapshot fetch는 실제 TX 밖에서 수행하고 보호소 준비는 짧은 별도 JPA TX, Animal upsert·검색과 Batch chunk checkpoint는 같은 JPA TX를 사용한다. 같은 DataSource라도 서로 다른 JDBC/JPA transaction manager를 혼용하면 metadata 쓰기가 chunk를 조기 commit할 수 있으므로 Repository·Explorer·회복도 같은 Animal JpaTransactionManager를 사용한다. 원문 chunk1000/retry3와 준비 step의 독립 commit 의미는 유지한다. 원문 fault-tolerant recovery가 정상 항목을 별도 TX로 커밋한 뒤 최종 Step이 FAILED일 수도 있다. 실제 반영량·source/search 일치와 실패 구간의 다음 재조회 계획을 함께 확인한다.
 
@@ -951,6 +975,33 @@ HTTP transport는 명시한 HTTPS 제공자만 사용하고 redirect를 따르�
 새 전용 합성 PostgreSQL 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P18_PG_SETTINGS`와 소유한 0600 `P18_PG_SETTINGS` 파일을 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlApmsCollectionTest`로 정확히 선택한다. 원문 업무·검색5표와 Batch6표·6sequence, 별도 marker 및 최소권한을 확인하고 정상 upsert/search·checkpoint 재조회·실패 rollback·실제2PID slot·stale 회복·정상 종료를 다룬다. 이력과 실패 자료를 보존하며 같은 fixture를 자동 초기화·재실행하지 않는다. 준비 helper·자격파일·실행 로그는 Git에 게시하지 않는다. 실제 실행 성공과 남은 검증은 해당 PR의 근거로 구분하며 운영 활성화는 별도다.
 
 APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사례, 최종 새 합성 PG5사례(1.392초)는 서로 다른 실행 근거다. 최종 PG는 실제 source/search/Batch metadata DML 후 강제 rollback·physical commit 증가0, 원문 부분 복구·기존 행 보존, 두 실제 PID의 slot, stale10분, 정상 예약 종료를 확인했다. 제공자는 대역이며 실 APMS/운영 검증은 하지 않았다. 최초 SQL 개행 관측 오류와 원문 부분 commit을 전체 실패 원자성으로 오해한 두 시험 실패는 보존하고, 새 fixture에서 최소 정정 후 검증했다. 기존 DB를 reset하지 않았다.
+
+### APMS 수동 실행 API
+
+`pawbridge.apms-manual.enabled=true`를 명시할 때만 원문 `BatchController`의 POST `/api/v1/batch/apms/sync`를 조립한다. 기본 off이며 `on` 등 true 이외 별칭은 비활성이다. 이 flag만 켜도 위 APMS Job·HTTP transport·`apms.api.*` 필수 입력 검사를 함께 조립하지만, 앱 내부 예약(`apmsCollectionSchedule`)은 `apms.batch.schedule-enabled=true`일 때만 만든다. 원문도 수동 API는 항상 두고 예약만 `schedule-enabled`로 켰다. 두 진입점은 같은 `ApmsBatchRunner`와 세션 advisory lock을 공유하므로 겹치면 뒤 요청은 409 `ALREADY_RUNNING`이다.
+
+원문처럼 동기 실행이다. 요청은 Job이 끝날 때까지 HTTP 연결과 요청 스레드를 붙잡는다. 응답 필드(`jobExecutionId`, `status`, `startTime`/`endTime` `yyyy-MM-dd HH:mm:ss`, `skipCount`, 수집 요약 4개, `searchSyncStatus`)와 상태 코드(완료·skip0 200, 실행 중·UNKNOWN 503, 그 밖 500, lock 경합 409, lock·metadata 확인 불가 503 `GUARD_UNAVAILABLE`, 예외 500 고정 문구)를 유지한다. `searchSyncStatus`는 원문 `elasticsearchIndexStep` 이름을 그대로 찾으므로 PostgreSQL Job에서는 원문 PostgreSQL 실행과 같이 항상 `NOT_STARTED`다.
+
+권한은 원문과 다르다. 원문 animal-service에는 자체 인증이 없어 클러스터 안 CronJob이 서비스에 직접 호출했고, Gateway의 `/api/v1/batch/**` 보호 경로는 JWT 로그인만 요구했지만 `/api/v1/v1/...`로 다시 써 실제로는 404였다. 모놀리스는 공개 앱이므로 무인증 개방 대신 기존 관리자 경로와 같이 서명 JWT의 ROLE_ADMIN만 허용한다(USER·SHELTER 403 `관리자 권한이 필요합니다.`, 토큰 없음·오류 401). 따라서 원래 CronJob 호출 방식(무토큰)은 이 경로로 옮길 수 없으며, 정기 수집은 앱 내부 예약을 쓰고 이 API는 관리자 재실행용으로 둔다.
+
+활성화 전 확인 항목: 이전 animal-service CronJob·수동 API와 앱 내부 예약 중 단일 실행 소유자, APMS writer 권한과 Batch metadata 권한, writer 용량 `workers+2` 이상(수동 요청도 같은 pool을 쓴다), 프록시·Ingress의 요청 timeout이 Job 실행 시간보다 긴지, 종료 유예 시간(모놀리스 `server.shutdown=graceful`·`timeout-per-shutdown-phase=10s`, 원문 animal-service는 330초)이다. 동기 수동 요청이 수 분 걸리는 도중 재배포나 종료가 오면 10초 뒤 writer pool이 닫히고 Job이 STARTED로 남아 10분 stale 회복에 의존한다. 단위·구성·실제 Security/JWT MVC 시험은 mock runner 기준이며 실제 APMS·PostgreSQL 실행 검증이 아니다.
+
+## 보호소 디렉터리 예약 수집
+
+원문 키 `shelter-directory.schedule-enabled=true`를 명시할 때만 원문 `ShelterDirectoryClient`·`ShelterDirectoryStore`·`ShelterDirectoryCollector`·`shelterDirectoryJob`과 단일 예약을 조립한다. 원문도 기본 false였으며 수동 실행 API는 없다. 서비스 키는 원문 `shelter-directory.service-key`(비어 있으면 실행 시 `SHELTER_DIRECTORY_UNAVAILABLE`), 주기는 원문 `shelter-directory.collection-cron`(기본 `0 0 4 * * *`, Asia/Seoul)이다. 이 스위치는 검색 분석기 조립 조건에도 추가했다. 다른 모듈과 공유하는 키는 없다.
+
+원문 동작을 그대로 옮겼다. 공공데이터 `shelterInfo_v2`를 1000행씩 최대30쪽 조회하고 빈 쪽에서 끝내며, 같은 등록번호의 다른 행·반복 쪽·빈 첫 쪽·형식 오류는 전체 실패로 처리한다. redirect를 따르지 않고 연결5초·요청10초·대기12초, 본문4MiB 상한을 둔다. 전체 snapshot을 받은 뒤에만 한 연결의 한 JDBC 트랜잭션으로 보호소 upsert·보호소 검색 문서·공개정보 JSON patch를 쓰고, 행마다 저장된 `sourceUpdatedDate`가 더 새로우면 건너뛰며 주소가 바뀌었는데 좌표가 없으면 기존 좌표를 지운다. 세션 advisory lock은 APMS 동물 수집과 같은 key1이라 서로 배타적이며, 이미 잡혀 있으면 `SHELTER_DIRECTORY_BUSY`로 실패한다.
+
+기존 writer DataSource·JdbcTransactionManager를 쓰고 새 pool·DDL은 없다. Batch metadata는 `pawbridge_animal.BATCH_`를 명시하고 metadata 탐색·자동 DDL·시작 시 Job 실행을 쓰지 않는다. 검색 writer는 기존 Animal 쓰기가 타입으로 주입받는 단일 bean과 충돌하지 않도록 store 내부 인스턴스로만 만든다. 원문 `SearchDocumentWriter.shelter(Connection, careRegNo)`를 추가해 수집 연결 밖의 두 번째 연결을 빌리지 않는다.
+
+활성화 전 확인 조건:
+- 공유 writer pool 기본 최대1·연결 대기2초다. 수집은 lock 획득부터 외부 조회(최대30회×12초)와 저장까지 그 연결을 계속 쥐므로, 그동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있다. `pawbridge.database.writer.maximum-pool-size`를 최소2 이상으로 명시하는 것은 켜기 전 확인 조건이며 시작 시 검사하지 않는다(이 수집 자체는 한 연결로 동작하므로 원문에 없던 조립 거부를 넣지 않았다). 원문에서는 shelter·여행(`0 */30`)·보호소 관측(`0 0 4`)이 Boot 기본 `@Scheduled` 스레드 하나를 나눠 순서대로 실행됐지만, 모놀리스는 기능별 scheduler를 두므로 04:00 Asia/Seoul에 동시에 시작할 수 있다. 함께 켜는 수집기의 연결 합계(shelter 1 + 여행 2 + 관측 1 + HTTP 쓰기)에 맞춰 pool을 잡거나 cron을 분리해야 한다.
+- writer 권한: `pawbridge_animal.shelters` SELECT·INSERT·UPDATE(검색 trigger 열 포함), `shelter_public_information` SELECT·INSERT·UPDATE, `shelter_search_documents` INSERT·UPDATE, Batch 6표·sequence, advisory lock 함수.
+- 이전 animal-service 예약을 먼저 멈춰 단일 소유권을 확보하고, 서비스 키·제공자 사용 조건을 확인한다. APMS 동물 수집과 같은 시각이면 한쪽이 BUSY로 실패한다.
+
+원문 결함은 고치지 않고 기록한다. 충돌 갱신은 `phone`을 바꾸지 않는다(최초 INSERT만 기록, 공개정보 JSON에는 반영). snapshot에서 사라진 보호소는 지우지 않는다. 전체 snapshot을 한 트랜잭션에서 모든 대상 행 `FOR UPDATE`로 잠근 채 쓰며 upsert 문에는 query timeout이 없다. 실패하면 Job이 FAILED로 끝나고 다음 예약까지 재시도하지 않으며, step 예외는 Spring Batch가 ERROR 로그와 `BATCH_*_EXECUTION` 종료 메시지로 남기고 launcher는 정상 반환한다. 종료 시 실행 중인 수집이 끝날 때까지 shutdown이 대기하므로 짧은 종료 유예 시간에서는 강제 종료될 수 있다. 원문 환경 변수 `SHELTER_DIRECTORY_CRON`은 `shelter-directory.collection-cron`에 연결되지 않아 기본 04:00이 적용된다. 원문은 `animal-query.backend=postgresql`일 때만 검색 문서를 썼지만 모놀리스 검색 writer는 분석기를 항상 사용하므로 검색 문서 쓰기가 새로 생긴다. 30쪽(3만 행)을 넘는 목록은 전체 실패다.
+
+단위 시험은 client 9·collector 6·store 4사례와 구성 시험(기본 off·`on` 별칭·같은 writer·Job/step·scheduler 계약)이다. 저장소·HTTP·DB는 mock이며 실제 공공데이터 API·PostgreSQL 잠금·권한·운영 활성화는 검증하지 않았다.
 
 
 ## APMS 사진 보관 예약 경로 편입
@@ -1009,8 +1060,34 @@ Unit, configuration, actual Security/JWT and architecture checks cover developme
 
 The selected 30 unit cases, 12 configuration cases and 101 Security/JWT MVC cases verify local business, shared-resource and request-boundary contracts. Mocked service/repository/storage results do not validate real PostgreSQL or R2 success. The Animal-parent Main/Security merge preserves the chatbot and observation configuration; a combined actual-Main runtime check is a separate final integration gate.
 
-Original DELETED patch/cart bypass, ignored SKU update fields, option mutation races and legacy cache coordination remain deferred activation gates. No payment functionality, category CRUD, live storage operation or production activation is introduced by this change.
+Original DELETED patch/cart bypass, ignored SKU update fields, option mutation races and legacy cache coordination remain deferred activation gates. No payment functionality, live storage operation or production activation is introduced by this change.
 
+The same flag also assembles the original category POST `/api/v1/categories`, PUT `/api/v1/categories/{categoryId}` and DELETE `/api/v1/categories/{categoryId}` behind the same ADMIN JWT boundary. They use the existing Store writer transaction and entity manager, build the original recursive response inside that transaction and keep the original 400 input/500 state error mapping. Public category GET stays under the separate catalog read flag. Unit, configuration and Security/JWT MVC cases use mocked repositories and do not validate real PostgreSQL. Original unvalidated null names, duplicate names, deletes of categories still referenced by products and unlocked concurrent re-parenting or child insertion surface as server errors or races; they remain deferred activation gates. Original create also stores blank names, and PUT clears an omitted `description` and moves the category to the root when `parentId` is omitted while ignoring a null or blank `name`. Concurrent opposite re-parenting can persist a cycle, after which the descendant check and recursive responses, including the public category tree GET, can fail with stack overflow. Non-admin denials return the generic monolith 403 message instead of the Gateway's admin message, unsupported methods such as PATCH return 403 instead of the original 405, and the writer transaction inherits the Store writer default timeout.
+
+### Store 검색 재구축 예약
+
+`pawbridge.store-maintenance.enabled=true`와 원문 `pawbridge.search.rebuild-enabled=true`를 둘 다 명시할 때만 Store 상품 검색 문서 재구축 작업과 `store-maintenance-` 단일 scheduler를 조립합니다. 기본 off이며 원문도 `SEARCH_REBUILD_ENABLED` 기본 false였습니다. `pawbridge.search.rebuild-enabled`와 주기 `pawbridge.search.rebuild-delay-ms`(기본 5초)는 Community 재구축과 같은 원문 이름이므로 두 모듈이 공유합니다. Community는 `pawbridge.community-maintenance.enabled` 하나로 정리와 재구축을 함께 조립하므로, 두 모듈 flag가 모두 켜진 상태에서 `rebuild-enabled=true`를 주면 Store와 Community 재구축이 함께 돌고 주기도 따로 정할 수 없습니다. 원문은 서비스별 프로세스여서 이 결합이 없었으며, 활성화 전 확인 조건으로 둡니다.
+
+원문 `SearchRebuildScheduler`→`rebuildPage(100)`을 그대로 옮겼습니다. 한 writer TX(원문 timeout 10초) 안에서 ACTIVE 상품 중 문서가 없거나 SKU·이름·옵션·분석기 버전이 다른 행을 PK 순서로 최대100개 `FOR UPDATE OF p SKIP LOCKED`로 잠그고, 행마다 `product_search_source`를 다시 읽어 기존 Store 검색 문서 upsert와 Nori 분석기를 재사용합니다. 기존 writer DataSource/JdbcTransactionManager를 쓰고 JDBC 쿼리 timeout 5초는 원문 값입니다. 새 pool·EMF·DDL·GRANT는 없습니다. 공유 writer pool은 기본 최대 1개·연결 대기 2초이므로, 재구축 TX가 5초마다 최대 10초 연결을 점유하는 동안 다른 쓰기 요청이 연결 대기 시간 초과로 실패할 수 있습니다(원문은 Store 전용 pool 기본 5). 활성화 전 pool 크기를 확인합니다.
+
+단위·조립 시험은 SQL 문구·바인딩·TX 경계·조건 분기·실패 전파만 검증합니다. 실제 PG 잠금, writer 권한(`pawbridge_store` 스키마 USAGE, `products` SELECT·행 잠금용 UPDATE, `product_search_source` SELECT, `product_search_documents` SELECT·INSERT·UPDATE), 예약 실행·종료 대기는 미검증입니다. 구 Store 실행기의 재구축과 동시에 켜지 않으며, 활성화 전 권한과 실행기 소유권을 확인해야 합니다. 운영·DB 변경은 없습니다.
+
+
+### Animal outbox 보존 정리
+
+`pawbridge.animal-maintenance.enabled=true`와 원문 키 `pawbridge.jobs.cleanup-enabled=true`를 둘 다 명시할 때만 `pawbridge_animal.outbox_events` 정리 작업과 `animal-maintenance-` 단일 scheduler를 조립합니다. 원문 `OutboxCleanupScheduler`는 `pawbridge.jobs.cleanup-enabled`가 없으면 켜지는(`matchIfMissing=true`) 구조였지만, 이식본은 기본 off입니다. `pawbridge.jobs.cleanup-enabled`는 Community·User 정리도 함께 쓰는 원문 키이므로 이 키만 켜서는 아무것도 조립되지 않고, 각 모듈 flag를 켠 모듈의 정리만 실행됩니다. 다른 모듈의 작업을 대신 켜지 않습니다.
+
+원문 `@Scheduled(cron = "0 0 3 * * ?")`(zone 지정 없음, JVM 기본 시간대)와 `@Transactional` 한 건으로 `DELETE ... WHERE created_at < (현재 - 7일)`을 실행하는 동작을 그대로 옮겼습니다. 기존 writer JdbcTemplate·JdbcTransactionManager(`TransactionTemplate` 기본 timeout)를 쓰고 새 pool·DDL·GRANT는 없습니다. 재사용한 `writeJdbc`의 문장 timeout 5초가 이 DELETE에도 적용되는데 원문 JPA `@Modifying` 쿼리에는 timeout이 없었으므로(원문과 다른 상속 차이), 정리가 오래 멈췄다가 켜져 행이 많이 쌓인 경우 DELETE가 5초를 넘겨 취소·롤백되고 같은 이유로 매일 반복될 수 있습니다. 기준 시각은 Community·User 이식과 같이 JVM 시계로 계산해 UTC로 바인딩합니다. 원문 삭제 건수 info 로그(`[OUTBOX-CLEANUP] Deleted ...`)는 남기지 않아 정리가 실제로 돌았는지 볼 신호가 없고, 실패는 scheduler 오류 처리기에 클래스 이름만 남깁니다.
+
+**원문 결함(고치지 않음):** `outbox_events`에는 전달 여부 열이 없고 원문은 "status 무관" 7일 경과 행을 모두 지웁니다. Debezium CDC는 테이블이 아니라 WAL을 읽고 INSERT가 이미 WAL에 있으면 이후 DELETE는 EventRouter가 무시하므로, 지연만으로는 이벤트가 사라지지 않습니다. 이벤트가 사라지는 경로는 재스냅샷(`animal-outbox-connector.json`의 `snapshot.mode=when_needed`), replication slot 무효화(`max_slot_wal_keep_size`), 테이블을 직접 읽는 로컬 전달입니다. 모놀리스의 찜 보상 전달(`JdbcAnimalFavoriteEvents`)은 `outbox_events`의 `FavoriteCompensation` 행 중 `processed_events`에 `LOCAL_COMPENSATION_DELIVERED`가 없는 행을 전달 대상으로 삼으므로, 전달이 7일 넘게 밀린 보상 이벤트도 이 정리로 영구 삭제됩니다. 기존 `FavoriteDeliveryConfiguration` 시작 가드는 User 정리(`user-maintenance.enabled`)와 `jobs.cleanup-enabled`의 조합만 거부하고 `animal-maintenance.enabled`는 검사하지 않으므로, 로컬 찜 보상 전달(`favorite-delivery.enabled`)과 이 정리를 함께 켜도 시작이 거부되지 않습니다. 이 가드 확장은 원문 동작이 아니라 개선이므로 이 변경에 넣지 않았고 활성화 전 확인 조건으로 둡니다.
+
+활성화 전 확인 조건:
+- writer에 `pawbridge_animal` USAGE와 `outbox_events` DELETE 및 WHERE 비교에 쓰는 `created_at` SELECT가 필요합니다(`favorite-delivery-owned-schema.sql`의 Animal outbox 권한은 SELECT·INSERT뿐이라 DELETE가 없습니다). `animal-command-owned-schema.sql`은 `outbox_events` SELECT·INSERT·DELETE를 주지만 누적 F29 CI writer ACL(`backend-app/scripts/f29_ci.py`)에는 `pawbridge_animal` 권한이 전혀 없어 그 역할로 켜면 권한 오류가 매일 scheduler 경고로만 남습니다.
+- 공유 writer pool은 기본 최대 1개·연결 대기 2초입니다. 03:00에 Community·User 정리가 같은 시각에 시작할 수 있으므로 함께 켜면 먼저 잡은 DELETE가 2초를 넘길 때 나머지가 연결 timeout으로 실패해 그날 정리가 건너뛰어질 수 있습니다(재시도 없음). 함께 켜지 않거나 pool을 늘립니다. cron은 zone이 없어 JVM 기본 시간대를 쓰므로 컨테이너 TZ가 UTC이면 03:00이 KST 12:00입니다.
+- 이전 animal-service의 `OutboxCleanupScheduler`(원문 기본 on)를 먼저 멈춰 단일 소유권을 확보합니다.
+- `FavoriteCompensation` 미전달 행이 없고 재스냅샷·재처리가 필요하지 않은 것을 확인한 뒤에 켭니다.
+
+단위·구성 시험은 mock JdbcOperations·TransactionOperations 기준(SQL 문구·UTC 바인딩·7일 cutoff·TX 경계·gate 조합·schedule 계약)이며 실제 PostgreSQL 삭제·권한·실행은 검증하지 않았습니다.
 
 ## 결제 확인과 Store 결제 결과 처리
 
@@ -1019,6 +1096,16 @@ Original DELETED patch/cart bypass, ignored SKU update fields, option mutation r
 `pawbridge.store-payment-events.enabled=true`는 원문의 DONE/ABORTED/CANCELED 처리, 주문 결제·취소와 재고·검색·outbox 쓰기를 기존 Store writer에 연결한다. ranking은 기존 `memberChatRedis`가 있으면 차용하고, 없으면 명시한 Redis 설정으로 소유 factory를 구성한다. Kafka 등록에는 추가 `kafka-enabled=true`가 필요하며, 원문 topic/group과 재시도 설정을 유지한 listener는 `autoStartup=false`로 둔다. Kafka의 전역 자동 구성은 제외하고 명명한 조건부 consumer factory만 사용한다.
 
 단위·구성·실제 Security/JWT와 합성 HTTP 검증 근거를 보존했다. 최종 단일 조립에서 기존 actualMain2와 동일 소유 PostgreSQL의 SELECT3을 재검증했고, Kafka Admin·ConsumerFactory·ProducerFactory·listener registry가 기본 비활성 상태에서 생성되지 않음을 확인했다. 선택한 구조 계약3과 현재 구조 guard도 통과했으며, 생성한 JAR의 실제 runtime162개 목록은 기존 CI 격리 경계를 통과했다. 전체 구조 자체회귀는 CI에서 별도로 실행해야 한다. 이 결과는 실 Toss·Redis·Kafka 운영 연결, 소비·ACK 성공, 결제 소유권·정상 상태·금액 정책 보완이나 운영 활성화 완료를 의미하지 않는다. 원문의 늦은 결제 결과·중복/경합·외부 보상·DB commit 뒤 실패 한계는 후속 보완으로 유보한다.
+
+### Store 모의 결제
+
+`pawbridge.store-mock-payment.enabled=true`(대소문자 무시, `on` 등 다른 값은 비활성)에서만 원문 store-service `OrderController`의 POST `/api/v1/orders/{orderId}/payment`를 조립한다. 기본 off다. 업무는 이미 편입된 `StorePaymentEvents.processPayment`를 그대로 호출하므로 `pawbridge.store-payment-events.enabled=true`도 함께 켜야 하며, 그 업무 빈이 없으면 앱이 시작 시 실패한다(조용한 403으로 대체하지 않는다). 원문 `payments.enabled`(Toss 결제 확인)와는 별개 경로라 그 플래그에 묶지 않았다.
+
+원문 Gateway는 `/api/orders/**`에 유효한 토큰만 요구했으므로 서명 검증한 회원이면 USER·ADMIN·SHELTER 모두 호출할 수 있다. 원문 그대로 주문 ID로 주문을 찾아 PENDING이 아니면 거부하고 PAID로 바꾼 뒤 같은 Store writer 트랜잭션에서 `order`/`ORDER_PAID` outbox(`orderId`·`userId`·`totalAmount`·`status`)를 INSERT한다. 응답은 본문 없는 200, 없는 주문은 400 `C001`, PENDING이 아닌 주문과 outbox 직렬화 실패는 500 `C004`, 숫자가 아닌 주문 ID는 400 `C005`다. Kafka/CDC로 outbox를 전달하는 기존 방식은 바꾸지 않는다.
+
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **소유자·금액·실제 결제 확인 없이 아무 회원이나 다른 회원의 주문을 PAID로 바꾸고 ORDER_PAID 이벤트를 만들 수 있다.** 프런트는 이 경로를 쓰지 않으며 운영에서 켜지 않는 것을 전제로 한다. 주문 행 잠금이 없고 UPDATE가 모든 열을 다시 쓰므로 Toss 결제 결과 처리와 경합할 수 있다(Toss ABORTED가 CANCELLED로 바꾸고 재고를 복구한 뒤 모의 결제가 PAID로 덮어쓰면 재고가 복구된 PAID 주문과 ORDER_PAID 이벤트가 남고, 관리자 배송·상태 PATCH와 동시에 실행되면 바뀐 `delivery_status`를 이전 값으로 되돌릴 수 있다). 재고·랭킹은 바꾸지 않는다. 운영에서 켜면 주문 위조가 노출된다. 원문과 다른 점으로, 등록되지 않은 메서드·alias(`/api/orders/...`)·하위 경로는 원문 405/라우팅 대신 공통 보안 기본 거부 403이며, 원문 전역 advice의 문자셋 위반 C007 분기는 이 경로에서 입력 문자열이 없어 두지 않았다. 트랜잭션은 Store writer 기본 timeout 15초를 상속한다(원문은 timeout 없음).
+
+활성화 전 선택한 writer에 `pawbridge_store` USAGE, `orders` SELECT·UPDATE(`@DynamicUpdate`가 없어 Hibernate가 갱신 가능한 모든 열과 `updated_at`을 다시 씀), `outbox` INSERT와 `outbox`의 `id` SELECT(IDENTITY 키라 Hibernate가 `insert ... returning id`를 실행하므로 RETURNING 열 SELECT 권한이 필요하며, 기존 직접 주문 합성 스키마는 `GRANT SELECT ON ALL TABLES`라 이 누락을 드러내지 못한다)가 필요하다. 이 경로가 `store-payment-events.enabled`를 요구하므로 해당 절의 Redis(`spring.data.redis.host` 또는 `memberChatRedis`) 전제도 함께 필요하다. 누적 F29 CI ACL(`backend-app/scripts/f29_ci.py`)에는 Store 권한이 없고, 기존 직접 주문 합성 권한도 `orders` UPDATE를 주지 않는다. Store writer는 공유 `writeDataSource`(기본 최대 1개·연결 대기 2초)를 쓰므로 다른 쓰기와 연결을 다툴 수 있다. 단위·구성·실제 Security/JWT MVC 시험은 mock 업무 기준이며 실제 PostgreSQL·Kafka 전달 검증이 아니다.
 
 ### 실제 Main 조립과 격리 PostgreSQL 계약 검증
 
@@ -1029,3 +1116,66 @@ Original DELETED patch/cart bypass, ignored SKU update fields, option mutation r
 Animal·Store·Payment 생산 코드를 합친 최종 조립에서는 기존 Main 무DB 2사례와 위 Main PostgreSQL 3사례, 총 5사례를 한 번 재검증했다. 새 고유 5사례로 합산하지 않는다. Payment→Store 공개 계약·내부 참조 거부·6모듈 의존 그래프의 선택 구조 시험 3사례, 현재 architecture/business-package 검사, 실행 JAR 생성도 통과했다. 해당 JAR의 실제 런타임 라이브러리 162개는 기존 CI 경계 검사에서 추가 허용 예외 없이 통과했다. 이 근거는 전체 TestKit 시험 성공이나 실행 JAR 기동·Kafka 소비·Redis·Toss·R2·AI·운영 배포 성공을 뜻하지 않는다. 관측 PostgreSQL 2사례는 이 최종 조립 검증 뒤 별도로 최초 실행됐다.
 
 두 PostgreSQL 시험은 명시적인 전용 설정 선택자와 소유권·권한·기준 자료 검증을 요구하며 입력이 없거나 잘못되면 건너뛰거나 다른 DB로 대체하지 않고 실패한다. 게시하는 파일은 시험 Java 2개와 합성 스키마 SQL 2개다. 자료 준비 helper, 동적 설정, 인증정보, 소유권 상태·영수증과 덤프는 게시하지 않는다. CI에서 이 자료를 새로 준비하거나 운영 기능을 켰다는 의미도 아니다.
+
+### 기존 LOCAL 로그인 편입
+
+`pawbridge.auth.local-enabled`는 기본 false다. true에서는 기존 `pawbridge.auth.sessions-enabled=true`, 명명된 writer/JdbcTransactionManager와 기존 JWT issuer를 요구한다. 정확한 `/api/v1/auth/login`에만 별도 보안 체인을 조립하고, 인증 관리자·BCrypt·DAO는 해당 체인 내부에서만 구성한다. 전역 인증 관리자·인코더·서블릿 필터를 추가하지 않는다. 기본 비활성 및 다른 인증·업무 경로의 보안은 유지한다.
+
+원문 필터의 JSON email/password 입력, 대소문자를 구분하지 않는 이메일 조회, 기본 BCrypt와 미존재 계정 숨김, 200 응답의 userId/email/name/role/careRegNo/accessToken/refreshToken, 401 문구를 보존한다. 원문 필터는 메서드 제한 없이 같은 경로를 처리하고 DTO의 MVC 검증을 실행하지 않는다. 새 POST 전용·이메일 형식·provider/삭제 상태 정책은 추가하지 않았다. 인증된 DB 계정 정보만 토큰에 사용하고 요청의 사용자·권한 헤더나 Bearer 값으로 비밀번호 인증을 우회하지 않는다. 토큰은 응답 본문에만 전달하며 세션 쿠키를 만들지 않는다.
+
+이메일·refresh 조회와 BCrypt 인증은 save 트랜잭션 밖에서 수행하고, 기존 refresh 행 갱신 또는 새 행 삽입만 개별 writer 트랜잭션에 둔다. 원문의 전체 로그인 트랜잭션·행 잠금 부재와 동시 첫 로그인 경합은 해결된 것으로 표시하지 않는다. 복수 단건 조회 결과를 임의 한 행으로 정상화하지 않으며, 조회 실패의 일반401과 인증 후 저장 실패의 예외 전파를 구분한다. 파싱·내부 인증·저장 예외는 기존 실패 경계를 유지하면서 비밀번호·토큰이 원인 메시지나 principal 문자열에 노출되지 않도록 고정 메시지와 비밀 없는 표현을 사용한다.
+
+JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경된 실제 Main 기존2사례가 성공했고 현재 생산 구조·업무 패키지 검사1003클래스를 통과했다. 첫 Boot 컴파일의 지원되지 않는 DAO 생성자는 기존 지원 API의 setter 조립으로만 교정했다. 실제 PostgreSQL 로그인·실계정·메일·운영 인증은 실행하지 않았다. 가입·비밀번호 재설정·계정 연결·LOCAL 폐지·Naver·운영 활성화는 포함하지 않는다.
+
+#### LOCAL 로그인 writer 권한 증분과 적용 순서
+
+`f29_ci.py`가 auth-session 단계까지 누적한 writer `pawbridge_f3_writer` 권한 중 로그인 관련 부분은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `refresh_tokens`의 `SELECT(refresh_token_id,token,user_id,expires_at)`·`UPDATE(token,expires_at)`·`DELETE`다. 이 밖에 앞선 member/admin 단계의 `users` 일부 열 UPDATE와 DELETE 권한도 누적돼 있다. 누적 권한에는 `users.password` SELECT와 `refresh_tokens` INSERT가 없다. LOCAL 로그인은 이메일 조회에서 `password`를 읽고 첫 로그인에서 `refresh_tokens`에 새 행을 넣으므로 이 권한만으로는 실패한다(SQLSTATE 42501).
+
+`boot/src/test/resources/owned-postgresql/local-login-writer-grants.sql`은 이 차이만 보충하는 증분이다. `SELECT(password) ON users`와 `INSERT(token,user_id,expires_at,created_at) ON refresh_tokens` 두 권한만 추가한다. `refresh_token_id`는 원문 V1의 identity 열이라 기본값 생성에 sequence 권한이 필요 없으므로 sequence 권한을 추가하지 않는다. `refresh_token_id`를 명시한 INSERT는 열 권한이 없어 거부된다. 기존 권한은 회수하지 않는다.
+
+적용 순서:
+
+1. 기존 strict F29 준비와 그 검증을 먼저 끝낸다. 증분은 F29 기준선의 일부가 아니다.
+2. 테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v login_writer=pawbridge_f3_writer -f local-login-writer-grants.sql`로 증분을 한 번 적용한다.
+3. 증분 적용 뒤에는 writer의 `users` SELECT 열 집합과 `refresh_tokens` INSERT 열 집합이 F29 strict 검증의 정확 집합과 달라지므로, 같은 역할에 strict F29 준비·검증을 다시 실행하지 않는다. 다시 실행하려면 먼저 두 권한을 `REVOKE`한다.
+
+`OwnedPostgresqlLocalLoginWriterTest`(`owned-postgresql` 태그, 일반 `test`·CI에서는 제외)는 `f29_ci.py`의 strict 준비를 실행한 것이 아니라, auth-session 이후 로그인 관련 권한 부분집합을 재현한 새 합성 PostgreSQL에 증분을 적용한 상태를 한 번 확인했다. 증분 전 비밀번호 조회·첫 INSERT 거부(42501) 재현은 저장소 밖 준비 기록에만 남아 있다. 시험은 정확한 열 권한 집합, 실제 BCrypt 비밀번호 조회, 첫 로그인 INSERT와 재로그인 동일 행 UPDATE, sequence 권한 없이 identity 생성, writer의 추가 쓰기 거부, reader의 `password`·`refresh_tokens` 조회 거부를 확인했다. 이 fixture는 F29 전체 권한 재현이 아니며 writer의 `users` UPDATE·DELETE도 주지 않는다. reader의 `refresh_tokens` INSERT·UPDATE·DELETE 거부는 단언하지 않는다(이번 증분은 writer에만 적용된다). 시험은 이미 종료한 일회용 합성 서버의 식별값에 고정돼 있어 그대로 재실행할 수 없다. CI는 이 증분을 준비하거나 재검증하지 않으므로, 이후 `JdbcLocalLogin`의 SQL이 바뀌면 권한 불일치를 CI가 잡지 못한다. 실제 운영 DB 역할의 권한 결정과 LOCAL 로그인 활성화는 이 문서가 승인하는 범위가 아니다.
+
+### LOCAL 비밀번호 변경
+
+`pawbridge.user-password.enabled`는 기본 false이며 정확히 `true`(대소문자 무시)일 때만 원문 `PUT /api/v1/users/me/password`를 조립한다. `on` 등 다른 값은 비활성이다. 보안 체인은 같은 flag가 켜졌을 때만 이 정확한 PUT을 기존 Bearer 인증 대상에 넣는다. 원문 Gateway도 이 경로를 인증만 요구했으므로 USER·ADMIN·SHELTER 모두 허용하고, 요청의 `X-User-*` 헤더나 본문 userId가 아니라 검증된 JWT principal만 사용한다. 다른 메서드·뒤 슬래시·`/api/users/...` alias는 거부(403)하며 alias는 Gateway 책임으로 남긴다. LOCAL 로그인(`pawbridge.auth.local-enabled`)과는 독립 flag다.
+
+원문 DTO의 `currentPassword` NotBlank, `newPassword` NotBlank와 8~20자 영문·숫자·특수문자(`@$!%*#?&`) 패턴과 메시지를 유지한다. 검증 실패는 원문처럼 `field: message`를 `, `로 이은 400이고 거부된 값은 응답·로그에 남기지 않는다. 기존 writer `writeTransactionManager` 한 트랜잭션(timeout 10초, 기존 F13과 같은 값) 안에서 회원 조회→`provider`가 정확히 `LOCAL`이 아니면 400 `소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다.`→기본 강도 BCrypt로 현재 비밀번호 확인 실패 시 400 `현재 비밀번호가 일치하지 않습니다.`→원문 문자열 동일 시 400 `현재 비밀번호와 동일한 비밀번호로 변경할 수 없습니다.`→새 BCrypt 해시와 `updated_at`(UTC 바인딩) 두 열 UPDATE 순서를 유지한다. 회원 부재는 400 `존재하지 않는 회원입니다.`, 그 밖의 예외는 500 `서버 에러!`이며 성공은 200 `비밀번호가 변경되었습니다.`·data:null이다. BCrypt는 이 기능 안에서만 생성하고 전역 `PasswordEncoder` bean을 등록하지 않는다. 새 pool·DDL·의존성은 없다.
+
+원문 결함과 차이는 고치지 않고 활성화 전 확인 항목으로 남긴다. 비밀번호 변경 뒤에도 기존 refresh token과 access token을 폐기하지 않는다(원문과 같음). 회원 행 잠금이 없어 동시 변경은 마지막 쓰기가 남는다. 원문은 JPA 전체 행 flush였지만 후보는 `password`·`updated_at`만 갱신하므로 동시에 바뀐 다른 열을 덮지 않는다. 삭제 대기 등 회원 상태는 원문처럼 확인하지 않는다. 현재 비밀번호 확인에 시도 횟수 제한이 없어 탈취한 access token으로 온라인 대입이 가능하다(원문과 같음). 원문 검증 실패 handler는 `rejected value`를 포함한 예외 메시지를 error 로그에 남겨 패턴 검증에 실패한 새 비밀번호가 평문으로 기록될 수 있었으나, 후보는 이 로그를 재현하지 않는다.
+
+#### 비밀번호 변경 writer 권한 증분과 적용 순서
+
+누적 writer `pawbridge_f3_writer` 권한은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `UPDATE(user_id,nickname,updated_at,role,care_reg_no)`이고, LOCAL 로그인 증분을 적용했다면 `SELECT(password)`가 더해진다. 비밀번호 변경은 `provider`·`password` 조회와 `password` UPDATE가 추가로 필요하므로 이 권한만으로는 실패한다(SQLSTATE 42501). `boot/src/test/resources/owned-postgresql/user-password-writer-grants.sql`은 `SELECT(provider,password),UPDATE(password)`만 추가한다(이미 있는 `SELECT(password)` 재부여는 변화 없음). 기존 권한은 회수하지 않는다.
+
+1. 기존 strict F29 준비와 그 검증(필요하면 LOCAL 로그인 증분)을 먼저 끝낸다.
+2. 테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v password_writer=pawbridge_f3_writer -f user-password-writer-grants.sql`로 한 번 적용한다.
+3. 적용 뒤에는 writer `users` 열 집합이 F29 strict 정확 집합과 달라지므로 같은 역할에 strict F29를 다시 실행하지 않는다. 다시 실행하려면 먼저 추가 권한을 `REVOKE`한다.
+
+이 증분은 실제 PostgreSQL에서 실행·검증하지 않았고 CI도 준비·검증하지 않는다. 단위(JDBC 계약·순서·BCrypt)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며, 실제 PG 권한·운영 DB 역할 결정·기능 활성화는 이 문서가 승인하는 범위가 아니다.
+
+### LOCAL 가입·이메일 인증·비밀번호 재설정
+
+세 flag는 모두 기본 false이며 정확히 `true`(대소문자 무시)일 때만 조립한다. `pawbridge.email-verification.enabled`는 원문 `POST /api/v1/email/send`·`/verify`, Redis 인증 상태, SMTP 발송기와 공유 `EmailVerifications` 서비스를 조립한다. `pawbridge.local-signup.enabled`는 `POST /api/v1/users/signup`, `pawbridge.password-reset.enabled`는 `POST /api/v1/auth/password/reset-request`·`/reset`을 조립하며, 두 flag는 인증 서비스가 없으면(`email-verification` 미활성) 시작 시 실패한다. 원문 Gateway의 JWT 면제 목록(`POST:/api/v1/users/signup`, `POST:/api/v1/auth/password/reset-request`, `POST:/api/v1/auth/password/reset`, 경로 전체가 면제였던 `/api/v1/email/**` 중 실제 매핑된 두 POST)만 각 flag가 켜졌을 때 토큰 없이 허용하고, 나머지 메서드·뒤 슬래시·이웃 경로·`/api/...` alias는 기본 거부(403)이다. 공개 경로에서는 Authorization 헤더를 해석하지 않는다. alias와 405/404 응답은 Gateway 책임이다.
+
+원문 동작을 그대로 옮겼다. 인증코드는 6자리 숫자(SecureRandom), 유효 5분, 발송은 이메일당 5분 창에서 5회(Lua 원자 증가), 검증 실패는 5회까지(실패 때만 증가, 새 코드 발송 시 초기화)이며, 성공하면 `email:verified:`(재설정은 `password:reset:verified:`) 표지를 1시간 둔다. Redis 키 접두사(`email:code:`·`email:attempts:`·`email:send:count:`·`email:verified:`, 재설정은 `password:reset:` 접두사)와 키에 쓰는 이메일 문자열(대소문자 그대로)도 같다. 메일은 먼저 보내고 성공해야 코드를 저장하며, 한국어 제목과 두 HTML 템플릿(`{{code}}` 치환)·발신자명 `PawBridge`를 유지한다. 가입은 인증 표지→LOCAL 이메일 중복(409)→비밀번호 일치→역할 필수→ROLE_ADMIN 거부→ROLE_USER 외 또는 보호소 등록번호가 있으면 `보호소 권한은 담당자 신청 승인으로 부여해야 합니다.`→닉네임 생성(기존 `GoogleNicknameGenerator`와 같은 목록·규칙 재사용)→BCrypt 기본 강도→INSERT→표지 삭제(실패 무시) 순서이고 응답은 `{code:200,message:"요청이 성공적으로 처리되었습니다.",data:{userId,email,name,nickname}}`이다. 재설정 요청은 LOCAL 계정이 있을 때만 메일을 보내되 발송 실패·횟수 초과는 숨기고 항상 같은 성공 응답을 주며, 재설정은 계정 없음·코드 검증 실패(만료·불일치·횟수 초과·Redis 오류 포함)를 모두 `비밀번호 재설정 인증코드가 유효하지 않습니다.`(400)로 합친다. 상태 코드·메시지는 원문 `ErrorCode`를 따른다(만료·불일치 400, 횟수 초과 429, 발송·템플릿 500, Redis 연결 실패 503, 그 밖 500 `서버 에러!`, DB 문자셋 제약 위반 400).
+
+원문과 다른 점: ① 재설정은 원문 JPA 전체 행 flush 대신 `password`·`updated_at` 두 열만 UPDATE한다. ② 오류 로그는 예외 메시지를 남기지 않고 클래스·상위 프레임만 남기며, 원문이 errorType을 log.error·warn으로 남기던 재설정(메일 발송 실패 포함)·가입 일부 지점은 예외를 로그 없이 삼키므로 운영에서 발송 실패가 보이지 않는다. ③ Redis는 `spring.data.redis.host/port/database/username/password`로 이 기능 전용 Lettuce 연결(연결·명령 timeout 2초)을 따로 만든다(회원 채팅 Redis와 공유하지 않으며 둘 다 켜면 연결이 2개다. 이 팩토리는 `defaultCandidate=false`로 등록해 회원 채팅의 이름 없는 `RedisConnectionFactory` 주입이 모호해지지 않게 했다). ④ 가입 트랜잭션은 writer 기본 timeout 15초를 상속한다(원문은 timeout 없음). ⑤ 메일 transport 실패(`MailException`)는 원문처럼 가공하지 않고 500 `서버 에러!`로 나간다. ⑥ SMTP 클라이언트 timeout·STARTTLS 속성(`mail.smtp.auth/starttls/connectiontimeout/timeout/writetimeout`)을 `application.properties` 기본값으로 원문 값 그대로 두었고 host·username·password는 환경 변수(`SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`)로만 받는다.
+
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **`POST /api/v1/email/send`는 인증 없이 임의 주소로 메일을 보낼 수 있다**(제한은 주소별 5분 5회뿐이라 서로 다른 수신자나 IP 단위 제한이 없다). Redis 키가 이메일 대소문자를 그대로 쓰는데 계정 조회는 대소문자를 무시하므로 같은 계정을 가리키는 대소문자 변형마다 발송·검증 횟수 제한이 따로 적용되어 6자리 코드 추측 제한을 우회할 수 있다. 검증 횟수 확인과 증가가 원자적이지 않아 동시 요청이 5회를 넘길 수 있다. 인증 표지는 이메일 문자열에만 묶여 1시간 동안 유효하다. 가입 비밀번호 규칙은 6자 이상뿐이다(변경·재설정은 8~20자 패턴). 닉네임 충돌 재시도와 동시 가입 충돌이 같은 PostgreSQL 트랜잭션 안에서 다시 시도하므로 실패한 문장 뒤 재시도는 대개 500으로 끝난다(실제 DB에서 검증하지 않음). 재설정 성공 뒤에도 기존 refresh·access 토큰을 폐기하지 않는다. 재설정 요청 응답은 같지만 계정이 있을 때만 메일을 보내므로 응답 시간 차이로 계정 존재를 추정할 수 있다. 발송 실패도 발송 횟수를 소모한다.
+
+#### 가입·재설정 writer 권한 증분과 활성화 전 조건
+
+누적 writer `pawbridge_f3_writer` 권한은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `UPDATE(user_id,nickname,updated_at,role,care_reg_no)`이고, LOCAL 로그인·비밀번호 변경 증분을 적용했다면 `SELECT(password,provider)`, `UPDATE(password)`가 더해진다. 가입은 여기에 `email`·`provider` 조회와 `INSERT(email,name,nickname,password,role,care_reg_no,provider,provider_id,created_at,updated_at)`가, 재설정은 `email`·`provider` 조회와 `UPDATE(password)`가 필요하다(`user_id` IDENTITY 기본값은 시퀀스 권한을 확인하지 않는다는 가정이며 실제 DB에서 확인하지 않았다). `boot/src/test/resources/owned-postgresql/local-signup-writer-grants.sql`이 이 증분이다.
+
+1. 기존 strict F29 준비와 그 검증(필요하면 LOCAL 로그인·비밀번호 변경 증분)을 먼저 끝낸다.
+2. 테이블 owner가 `psql -v auth_writer=pawbridge_f3_writer -f local-signup-writer-grants.sql`로 한 번 적용한다. 켜지 않을 기능의 절은 지우고 적용한다.
+3. 적용 뒤에는 같은 역할에 strict F29를 다시 실행하지 않는다. 다시 실행하려면 먼저 추가 권한을 `REVOKE`한다.
+
+이 증분은 실제 PostgreSQL에서 실행·검증하지 않았고 CI도 준비·검증하지 않는다. 활성화 전에는 ① Redis(`spring.data.redis.*`)와 SMTP(`spring.mail.host/username/password`, 계정은 Google 앱 비밀번호 같은 비밀값이며 이 변경은 어떤 비밀값도 포함하지 않는다) 설정과 구 user-service 가입·메일 발송과의 단일 소유권, ② 공유 writer pool 기본 최대 1개·연결 대기 2초(가입·재설정 DB 작업과 다른 쓰기가 연결을 다툰다. 특히 공개 재설정 요청은 readOnly 트랜잭션으로 공유 writer 연결을 SMTP 전송(연결·읽기·쓰기 timeout 각 5초)이 끝날 때까지 쥐므로, 인증 없이 반복 호출하면 모놀리스 전체 쓰기가 연결 대기 2초 후 실패할 수 있고 대소문자만 바꾼 주소는 주소별 제한을 각각 받는다. 원문은 서비스 전용 pool이라 영향이 user-service에 그쳤다. 켜기 전에 pool 크기나 프록시 단위 제한을 정한다), ③ 위 공개 메일 발송 경로를 외부에 노출해도 되는지(프록시·WAF의 IP 단위 제한 등)를 확인해야 한다. 구현 변경은 `user`·`boot`의 `build.gradle`에 Redis·`spring-context-support`·`jakarta.mail`·`spring-boot-starter-mail` 의존성을 추가한다. 이 두 파일은 구조 selftest 재사용 기준(run 39577223965)의 입력 해시에 들어 있어 기준과 달라지므로 `verify_architecture_selftest_inputs`가 거짓이 되고 workflow는 이전 실행을 참조하지 않고 현재 구조 selftest를 직접 실행한다(실패가 아니다). 해시 상수는 마지막 성공 실행의 입력 그대로 둔다. 새 런타임 jar는 JAR 격리 검사의 금지 패턴에 해당하지 않는다. `user`가 `jakarta.mail-api`를 implementation으로 두어 boot 런타임에 전이되므로 starter-mail의 Angus 구현과 `jakarta.mail.*` 클래스가 중복 포함되는지는 로컬에서 확인하지 못했다(`:boot:dependencies --configuration runtimeClasspath`로 확인하고 중복이면 `compileOnly`로 바꾼다). 활성화는 공개 `/api/v1/email/send`를 함께 노출한다(원문도 같았다). 단위(순서·키·Lua 인자·SQL 바인딩)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 SMTP 전송·Redis 서버·PostgreSQL 권한과 운영 활성화는 검증하지 않았다.
+

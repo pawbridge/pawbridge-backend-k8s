@@ -88,6 +88,14 @@ class PawBridgeApplicationTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.directorder.infrastructure.JdbcProductSearchRebuild.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.animal.internal.maintenance.infrastructure.JdbcAnimalOutboxRetention.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentController.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.animal.internal.shelterdirectory.infrastructure.ShelterDirectoryCollector.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.password.application.ChangeUserPassword.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.emailverification.application.EmailVerifications.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.signup.application.LocalSignup.class)).isEmpty();
+                    assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.passwordreset.application.PasswordReset.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.maintenance.infrastructure.JdbcCommunityEventRetention.class)).isEmpty();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage.class)).isEmpty();
                     assertThat(context.getBeansOfType(jakarta.persistence.EntityManagerFactory.class)).isEmpty();

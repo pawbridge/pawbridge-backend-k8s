@@ -53,7 +53,20 @@ public class ReadSecurityConfiguration {
             @Value("${lost-gallery-feed.enabled:false}") String galleryFeedFlag,
             @Value("${pawbridge.animal-chatbot.enabled:false}") String chatbotFlag,
             @Value("${pawbridge.store-catalog-management.enabled:false}") String catalogManagementFlag,
-            @Value("${pawbridge.payments.enabled:false}") String paymentsEnabledFlag) throws Exception {
+            @Value("${pawbridge.payments.enabled:false}") String paymentsEnabledFlag,
+            @Value("${pawbridge.user-password.enabled:false}") String userPasswordFlag,
+            @Value("${pawbridge.store-mock-payment.enabled:false}") String storeMockPaymentFlag,
+            @Value("${pawbridge.animal-images.enabled:false}") String animalImagesFlag,
+            @Value("${pawbridge.apms-manual.enabled:false}") String apmsManualFlag,
+            @Value("${pawbridge.email-verification.enabled:false}") String emailVerificationFlag,
+            @Value("${pawbridge.local-signup.enabled:false}") String localSignupFlag,
+            @Value("${pawbridge.password-reset.enabled:false}") String passwordResetFlag) throws Exception {
+
+        var animalImagesEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(animalImagesFlag);
+        var animalImageWriting=new AndRequestMatcher(animalImagesEnabled,new OrRequestMatcher(
+                new AntPathRequestMatcher("/api/v1/animals/images","POST"),
+                new AntPathRequestMatcher("/api/v1/animals/images/multiple","POST"),
+                new AntPathRequestMatcher("/api/v1/animals/images","DELETE")));
 
         var catalogManagementEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(catalogManagementFlag);
         var catalogManagementWriting=new AndRequestMatcher(catalogManagementEnabled,new OrRequestMatcher(
@@ -66,10 +79,17 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/option-groups/{groupId}","DELETE"),
                 new AntPathRequestMatcher("/api/v1/option-groups/{groupId}/values","POST"),
                 new AntPathRequestMatcher("/api/v1/option-groups/values/{valueId}","PUT"),
-                new AntPathRequestMatcher("/api/v1/option-groups/values/{valueId}","DELETE")));
+                new AntPathRequestMatcher("/api/v1/option-groups/values/{valueId}","DELETE"),
+                new AntPathRequestMatcher("/api/v1/categories","POST"),
+                new AntPathRequestMatcher("/api/v1/categories/{categoryId}","PUT"),
+                new AntPathRequestMatcher("/api/v1/categories/{categoryId}","DELETE")));
 
         var paymentEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(paymentsEnabledFlag);
         var paymentConfirmation=new AndRequestMatcher(paymentEnabled,new AntPathRequestMatcher("/api/payments/confirm","POST"));
+        // Original Gateway required only a valid token for /api/orders/**; the mock route has no owner check.
+        var storeMockPaymentEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(storeMockPaymentFlag);
+        var storeMockPayment=new AndRequestMatcher(storeMockPaymentEnabled,
+                new AntPathRequestMatcher("/api/v1/orders/{orderId}/payment","POST"));
 
         var chatbotEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(chatbotFlag) && "postgresql".equals(animalQueryBackend);
@@ -90,6 +110,7 @@ public class ReadSecurityConfiguration {
         var storeOrderAdministrationRoutes=new AndRequestMatcher(storeOrderAdministrationEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/admin/orders","GET"),
                 new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}","GET"),
+                new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}/status","PATCH"),
                 new AntPathRequestMatcher("/api/v1/admin/orders/{orderId}/delivery-status","PATCH")));
         var animalTravelEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)
                 request -> "true".equalsIgnoreCase(animalTravelFlag) && "postgresql".equalsIgnoreCase(animalQueryBackend);
@@ -170,6 +191,10 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/stats/daily-animals","GET"),
                 new AntPathRequestMatcher("/api/v1/admin/stats/intake-trend","GET")));
 
+        // Original animal-service had no own authentication; only the Gateway route required a JWT.
+        var apmsManualEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(apmsManualFlag);
+        var apmsManualSync=new AndRequestMatcher(apmsManualEnabled,new AntPathRequestMatcher("/api/v1/batch/apms/sync","POST"));
+
         var storeWishlistEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request->storeWishlistEnabledFlag;
         var storeWishlistWriting=new AndRequestMatcher(storeWishlistEnabled,new OrRequestMatcher(
                 new AntPathRequestMatcher("/api/v1/wishlists","POST"),
@@ -203,6 +228,21 @@ public class ReadSecurityConfiguration {
         var commentUpdate = new AntPathRequestMatcher("/api/v1/comments/{commentId}", "PUT");
         var userProfile = new AntPathRequestMatcher("/api/v1/users/me", "GET");
         var userNickname = new AntPathRequestMatcher("/api/v1/users/me/nickname", "PUT");
+        // Original Gateway whitelist: these POST routes (and all of /api/v1/email/**) need no token; each is
+        // public only while its own flag is exactly true.
+        var emailVerificationPublic = new AndRequestMatcher(
+                (org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(emailVerificationFlag),
+                new OrRequestMatcher(new AntPathRequestMatcher("/api/v1/email/send", "POST"),
+                        new AntPathRequestMatcher("/api/v1/email/verify", "POST")));
+        var localSignupPublic = new AndRequestMatcher(
+                (org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(localSignupFlag),
+                new AntPathRequestMatcher("/api/v1/users/signup", "POST"));
+        var passwordResetPublic = new AndRequestMatcher(
+                (org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(passwordResetFlag),
+                new OrRequestMatcher(new AntPathRequestMatcher("/api/v1/auth/password/reset-request", "POST"),
+                        new AntPathRequestMatcher("/api/v1/auth/password/reset", "POST")));
+        var userPassword = new AndRequestMatcher((org.springframework.security.web.util.matcher.RequestMatcher) request -> "true".equalsIgnoreCase(userPasswordFlag),
+                new AntPathRequestMatcher("/api/v1/users/me/password", "PUT"));
         var favoriteStatus = new AntPathRequestMatcher("/api/v1/favorites/{animalId}/check", "GET");
         var noteRecipient = new AntPathRequestMatcher("/api/v1/notes/recipients/{member}", "GET");
         var noteBlockStatus = new AntPathRequestMatcher("/api/v1/notes/blocks/status", "GET");
@@ -284,8 +324,8 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/approve","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelter-applications/{id}/reject","POST"),
                 new AntPathRequestMatcher("/api/v1/admin/users/shelters/{careRegNo}/members","GET")));
-        var adminRoutes = new OrRequestMatcher(shelterCommandAdmin, storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
-        var postWriting = new OrRequestMatcher(catalogManagementWriting, paymentConfirmation,shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
+        var adminRoutes = new OrRequestMatcher(apmsManualSync, shelterCommandAdmin, storeOrderAdministrationRoutes, adminAnimalStatistics, homeVideoManagement, shelterAdmin, userDirectory, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,totalUserCount, dailySignupStats, signupPeriods, userDeletion, userDetail, userUpdate, visitPeriod);
+        var postWriting = new OrRequestMatcher(apmsManualSync, animalImageWriting, catalogManagementWriting, paymentConfirmation, storeMockPayment,shelterCommandAdmin, shelterCommandUpdate, storeOrderAdministrationRoutes, storeCartRoutes, storeOrderReading, storeDirectOrderRoutes, animalCommandWriting, storeWishlistWriting, adminAnimalStatistics, storeMyPage, reportWriting, homeVideoManagement, userAnimalActivities, shelterOwn, shelterAdmin, userDirectory, chatRest, adminPostList, adminPostDetail, adminPostUpdate, adminPostDelete, postStatsToday, postStatsPeriod,postCreation, postDeletion, postUpdate, commentCreation, commentDeletion, commentUpdate, userProfile, userNickname, userPassword, favoriteStatus, noteRecipient, noteBlockStatus, totalUserCount, dailySignupStats, signupPeriods, noteBlockList, noteNotifications, privateNote, privateNoteList, noteBlockRemove, noteBlockCreate, noteStream, noteRead, noteFavorite, noteDeletion, noteSend, userDeletion, userDetail, userUpdate, visitPeriod, sessionLogout);
         var streamContexts = new RequestAttributeSecurityContextRepository();
         return http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -306,6 +346,7 @@ public class ReadSecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/comments/posts/read/{postId}").permitAll()
                         .requestMatchers(visitIdentity, visitCount).permitAll()
                         .requestMatchers(sessionRefresh).permitAll()
+                        .requestMatchers(emailVerificationPublic, localSignupPublic, passwordResetPublic).permitAll()
                         .requestMatchers(chatSocket).permitAll()
                         .requestMatchers(adminRoutes).hasAuthority("ROLE_ADMIN")
                         .requestMatchers(postWriting).authenticated()

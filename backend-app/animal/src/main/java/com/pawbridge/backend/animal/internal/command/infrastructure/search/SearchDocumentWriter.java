@@ -2,10 +2,13 @@ package com.pawbridge.backend.animal.internal.command.infrastructure.search;
 import com.pawbridge.backend.animal.internal.discovery.infrastructure.KoreanSearchAnalyzer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.Map;
 import java.util.Objects;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Search projection writes always join the same Animal JPA writer transaction. */
@@ -29,6 +32,16 @@ public final class SearchDocumentWriter {
         JdbcTemplate jdbc = transactionJdbc();
         for (Map<String,Object> row : jdbc.queryForList(
                 "SELECT id,search_revision,name,address FROM pawbridge_animal.shelters WHERE id=? AND search_dirty FOR UPDATE", id))
+            writeShelter(jdbc, analyzer, row);
+    }
+
+    /** The directory collector owns a raw JDBC transaction; never borrow a second connection here. */
+    public void shelter(Connection connection, String careRegNo) throws SQLException {
+        if (connection.getAutoCommit()) throw new IllegalStateException("Search writes require the source transaction");
+        JdbcTemplate jdbc=new JdbcTemplate(new SingleConnectionDataSource(connection,true));
+        jdbc.setQueryTimeout(5);
+        for (Map<String,Object> row : jdbc.queryForList(
+                "SELECT id,search_revision,name,address FROM pawbridge_animal.shelters WHERE care_reg_no=? AND search_dirty FOR UPDATE", careRegNo))
             writeShelter(jdbc, analyzer, row);
     }
 

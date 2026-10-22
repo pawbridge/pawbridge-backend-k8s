@@ -13,6 +13,8 @@ import org.springframework.context.annotation.Configuration;
         + "'true'.equalsIgnoreCase('${pawbridge.shelter-commands.enabled:false}') or "
         + "'true'.equalsIgnoreCase('${apms-photo-archive.enabled:false}') or "
         + "'true'.equalsIgnoreCase('${apms.batch.schedule-enabled:false}') or "
+        + "'true'.equalsIgnoreCase('${pawbridge.apms-manual.enabled:false}') or "
+        + "'true'.equalsIgnoreCase('${shelter-directory.schedule-enabled:false}') or "
         + "('true'.equalsIgnoreCase('${pawbridge.animal-chatbot.enabled:false}') and 'postgresql'.equals('${pawbridge.animal-query.backend:}')) or "
         + "('true'.equalsIgnoreCase('${pawbridge.animal-query.projection-schedule-enabled:false}') and "
         + "'postgresql'.equalsIgnoreCase('${pawbridge.animal-query.backend:}') and "
