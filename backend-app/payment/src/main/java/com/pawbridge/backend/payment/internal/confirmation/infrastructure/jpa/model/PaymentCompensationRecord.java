@@ -19,10 +19,10 @@ public class PaymentCompensationRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(length = 100)
+    @Column(length = 200)
     private String paymentKey;
 
-    @Column(length = 100)
+    @Column(length = 200)
     private String orderId;
 
     private Long userId;

@@ -8,10 +8,16 @@ public interface StorePaymentEvents {
     enum Completion { APPLIED, ALREADY_PAID, REJECTED }
 
     /**
-     * Requires the caller's active Store writer transaction. Locks the order row, then marks a PENDING order with
-     * the same total amount PAID. The daily ranking increment runs only after that transaction commits.
+     * Result of {@link #completePayment}. {@code afterCommit} increments the daily ranking; the caller runs it only
+     * after its transaction committed and released the connection. It never throws (failures are logged).
      */
-    Completion completePayment(String orderUuid, long amount);
+    record Completed(Completion completion, Runnable afterCommit) { }
+
+    /**
+     * Requires the caller's active Store writer transaction. Locks the order row, then marks a PENDING order with
+     * the same total amount PAID.
+     */
+    Completed completePayment(String orderUuid, long amount);
 
     /** Requires the caller's active Store writer transaction. Cancels and restores stock only for a locked PENDING order. */
     boolean failPayment(String orderUuid);

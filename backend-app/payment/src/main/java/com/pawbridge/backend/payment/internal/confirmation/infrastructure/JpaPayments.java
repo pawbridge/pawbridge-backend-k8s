@@ -19,6 +19,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -41,7 +42,6 @@ public final class JpaPayments implements Payments {
     private static final Log LOG = LogFactory.getLog(JpaPayments.class);
     private static final ZoneOffset RESPONSE_OFFSET = ZoneOffset.of("+09:00");
     private static final Set<String> LOOKUP_FAILURES = Set.of("ABORTED", "EXPIRED", "CANCELED");
-    private static final Set<String> NON_BUSINESS_403_CODES = Set.of("FORBIDDEN_REQUEST", "UNAUTHORIZED_KEY");
     private static final Pattern ERROR_CODE = Pattern.compile("\"code\"\\s*:\\s*\"([A-Za-z0-9_]+)\"");
 
     /** Back-off between writer connection attempts; replaceable in tests. */
@@ -106,28 +106,27 @@ public final class JpaPayments implements Payments {
         try {
             response = tossPaymentsClient.confirmPayment(authorization(), request);
         } catch (RuntimeException failure) {
-            // B. Classify the provider failure.
-            if (alreadyProcessed(failure)) return previouslyRecorded(orderId, failure);
-            if (notProcessed(failure)) {
-                // Our request was refused (credentials, permission, rate limit); the customer's payment was not
-                // attempted, so the order stays PENDING, stock stays reserved and no money needs compensation.
-                throw new RuntimeException("Payment provider did not process the request. The order remains pending.", failure);
-            }
-            if (clearRejection(failure)) return reject(request);
-            response = null;
-        }
-        if (response == null) {
-            TossPaymentResponse looked = lookup(request.getPaymentKey());
-            if (looked != null && "DONE".equals(looked.getStatus()) && orderId != null && orderId.equals(looked.getOrderId())) {
-                response = looked;
-            } else if (looked != null && LOOKUP_FAILURES.contains(looked.getStatus())) {
-                return reject(request);
-            } else {
-                record(request.getPaymentKey(), orderId, amount, userId,
-                        PaymentCompensationRecord.Stage.UNKNOWN_RESULT, "PROVIDER_RESULT_UNKNOWN");
-                throw new RuntimeException("Payment result is unknown. The order remains pending.");
+            // B. Classify the provider failure (see ProviderFailure for the allow-list).
+            switch (classify(failure)) {
+                case ALREADY_PROCESSED -> {
+                    Optional<Payment> found = reads.execute(status -> doneFor(orderId));
+                    if (found != null && found.isPresent()) return stored(found.get());
+                    // Toss says processed but nothing is recorded here: resolve it with one lookup.
+                    return resolveUnknown(userId, request, true);
+                }
+                case NOT_PROCESSED ->
+                    // Our request was refused (credentials, merchant configuration, rate limit); the customer's
+                    // payment was not attempted, so the order stays PENDING and no money needs compensation.
+                    throw new RuntimeException("Payment provider did not process the request. The order remains pending.", failure);
+                case REJECTED -> {
+                    return reject(request);
+                }
+                default -> {
+                    return resolveUnknown(userId, request, false);
+                }
             }
         }
+        if (response == null) return resolveUnknown(userId, request, false);
         if (!"DONE".equals(response.getStatus())) {
             return response;
         }
@@ -136,13 +135,31 @@ public final class JpaPayments implements Payments {
         return applySuccess(userId, response);
     }
 
+    /**
+     * Unknown provider result: one GET lookup. DONE for this order is applied; a clear failure for this order follows
+     * the rejection path (never after ALREADY_PROCESSED); anything else keeps the order PENDING and is recorded.
+     */
+    private TossPaymentResponse resolveUnknown(Long userId, TossPaymentConfirmRequest request, boolean alreadyProcessed) {
+        String orderId = request.getOrderId();
+        TossPaymentResponse looked = lookup(request.getPaymentKey());
+        boolean sameOrder = looked != null && orderId != null && orderId.equals(looked.getOrderId());
+        if (sameOrder && "DONE".equals(looked.getStatus())) return applySuccess(userId, looked);
+        if (sameOrder && !alreadyProcessed && LOOKUP_FAILURES.contains(looked.getStatus())) return reject(request);
+        record(request.getPaymentKey(), orderId, request.getAmount(), userId, PaymentCompensationRecord.Stage.UNKNOWN_RESULT,
+                alreadyProcessed ? "ALREADY_PROCESSED_UNRECORDED" : "PROVIDER_RESULT_UNKNOWN");
+        throw new RuntimeException("Payment result is unknown. The order remains pending.");
+    }
+
     /** C. One Store writer transaction: lock and re-check the order, then insert the payment. D on any failure. */
     private TossPaymentResponse applySuccess(Long userId, TossPaymentResponse response) {
         Applied applied;
+        Runnable[] ranking = {null};
         try {
             applied = withConnectionRetry(() -> writes.execute(status -> {
+                ranking[0] = null;
                 long total = response.getTotalAmount() == null ? -1L : response.getTotalAmount();
-                StorePaymentEvents.Completion completion = storePayments.completePayment(response.getOrderId(), total);
+                StorePaymentEvents.Completed completed = storePayments.completePayment(response.getOrderId(), total);
+                StorePaymentEvents.Completion completion = completed.completion();
                 Optional<Payment> done = doneFor(response.getOrderId());
                 if (done.isPresent()) {
                     if (done.get().getPaymentKey().equals(response.getPaymentKey())) return Applied.ACCEPTED;
@@ -163,13 +180,18 @@ public final class JpaPayments implements Payments {
                         .build();
                 payment.approve(response.getApprovedAt() == null ? null : response.getApprovedAt().toLocalDateTime());
                 paymentRepository.saveAndFlush(payment);
+                ranking[0] = completed.afterCommit();
                 return Applied.ACCEPTED;
             }));
         } catch (RuntimeException failure) {
             return compensate(userId, response, failure instanceof CannotCreateTransactionException
                     ? "WRITER_UNAVAILABLE" : "PERSIST_FAILED", failure);
         }
-        if (applied == Applied.ACCEPTED) return response;
+        if (applied == Applied.ACCEPTED) {
+            // Committed and the writer connection is released: Redis latency cannot hold it any more.
+            runAfterCommit(ranking[0]);
+            return response;
+        }
         return compensate(userId, response, applied.name(), null);
     }
 
@@ -197,7 +219,10 @@ public final class JpaPayments implements Payments {
 
     /** Clear provider rejection: cancel a still PENDING order and restore stock, then keep the original ABORTED body. */
     private TossPaymentResponse reject(TossPaymentConfirmRequest request) {
-        withConnectionRetry(() -> writes.execute(status -> storePayments.failPayment(request.getOrderId())));
+        Optional<Payment> paid = withConnectionRetry(() -> writes.execute(status ->
+                storePayments.failPayment(request.getOrderId()) ? Optional.<Payment>empty() : doneFor(request.getOrderId())));
+        // A concurrent request may already have paid this order; report that payment instead of ABORTED.
+        if (paid != null && paid.isPresent()) return stored(paid.get());
         return TossPaymentResponse.builder()
                 .status("ABORTED")
                 .orderId(request.getOrderId())
@@ -205,10 +230,14 @@ public final class JpaPayments implements Payments {
                 .build();
     }
 
-    private TossPaymentResponse previouslyRecorded(String orderId, RuntimeException failure) {
-        Optional<Payment> found = reads.execute(status -> doneFor(orderId));
-        if (found == null || found.isEmpty()) throw failure;
-        return stored(found.get());
+    private static void runAfterCommit(Runnable work) {
+        if (work == null) return;
+        try {
+            work.run();
+        } catch (RuntimeException ignored) {
+            // Ranking is best effort and must never fail or refund a committed payment.
+            LOG.warn("Payment ranking update failed after commit: " + ignored.getClass().getSimpleName());
+        }
     }
 
     private TossPaymentResponse lookup(String paymentKey) {
@@ -260,35 +289,53 @@ public final class JpaPayments implements Payments {
     static String safe(String value) {
         if (value == null) return null;
         String cleaned = value.replaceAll("[^A-Za-z0-9_\\-]", "_");
-        return cleaned.length() > 100 ? cleaned.substring(0, 100) : cleaned;
+        return cleaned.length() > 200 ? cleaned.substring(0, 200) : cleaned;
     }
 
-    private static boolean alreadyProcessed(RuntimeException failure) {
-        return mentions(failure.getMessage())
-                || (failure instanceof RestClientResponseException provider && mentions(provider.getResponseBodyAsString()));
-    }
-
-    private static boolean mentions(String text) {
-        return text != null && (text.contains("S008") || text.contains("ALREADY_PROCESSED_PAYMENT"));
-    }
-
-    /** Toss business rejection: 4xx other than 401/429 and other than a non-business 403 (see {@link #notProcessed}). */
-    private static boolean clearRejection(RuntimeException failure) {
-        return failure instanceof RestClientResponseException provider && provider.getStatusCode().is4xxClientError();
-    }
+    /** How a failed confirm call is handled; only REJECTED may cancel the order. */
+    enum ProviderFailure { ALREADY_PROCESSED, NOT_PROCESSED, REJECTED, UNKNOWN }
 
     /**
-     * 401 (e.g. UNAUTHORIZED_KEY) and 429 (rate limit) mean Toss did not process our request. Toss also returns 403 for
-     * card/account declines (REJECT_*, INVALID_PASSWORD ...), so a 403 is a business rejection only when its error code
-     * is present and is not an authorization code (FORBIDDEN_REQUEST, UNAUTHORIZED_KEY).
+     * Customer/payment rejections from the Toss confirm API (docs.tosspayments.com/reference/error-codes, checked
+     * 2026-10-22): the customer's card, account or limit declined the payment, so no money moved. Prefixes
+     * REJECT_, INVALID_CARD_ and EXCEED_ plus these exact codes.
      */
-    static boolean notProcessed(RuntimeException failure) {
-        if (!(failure instanceof RestClientResponseException provider)) return false;
+    static final Set<String> REJECTION_CODES = Set.of("INVALID_REJECT_CARD", "INVALID_STOPPED_CARD", "BELOW_MINIMUM_AMOUNT",
+            "NOT_ALLOWED_POINT_USE", "NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT", "NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN",
+            "RESTRICTED_TRANSFER_ACCOUNT", "INVALID_ACCOUNT_INFO_RE_REGISTER", "INVALID_PASSWORD", "FDS_ERROR",
+            "NOT_AVAILABLE_BANK", "NOT_AVAILABLE_PAYMENT", "NOT_FOUND_PAYMENT_SESSION");
+    private static final List<String> REJECTION_PREFIXES = List.of("REJECT_", "INVALID_CARD_", "EXCEED_");
+    /** Our request was refused before any payment attempt: credentials, merchant configuration or malformed request. */
+    static final Set<String> NOT_PROCESSED_CODES = Set.of("INVALID_API_KEY", "UNAUTHORIZED_KEY", "FORBIDDEN_REQUEST",
+            "INCORRECT_BASIC_AUTH_FORMAT", "INVALID_AUTHORIZE_AUTH", "NOT_FOUND_TERMINAL_ID", "INVALID_UNREGISTERED_SUBMALL",
+            "NOT_REGISTERED_BUSINESS", "INVALID_REQUEST");
+
+    /**
+     * Allow-list classification. S008/ALREADY_PROCESSED_PAYMENT: already processed. 401, 429 and the codes above: not
+     * processed. Listed customer rejections: rejected. Everything else (ALREADY_PROCESSING_REQUEST, PROVIDER_ERROR,
+     * CARD_PROCESSING_ERROR, unknown or missing codes, 5xx, timeouts, connection errors): unknown, resolved by lookup.
+     */
+    static ProviderFailure classify(RuntimeException failure) {
+        String code = failure instanceof RestClientResponseException provider ? errorCode(provider.getResponseBodyAsString()) : null;
+        if ("ALREADY_PROCESSED_PAYMENT".equals(code) || "S008".equals(code) || mentionsProcessed(failure)) {
+            return ProviderFailure.ALREADY_PROCESSED;
+        }
+        if (!(failure instanceof RestClientResponseException provider) || !provider.getStatusCode().is4xxClientError()) {
+            return ProviderFailure.UNKNOWN;
+        }
         int status = provider.getStatusCode().value();
-        if (status == 401 || status == 429) return true;
-        if (status != 403) return false;
-        String code = errorCode(provider.getResponseBodyAsString());
-        return code == null || NON_BUSINESS_403_CODES.contains(code);
+        if (status == 401 || status == 429 || (code != null && NOT_PROCESSED_CODES.contains(code))) return ProviderFailure.NOT_PROCESSED;
+        if (code != null && (REJECTION_CODES.contains(code) || REJECTION_PREFIXES.stream().anyMatch(code::startsWith))) {
+            return ProviderFailure.REJECTED;
+        }
+        return ProviderFailure.UNKNOWN;
+    }
+
+    /** The original Feign-era check on the exception text, kept for non-JSON error bodies. */
+    private static boolean mentionsProcessed(RuntimeException failure) {
+        String text = failure.getMessage();
+        if (failure instanceof RestClientResponseException provider) text = text + " " + provider.getResponseBodyAsString();
+        return text != null && (text.contains("S008") || text.contains("ALREADY_PROCESSED_PAYMENT"));
     }
 
     private static String errorCode(String body) {

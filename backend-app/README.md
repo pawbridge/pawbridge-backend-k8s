@@ -1067,36 +1067,38 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 흐름:
 1. 트랜잭션 밖: reader로 주문을 조회해 **로그인 회원이 주문자인지(아니면 403)** 먼저 확인한다. 그다음 짧은 읽기 TX로 이 주문의 DONE 결제를 찾아 있으면 DONE으로 다시 응답하고(금액이 다르면 기존 오류), 없으면 금액이 같은지, **주문이 PENDING인지(아니면 409)** 확인한다. 다른 회원은 기존 결제의 paymentKey를 받을 수 없다. 이 검사는 모두 Toss 호출 전이다.
 2. Toss 승인 호출은 트랜잭션·쓰기 연결을 잡지 않은 상태에서 한다.
-3. 결과 반영은 Store writer 트랜잭션 하나다. 주문 행을 `SELECT ... FOR UPDATE`로 잠그고 PENDING·금액·이 주문의 기존 DONE 결제 여부를 다시 확인한 뒤 Payment INSERT와 주문 PAID를 함께 커밋한다. 일간 랭킹(Redis ZINCRBY)은 커밋 뒤(`afterCommit`)에 실행하고 실패해도 로그만 남긴다.
+3. 결과 반영은 Store writer 트랜잭션 하나다. 주문 행을 `SELECT ... FOR UPDATE`로 잠그고 PENDING·금액·이 주문의 기존 DONE 결제 여부를 다시 확인한 뒤 Payment INSERT와 주문 PAID를 함께 커밋한다. 일간 랭킹(Redis ZINCRBY)은 커밋과 writer 연결 반환이 끝난 뒤 트랜잭션 밖에서 실행하며, 실패해도 로그만 남기고 결제 응답·환불에 영향을 주지 않는다(느린 Redis가 writer 연결을 잡지 않는다).
 
 | 경우 | 동작 |
 | --- | --- |
 | 승인 성공 | 결제 행 + 주문 PAID 한 번에 커밋, Toss 응답 그대로 200 |
-| 명확한 거절(Toss 업무 4xx) | 주문이 PENDING이면 취소·재고 복구(검색 문서 포함) 후 200 `ABORTED` |
-| Toss가 요청을 처리하지 않음(401, 429, 오류 코드가 없거나 `FORBIDDEN_REQUEST`·`UNAUTHORIZED_KEY`인 403) | 결제가 시도되지 않았으므로 주문 PENDING·재고 유지, 보상 기록 없음, 500 |
-| 결과 모름(타임아웃·연결 오류·Toss 5xx) | Toss 결제 조회 1회: DONE이면 성공 처리, ABORTED/EXPIRED/CANCELED면 거절 처리, 그래도 모르면 주문 PENDING 유지 + 보상 기록 + 500 |
-| S008(이미 처리됨) | 짧은 읽기 TX로 DB의 DONE 결제를 찾아 DONE 응답, 없으면 기존처럼 오류 |
+| 고객 결제 거절(아래 허용목록 코드) | 주문이 PENDING이면 취소·재고 복구(검색 문서 포함) 후 200 `ABORTED`. 그 사이 다른 요청이 이미 결제했으면 그 DONE을 응답 |
+| 요청 미처리(401, 429, 인증·가맹점 설정 코드) | 결제가 시도되지 않았으므로 주문 PENDING·재고 유지, 보상 기록 없음, 500 |
+| 결과 모름(타임아웃·연결 오류·5xx, `ALREADY_PROCESSING_REQUEST`, `PROVIDER_ERROR`, 목록에 없거나 코드가 없는 4xx) | Toss 결제 조회 1회: 같은 주문의 DONE이면 성공 처리, 같은 주문의 ABORTED/EXPIRED/CANCELED면 거절 처리, 그 밖(다른 주문 포함)은 주문 PENDING 유지 + `UNKNOWN_RESULT` 기록 + 500 |
+| S008(`ALREADY_PROCESSED_PAYMENT`) | 짧은 읽기 TX로 DB의 DONE 결제를 찾아 DONE 응답. 없으면 조회 1회: 같은 주문의 DONE이면 성공 처리, 그 밖은 주문을 건드리지 않고 `UNKNOWN_RESULT` 기록 + 500 |
 | 동시 요청 | 주문 행 잠금으로 직렬화. 같은 paymentKey가 이미 DONE이면 멱등 성공, 다른 결제로 이미 PAID면 이 결제를 Toss 취소 |
 | 반영 실패·재검사 거부 | 트랜잭션 밖에서 Toss 취소 후 500. 단 그 paymentKey가 DB에 DONE이면 취소하지 않고 DONE 응답. DB 확인이 안 되면 취소하지 않고 보상 기록 |
 | 쓰기 연결 획득 실패 | 100ms·200ms 간격으로 최대 3회 시도한 뒤 위 행으로 |
 | Toss 취소 실패 | 보상 기록(`CANCEL_FAILED`) + 500 |
 
-Toss는 카드·계좌 거절(`REJECT_*`, `INVALID_PASSWORD` 등)에도 403을 쓰므로 403은 응답 본문의 `code`로 구분한다. 업무 거절은 위 비업무 경우와 S008(`ALREADY_PROCESSED_PAYMENT`)을 뺀 4xx다.
+분류는 응답 본문의 Toss `code` 허용목록이다(공식 오류 코드 문서의 결제 승인 항목 기준, 2026-10-22 확인, `JpaPayments.classify`). 주문을 취소하는 고객 거절은 `REJECT_*`·`INVALID_CARD_*`·`EXCEED_*`와 `INVALID_REJECT_CARD`, `INVALID_STOPPED_CARD`, `BELOW_MINIMUM_AMOUNT`, `NOT_ALLOWED_POINT_USE`, `NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT`, `NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN`, `RESTRICTED_TRANSFER_ACCOUNT`, `INVALID_ACCOUNT_INFO_RE_REGISTER`, `INVALID_PASSWORD`, `FDS_ERROR`, `NOT_AVAILABLE_BANK`, `NOT_AVAILABLE_PAYMENT`, `NOT_FOUND_PAYMENT_SESSION`뿐이다. 요청 미처리는 401·429와 `INVALID_API_KEY`, `UNAUTHORIZED_KEY`, `FORBIDDEN_REQUEST`, `INCORRECT_BASIC_AUTH_FORMAT`, `INVALID_AUTHORIZE_AUTH`, `NOT_FOUND_TERMINAL_ID`, `INVALID_UNREGISTERED_SUBMALL`, `NOT_REGISTERED_BUSINESS`, `INVALID_REQUEST`이다. 새 코드는 기본적으로 "결과 모름"으로 처리되어 주문을 취소하지 않는다.
 
-보상 기록은 `pawbridge_payment.payment_compensation_records`에 별도 짧은 TX로 저장하고(실패해도 응답 흐름은 그대로), 동시에 ERROR 로그 한 줄 `PAYMENT_COMPENSATION_REQUIRED paymentKey= orderId= amount= userId= stage= reason= recordId=`을 남긴다(저장 실패 시 `recordId=none`). Toss 원문·카드 정보·비밀값은 남기지 않는다.
+보상 기록은 `pawbridge_payment.payment_compensation_records`에 별도 짧은 TX로 저장하고(실패해도 응답 흐름은 그대로), 동시에 ERROR 로그 한 줄 `PAYMENT_COMPENSATION_REQUIRED paymentKey= orderId= amount= userId= stage= reason= recordId=`을 남긴다(저장 실패 시 `recordId=none`). Toss 원문·카드 정보·비밀값은 남기지 않는다. paymentKey·orderId는 영숫자·`_`·`-` 외 문자를 `_`로 바꾸고 200자로 자른다(Toss paymentKey 최대 200자). 기존 `payments.payment_key`는 VARCHAR(100)이라 긴 키의 INSERT가 실패할 수 있다(기존 한계, 이 경우 Toss 취소 경로).
 
-원래 MSA와 다른 점: 주문 소유자·상태 검사를 추가했다. 승인 호출 중 트랜잭션을 잡지 않으며 타임아웃·5xx는 조회로 확인한다(원래는 모든 예외를 실패로 보고 주문을 취소). 반영 실패 시 주문은 PENDING으로 남는다(원래는 PAYMENT_FAILED 이벤트로 취소). 랭킹은 커밋 뒤 실행한다. Payment와 Store의 outbox(`PAYMENT_*`, `ORDER_PAID`, `SKU_UPDATED`)는 더 이상 쓰지 않는다.
+원래 MSA와 다른 점: 주문 소유자·상태 검사를 추가했다. 승인 호출 중 트랜잭션을 잡지 않으며 타임아웃·5xx는 조회로 확인한다(원래는 모든 예외를 실패로 보고 주문을 취소). 반영 실패 시 주문은 PENDING으로 남는다(원래는 PAYMENT_FAILED 이벤트로 취소). 랭킹은 커밋·연결 반환 뒤 실행한다. Payment와 Store의 outbox(`PAYMENT_*`, `ORDER_PAID`, `SKU_UPDATED`)는 더 이상 쓰지 않는다.
 
-구조: Payment 엔티티는 별도 JPA 단위 없이 Store writer 단위(`storeDirectOrderEntityManagerFactory`)에 `pawbridge.payments.enabled`일 때만 추가된다(`@Table(schema="pawbridge_payment")`). 같은 `storeDirectOrderJpaTransactionManager` 하나만 쓰므로 writer pool 최대 1에서도 트랜잭션이 중첩되지 않는다. Store의 `completePayment`/`failPayment`는 호출자 트랜잭션을 필수로 요구한다(`PROPAGATION_MANDATORY`). 모의 결제의 `processPayment`는 자체 트랜잭션을 유지한다.
+구조: Payment 엔티티는 별도 JPA 단위 없이 Store writer 단위(`storeDirectOrderEntityManagerFactory`)에 `pawbridge.payments.enabled`일 때만 추가된다(`@Table(schema="pawbridge_payment")`). 같은 `storeDirectOrderJpaTransactionManager` 하나만 쓰므로 writer pool 최대 1에서도 트랜잭션이 중첩되지 않는다. Store의 `completePayment`/`failPayment`는 호출자 트랜잭션을 필수로 요구한다(`PROPAGATION_MANDATORY`). `completePayment`는 랭킹 작업을 실행하지 않고 돌려주며 Payment가 커밋 뒤에 실행한다. 모의 결제의 `processPayment`는 자체 트랜잭션을 유지한다.
 
 활성화 조건:
 - `pawbridge.store-payment-events.enabled=true`가 함께 필요하며 없으면 시작이 실패한다. 이 flag는 랭킹용 Redis(`spring.data.redis.host` 또는 `memberChatRedis`)를 요구한다.
-- 운영은 앱 계정 하나로 `pawbridge_store`와 `pawbridge_payment`를 모두 쓴다. writer 계정에 `pawbridge_payment`의 `payments` SELECT·INSERT, `payment_compensation_records` SELECT·INSERT와 `pawbridge_store.orders` 행 잠금·UPDATE, 재고·검색 문서 권한이 필요하다. reader는 `orders.user_id`를 읽는다.
+- 운영은 앱 계정 하나로 `pawbridge_store`와 `pawbridge_payment`를 모두 쓴다. writer 계정에 `pawbridge_payment` 스키마 USAGE, `payments` SELECT·INSERT, `payment_compensation_records` SELECT·INSERT와 `pawbridge_store.orders` 행 잠금·UPDATE, 재고·검색 문서 권한이 필요하다. reader는 `orders.user_id`를 읽는다.
 - 공유 writer pool 기본 최대 1개는 운영 결제에 쓸 수 없다. 크기를 늘린다.
-- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`payment-service/src/migration/resources/db/postgresql/V3__monolith_payment_compensation.sql`)을 전환 때 적용한다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
+- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`infrastructure/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 Flyway 위치·CI 픽스처 밖에 있어 자동으로 실행되지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
 - `toss.secret-key`(필수)와 `toss.base-url`.
 
-단위·구성·Security/JWT MVC 시험은 stub Toss와 합성 트랜잭션 기준이다. 실제 PostgreSQL 잠금·커밋, 실 Toss·Redis 연결과 운영 활성화는 검증하지 않았다.
+알려진 한계: 승인 응답이 DONE이 아닌 경우(가상계좌 `WAITING_FOR_DEPOSIT` 등)는 원래처럼 응답만 돌려주며 웹훅 처리는 없다. 서블릿 기본 오류 로그에 Toss 오류 본문이 남을 수 있다(비밀값은 없음).
+
+단위·구성·Security/JWT MVC 시험은 stub Toss와 합성 트랜잭션 기준이다. 실제 PostgreSQL 잠금·커밋, 실 Toss·Redis 연결과 운영 활성화는 검증하지 않았다(통합 시험 과제).
 
 ### Store 모의 결제
 

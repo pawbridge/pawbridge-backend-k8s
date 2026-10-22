@@ -19,7 +19,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import org.springframework.transaction.support.TransactionOperations;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Store side of the direct payment call. No pool, EMF, message transport or Redis client is owned here. */
@@ -53,23 +52,23 @@ public final class JpaStorePaymentEvents implements StorePaymentEvents {
         this.stocks=stocks; this.ranking=ranking; this.clock=clock;
     }
 
-    @Override public Completion completePayment(String orderUuid, long amount) {
+    private static final Runnable NOTHING = () -> { };
+
+    @Override public Completed completePayment(String orderUuid, long amount) {
         return mandatoryWrites.execute(transaction -> {
             requireWriter();
             Order order=locks.lockByUuid(orderUuid).orElse(null);
-            if(order==null) return Completion.REJECTED;
-            if(order.getStatus()==OrderStatus.PAID) return Completion.ALREADY_PAID;
+            if(order==null) return new Completed(Completion.REJECTED,NOTHING);
+            if(order.getStatus()==OrderStatus.PAID) return new Completed(Completion.ALREADY_PAID,NOTHING);
             if(order.getStatus()!=OrderStatus.PENDING || order.getTotalAmount()==null || order.getTotalAmount()!=amount)
-                return Completion.REJECTED;
+                return new Completed(Completion.REJECTED,NOTHING);
             order.paid();
             String key="store:ranking:daily:"+LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE);
             List<Rank> ranks=order.getOrderItems().stream().map(item -> new Rank(
                     String.valueOf(item.getProductSKU().getProduct().getId()),item.getQuantity())).toList();
             Long orderId=order.getId();
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override public void afterCommit() { incrementAfterCommit(key,ranks,orderId); }
-            });
-            return Completion.APPLIED;
+            // Redis is not touched here: the caller runs this after commit and connection release.
+            return new Completed(Completion.APPLIED,() -> incrementAfterCommit(key,ranks,orderId));
         });
     }
 

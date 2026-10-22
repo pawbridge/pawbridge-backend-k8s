@@ -38,13 +38,16 @@ class JpaStorePaymentEventsTest {
         assertThat(f.events).doesNotContain("lock");assertThat(f.order.getStatus()).isEqualTo(OrderStatus.PENDING);
     }
 
-    @Test void given__a_locked_pending_order_with_the_same_amount__when__completing__then__mark_paid_and_rank_only_after_commit() {
+    @Test void given__a_locked_pending_order_with_the_same_amount__when__completing__then__mark_paid_and_defer_ranking_to_the_caller() {
         var f=new Fixture();
-        Completion result=f.writes.execute(status->{
-            var completion=f.service.completePayment("order-uuid",900L);
-            assertThat(f.ranks).isEmpty();f.events.add("caller-work");return completion;
+        StorePaymentEvents.Completed result=f.writes.execute(status->{
+            var completed=f.service.completePayment("order-uuid",900L);
+            assertThat(f.ranks).isEmpty();f.events.add("caller-work");return completed;
         });
-        assertThat(result).isEqualTo(Completion.APPLIED);assertThat(f.order.getStatus()).isEqualTo(OrderStatus.PAID);
+        assertThat(result.completion()).isEqualTo(Completion.APPLIED);assertThat(f.order.getStatus()).isEqualTo(OrderStatus.PAID);
+        assertThat(f.events).containsExactly("begin","lock","caller-work","commit");assertThat(f.ranks).isEmpty();
+        // The caller runs it after commit and connection release, outside any transaction.
+        result.afterCommit().run();
         assertThat(f.events).containsExactly("begin","lock","caller-work","commit","rank","rank","rank");
         assertThat(f.ranks).containsExactly("store:ranking:daily:20261021|100|2.0","store:ranking:daily:20261021|100|3.0","store:ranking:daily:20261021|200|4.0");
         assertThat(f.restorations).isEmpty();
@@ -59,8 +62,9 @@ class JpaStorePaymentEventsTest {
     @Test void given__ranking_fails_after_commit__when__completing__then__swallow_the_failure_and_keep_the_commit() {
         var f=new Fixture();List<String> attempts=new ArrayList<>();
         var service=f.service(quantities->{},(key,product,quantity)->{attempts.add(product);throw new IllegalStateException("synthetic redis failure");});
-        Completion result=f.writes.execute(status->service.completePayment("order-uuid",900L));
-        assertThat(result).isEqualTo(Completion.APPLIED);assertThat(f.events).containsExactly("begin","lock","commit");
+        StorePaymentEvents.Completed result=f.writes.execute(status->service.completePayment("order-uuid",900L));
+        assertThat(result.completion()).isEqualTo(Completion.APPLIED);assertThat(f.events).containsExactly("begin","lock","commit");
+        assertThatCode(()->result.afterCommit().run()).doesNotThrowAnyException();
         assertThat(attempts).containsExactly("100","100","200");
     }
 
@@ -156,7 +160,10 @@ class JpaStorePaymentEventsTest {
             return new JpaStorePaymentEvents(orders,uuid->{events.add("lock");return "order-uuid".equals(uuid)?Optional.of(order):Optional.empty();},
                     writes,mandatory,stock,ranking,clock);
         }
-        Completion complete(String uuid,long amount){return writes.execute(status->service.completePayment(uuid,amount));}
+        Completion complete(String uuid,long amount){
+            StorePaymentEvents.Completed completed=writes.execute(status->service.completePayment(uuid,amount));
+            completed.afterCommit().run();return completed.completion();
+        }
         boolean fail(){Boolean cancelled=writes.execute(status->service.failPayment("order-uuid"));return cancelled;}
         void addItem(long skuId,long productId,int quantity) {
             var product=Product.builder().id(productId).name("synthetic").status(ProductStatus.ACTIVE).build();

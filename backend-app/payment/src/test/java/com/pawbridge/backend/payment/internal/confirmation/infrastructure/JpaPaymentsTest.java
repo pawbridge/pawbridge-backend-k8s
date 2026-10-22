@@ -44,7 +44,7 @@ class JpaPaymentsTest {
         f.provider(response);
         var result = f.service.confirmPayment(7L, f.request);
         assertThat(result).isSameAs(response);
-        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:rw", "complete:200", "done-check", "payment", "commit");
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:rw", "complete:200", "done-check", "payment", "commit", "rank");
         var payment = f.savedPayment;
         assertThat(payment.getUserId()).isEqualTo(7L);
         assertThat(payment.getOrderId()).isEqualTo("order-uuid");
@@ -121,7 +121,8 @@ class JpaPaymentsTest {
         verify(f.store, never()).completePayment(anyString(), anyLong()); verifyNoInteractions(f.compensations);
     }
 
-    @ParameterizedTest @ValueSource(strings = {"401:UNAUTHORIZED_KEY", "429:PROVIDER_RATE_LIMIT", "403:FORBIDDEN_REQUEST", "403:"})
+    @ParameterizedTest @ValueSource(strings = {"401:UNAUTHORIZED_KEY", "429:", "403:FORBIDDEN_REQUEST", "400:INVALID_API_KEY",
+            "400:NOT_FOUND_TERMINAL_ID", "403:INCORRECT_BASIC_AUTH_FORMAT"})
     void given__toss_did_not_process_our_request__when__confirming__then__keep_the_order_pending_without_cancel_or_record(String input) {
         var f = new Fixture(); var parts = input.split(":", -1);
         var body = parts[1].isEmpty() ? "" : "{\"code\":\"" + parts[1] + "\",\"message\":\"synthetic\"}";
@@ -154,11 +155,75 @@ class JpaPaymentsTest {
         verifyNoInteractions(f.store, f.compensations);
     }
 
-    @Test void given__already_processed_without_a_recorded_payment__when__confirming__then__rethrow_the_provider_failure_unchanged() {
-        var f = new Fixture(); var failure = new IllegalStateException("S008 synthetic");
-        f.providerFails(failure);
-        assertThatThrownBy(() -> f.service.confirmPayment(7L, f.request)).isSameAs(failure);
-        verifyNoInteractions(f.store, f.compensations);
+    @Test void given__already_processed_without_a_recorded_payment__when__the_lookup_is_done__then__apply_it_in_the_writer() {
+        var f = new Fixture(); var looked = f.done();
+        f.providerFails(new IllegalStateException("S008 synthetic"));
+        when(f.toss.getPayment(anyString(), eq("synthetic-key"))).thenAnswer(call -> { f.outside("lookup"); return looked; });
+        assertThat(f.service.confirmPayment(7L, f.request)).isSameAs(looked);
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:ro", "commit", "lookup",
+                "begin:rw", "complete:200", "done-check", "payment", "commit", "rank");
+        verifyNoInteractions(f.compensations);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"none", "ABORTED"})
+    void given__already_processed_without_a_recorded_payment__when__the_lookup_is_not_done__then__record_and_never_cancel_the_order(String looked, CapturedOutput output) {
+        var f = new Fixture();
+        f.providerFails(HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY,
+                "{\"code\":\"ALREADY_PROCESSED_PAYMENT\"}".getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+        if (!looked.equals("none")) when(f.toss.getPayment(anyString(), anyString())).thenReturn(
+                TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status(looked).build());
+        assertThatThrownBy(() -> f.service.confirmPayment(7L, f.request)).hasMessage("Payment result is unknown. The order remains pending.");
+        verifyNoInteractions(f.store); verify(f.toss, never()).cancelPayment(anyString(), anyString(), any());
+        assertThat(f.savedRecord.getReason()).isEqualTo("ALREADY_PROCESSED_UNRECORDED");
+        assertThat(output.getAll()).contains("PAYMENT_COMPENSATION_REQUIRED paymentKey=synthetic-key orderId=order-uuid amount=200 userId=7 stage=UNKNOWN_RESULT reason=ALREADY_PROCESSED_UNRECORDED recordId=41");
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"400:ALREADY_PROCESSING_REQUEST", "400:", "408:", "400:PROVIDER_ERROR",
+            "400:CARD_PROCESSING_ERROR", "400:SOME_FUTURE_CODE", "404:NOT_FOUND_PAYMENT"})
+    void given__a_4xx_that_is_not_a_listed_rejection__when__confirming__then__resolve_by_lookup_and_keep_the_order_pending(String input) {
+        var f = new Fixture(); var parts = input.split(":", -1);
+        var body = parts[1].isEmpty() ? "<html>gateway</html>" : "{\"code\":\"" + parts[1] + "\",\"message\":\"synthetic\"}";
+        f.providerFails(HttpClientErrorException.create(HttpStatus.valueOf(Integer.parseInt(parts[0])), "synthetic", HttpHeaders.EMPTY,
+                body.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+        when(f.toss.getPayment(anyString(), eq("synthetic-key"))).thenReturn(
+                TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status("IN_PROGRESS").build());
+        assertThatThrownBy(() -> f.service.confirmPayment(7L, f.request)).hasMessage("Payment result is unknown. The order remains pending.");
+        verify(f.toss).getPayment(anyString(), eq("synthetic-key")); verifyNoInteractions(f.store);
+        assertThat(f.savedRecord.getStage()).isEqualTo(PaymentCompensationRecord.Stage.UNKNOWN_RESULT);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"REJECT_CARD_PAYMENT", "INVALID_CARD_NUMBER", "EXCEED_MAX_DAILY_PAYMENT_COUNT",
+            "INVALID_STOPPED_CARD", "BELOW_MINIMUM_AMOUNT", "NOT_FOUND_PAYMENT_SESSION", "FDS_ERROR"})
+    void given__a_listed_customer_rejection__when__confirming__then__cancel_the_order_without_lookup(String code) {
+        var f = new Fixture();
+        f.providerFails(HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY,
+                ("{\"code\":\"" + code + "\"}").getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+        assertThat(f.service.confirmPayment(7L, f.request).getStatus()).isEqualTo("ABORTED");
+        verify(f.store).failPayment("order-uuid"); verify(f.toss, never()).getPayment(anyString(), anyString());
+    }
+
+    @Test void given__a_rejection_while_a_concurrent_request_already_paid__when__confirming__then__replay_the_recorded_done() {
+        var f = new Fixture(); f.failCancels = false;
+        when(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE)).thenReturn(Optional.empty())
+                .thenReturn(Optional.of(f.existing("concurrent-key")));
+        f.providerFails(HttpClientErrorException.create(HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY,
+                "{\"code\":\"REJECT_CARD_PAYMENT\"}".getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8));
+        var result = f.service.confirmPayment(7L, f.request);
+        assertThat(result.getStatus()).isEqualTo("DONE"); assertThat(result.getPaymentKey()).isEqualTo("concurrent-key");
+    }
+
+    @Test void given__an_aborted_lookup_for_another_order__when__the_result_is_unknown__then__never_cancel_this_order() {
+        var f = new Fixture();
+        f.providerFails(new ResourceAccessException("synthetic"));
+        when(f.toss.getPayment(anyString(), anyString())).thenReturn(TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("other-order").status("ABORTED").build());
+        assertThatThrownBy(() -> f.service.confirmPayment(7L, f.request)).hasMessage("Payment result is unknown. The order remains pending.");
+        verifyNoInteractions(f.store);
+    }
+
+    @Test void given__ranking_fails_after_commit__when__the_payment_is_applied__then__still_return_the_approval() {
+        var f = new Fixture(); var response = f.done(); f.provider(response); f.rankingFailure = new IllegalStateException("synthetic redis");
+        assertThat(f.service.confirmPayment(7L, f.request)).isSameAs(response);
+        verify(f.toss, never()).cancelPayment(anyString(), anyString(), any()); verifyNoInteractions(f.compensations);
     }
 
     @Test void given__a_timeout_and_a_done_lookup__when__confirming__then__apply_the_looked_up_payment() {
@@ -167,7 +232,7 @@ class JpaPaymentsTest {
         when(f.toss.getPayment(anyString(), eq("synthetic-key"))).thenAnswer(call -> { f.outside("lookup"); return looked; });
         var result = f.service.confirmPayment(7L, f.request);
         assertThat(result).isSameAs(looked);
-        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "lookup", "begin:rw", "complete:200", "done-check", "payment", "commit");
+        assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "lookup", "begin:rw", "complete:200", "done-check", "payment", "commit", "rank");
         verifyNoInteractions(f.compensations);
     }
 
@@ -284,7 +349,8 @@ class JpaPaymentsTest {
 
     @Test void given__client_supplied_identifiers__when__logging__then__reduce_them_to_one_bounded_token() {
         assertThat(JpaPayments.safe("bad\nkey=1 x")).isEqualTo("bad_key_1_x");
-        assertThat(JpaPayments.safe("a".repeat(150))).hasSize(100);
+        assertThat(JpaPayments.safe("a".repeat(200))).hasSize(200);
+        assertThat(JpaPayments.safe("a".repeat(250))).hasSize(200);
         assertThat(JpaPayments.safe(null)).isNull();
     }
 
@@ -299,6 +365,8 @@ class JpaPaymentsTest {
         final RecordingManager manager = new RecordingManager(events);
         final TossPaymentConfirmRequest request = TossPaymentConfirmRequest.builder().paymentKey("synthetic-key").orderId("order-uuid").amount(200L).build();
         Completion completion = Completion.APPLIED;
+        RuntimeException rankingFailure;
+        boolean failCancels = true;
         Payment savedPayment;
         PaymentCompensationRecord savedRecord;
         final JpaPayments service;
@@ -316,11 +384,15 @@ class JpaPaymentsTest {
             when(store.completePayment(anyString(), anyLong())).thenAnswer(call -> {
                 assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
                 assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isFalse();
-                events.add("complete:" + call.getArgument(1)); return completion;
+                events.add("complete:" + call.getArgument(1));
+                return new StorePaymentEvents.Completed(completion, () -> {
+                    if (rankingFailure != null) throw rankingFailure;
+                    outside("rank");
+                });
             });
             when(store.failPayment(anyString())).thenAnswer(call -> {
                 assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
-                events.add("fail"); return true;
+                events.add("fail"); return failCancels;
             });
             when(toss.cancelPayment(anyString(), anyString(), any())).thenAnswer(call -> { outside("cancel"); return null; });
             var writes = new TransactionTemplate(manager);
