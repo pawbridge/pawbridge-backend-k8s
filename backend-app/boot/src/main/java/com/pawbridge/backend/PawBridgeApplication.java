@@ -51,7 +51,6 @@ import org.springframework.context.annotation.Import;
 @SpringBootConfiguration
 @EnableAutoConfiguration(excludeName = {"org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration",
         "org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration",
-        "org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration",
         "org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration"}, exclude = {DataSourceAutoConfiguration.class,
         DataSourceTransactionManagerAutoConfiguration.class, JdbcTemplateAutoConfiguration.class,
         UserDetailsServiceAutoConfiguration.class,
