@@ -178,7 +178,7 @@ class JpaPaymentsTest {
         assertThat(output.getAll()).contains("PAYMENT_COMPENSATION_REQUIRED paymentKey=synthetic-key orderId=order-uuid amount=200 userId=7 stage=UNKNOWN_RESULT reason=ALREADY_PROCESSED_UNRECORDED recordId=41");
     }
 
-    @ParameterizedTest @ValueSource(strings = {"400:ALREADY_PROCESSING_REQUEST", "400:", "408:", "400:PROVIDER_ERROR",
+    @ParameterizedTest @ValueSource(strings = {"400:ALREADY_PROCESSING_REQUEST", "400:", "408:", "400:PROVIDER_ERROR", "400:INVALID_REQUEST",
             "400:CARD_PROCESSING_ERROR", "400:SOME_FUTURE_CODE", "404:NOT_FOUND_PAYMENT"})
     void given__a_4xx_that_is_not_a_listed_rejection__when__confirming__then__resolve_by_lookup_and_keep_the_order_pending(String input) {
         var f = new Fixture(); var parts = input.split(":", -1);

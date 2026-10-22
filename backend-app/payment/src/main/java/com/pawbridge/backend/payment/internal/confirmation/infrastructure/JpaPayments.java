@@ -308,7 +308,7 @@ public final class JpaPayments implements Payments {
     /** Our request was refused before any payment attempt: credentials, merchant configuration or malformed request. */
     static final Set<String> NOT_PROCESSED_CODES = Set.of("INVALID_API_KEY", "UNAUTHORIZED_KEY", "FORBIDDEN_REQUEST",
             "INCORRECT_BASIC_AUTH_FORMAT", "INVALID_AUTHORIZE_AUTH", "NOT_FOUND_TERMINAL_ID", "INVALID_UNREGISTERED_SUBMALL",
-            "NOT_REGISTERED_BUSINESS", "INVALID_REQUEST");
+            "NOT_REGISTERED_BUSINESS");
 
     /**
      * Allow-list classification. S008/ALREADY_PROCESSED_PAYMENT: already processed. 401, 429 and the codes above: not
