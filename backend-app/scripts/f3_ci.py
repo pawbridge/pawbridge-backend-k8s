@@ -355,10 +355,14 @@ def smoke():
                 expect(base, '/api/v1/posts/read/' + missing, 404)
             for invalid in ('abc', '9223372036854775808'):
                 expect(base, '/api/v1/posts/read/' + invalid, 500)
-            for method, path in [('GET','/error'),('GET','/api/v1/users/internal/42/nickname'),
-                ('GET','/api/posts/read/42'),('HEAD','/api/v1/posts/read/42'),
+            for method, path in [('GET','/error'),('HEAD','/api/v1/posts/read/42'),
                 ('OPTIONS','/api/v1/posts/read/42'),('POST','/api/v1/posts/read/42')]:
                 expect(base, path, 403, method)
+            # Gateway-moved behavior: internal user paths are 404 and the temporary legacy alias reads the v1 route.
+            for internal in ('/api/v1/users/internal/42/nickname', '/api/users/internal/42/nickname'):
+                expect(base, internal, 404)
+            if expect(base, '/api/posts/read/42', 200) != expect(base, '/api/v1/posts/read/42', 200):
+                raise AssertionError('Legacy post read alias differs from the v1 route')
             if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_f2_reader','pawbridge_f3_writer') AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
                 raise AssertionError('Reader/writer transaction leaked after HTTP response')
             result['packaged_post_get_auth_upload_rollback_recovery'] = 'passed'

@@ -63,6 +63,7 @@ class AnimalStatisticsHttpTest {
         String admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN");
         for (String path : List.of("/api/v1/animals/stats", "/api/v1/animals/stats/today/extra", "/api/v1/animals/stats/unknown",
                 "/api/v1/admin/stats", "/api/v1/admin/stats/daily-animals/extra", "/api/v1/admin/stats/unknown",
+                // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
                 "/api/animals/stats/today", "/api/admin/stats/daily-animals", "/api/admin/stats/intake-trend")) {
             mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden());
         }

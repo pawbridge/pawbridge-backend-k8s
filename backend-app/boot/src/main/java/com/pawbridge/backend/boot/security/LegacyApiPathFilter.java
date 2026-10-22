@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.http.server.PathContainer;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 import org.springframework.web.util.pattern.PathPattern;
 import org.springframework.web.util.pattern.PathPatternParser;
 
@@ -79,7 +80,9 @@ public final class LegacyApiPathFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String uri = request.getRequestURI();
         var path = PathContainer.parsePath(uri);
-        if (uri.startsWith("/api/users/internal/") || uri.startsWith("/api/v1/users/internal/")) {
+        // Decoded path (as Tomcat/Security/MVC see it) so /users/%69nternal/ cannot dodge the refusal.
+        String decoded = UrlPathHelper.defaultInstance.getPathWithinApplication(request);
+        if (decoded.startsWith("/api/users/internal/") || decoded.startsWith("/api/v1/users/internal/")) {
             // Same refusal the Gateway JWT filter gave service-to-service endpoints.
             response.setStatus(404);
             response.setCharacterEncoding(StandardCharsets.UTF_8.name());
@@ -91,7 +94,8 @@ public final class LegacyApiPathFilter extends OncePerRequestFilter {
                 && routed(path, request.getMethod())) {
             String rewritten = "/api/v1/" + uri.substring("/api/".length());
             request.setAttribute(ORIGINAL_PATH_ATTRIBUTE, uri);
-            chain.doFilter(new RewrittenRequest(request, rewritten), response);
+            // servletPath is built from the decoded original so Security matchers and MVC agree on the same path.
+            chain.doFilter(new RewrittenRequest(request, rewritten, "/api/v1/" + decoded.substring("/api/".length())), response);
             return;
         }
         chain.doFilter(request, response);
@@ -104,10 +108,12 @@ public final class LegacyApiPathFilter extends OncePerRequestFilter {
 
     private static final class RewrittenRequest extends HttpServletRequestWrapper {
         private final String path;
+        private final String servletPath;
 
-        RewrittenRequest(HttpServletRequest request, String path) {
+        RewrittenRequest(HttpServletRequest request, String path, String servletPath) {
             super(request);
             this.path = path;
+            this.servletPath = servletPath;
         }
 
         @Override public String getRequestURI() { return path; }
@@ -118,7 +124,7 @@ public final class LegacyApiPathFilter extends OncePerRequestFilter {
             return start < 0 ? original : new StringBuffer(original.substring(0, start)).append(path);
         }
 
-        @Override public String getServletPath() { return path.substring(getContextPath().length()); }
+        @Override public String getServletPath() { return servletPath; }
 
         @Override public String getPathInfo() { return null; }
     }

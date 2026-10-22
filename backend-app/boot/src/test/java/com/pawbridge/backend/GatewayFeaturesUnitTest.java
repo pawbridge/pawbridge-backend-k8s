@@ -175,6 +175,28 @@ class GatewayFeaturesUnitTest {
                 .isEqualTo("{\"code\":404,\"message\":\"유효하지 않은 엔드포인트입니다.\",\"data\":null}");
     }
 
+    @Test
+    void given__percent_encoded_internal_user_path__when__filtering__then__still_404() throws Exception {
+        for (String path : new String[]{"/api/users/%69nternal/5/nickname", "/api/v1/users/internal%2F".replace("%2F", "/") + "5", "/api/v1/%75sers/internal/5"}) {
+            var request = new MockHttpServletRequest("GET", path);
+            var response = new MockHttpServletResponse();
+            var chain = new MockFilterChain();
+            new LegacyApiPathFilter().doFilter(request, response, chain);
+            assertThat(chain.getRequest()).as(path).isNull();
+            assertThat(response.getStatus()).isEqualTo(404);
+        }
+    }
+
+    @Test
+    void given__encoded_remainder__when__rewriting__then__servlet_path_is_decoded_and_uri_keeps_its_encoding() throws Exception {
+        var request = new MockHttpServletRequest("GET", "/api/posts/read/a%20b");
+        var chain = new MockFilterChain();
+        new LegacyApiPathFilter().doFilter(request, new MockHttpServletResponse(), chain);
+        var seen = (HttpServletRequest) chain.getRequest();
+        assertThat(seen.getRequestURI()).isEqualTo("/api/v1/posts/read/a%20b");
+        assertThat(seen.getServletPath()).isEqualTo("/api/v1/posts/read/a b");
+    }
+
     // ---- lost-candidates limits ----
 
     private static final String TYPE = "multipart/form-data; boundary=x";
@@ -212,6 +234,16 @@ class GatewayFeaturesUnitTest {
         // exactly at the limit is admitted
         assertThat(run(filter, search(TYPE, new byte[10]), chain).getStatus()).isEqualTo(200);
         assertThat(chain.getRequest()).isNotNull();
+    }
+
+    @Test
+    void given__percent_encoded_path__when__searching__then__the_same_limits_apply() throws Exception {
+        var filter = new LostSearchLimitsFilter(10, 2, 30, 50);
+        for (String path : new String[]{"/api/v1/animals/lost-%63andidates", "/api/v1/animals/lost-candidates;x=1", "/api/v1/animals/%6cost-candidates/"}) {
+            var request = search(TYPE, new byte[11]);
+            request.setRequestURI(path);
+            assertRejected(run(filter, request, new MockFilterChain()), 413, "사진 크기 제한을 초과했습니다", null);
+        }
     }
 
     @Test

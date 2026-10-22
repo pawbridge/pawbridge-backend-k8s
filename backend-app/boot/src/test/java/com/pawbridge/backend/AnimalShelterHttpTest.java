@@ -43,6 +43,7 @@ class AnimalShelterHttpTest {
         String admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN");
         for (String path : List.of("/api/v1/shelters/discovery", "/api/v1/shelters/42/observations",
                 "/api/v1/shelters/abc", "/api/v1/shelters/-1", "/api/v1/shelters/42/extra",
+                // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
                 "/api/v1/shelters/by-care-reg-no/CARE-42/extra", "/api/v1/shelters/count/extra", "/api/shelters/42")) {
             mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden());
         }

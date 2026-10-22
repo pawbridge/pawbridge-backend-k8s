@@ -18,6 +18,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeoutException;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 /**
  * Bounded public upload admission for {@code POST /api/v1/animals/lost-candidates}, moved from the API Gateway
@@ -25,6 +26,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  *
  * <p>Differences from the Gateway filter: the body is not buffered here (the servlet container parses the multipart
  * parts itself), so the size cap is the declared Content-Length and requests without one are refused with 411;
+ * permits are taken only after the body has been received so slow uploads cannot hold them;
  * the 50 second limit is not enforced by interrupting the request, only by the 3s+45s Python client timeouts and by
  * mapping a timeout that escapes the controller to 504.
  */
@@ -47,8 +49,10 @@ public final class LostSearchLimitsFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        return !"POST".equals(request.getMethod()) || !(PATH.equals(uri) || (PATH + "/").equals(uri));
+        // Decide on the decoded path (what Tomcat mapping, Security and MVC use), never the raw URI:
+        // /lost-%63andidates must not slip past the limits.
+        String path = UrlPathHelper.defaultInstance.getPathWithinApplication(request);
+        return !"POST".equals(request.getMethod()) || !(PATH.equals(path) || (PATH + "/").equals(path));
     }
 
     @Override
@@ -61,6 +65,10 @@ public final class LostSearchLimitsFilter extends OncePerRequestFilter {
         catch (IllegalArgumentException ex) { reject(response, 415); return; }
         if (type == null || !MediaType.MULTIPART_FORM_DATA.isCompatibleWith(type)) { reject(response, 415); return; }
         if (length < 0) { reject(response, 411); return; }
+        // Read the whole multipart body before taking a permit: a slow or stalled upload then occupies only its own
+        // request thread, so two slow clients cannot exhaust the concurrency permits for everyone. A malformed body is
+        // left for the handler to report exactly as before (the container rethrows the same failure there).
+        try { request.getParts(); } catch (IOException | ServletException | IllegalStateException ignored) { }
         if (!active.tryAcquire()) { reject(response, 503); return; }
         try {
             if (!admit()) { reject(response, 429); return; }

@@ -53,6 +53,7 @@ class AnimalReadHttpTest {
         String admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN");
         for (String path : List.of("/api/v1/animals/abc",
                 "/api/v1/animals/-1", "/api/v1/animals/42/extra", "/api/v1/animals/42/similar/extra",
+                // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
                 "/api/v1/animals/abc/similar", "/api/animals/42/similar", "/api/v1/animals/apms",
                 "/api/v1/animals/apms/D-42/extra", "/api/v1/animals/expiring-soon/extra",
                 "/api/v1/animals/expiring-soon-extra")) {

@@ -64,6 +64,7 @@ class GatewayFeaturesConfigurationTest {
         assertThat(properties.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,info");
         assertThat(properties.getProperty("management.endpoint.health.probes.enabled")).isEqualTo("true");
         assertThat(properties.getProperty("management.endpoint.health.show-details")).isEqualTo("never");
+        assertThat(properties.getProperty("management.health.mail.enabled")).isEqualTo("false");
         assertThat(properties.getProperty("pawbridge.legacy-api-paths.enabled")).isEqualTo("true");
         assertThat(properties.stringPropertyNames()).noneMatch(name -> name.contains("prometheus"));
     }
