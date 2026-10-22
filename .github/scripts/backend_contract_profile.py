@@ -730,7 +730,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '98f2e297447daffb5af14
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/StoreOrderAdministrationConfiguration.java': 'c7182b7c51d1dd57451f0d47d5a145a4c747dbf5a614472ce7553d86181aaa25',
  'backend-app/boot/src/test/java/com/pawbridge/backend/StoreAdminOrderDisabledHttpTest.java': 'b9194214cd588809e9a151166f9f10dcaf4eb45ae4b6fbea774aafbb710a2e9b',
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreOrderAdministrationTest.java': 'fd4d26f4b1ba66e2ee1f794b74a0c56cdd8e29698e0b060a209c979879166651',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreOrderAdministrationConfigurationTest.java': 'f3f8f224cf722567db05597a947647ec94ba9169ca945389a8721e1cf22764e2',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/StoreOrderAdministrationConfigurationTest.java': '36d91cd99e37c9b7d93048f0471e70e957e639b14b7e7e26f494c669ecb537df',
  'backend-app/boot/src/test/resources/owned-postgresql/admin-order-owned-schema.sql': '6e051995638179cecd99e7b206e7668db11d8074efc959e5da5921b13cb029e5',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/api/StoreOrderAdministrators.java': 'bd135cb2d2d5d1d36ad463a5b953dc00ee1e9e20ee0243551474be9d70db1d13',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/orderadministration/application/AdminOrderNotFoundException.java': '399710325d5a708fbea581f11d598736dadbb7e6ca6c8814303cf528092a9e60',
