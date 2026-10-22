@@ -896,7 +896,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 `animals/{uuid}{확장자}` 키, 부분 업로드 실패 시 앞 객체 유지, 삭제 실패·외부 URL 무시와 200 응답을 유지한다. 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다.
 
-원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있고, 원문의 삭제 실패 error 로그는 남기지 않는다. 이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있고, 원문의 삭제 실패 error 로그는 남기지 않는다. 이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 역할 조회는 기존 Animal 쓰기와 같은 `JdbcAnimalCommandActors`이므로 선택한 writer에 `pawbridge_user` USAGE, `users`·`contact_deletions` SELECT, `FOR UPDATE`용 `users` UPDATE(user_id)가 필요하다(`animal-command-owned-schema.sql`과 같음). 누적 F29 CI writer ACL은 `contact_deletions`에 INSERT(user_id)만 주므로 그 역할로 켜면 단건 업로드·삭제가 권한 오류 500으로 실패한다. 활성화 전 권한을 별도로 부여·검증한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
 
 ### 보호소 관리 쓰기와 회원 승인 직렬화
 
