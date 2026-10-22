@@ -48,6 +48,7 @@ public final class LegacyApiPathFilter extends OncePerRequestFilter {
     /** Mirrors the legacy routes of api-gateway/application.yml; first column is the Gateway route's Path predicate. */
     private static final List<Rule> RULES = List.of(
             rule(ANY, "/api/users/**", "/api/auth/**", "/api/favorites/**"),
+            rule(ANY, "/api/payments/**"),
             rule(READ_WRITE, "/api/animals/**", "/api/shelters/**"),
             rule(READ, "/api/places", "/api/places/regions", "/api/places/{contentId}"),
             rule(ANY, "/api/chats", "/api/chats/**"),
@@ -70,8 +71,6 @@ public final class LegacyApiPathFilter extends OncePerRequestFilter {
             rule(ANY, "/api/admin/users", "/api/admin/users/**", "/api/admin/stats/daily-signups",
                     "/api/admin/posts", "/api/admin/posts/**",
                     "/api/admin/stats/daily-animals", "/api/admin/stats/intake-trend"));
-    /** Routed by the Gateway without any rewrite; the application already serves these paths unchanged. */
-    private static final PathPattern PAYMENTS = PARSER.parse("/api/payments/**");
     /** The Gateway sent these to a protected route, but the public upload endpoint must not become reachable that way. */
     private static final PathPattern LOST_SEARCH_ALIAS = PARSER.parse("/api/animals/lost-candidates");
 
@@ -90,8 +89,7 @@ public final class LegacyApiPathFilter extends OncePerRequestFilter {
             response.getWriter().write("{\"code\":404,\"message\":\"유효하지 않은 엔드포인트입니다.\",\"data\":null}");
             return;
         }
-        if (uri.startsWith("/api/") && !uri.startsWith("/api/v1/") && !PAYMENTS.matches(path)
-                && routed(path, request.getMethod())) {
+        if (uri.startsWith("/api/") && !uri.startsWith("/api/v1/") && routed(path, request.getMethod())) {
             String rewritten = "/api/v1/" + uri.substring("/api/".length());
             request.setAttribute(ORIGINAL_PATH_ATTRIBUTE, uri);
             // servletPath is built from the decoded original so Security matchers and MVC agree on the same path.

@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -36,7 +37,7 @@ import org.springframework.web.context.WebApplicationContext;
  * legacy rewrite, then Spring Security (CORS first), then the lost-search limits.
  */
 @WebMvcTest(properties = {"pawbridge.animal-discovery.enabled=true", "pawbridge.animal-lost-search.enabled=true",
-        "pawbridge.user-store-mypage.enabled=true"},
+        "pawbridge.user-store-mypage.enabled=true", "pawbridge.payments.enabled=true"},
         excludeAutoConfiguration = org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
 @ContextConfiguration(classes = {GatewayFeaturesHttpTest.Probe.class, ReadSecurityConfiguration.class, F3TestInputs.SecurityInputs.class})
 class GatewayFeaturesHttpTest {
@@ -45,6 +46,8 @@ class GatewayFeaturesHttpTest {
         @GetMapping("/api/v1/animals") String animals() { return "animals"; }
 
         @GetMapping("/api/v1/users/me/cart") String cart() { return "cart"; }
+
+        @PostMapping("/api/v1/payments/confirm") String confirm() { return "confirmed"; }
 
         @PostMapping(value = "/api/v1/animals/lost-candidates", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
         String search(@RequestHeader(value = "Authorization", required = false) String authorization,
@@ -110,6 +113,15 @@ class GatewayFeaturesHttpTest {
         mvc.perform(get("/api/users/me/cart")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/users/me/cart")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/users/me/cart").header("Authorization", token)).andExpect(status().isOk()).andExpect(content().string("cart"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/payments/confirm", "/api/v1/payments/confirm"})
+    void given__payment_confirmation__when__requested__then__authentication_is_required_on_both_spellings(String path) throws Exception {
+        var token = "Bearer " + F3TestInputs.token(7, "ROLE_USER");
+        mvc.perform(post(path)).andExpect(status().isUnauthorized());
+        mvc.perform(post(path).header("Authorization", "Bearer synthetic-invalid-token")).andExpect(status().isUnauthorized());
+        mvc.perform(post(path).header("Authorization", token)).andExpect(status().isOk()).andExpect(content().string("confirmed"));
     }
 
     @ParameterizedTest

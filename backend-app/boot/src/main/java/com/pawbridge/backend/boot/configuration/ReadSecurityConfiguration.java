@@ -87,7 +87,7 @@ public class ReadSecurityConfiguration {
                 new AntPathRequestMatcher("/api/v1/categories/{categoryId}","DELETE")));
 
         var paymentEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(paymentsEnabledFlag);
-        var paymentConfirmation=new AndRequestMatcher(paymentEnabled,new AntPathRequestMatcher("/api/payments/confirm","POST"));
+        var paymentConfirmation=new AndRequestMatcher(paymentEnabled,new AntPathRequestMatcher("/api/v1/payments/confirm","POST"));
         // Original Gateway required only a valid token for /api/orders/**; the mock route has no owner check.
         var storeMockPaymentEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(storeMockPaymentFlag);
         var storeMockPayment=new AndRequestMatcher(storeMockPaymentEnabled,
