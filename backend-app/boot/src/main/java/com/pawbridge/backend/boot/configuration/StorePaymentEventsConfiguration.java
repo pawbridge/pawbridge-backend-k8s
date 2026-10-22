@@ -20,15 +20,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.kafka.annotation.EnableKafka;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
-import org.springframework.kafka.core.ConsumerFactory;
-import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.backoff.FixedBackOff;
 
-/** Default-off original Store payment result business; transport activation is a separate explicit gate. */
+/** Default-off original Store payment result business; no message transport is registered here. */
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.store-payment-events",name="enabled",havingValue="true")
 @Import({StoreOrderSupportConfiguration.class,StorePaymentTransportConfiguration.class})
@@ -69,38 +63,5 @@ public class StorePaymentEventsConfiguration {
         final JpaStockAdjustments delegate;
         SharedWriterStockRestorer(JpaStockAdjustments delegate) { this.delegate=delegate; }
         @Override public void increaseStocks(Map<Long,Integer> quantities) { delegate.increaseStocks(quantities); }
-    }
-
-    @Configuration(proxyBeanMethods=false)
-    @ConditionalOnProperty(prefix="pawbridge.store-payment-events",name={"enabled","kafka-enabled"},havingValue="true")
-    @EnableKafka
-    public static class KafkaTransport {
-        @Bean FixedBackOff storePaymentEventsBackOff() { return new FixedBackOff(1000L,4L); }
-        @Bean DefaultErrorHandler storePaymentEventsErrorHandler(
-                @Qualifier("storePaymentEventsBackOff") FixedBackOff backOff) {
-            var handler=new DefaultErrorHandler((record,failure)->{
-                // No raw event/key/provider exception body is copied into the recovery exception.
-                throw new IllegalStateException("Outbox event recovery is unresolved");
-            },backOff);
-            handler.setAckAfterHandle(false);
-            return handler;
-        }
-        @Bean ConcurrentKafkaListenerContainerFactory<String,String> storePaymentEventsKafkaListenerContainerFactory(
-                @Qualifier("storePaymentEventsConsumerFactory") ConsumerFactory<String,String> existingConsumers,
-                @Qualifier("storePaymentEventsErrorHandler") DefaultErrorHandler errors) {
-            var factory=new ConcurrentKafkaListenerContainerFactory<String,String>();
-            factory.setConsumerFactory(existingConsumers);factory.setCommonErrorHandler(errors);
-            factory.setAutoStartup(false);
-            return factory;
-        }
-        @Bean PaymentListener storePaymentEventsListener(StorePaymentEvents events) { return new PaymentListener(events); }
-    }
-
-    public static final class PaymentListener {
-        private final StorePaymentEvents events;
-        PaymentListener(StorePaymentEvents events) { this.events=events; }
-        @KafkaListener(topics={"payment.events","payment"},groupId="payment-group",
-                containerFactory="storePaymentEventsKafkaListenerContainerFactory",autoStartup="false")
-        public void handle(String event) { events.handle(event); }
     }
 }

@@ -1093,9 +1093,9 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 
 `pawbridge.payments.enabled=true`는 원문의 POST `/api/payments/confirm`을 명시적으로 조립한다. 인증된 사용자의 요청 DTO와 응답 형태를 유지하며, Store 주문 조회는 별도 reader 트랜잭션을 사용하고 Payment 저장은 기존 writer DataSource 위의 전용 JPA 단위를 사용한다. Toss 연결은 기존 endpoint 기본값과 주입형 RestClient를 사용한다. 키를 로그에 남기지 않으며 이 기능은 기본 비활성이다.
 
-`pawbridge.store-payment-events.enabled=true`는 원문의 DONE/ABORTED/CANCELED 처리, 주문 결제·취소와 재고·검색·outbox 쓰기를 기존 Store writer에 연결한다. ranking은 기존 `memberChatRedis`가 있으면 차용하고, 없으면 명시한 Redis 설정으로 소유 factory를 구성한다. Kafka 등록에는 추가 `kafka-enabled=true`가 필요하며, 원문 topic/group과 재시도 설정을 유지한 listener는 `autoStartup=false`로 둔다. Kafka의 전역 자동 구성은 제외하고 명명한 조건부 consumer factory만 사용한다.
+`pawbridge.store-payment-events.enabled=true`는 원문의 DONE/ABORTED/CANCELED 처리, 주문 결제·취소와 재고·검색·outbox 쓰기를 기존 Store writer에 연결한다. ranking은 기존 `memberChatRedis`가 있으면 차용하고, 없으면 명시한 Redis 설정으로 소유 factory를 구성한다. 이 모놀리스에는 Kafka 전송 계층이 없다(`spring-kafka` 의존성, `kafka-enabled` 속성, `@KafkaListener`와 consumer factory를 제거했다). 이전에도 listener는 `autoStartup=false`로 시작된 적이 없었고 producer는 없었으므로 동작은 같다. 기존 `StorePaymentEvents.handle(String)`은 현재 호출처가 없으며, 결제 결과 반영은 후속 PR에서 직접 호출로 바꿀 예정이다. 이 변경은 `boot/build.gradle`을 바꾸므로 구조 자체회귀 재사용 기준이 깨져 CI가 구조 검사를 직접 실행한다(실패가 아니다).
 
-단위·구성·실제 Security/JWT와 합성 HTTP 검증 근거를 보존했다. 최종 단일 조립에서 기존 actualMain2와 동일 소유 PostgreSQL의 SELECT3을 재검증했고, Kafka Admin·ConsumerFactory·ProducerFactory·listener registry가 기본 비활성 상태에서 생성되지 않음을 확인했다. 선택한 구조 계약3과 현재 구조 guard도 통과했으며, 생성한 JAR의 실제 runtime162개 목록은 기존 CI 격리 경계를 통과했다. 전체 구조 자체회귀는 CI에서 별도로 실행해야 한다. 이 결과는 실 Toss·Redis·Kafka 운영 연결, 소비·ACK 성공, 결제 소유권·정상 상태·금액 정책 보완이나 운영 활성화 완료를 의미하지 않는다. 원문의 늦은 결제 결과·중복/경합·외부 보상·DB commit 뒤 실패 한계는 후속 보완으로 유보한다.
+단위·구성·실제 Security/JWT와 합성 HTTP 검증 근거를 보존했다. 최종 단일 조립에서 기존 actualMain2와 동일 소유 PostgreSQL의 SELECT3을 재검증했고, 선택한 구조 계약3과 현재 구조 guard도 통과했으며, 생성한 JAR의 실제 runtime162개 목록은 기존 CI 격리 경계를 통과했다. 전체 구조 자체회귀는 CI에서 별도로 실행해야 한다. 이 결과는 실 Toss·Redis·Kafka 운영 연결, 소비·ACK 성공, 결제 소유권·정상 상태·금액 정책 보완이나 운영 활성화 완료를 의미하지 않는다. 원문의 늦은 결제 결과·중복/경합·외부 보상·DB commit 뒤 실패 한계는 후속 보완으로 유보한다.
 
 ### Store 모의 결제
 
