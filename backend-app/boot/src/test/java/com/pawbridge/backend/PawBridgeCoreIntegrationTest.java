@@ -202,7 +202,7 @@ class PawBridgeCoreIntegrationTest {
                         "pawbridge.animal-commands.enabled=true", "pawbridge.store-direct-orders.enabled=true",
                         "pawbridge.auth.google-enabled=false", "pawbridge.auth.sessions-enabled=false", "pawbridge.chat.enabled=false",
                         "pawbridge.jobs.cleanup-enabled=false", "pawbridge.user-maintenance.enabled=false",
-                        "pawbridge.community-maintenance.enabled=false", "pawbridge.favorite-delivery.enabled=false",
+                        "pawbridge.community-maintenance.enabled=false",
                         "pawbridge.visits.enabled=false", "pawbridge.visits.collection-enabled=false",
                         "pawbridge.animal-query.projection-schedule-enabled=false", "apms.batch.schedule-enabled=false",
                         "apms-photo-archive.enabled=false", "tourapi.enabled=false", "tourapi.schedule-enabled=false",

@@ -77,7 +77,7 @@ class PaymentConfirmationConfigurationTest {
                         "pawbridge.visits.enabled=false", "pawbridge.visits.collection-enabled=false",
                         "pawbridge.animal-query.projection-schedule-enabled=false", "apms.batch.schedule-enabled=false",
                         "apms-photo-archive.enabled=false", "tourapi.enabled=false", "tourapi.schedule-enabled=false",
-                        "lost-gallery-feed.enabled=false", "pawbridge.favorite-delivery.enabled=false",
+                        "lost-gallery-feed.enabled=false",
                         "pawbridge.shelter-observations.schedule-enabled=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed().hasSingleBean(Payments.class).hasSingleBean(PaymentController.class)

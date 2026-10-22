@@ -1,7 +1,6 @@
 package com.pawbridge.backend.user.internal.animalactivity.infrastructure;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pawbridge.backend.animal.api.AnimalFavoriteCounts;
 import com.pawbridge.backend.user.internal.animalactivity.application.*;
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException;
 import java.sql.*;
@@ -19,28 +18,30 @@ public final class JdbcUserAnimalActivities implements UserAnimalActivities {
     private final JdbcOperations jdbc;
     private final TransactionOperations write,read;
     private final AnimalLookup animals;
-    private final Supplier<UUID> ids;
+    private final AnimalFavoriteCounts counts;
     private final Supplier<LocalDateTime> now;
-    private final ObjectMapper payloads=new ObjectMapper();
-    public JdbcUserAnimalActivities(JdbcOperations jdbc,TransactionOperations write,TransactionOperations read,AnimalLookup animals){this(jdbc,write,read,animals,UUID::randomUUID,LocalDateTime::now);}
-    public JdbcUserAnimalActivities(JdbcOperations jdbc,TransactionOperations write,TransactionOperations read,AnimalLookup animals,Supplier<UUID> ids,Supplier<LocalDateTime> now){
-        this.jdbc=jdbc;this.write=write;this.read=read;this.animals=animals;this.ids=ids;this.now=now;
+    public JdbcUserAnimalActivities(JdbcOperations jdbc,TransactionOperations write,TransactionOperations read,AnimalLookup animals,AnimalFavoriteCounts counts){this(jdbc,write,read,animals,counts,LocalDateTime::now);}
+    public JdbcUserAnimalActivities(JdbcOperations jdbc,TransactionOperations write,TransactionOperations read,AnimalLookup animals,AnimalFavoriteCounts counts,Supplier<LocalDateTime> now){
+        this.jdbc=jdbc;this.write=write;this.read=read;this.animals=animals;this.counts=counts;this.now=now;
     }
+    /** The favorite row and the animal's count commit or roll back together; an absent animal rejects the add. */
     public Favorite add(long current,long animal){return write.execute(tx->{
+        if(exists(current,animal))throw new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ALREADY_EXISTS);
+        requireUser(current);
+        LocalDateTime created=now.get();
+        Long id;
         try{
-            if(exists(current,animal))throw new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ALREADY_EXISTS);
-            requireUser(current);
-            LocalDateTime created=now.get();
-            Long id=jdbc.queryForObject("INSERT INTO pawbridge_user.favorites(user_id,animal_id,created_at) VALUES(?,?,?) RETURNING favorite_id",Long.class,current,animal,timestamp(created));
-            event(current,animal,"FAVORITE_ADDED");
-            // Auditing's in-memory LocalDateTime is returned before any DB precision refresh, as in JPA.
-            return new Favorite(id,current,animal,created);
+            id=jdbc.queryForObject("INSERT INTO pawbridge_user.favorites(user_id,animal_id,created_at) VALUES(?,?,?) RETURNING favorite_id",Long.class,current,animal,timestamp(created));
         }catch(DataIntegrityViolationException conflict){throw new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ALREADY_EXISTS);}
+        if(!counts.adjust(animal,1))throw new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ANIMAL_NOT_FOUND);
+        // Auditing's in-memory LocalDateTime is returned before any DB precision refresh, as in JPA.
+        return new Favorite(id,current,animal,created);
     });}
+    /** A favorite of an animal that no longer exists can still be removed; the count update is then skipped. */
     public void remove(long current,long animal){write.executeWithoutResult(tx->{
         if(!exists(current,animal))throw new FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.NOT_FOUND);
         int deleted=jdbc.update("DELETE FROM pawbridge_user.favorites WHERE user_id=? AND animal_id=?",current,animal);
-        if(deleted>0)event(current,animal,"FAVORITE_REMOVED");
+        if(deleted>0)counts.adjust(animal,-1);
     });}
     public Favorites favorites(long current){return read.execute(tx->{
         requireUser(current);
@@ -71,18 +72,6 @@ public final class JdbcUserAnimalActivities implements UserAnimalActivities {
     });}
     private boolean exists(long current,long animal){return jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pawbridge_user.favorites WHERE user_id=? AND animal_id=?)",Boolean.class,current,animal);}
     private void requireUser(long current){if(!jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM pawbridge_user.users WHERE user_id=?)",Boolean.class,current))throw new UserNotFoundException();}
-    private void event(long current,long animal,String type){
-        // FavoriteService and OutboxService intentionally generate distinct UUIDs in the pinned source.
-        String payloadId=ids.get().toString();Map<String,Object> payload=Map.of("eventType",type,"eventId",payloadId,"userId",current,"animalId",animal,"timestamp",now.get().toString());
-        try{
-            String outboxId=ids.get().toString();String json=payloads.writeValueAsString(payload);
-            jdbc.update("INSERT INTO pawbridge_user.outbox_events(event_id,aggregate_type,aggregate_id,event_type,topic,payload,created_at) VALUES(?,'Favorite',?,?,'user.favorite.events',CAST(? AS json),?)",
-                    outboxId,Long.toString(current),type,json,timestamp(now.get()));
-        }catch(JsonProcessingException|RuntimeException unavailable){
-            // OutboxService wraps its persistence failure: do not misclassify its UNIQUE error as favorite409.
-            throw new IllegalStateException("Outbox event persistence failed",unavailable);
-        }
-    }
     private static Calendar utc(){return Calendar.getInstance(TimeZone.getTimeZone("UTC"));}
     private static SqlValue timestamp(LocalDateTime value){return new SqlValue(){public void setValue(PreparedStatement statement,int index)throws SQLException{statement.setTimestamp(index,Timestamp.valueOf(value),utc());}public void cleanup(){ }};}
     private record CurrentUser(String role,String careRegNo) { }

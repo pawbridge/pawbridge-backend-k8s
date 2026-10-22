@@ -99,43 +99,34 @@ class UserAnimalModuleConfigurationTest {
                 });
     }
 
-    @Test
-    void given__module_member_reads_and_local_delivery_enabled__when__assembling_together__then__share_animal_api_and_keep_reader_and_writer_transactions_separate() {
+    @ParameterizedTest @ValueSource(strings={"http","module"})
+    void given__activities_enabled__when__assembling__then__wire_the_favorite_count_api_on_the_writer_without_a_scheduler_or_own_transaction(String backend) {
         inputs().withBean("writeDataSource", DataSource.class, () -> mock(DataSource.class))
-                .withUserConfiguration(com.pawbridge.backend.boot.configuration.FavoriteDeliveryConfiguration.class)
-                .withPropertyValues("pawbridge.shelter-membership.enabled=true",
-                        "pawbridge.shelter-membership.animal-backend=module",
-                        "pawbridge.user-animal-activities.enabled=true",
-                        "pawbridge.user-animal-activities.animal-backend=module",
-                        "pawbridge.favorite-delivery.enabled=true",
-                        "pawbridge.favorite-delivery.user-outbox-floor=12",
-                        "pawbridge.favorite-delivery.animal-outbox-floor=23",
-                        "pawbridge.favorite-delivery.delay-ms=3600000")
+                .withPropertyValues("pawbridge.user-animal-activities.enabled=true",
+                        "pawbridge.user-animal-activities.animal-backend=" + backend, "service.animal.url=http://127.0.0.1:1")
                 .run(context -> {
-                    assertThat(context).hasNotFailed().hasSingleBean(AnimalMemberReads.class)
-                            .hasSingleBean(AnimalShelterReads.class)
-                            .hasSingleBean(com.pawbridge.backend.animal.api.AnimalFavoriteEvents.class)
-                            .hasSingleBean(com.pawbridge.backend.user.internal.favoritedelivery.infrastructure.JdbcFavoriteEventDelivery.class)
-                            .hasSingleBean(org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class)
-                            .doesNotHaveBean(HttpClient.class).doesNotHaveBean(ShelterReadController.class)
-                            .doesNotHaveBean(ShelterDiscoveryReadController.class);
-                    var members = context.getBean(AnimalMemberReads.class);
-                    assertThat(context.getBean(AnimalShelterReads.class)).isSameAs(members);
-                    assertThat(ReflectionTestUtils.getField(context.getBean(UserAnimalActivities.AnimalLookup.class), "animals"))
-                            .isSameAs(members);
-                    var reader = (TransactionTemplate) ReflectionTestUtils.getField(members, "reads");
-                    var actor = context.getBean(com.pawbridge.backend.animal.api.AnimalFavoriteEvents.class);
-                    var writer = (TransactionTemplate) ReflectionTestUtils.getField(actor, "transactions");
-                    assertThat(reader.getTransactionManager()).isSameAs(context.getBean("transactionManager"));
-                    assertThat(reader.isReadOnly()).isTrue();
-                    assertThat(writer.getTransactionManager()).isSameAs(context.getBean("writeTransactionManager"))
-                            .isNotSameAs(reader.getTransactionManager());
+                    assertThat(context).hasNotFailed().hasSingleBean(com.pawbridge.backend.animal.api.AnimalFavoriteCounts.class)
+                            .doesNotHaveBean(org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler.class);
+                    var counts = context.getBean(com.pawbridge.backend.animal.api.AnimalFavoriteCounts.class);
+                    assertThat(counts).isInstanceOf(com.pawbridge.backend.animal.internal.favorite.infrastructure.JdbcAnimalFavoriteCounts.class);
+                    assertThat(ReflectionTestUtils.getField(counts, "jdbc")).isSameAs(context.getBean("writeJdbc"));
+                    var activities = context.getBean(UserAnimalActivities.class);
+                    assertThat(ReflectionTestUtils.getField(activities, "counts")).isSameAs(counts);
+                    assertThat(ReflectionTestUtils.getField(activities, "jdbc")).isSameAs(context.getBean("writeJdbc"));
+                    var writer = (TransactionTemplate) ReflectionTestUtils.getField(activities, "write");
+                    assertThat(writer.getTransactionManager()).isSameAs(context.getBean("writeTransactionManager"));
                     assertThat(writer.getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED);
                     verify(context.getBean("transactionManager", PlatformTransactionManager.class), never()).getTransaction(any());
                     verify(context.getBean("writeTransactionManager", PlatformTransactionManager.class), never()).getTransaction(any());
                     verify(context.getBean("writeJdbc", JdbcTemplate.class)).afterPropertiesSet();
                     verifyNoMoreInteractions(context.getBean("writeJdbc"));
                 });
+    }
+
+    @Test
+    void given__activities_disabled__when__assembling__then__no_favorite_count_api() {
+        inputs().run(context -> assertThat(context).hasNotFailed()
+                .doesNotHaveBean(com.pawbridge.backend.animal.api.AnimalFavoriteCounts.class));
     }
 
     @Test
