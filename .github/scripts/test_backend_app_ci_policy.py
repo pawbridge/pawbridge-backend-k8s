@@ -66,10 +66,10 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         return value if raw else value.splitlines()[0] + '\n'
 
     def gate(self, selection='success', selected='true', check='success', package=None,
-             proof=None, mode=None):
+             proof=None, mode=None, event='push'):
         return subprocess.run(
             ['bash', '-euc', self.script('ci-result')],
-            env={'PATH': os.environ.get('PATH', ''), 'SELECTION_RESULT': selection,
+            env={'PATH': os.environ.get('PATH', ''), 'EVENT_NAME': event, 'SELECTION_RESULT': selection,
                  'MODULE_SELECTED': selected, 'MODULE_RESULT': check,
                  'PACKAGE_RESULT': package if package is not None else ('skipped' if selected == 'false' else 'success'),
                  'PROOF_RESULT': proof if proof is not None else ('skipped' if selected == 'false' else 'success'),
@@ -164,6 +164,36 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 actual = self.gate(selected=selected, check=result)
                 self.assertEqual(0, actual.returncode, actual.stderr)
 
+    def test_given_pull_request__when_gating__then_require_package_and_the_intentional_contract_skip(self):
+        actual = self.gate(event='pull_request', check='skipped')
+        self.assertEqual(0, actual.returncode, actual.stderr)
+        self.assertEqual(0, self.gate(event='pull_request', selected='false', check='skipped').returncode)
+        for package in ('failure', 'cancelled', 'skipped', ''):
+            with self.subTest(package=package):
+                self.assertNotEqual(0, self.gate(event='pull_request', check='skipped', package=package).returncode)
+        for check in ('success', 'failure', 'cancelled', ''):
+            with self.subTest(check=check):
+                self.assertNotEqual(0, self.gate(event='pull_request', check=check).returncode)
+        for key, value in (('selection', 'failure'), ('proof', 'failure'), ('proof', 'cancelled'), ('mode', '')):
+            with self.subTest(key=key, value=value):
+                self.assertNotEqual(0, self.gate(event='pull_request', check='skipped', **{key: value}).returncode)
+
+    def test_given_dev_push__when_gating__then_still_require_the_executed_postgresql_contracts(self):
+        for check in ('skipped', 'failure', 'cancelled', ''):
+            with self.subTest(check=check):
+                self.assertNotEqual(0, self.gate(event='push', check=check).returncode)
+
+    def test_given_pull_request_without_contracts__when_packaging__then_keep_the_same_jar_isolation_guard(self):
+        def isolation(job, name):
+            step = job.split('      - name: ' + name + '\n', 1)[1].split('\n      - name:', 1)[0]
+            return re.search(r"if grep -E '[^\n]+\n[^\n]+", step).group(0).replace('package-jar-contents', 'boot-jar-contents')
+        package = self.job('package')
+        self.assertNotIn('if:', package.split('      - name: Verify production JAR isolation before sharing the candidate\n', 1)[1].split('\n      - name:', 1)[0])
+        self.assertEqual(isolation(self.job('check'), 'Verify production JAR isolation'),
+                         isolation(package, 'Verify production JAR isolation before sharing the candidate'))
+        self.assertLess(package.index('Verify production JAR isolation before sharing the candidate'),
+                        package.index("Share only this run's exact candidate JAR"))
+
     def test_given_failed_or_missing_selection__when_gating__then_reject_even_a_successful_check(self):
         for result in ('failure', 'cancelled', 'skipped', ''):
             with self.subTest(result=result):
@@ -186,9 +216,10 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('PUSH_BEFORE_SHA: ${{ github.event.before }}', selection)
         check = self.job('check')
         self.assertIn('needs: [selection, proof, package]', check)
-        self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", check)
+        self.assertIn("if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", check)
         gate = self.job('ci-result')
         self.assertIn('needs: [selection, proof, package, check]', gate)
+        self.assertIn('EVENT_NAME: ${{ github.event_name }}', gate)
         self.assertIn('SELECTION_RESULT: ${{ needs.selection.result }}', gate)
         self.assertIn('MODULE_SELECTED: ${{ needs.selection.outputs.selected }}', gate)
         self.assertIn('MODULE_RESULT: ${{ needs.check.result }}', gate)
@@ -496,8 +527,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         proof, package, check = self.job('proof'), self.job('package'), self.job('check')
         self.assertLess(text.index('  proof:\n'), text.index('  package:\n'))
         self.assertIn('needs: [selection, proof]', package)
-        for stage in (package, check):
-            self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", stage)
+        self.assertIn("if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", package)
+        self.assertIn("if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", check)
         self.assertIn('permissions:\n      contents: read\n      actions: read\n      pull-requests: read', proof)
         self.assertIn('persist-credentials: false', proof)
         self.assertIn('fetch-depth: 0', proof)
