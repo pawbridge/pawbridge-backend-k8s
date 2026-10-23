@@ -17,6 +17,7 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.http.HttpMessageConverters;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
@@ -90,8 +91,12 @@ class LegacyNicknameDecoderCompatibilityTest {
     }
 
     @Configuration(proxyBeanMethods = false)
-    @EnableAutoConfiguration(exclude = {DataSourceAutoConfiguration.class,
-            SecurityAutoConfiguration.class, UserDetailsServiceAutoConfiguration.class})
+    @EnableAutoConfiguration(exclude = {
+            DataSourceAutoConfiguration.class,
+            SecurityAutoConfiguration.class,
+            UserDetailsServiceAutoConfiguration.class,
+            ManagementWebSecurityAutoConfiguration.class
+    })
     @Import(PlainStringNicknameEndpoint.class)
     static class OracleWebConfiguration {}
 
