@@ -1,7 +1,7 @@
 package com.pawbridge.backend.boot.configuration;
 
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLogin;
-import com.pawbridge.backend.user.internal.oauth.infrastructure.JdbcGoogleLogin;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLogin;
+import com.pawbridge.backend.user.internal.oauth.infrastructure.JdbcSocialLogin;
 import com.pawbridge.backend.user.internal.session.application.AuthSessions;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -14,10 +14,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(name="pawbridge.auth.google-enabled",havingValue="true")
-public class GoogleOAuthBusinessConfiguration {
-    @Bean GoogleLogin googleLogin(@Qualifier("writeJdbc") JdbcTemplate jdbc,
+public class SocialOAuthBusinessConfiguration {
+    @Bean SocialLogin googleLogin(@Qualifier("writeJdbc") JdbcTemplate jdbc,
             @Qualifier("writeTransactionManager") JdbcTransactionManager manager,JwtSessionTokens tokens,AuthSessions sessions) {
         var transaction=new TransactionTemplate(manager);
-        return new JdbcGoogleLogin(jdbc,transaction,tokens);
+        return new JdbcSocialLogin(jdbc,transaction,tokens);
     }
 }

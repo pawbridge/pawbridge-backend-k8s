@@ -1,10 +1,10 @@
 package com.pawbridge.backend.boot.configuration;
 
 import com.pawbridge.backend.boot.security.GatewayCors;
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLogin;
-import com.pawbridge.backend.user.internal.oauth.infrastructure.GoogleOAuth2UserService;
-import com.pawbridge.backend.user.internal.oauth.web.GoogleOAuth2FailureHandler;
-import com.pawbridge.backend.user.internal.oauth.web.GoogleOAuth2SuccessHandler;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLogin;
+import com.pawbridge.backend.user.internal.oauth.infrastructure.SocialOAuth2UserService;
+import com.pawbridge.backend.user.internal.oauth.web.SocialOAuth2FailureHandler;
+import com.pawbridge.backend.user.internal.oauth.web.SocialOAuth2SuccessHandler;
 import java.net.URI;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -25,8 +25,8 @@ import org.springframework.web.filter.CorsFilter;
 
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.auth",name="google-enabled",havingValue="true",matchIfMissing=false)
-@Import(GoogleOAuthBusinessConfiguration.class)
-public class GoogleOAuthConfiguration {
+@Import(SocialOAuthBusinessConfiguration.class)
+public class SocialOAuthConfiguration {
     @Bean ClientRegistrationRepository googleClientRegistrationRepository(
             @Value("${spring.security.oauth2.client.registration.google.client-id:${GOOGLE_CLIENT_ID:}}") String clientId,
             @Value("${spring.security.oauth2.client.registration.google.client-secret:${GOOGLE_SECRET_KEY:}}") String secret,
@@ -38,17 +38,17 @@ public class GoogleOAuthConfiguration {
                 .authorizationUri("https://accounts.google.com/o/oauth2/v2/auth?prompt=select_account").build();
         return new InMemoryClientRegistrationRepository(registration);
     }
-    @Bean GoogleOAuth2UserService googleOAuth2UserService(GoogleLogin login){return new GoogleOAuth2UserService(login);}
-    @Bean GoogleOAuth2SuccessHandler googleOAuth2SuccessHandler(GoogleLogin login,@Value("${oauth2.redirect-uri:${OAUTH2_REDIRECT_URI:}}") String frontend){requireUri(frontend,null);return new GoogleOAuth2SuccessHandler(login,frontend);}
-    @Bean GoogleOAuth2FailureHandler googleOAuth2FailureHandler(@Value("${oauth2.redirect-uri:${OAUTH2_REDIRECT_URI:}}") String frontend){requireUri(frontend,null);return new GoogleOAuth2FailureHandler(frontend);}
+    @Bean SocialOAuth2UserService googleOAuth2UserService(SocialLogin login){return new SocialOAuth2UserService(login);}
+    @Bean SocialOAuth2SuccessHandler googleOAuth2SuccessHandler(SocialLogin login,@Value("${oauth2.redirect-uri:${OAUTH2_REDIRECT_URI:}}") String frontend){requireUri(frontend,null);return new SocialOAuth2SuccessHandler(login,frontend);}
+    @Bean SocialOAuth2FailureHandler googleOAuth2FailureHandler(@Value("${oauth2.redirect-uri:${OAUTH2_REDIRECT_URI:}}") String frontend){requireUri(frontend,null);return new SocialOAuth2FailureHandler(frontend);}
     @Bean
     @Order(1)
     SecurityFilterChain googleOAuthSecurity(
             HttpSecurity http,
             ClientRegistrationRepository clients,
-            GoogleOAuth2UserService users,
-            GoogleOAuth2SuccessHandler success,
-            GoogleOAuth2FailureHandler failure,
+            SocialOAuth2UserService users,
+            SocialOAuth2SuccessHandler success,
+            SocialOAuth2FailureHandler failure,
             @Value(GatewayCors.ORIGIN_PATTERNS_VALUE) String corsOriginPatterns) throws Exception {
         var securityContextRepository = new RequestAttributeSecurityContextRepository();
         var authorizationRequestRepository = new HttpSessionOAuth2AuthorizationRequestRepository();

@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import com.pawbridge.backend.boot.configuration.GoogleOAuthConfiguration;
+import com.pawbridge.backend.boot.configuration.SocialOAuthConfiguration;
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration;
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLogin;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLogin;
 import com.pawbridge.backend.user.internal.session.application.AuthSessions;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
 import org.junit.jupiter.api.Test;
@@ -22,10 +22,10 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(properties={"pawbridge.auth.google-enabled=true","spring.security.oauth2.client.registration.google.client-id=synthetic-client",
         "spring.security.oauth2.client.registration.google.client-secret=synthetic-private-secret","spring.security.oauth2.client.registration.google.redirect-uri=https://fixture.invalid/login/oauth2/code/google",
         "oauth2.redirect-uri=https://fixture.invalid/oauth/callback"},excludeAutoConfiguration=org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
-@ContextConfiguration(classes={GoogleOAuthConfiguration.class,ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
-class GoogleOAuthSecurityTest {
+@ContextConfiguration(classes={SocialOAuthConfiguration.class,ReadSecurityConfiguration.class,F3TestInputs.SecurityInputs.class})
+class SocialOAuthSecurityTest {
     @Autowired MockMvc mvc;
-    @MockitoBean GoogleLogin login;
+    @MockitoBean SocialLogin login;
     @MockitoBean AuthSessions sessions;
     @MockitoBean JwtSessionTokens tokens;
     @Test void given__explicit_google_configuration__when__starting_authorization__then__use_original_scopes_and_temporary_spring_state_only()throws Exception{
@@ -70,9 +70,9 @@ class GoogleOAuthSecurityTest {
     }
     @Test void given__google_unspecified_or_disabled__when__assembling_configuration__then__register_no_oauth_client_or_security_chain(){
         for(String flag:new String[]{"absent","false"}){
-            var runner=new ApplicationContextRunner().withUserConfiguration(GoogleOAuthConfiguration.class);
+            var runner=new ApplicationContextRunner().withUserConfiguration(SocialOAuthConfiguration.class);
             if(flag.equals("false"))runner=runner.withPropertyValues("pawbridge.auth.google-enabled=false");
-            runner.run(context->assertThat(context).hasNotFailed().doesNotHaveBean(ClientRegistrationRepository.class).doesNotHaveBean(SecurityFilterChain.class).doesNotHaveBean(GoogleLogin.class));
+            runner.run(context->assertThat(context).hasNotFailed().doesNotHaveBean(ClientRegistrationRepository.class).doesNotHaveBean(SecurityFilterChain.class).doesNotHaveBean(SocialLogin.class));
         }
     }
 }

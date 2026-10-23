@@ -3,8 +3,8 @@ package com.pawbridge.backend.user.internal.oauth.infrastructure;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLogin.GoogleUser;
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLoginRejectedException;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLogin.SocialUser;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLoginRejectedException;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -34,16 +34,16 @@ import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-class JdbcGoogleLoginTest {
+class JdbcSocialLoginTest {
     private static final LocalDateTime NOW=LocalDateTime.parse("2030-01-01T12:34:56.123456");
     private static final Map<String,Object> ATTRIBUTES=Map.of("email","social@example.test","name","Social","sub","provider-sub");
-    private static final GoogleUser EXISTING=new GoogleUser(7,"social@example.test","Stored","ROLE_ADMIN","care","GOOGLE");
+    private static final SocialUser EXISTING=new SocialUser(7,"social@example.test","Stored","ROLE_ADMIN","care","GOOGLE");
 
     @ParameterizedTest @ValueSource(strings={"unsupported","missing-email","empty-email"})
     void given__unsupported_provider_or_missing_email__when__loading__then__reject_before_any_account_transaction(String example) {
         var f=new Fixture();var attributes=new HashMap<>(ATTRIBUTES);
         if(example.equals("missing-email"))attributes.remove("email");if(example.equals("empty-email"))attributes.put("email","");
-        assertThrows(GoogleLoginRejectedException.class,()->f.login.load(example.equals("unsupported")?"other":"google",attributes));
+        assertThrows(SocialLoginRejectedException.class,()->f.login.load(example.equals("unsupported")?"other":"google",attributes));
         assertTrue(f.events.isEmpty());assertTrue(f.jdbc.bindings.isEmpty());assertEquals(0,f.nicknames);verifyNoInteractions(f.tokens);
     }
 
@@ -57,14 +57,14 @@ class JdbcGoogleLoginTest {
     @Test
     void given__local_account_with_same_email__when__loading_google__then__reject_without_linking_or_inserting() {
         var f=new Fixture();f.jdbc.local=List.of(EXISTING);
-        assertEquals("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.",assertThrows(GoogleLoginRejectedException.class,()->f.login.load("google",ATTRIBUTES)).getMessage());
+        assertEquals("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.",assertThrows(SocialLoginRejectedException.class,()->f.login.load("google",ATTRIBUTES)).getMessage());
         assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","rollback","cleanup"),f.events);assertEquals(0,f.nicknames);assertTrue(f.jdbc.bindings.isEmpty());verifyNoInteractions(f.tokens);
     }
 
     @Test
     void given__new_google_account__when__loading__then__insert_source_defaults_provider_id_and_one_audit_time_without_issuing_tokens() {
-        var f=new Fixture();GoogleUser user=f.login.load("google",ATTRIBUTES);
-        assertEquals(new GoogleUser(19,"social@example.test","Social","ROLE_USER",null,"GOOGLE"),user);
+        var f=new Fixture();SocialUser user=f.login.load("google",ATTRIBUTES);
+        assertEquals(new SocialUser(19,"social@example.test","Social","ROLE_USER",null,"GOOGLE"),user);
         assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","commit","cleanup"),f.events);
         Map<Integer,Object> values=f.jdbc.bindings.getFirst();
         Map.of(1,"social@example.test",2,"Social",3,"nickname1",4,"OAuth2",5,"ROLE_USER",7,"GOOGLE",8,"provider-sub",9,Timestamp.valueOf(NOW),10,Timestamp.valueOf(NOW))
@@ -85,7 +85,7 @@ class JdbcGoogleLoginTest {
         var f=new Fixture();f.jdbc.userFailure=new DataIntegrityViolationException("synthetic unique");f.jdbc.userFailuresRemaining=1;
         if(racedAccount)f.jdbc.googleAfterFailure=EXISTING;
         var result=f.login.load("google",ATTRIBUTES);
-        assertEquals(racedAccount?EXISTING:new GoogleUser(19,"social@example.test","Social","ROLE_USER",null,"GOOGLE"),result);
+        assertEquals(racedAccount?EXISTING:new SocialUser(19,"social@example.test","Social","ROLE_USER",null,"GOOGLE"),result);
         var expected=new ArrayList<>(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup","begin","user:GOOGLE"));
         if(!racedAccount)expected.addAll(List.of("user:LOCAL","nickname","insert-user"));
         expected.addAll(List.of("commit","cleanup"));assertEquals(expected,f.events);
@@ -131,19 +131,19 @@ class JdbcGoogleLoginTest {
 
     private static final class Fixture {
         final List<String> events=new ArrayList<>();final RecordingJdbc jdbc=new RecordingJdbc(events);final Manager manager=new Manager(events);
-        final JwtSessionTokens tokens=mock(JwtSessionTokens.class);final JdbcGoogleLogin login;int nicknames;
+        final JwtSessionTokens tokens=mock(JwtSessionTokens.class);final JdbcSocialLogin login;int nicknames;
         Fixture(){
             when(tokens.access(any())).thenAnswer(call->{events.add("access");return "safe-access";});
             when(tokens.refresh()).thenAnswer(call->{events.add("refresh");return "safe-refresh";});
             when(tokens.refreshExpiration()).thenAnswer(call->{events.add("refresh-expiration");return 600_999L;});
             Supplier<String> nickname=()->{events.add("nickname");return "nickname"+(++nicknames);};
-            login=new JdbcGoogleLogin(jdbc,new TransactionTemplate(manager),tokens,nickname,()->NOW);
+            login=new JdbcSocialLogin(jdbc,new TransactionTemplate(manager),tokens,nickname,()->NOW);
         }
     }
     private static final class RecordingJdbc extends JdbcTemplate {
-        final List<String> events;List<GoogleUser> google=List.of(),local=List.of();List<Long> refreshIds=List.of();
+        final List<String> events;List<SocialUser> google=List.of(),local=List.of();List<Long> refreshIds=List.of();
         final List<Map<Integer,Object>> bindings=new ArrayList<>();final List<String> calendarZones=new ArrayList<>();
-        RuntimeException userFailure,refreshFailure;int writes,userFailuresRemaining=Integer.MAX_VALUE;GoogleUser googleAfterFailure;boolean userPresent=true;
+        RuntimeException userFailure,refreshFailure;int writes,userFailuresRemaining=Integer.MAX_VALUE;SocialUser googleAfterFailure;boolean userPresent=true;
         RecordingJdbc(List<String> events){this.events=events;}
         @Override public <T> List<T> query(String sql,RowMapper<T> mapper,Object... args) {
             var result=new ArrayList<T>();

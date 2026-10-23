@@ -1,7 +1,7 @@
 package com.pawbridge.backend.user.internal.oauth.infrastructure;
 
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLogin;
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLoginRejectedException;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLogin;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLoginRejectedException;
 import com.pawbridge.backend.user.internal.nickname.infrastructure.JdbcUserNicknameStore;
 import com.pawbridge.backend.user.internal.session.application.AuthSessions;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
@@ -22,7 +22,7 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.transaction.support.TransactionOperations;
 
 /** Google protocol I/O precedes this adapter; account creation and refresh persistence stay separate. */
-public final class JdbcGoogleLogin implements GoogleLogin {
+public final class JdbcSocialLogin implements SocialLogin {
     private static final String FIND_USER="SELECT user_id,email,name,role,care_reg_no,provider FROM pawbridge_user.users WHERE lower(email)=lower(?) AND lower(provider)=lower(?)";
     private static final String INSERT_USER="INSERT INTO pawbridge_user.users(email,name,nickname,password,role,care_reg_no,provider,provider_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)";
     private static final String LOCK_USER="SELECT user_id FROM pawbridge_user.users WHERE user_id = ? FOR UPDATE";
@@ -35,19 +35,19 @@ public final class JdbcGoogleLogin implements GoogleLogin {
     private final Supplier<String> nicknames;
     private final Supplier<LocalDateTime> now;
 
-    public JdbcGoogleLogin(JdbcOperations jdbc,TransactionOperations transactions,JwtSessionTokens tokens) {
-        this(jdbc,transactions,tokens,new GoogleNicknameGenerator(new JdbcUserNicknameStore(jdbc))::generateUniqueNickname,LocalDateTime::now);
+    public JdbcSocialLogin(JdbcOperations jdbc,TransactionOperations transactions,JwtSessionTokens tokens) {
+        this(jdbc,transactions,tokens,new SocialNicknameGenerator(new JdbcUserNicknameStore(jdbc))::generateUniqueNickname,LocalDateTime::now);
     }
-    public JdbcGoogleLogin(JdbcOperations jdbc,TransactionOperations transactions,JwtSessionTokens tokens,
+    public JdbcSocialLogin(JdbcOperations jdbc,TransactionOperations transactions,JwtSessionTokens tokens,
             Supplier<String> nicknames,Supplier<LocalDateTime> now) {
         this.jdbc=jdbc;this.transactions=transactions;this.tokens=tokens;this.nicknames=nicknames;this.now=now;
     }
 
-    @Override public GoogleUser load(String registrationId,java.util.Map<String,Object> attributes) {
+    @Override public SocialUser load(String registrationId,java.util.Map<String,Object> attributes) {
         if(!"google".equalsIgnoreCase(registrationId))
-            throw new GoogleLoginRejectedException("지원하지 않는 로그인 방식입니다: "+registrationId);
+            throw new SocialLoginRejectedException("지원하지 않는 로그인 방식입니다: "+registrationId);
         String email=(String)attributes.get("email");
-        if(email==null || email.isEmpty())throw new GoogleLoginRejectedException("이메일 정보를 가져올 수 없습니다");
+        if(email==null || email.isEmpty())throw new SocialLoginRejectedException("이메일 정보를 가져올 수 없습니다");
         String name=(String)attributes.get("name");
         String providerId=(String)attributes.get("sub");
         try {return loadAccount(email,name,providerId);}
@@ -57,25 +57,25 @@ public final class JdbcGoogleLogin implements GoogleLogin {
         }
     }
 
-    private GoogleUser loadAccount(String email,String name,String providerId) {
+    private SocialUser loadAccount(String email,String name,String providerId) {
         return transactions.execute(status->{
-            List<GoogleUser> existing=findUser(email,"GOOGLE");
+            List<SocialUser> existing=findUser(email,"GOOGLE");
             if(!existing.isEmpty())return existing.getFirst();
             if(!findUser(email,"LOCAL").isEmpty())
-                throw new GoogleLoginRejectedException("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.");
+                throw new SocialLoginRejectedException("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.");
             String nickname=nicknames.get();
             return insertUser(email,name,providerId,nickname);
         });
     }
 
-    private List<GoogleUser> findUser(String email,String provider) {
-        List<GoogleUser> found=jdbc.query(FIND_USER,(row,n)->new GoogleUser(row.getLong("user_id"),row.getString("email"),
+    private List<SocialUser> findUser(String email,String provider) {
+        List<SocialUser> found=jdbc.query(FIND_USER,(row,n)->new SocialUser(row.getLong("user_id"),row.getString("email"),
                 row.getString("name"),row.getString("role"),row.getString("care_reg_no"),row.getString("provider")),email,provider);
         if(found.size()>1)throw new IncorrectResultSizeDataAccessException(1,found.size());
         return found;
     }
 
-    private GoogleUser insertUser(String email,String name,String providerId,String nickname) {
+    private SocialUser insertUser(String email,String name,String providerId,String nickname) {
         LocalDateTime timestamp=now.get();var generated=new GeneratedKeyHolder();
         jdbc.update(connection->{
             PreparedStatement statement=connection.prepareStatement(INSERT_USER,new String[]{"user_id"});
@@ -89,10 +89,10 @@ public final class JdbcGoogleLogin implements GoogleLogin {
         },generated);
         Number id=generated.getKey();
         if(id==null)throw new IllegalStateException("Social account ID was not returned");
-        return new GoogleUser(id.longValue(),email,name,"ROLE_USER",null,"GOOGLE");
+        return new SocialUser(id.longValue(),email,name,"ROLE_USER",null,"GOOGLE");
     }
 
-    @Override public AuthSessions.Tokens complete(GoogleUser user) {
+    @Override public AuthSessions.Tokens complete(SocialUser user) {
         String access=tokens.access(new JwtSessionTokens.UserClaims(user.userId(),user.email(),user.name(),user.role(),user.careRegNo()));
         String refresh=tokens.refresh();
         LocalDateTime expires=now.get().plusSeconds(TimeUnit.MILLISECONDS.toSeconds(tokens.refreshExpiration()));

@@ -2,7 +2,7 @@ package com.pawbridge.backend.boot.configuration;
 
 import com.pawbridge.backend.user.internal.emailverification.application.EmailVerifications;
 import com.pawbridge.backend.user.internal.nickname.infrastructure.JdbcUserNicknameStore;
-import com.pawbridge.backend.user.internal.oauth.infrastructure.GoogleNicknameGenerator;
+import com.pawbridge.backend.user.internal.oauth.infrastructure.SocialNicknameGenerator;
 import com.pawbridge.backend.user.internal.password.infrastructure.BcryptPasswordHashes;
 import com.pawbridge.backend.user.internal.signup.application.LocalSignup;
 import com.pawbridge.backend.user.internal.signup.infrastructure.JdbcSignupAccounts;
@@ -22,7 +22,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 public class LocalSignupConfiguration {
     @Bean
     LocalSignup localSignup(EmailVerifications verifications, @Qualifier("writeJdbc") JdbcTemplate jdbc) {
-        var nicknames = new GoogleNicknameGenerator(new JdbcUserNicknameStore(jdbc));
+        var nicknames = new SocialNicknameGenerator(new JdbcUserNicknameStore(jdbc));
         // Kept local to this feature: no global PasswordEncoder bean is registered.
         return new LocalSignup(verifications, new JdbcSignupAccounts(jdbc, nicknames::generateUniqueNickname),
                 new BcryptPasswordHashes());

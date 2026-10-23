@@ -6,12 +6,12 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.List;
 
-public final class GoogleNicknameGenerator {
-    private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(GoogleNicknameGenerator.class);
+public final class SocialNicknameGenerator {
+    private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(SocialNicknameGenerator.class);
 
     private final UserNicknameStore userRepository;
 
-    public GoogleNicknameGenerator(UserNicknameStore userRepository) { this.userRepository=userRepository; }
+    public SocialNicknameGenerator(UserNicknameStore userRepository) { this.userRepository=userRepository; }
     private final SecureRandom random = new SecureRandom();
 
     // 부사 목록 (20개)
