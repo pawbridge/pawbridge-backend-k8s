@@ -219,6 +219,6 @@ class StoreCartConfigurationTest {
     private static ApplicationContextRunner runner() {
         return new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class))
                 .withUserConfiguration(StoreDirectOrderConfiguration.class, StoreCartConfiguration.class,
-                        StoreMemberJpaConfiguration.class, StoreCatalogConfiguration.class);
+                        StoreCatalogConfiguration.class);
     }
 }

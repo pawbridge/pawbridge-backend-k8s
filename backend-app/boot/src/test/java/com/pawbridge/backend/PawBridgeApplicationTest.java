@@ -83,8 +83,7 @@ class PawBridgeApplicationTest {
                     context.getBeanFactory().registerSingleton("readDatabaseSettings", settings);
                     context.getBeanFactory().registerSingleton("postWriteSettings", writeSettings);
                 })
-                .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true",
-                        "pawbridge.user-store-mypage.backend=module")
+                .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context.getBeansOfType(com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild.class)).isEmpty();

@@ -386,8 +386,8 @@ class OwnedPostgresqlMainCoreIntegrationTest {
 
     private static final String[] CORE_FLAGS = {
         "spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.database.writer.maximum-pool-size=1",
-        "pawbridge.user-animal-activities.enabled=true", "pawbridge.user-animal-activities.animal-backend=module",
-        "pawbridge.user-store-mypage.enabled=true", "pawbridge.user-store-mypage.backend=module",
+        "pawbridge.user-animal-activities.enabled=true",
+        "pawbridge.user-store-mypage.enabled=true",
         "pawbridge.animal-commands.enabled=true", "pawbridge.store-direct-orders.enabled=true",
         "pawbridge.auth.google-enabled=false", "pawbridge.auth.sessions-enabled=false", "pawbridge.chat.enabled=false",
         "pawbridge.jobs.cleanup-enabled=false", "pawbridge.user-maintenance.enabled=false", "pawbridge.community-maintenance.enabled=false",

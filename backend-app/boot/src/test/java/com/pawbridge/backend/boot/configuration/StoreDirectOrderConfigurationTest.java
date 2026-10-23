@@ -151,7 +151,7 @@ class StoreDirectOrderConfigurationTest {
     private static ApplicationContextRunner runner() {
         return new ApplicationContextRunner().withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class))
                 .withUserConfiguration(StoreDirectOrderConfiguration.class, AnimalCommandConfiguration.class,
-                        StoreMemberJpaConfiguration.class, StoreCatalogConfiguration.class);
+                        StoreCatalogConfiguration.class);
     }
 
     private static ApplicationContextRunner writerInputs(DataSource writer) {

@@ -14,18 +14,22 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
-/** Imported only from enabled, module-selected User feature configurations; never enables public routes. */
-@Configuration(proxyBeanMethods=false)
+/** Imported only from enabled User feature configurations; never enables public routes. */
+@Configuration(proxyBeanMethods = false)
 class AnimalModuleReadConfiguration {
+
     @Bean
-    AnimalShelterReads animalModuleReads(@Qualifier("dataSource") DataSource source,
-            @Qualifier("transactionManager") PlatformTransactionManager manager, ObjectMapper mapper,
+    AnimalShelterReads animalModuleReads(
+            @Qualifier("dataSource") DataSource source,
+            @Qualifier("transactionManager") PlatformTransactionManager manager,
+            ObjectMapper mapper,
             ObjectProvider<ShelterReads> existing,
-            @Value("${pawbridge.user-animal-activities.enabled:false}") boolean activities,
-            @Value("${pawbridge.user-animal-activities.animal-backend:http}") String backend) {
+            @Value("${pawbridge.user-animal-activities.enabled:false}") boolean activities) {
         ShelterReads shelters = existing.getIfAvailable(() -> new JdbcShelterReads(source, manager, mapper));
         var registration = new ModuleAnimalShelterReads(shelters, manager);
-        return activities && backend.equals("module")
-                ? new JdbcAnimalMemberReads(source, manager, registration) : registration;
+        if (activities) {
+            return new JdbcAnimalMemberReads(source, manager, registration);
+        }
+        return registration;
     }
 }

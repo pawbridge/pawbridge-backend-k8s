@@ -358,7 +358,7 @@ class OwnedPostgresqlShelterCommandTest {
             new WebApplicationContextRunner().withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class,JacksonAutoConfiguration.class,HttpMessageConvertersAutoConfiguration.class,
                     ValidationAutoConfiguration.class,DispatcherServletAutoConfiguration.class,WebMvcAutoConfiguration.class,SpringDataWebAutoConfiguration.class,SecurityAutoConfiguration.class,SecurityFilterAutoConfiguration.class))
                     .withUserConfiguration(ShelterCommandConfiguration.class,ShelterMembershipConfiguration.class,ReadSecurityConfiguration.class)
-                    .withPropertyValues("pawbridge.shelter-commands.enabled=true","pawbridge.shelter-membership.enabled=true","pawbridge.shelter-membership.animal-backend=module","spring.sql.init.mode=never","spring.jmx.enabled=false")
+                    .withPropertyValues("pawbridge.shelter-commands.enabled=true","pawbridge.shelter-membership.enabled=true","spring.sql.init.mode=never","spring.jmx.enabled=false")
                     .withBean("writeDataSource",DataSource.class,()->pool,d->d.setDestroyMethodName(""))
                     .withBean("dataSource",DataSource.class,()->pool,d->d.setDestroyMethodName(""))
                     .withBean("writeJdbc",JdbcTemplate.class,()->jdbc)
