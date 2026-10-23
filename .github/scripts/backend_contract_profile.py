@@ -441,7 +441,8 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '6b74d6ef8e53cd7605e19
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/application/UpdatePostTest.java': 'e0841d5708df3d033cf4c5d909859d6210bff1aa4c3591fc17d73f95e0ddd001',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/infrastructure/JdbcAdminPostPageReaderTest.java': '9e7d26b505d8f7af1286b588938b4126230771b94060c180a66563bd01e7d1b3',
  'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/report/infrastructure/JdbcAnimalReportsTest.java': 'a55a38df8720a15a560cc7f2c4eea82bdf8653b2bf3b54b3bc150de765e6e3d6',
- 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/report/infrastructure/S3AnimalReportMediaUploaderTest.java': '82d782b119f53b4800f22fa4ebf6dee3e77947b890748e8c8f789804236d7deb',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/report/infrastructure/S3AnimalReportMediaUploaderTest.java': 'd62e2d74d7764d767d251f5a0b69dbd2fcb80216da0f4f058256501b71f0c0a9',
+ 'backend-app/community/src/test/java/com/pawbridge/backend/community/internal/post/infrastructure/media/S3PostMediaRemoverTest.java': '0e9e4591b0c3d162c0cd9cee231afde7906dd29402c6594d8a6abe66df4d5d35',
  'backend-app/scripts/test_f14_ci_guards.py': 'aba0d5b772835abaa770e3bed93a4290e74609200e5a67d290e7c90a5e6d04bd',
  'backend-app/scripts/test_f9_ci_guards.py': 'a5e7871329d57bbc640118e9ecad96a56b245aee3c3f0c42ed55c3db4a92a29c',
  'backend-app/user/build.gradle': 'c316d39a5f7926126ac8ac8cc011362c7752b60149b061e1e10161559aa1b6de',
@@ -1135,12 +1136,12 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '6b74d6ef8e53cd7605e19
  'backend-app/boot/src/test/java/com/pawbridge/backend/GatewayFeaturesTomcatTest.java': '836f867d512cda5e643b77be42feb2524955f81726878693d098e1254d223ac9',
  'backend-app/scripts/f12_ci.py': 'fd44c6b0052b696e722d7f9d8b026374893d75892e288fce5aa55f85cc134257',
  'backend-app/scripts/f2_ci.py': '7dd2eb7d9c6b799d9f3fbeaf8f995b71af7a5c7bbafb99f3e6e536eebc05c631',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteSettings.java': '132d5a634f7e497e47bc14478a9e10a49b231a552196425b6185c311a26e5665',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PostWriteSettings.java': '5934eee748ead42916fce72105ae24e6d94095341a44143a6a13b8ea2d859cda',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadConfiguration.java': 'a42e3268859eb12322e7f287682ef1e98b1b5c1a64e4868916d3bd78d177bd78',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ReadDatabaseSettings.java': 'd6dbde87e4314407355a01beb0525aa6f7bb31f5dbdbd8cc841a3b819a7381a4',
  'backend-app/boot/src/test/java/com/pawbridge/backend/F3TestInputs.java': '884570ff2598e18a36f427f7bbd840944752dfbee50c82642c8f869b1aaf1805',
  'backend-app/boot/src/test/java/com/pawbridge/backend/PostMultipartHttpTest.java': 'b0109b1a745e7e24699fb91f51568f838e6201e5a5df5c75a1a17e5aae759fe7',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/PostWriteSettingsTest.java': '09deb9d20f6913233ab2aeacb75aa63c6785596272310f61097a0e484964f81c',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PostWriteSettingsTest.java': 'e98d6b6f656d3a53965dc0cd4f31b75f9b1165b466bcc09789693a1780c91ea5',
  'backend-app/scripts/f10_ci.py': '9019c9fa0a57459f23c094f7f7ad677777faea22e01392b2c5af1099532e5968',
  'backend-app/scripts/f11_ci.py': '5c39feda2ed93ee46bcfc267f9d201f4476200eb01abf1d33d95c7e2604d9f34',
  'backend-app/scripts/f13_ci.py': 'c853193fba6b39928c7aefa866f68b1d51519e6a26b6f3d295045b8dea1b3404',
@@ -1538,7 +1539,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 842
+                or len(POST_READS_APP_HASHES) != 843
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

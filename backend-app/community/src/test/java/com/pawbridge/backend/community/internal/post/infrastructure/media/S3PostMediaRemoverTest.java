@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.pawbridge.backend.community.internal.post.application.PostUpload;
+import com.pawbridge.backend.community.internal.report.infrastructure.S3AnimalReportMediaUploader;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -133,6 +134,61 @@ class S3PostMediaRemoverTest {
             "https://fixture.invalid/owner/posts/images/\n12345678-1234-4234-8234-123456789abc.png"})
     void given__opaque_characters_outside_exact_uploader_grammar__when__remove__then__retain_scope_and_traversal_guards(String url) {
         remover.remove(List.of(url));
+        verifyNoInteractions(s3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"image/png", "video/mp4"})
+    void given__empty_prefix_post_upload__when__removing_saved_url__then__delete_the_exact_root_key(String mime) {
+        List<PutObjectRequest> uploaded = new ArrayList<>();
+        when(s3.putObject(any(PutObjectRequest.class), any(RequestBody.class))).thenAnswer(call -> {
+            uploaded.add(call.getArgument(0));
+            return null;
+        });
+        var rootUploader = new S3PostMediaUploader(s3, "synthetic-bucket", base, "");
+        var rootRemover = new S3PostMediaRemover(s3, "synthetic-bucket", base, "");
+        var file = new PostUpload("pet.png", mime, 1, () -> new ByteArrayInputStream(new byte[]{1}));
+        List<String> savedUrls = rootUploader.upload(List.of(file));
+
+        rootRemover.remove(savedUrls);
+
+        String key = uploaded.getFirst().key();
+        String folder = mime.startsWith("video/") ? "posts/videos/" : "posts/images/";
+        assertTrue(key.startsWith(folder));
+        assertEquals(List.of(base + "/" + key), savedUrls);
+        verify(s3).deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key(key).build());
+    }
+
+    @Test
+    void given__empty_prefix_report_upload__when__removing_saved_url__then__delete_the_exact_root_key() {
+        List<PutObjectRequest> uploaded = new ArrayList<>();
+        when(s3.putObject(any(PutObjectRequest.class), any(RequestBody.class))).thenAnswer(call -> {
+            uploaded.add(call.getArgument(0));
+            return null;
+        });
+        var rootRemover = new S3PostMediaRemover(s3, "synthetic-bucket", base, "");
+        var reportUploader = new S3AnimalReportMediaUploader(s3, "synthetic-bucket", base, "", rootRemover);
+        var file = new PostUpload("lost.png", "image/png", 1, () -> new ByteArrayInputStream(new byte[]{1}));
+        List<String> savedUrls = reportUploader.upload(List.of(file));
+
+        rootRemover.remove(savedUrls);
+
+        String key = uploaded.getFirst().key();
+        assertTrue(key.startsWith("reports/images/"));
+        assertEquals(List.of(base + "/" + key), savedUrls);
+        verify(s3).deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key(key).build());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://elsewhere.invalid/posts/images/a.png", "https://fixture.invalid.evil/posts/images/a.png",
+            "http://fixture.invalid/posts/images/a.png", "https://fixture.invalid", "https://fixture.invalid/",
+            "https://fixture.invalid//posts/images/a.png", "https://fixture.invalid/posts//images/a.png",
+            "https://fixture.invalid/posts/../images/a.png", "https://fixture.invalid/posts/images/a%2fb.png",
+            "https://fixture.invalid/posts/images/a.png?token=secret", "https://fixture.invalid/posts/images/a.png#fragment",
+            "https://fixture.invalid/posts\\images/a.png", ""})
+    void given__empty_prefix__when__removing_url_outside_public_base_or_with_unsafe_key__then__do_not_call_the_sdk(String url) {
+        var rootRemover = new S3PostMediaRemover(s3, "synthetic-bucket", base, "");
+        rootRemover.remove(List.of(url));
         verifyNoInteractions(s3);
     }
 }

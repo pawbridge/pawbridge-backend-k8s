@@ -29,4 +29,20 @@ class S3AnimalReportMediaUploaderTest {
         var uploads=new S3AnimalReportMediaUploader(s3,"fixture","https://fixture.invalid","",remover);
         assertThat(uploads.upload(null)).isEmpty();assertThat(uploads.upload(List.of())).isEmpty();verifyNoInteractions(s3,remover);
     }
+    @Test void given__empty_prefix__when__uploading_report_photo__then__key_is_at_bucket_root_and_url_matches_legacy_format() {
+        S3Client s3=mock(S3Client.class);
+        PostMediaRemover remover=mock(PostMediaRemover.class);
+        List<String> keys=new ArrayList<>();
+        when(s3.putObject(any(PutObjectRequest.class),any(RequestBody.class))).thenAnswer(call->{
+            PutObjectRequest request=call.getArgument(0);
+            keys.add(request.key());
+            return PutObjectResponse.builder().build();
+        });
+        var uploads=new S3AnimalReportMediaUploader(s3,"fixture-bucket","https://fixture.invalid///","",remover);
+        var photo=new PostUpload("one.png","image/png",3,()->new ByteArrayInputStream(new byte[]{1,2,3}));
+        List<String> urls=uploads.upload(List.of(photo));
+        assertThat(keys).singleElement().asString().matches("reports/images/[0-9a-f-]{36}\\.png");
+        assertThat(urls).containsExactly("https://fixture.invalid/"+keys.getFirst());
+        verifyNoInteractions(remover);
+    }
 }
