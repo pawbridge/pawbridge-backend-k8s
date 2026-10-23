@@ -20,6 +20,15 @@ public final class GatewayCors {
     public static final String DEFAULT_ORIGIN_PATTERNS = "http://localhost:3000,http://127.0.0.1:3000,"
             + "http://localhost:5173,http://127.0.0.1:5173,https://pawbridge.kr,https://www.pawbridge.kr,https://*.pawbridge.kr";
 
+    /** Property that replaces {@link #DEFAULT_ORIGIN_PATTERNS}. */
+    public static final String ORIGIN_PATTERNS_PROPERTY = "pawbridge.cors.allowed-origin-patterns";
+
+    /**
+     * {@code @Value} expression every SecurityFilterChain uses to read the origin patterns, so the main chain,
+     * the local login chain and the Google OAuth chain always share one property and one default.
+     */
+    public static final String ORIGIN_PATTERNS_VALUE = "${" + ORIGIN_PATTERNS_PROPERTY + ":" + DEFAULT_ORIGIN_PATTERNS + "}";
+
     private GatewayCors() {}
 
     public static CorsConfigurationSource source(String originPatternsCsv) {
