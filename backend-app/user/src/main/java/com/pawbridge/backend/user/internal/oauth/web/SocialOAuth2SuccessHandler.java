@@ -1,7 +1,7 @@
 package com.pawbridge.backend.user.internal.oauth.web;
 
-import com.pawbridge.backend.user.internal.oauth.application.GoogleLogin;
-import com.pawbridge.backend.user.internal.oauth.infrastructure.GoogleOAuthPrincipal;
+import com.pawbridge.backend.user.internal.oauth.application.SocialLogin;
+import com.pawbridge.backend.user.internal.oauth.infrastructure.SocialOAuthPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -13,14 +13,14 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
 import org.springframework.web.util.UriComponentsBuilder;
 
-public final class GoogleOAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
-    private static final Logger LOG=LoggerFactory.getLogger(GoogleOAuth2SuccessHandler.class);
-    private final GoogleLogin login;
+public final class SocialOAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
+    private static final Logger LOG=LoggerFactory.getLogger(SocialOAuth2SuccessHandler.class);
+    private final SocialLogin login;
     private final String redirectUri;
-    public GoogleOAuth2SuccessHandler(GoogleLogin login,String redirectUri){this.login=login;this.redirectUri=redirectUri;}
+    public SocialOAuth2SuccessHandler(SocialLogin login,String redirectUri){this.login=login;this.redirectUri=redirectUri;}
     @Override public void onAuthenticationSuccess(HttpServletRequest request,HttpServletResponse response,Authentication authentication)throws IOException{
         try {
-            var principal=(GoogleOAuthPrincipal)authentication.getPrincipal();
+            var principal=(SocialOAuthPrincipal)authentication.getPrincipal();
             var tokens=login.complete(principal.user());
             String target=UriComponentsBuilder.fromUriString(redirectUri).queryParam("accessToken",tokens.accessToken())
                     .queryParam("refreshToken",tokens.refreshToken()).build().toUriString();

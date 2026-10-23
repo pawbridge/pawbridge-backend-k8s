@@ -13,11 +13,11 @@ import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
 import org.springframework.web.util.UriComponentsBuilder;
 
-public final class GoogleOAuth2FailureHandler extends SimpleUrlAuthenticationFailureHandler {
-    private static final Logger LOG=LoggerFactory.getLogger(GoogleOAuth2FailureHandler.class);
-    private static final Set<String> SAFE=Set.of("이메일 정보를 가져올 수 없습니다","이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.","로그인 처리 중 오류가 발생했습니다");
+public final class SocialOAuth2FailureHandler extends SimpleUrlAuthenticationFailureHandler {
+    private static final Logger LOG=LoggerFactory.getLogger(SocialOAuth2FailureHandler.class);
+    private static final Set<String> SAFE=Set.of("이메일 정보를 가져올 수 없습니다","이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.","이미 다른 소셜 계정에 연결된 이메일입니다. 관리자에게 문의해주세요.","로그인 처리 중 오류가 발생했습니다");
     private final String redirectUri;
-    public GoogleOAuth2FailureHandler(String redirectUri){this.redirectUri=redirectUri;}
+    public SocialOAuth2FailureHandler(String redirectUri){this.redirectUri=redirectUri;}
     @Override public void onAuthenticationFailure(HttpServletRequest request,HttpServletResponse response,AuthenticationException exception)throws IOException{
         String message="로그인에 실패했습니다";
         if(exception instanceof OAuth2AuthenticationException oauth && "oauth2_processing_error".equals(oauth.getError().getErrorCode())
