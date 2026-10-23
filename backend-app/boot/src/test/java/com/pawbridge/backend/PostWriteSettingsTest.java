@@ -3,6 +3,8 @@ package com.pawbridge.backend;
 import com.pawbridge.backend.boot.configuration.PostWriteSettings;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.assertj.core.api.Assertions.*;
 
 class PostWriteSettingsTest {
@@ -46,5 +48,39 @@ class PostWriteSettingsTest {
             assertThatThrownBy(()->PostWriteSettings.fromEnvironment(values::get))
                     .hasMessage("Missing or invalid explicit setting: "+key);
         });
+    }
+
+    @Test
+    void given__empty_object_prefix__when__validating__then__accept_it_as_bucket_root() {
+        var values=F3TestInputs.values();
+        values.put("PAWBRIDGE_STORAGE_OBJECT_PREFIX","");
+        var settings=PostWriteSettings.fromEnvironment(values::get);
+        assertThat(settings.objectPrefix()).isEmpty();
+    }
+
+    @Test
+    void given__unset_object_prefix__when__validating__then__accept_it_as_bucket_root() {
+        var values=F3TestInputs.values();
+        values.remove("PAWBRIDGE_STORAGE_OBJECT_PREFIX");
+        var settings=PostWriteSettings.fromEnvironment(values::get);
+        assertThat(settings.objectPrefix()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings={"posts","posts/","a/b-c_d/"})
+    void given__non_empty_object_prefix__when__validating__then__keep_the_value_unchanged(String prefix) {
+        var values=F3TestInputs.values();
+        values.put("PAWBRIDGE_STORAGE_OBJECT_PREFIX",prefix);
+        var settings=PostWriteSettings.fromEnvironment(values::get);
+        assertThat(settings.objectPrefix()).isEqualTo(prefix);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings={" ","  ","/","//","../","a//b","a/../b"," posts/","posts /","posts\\","posts?x=1","posts%2f"})
+    void given__blank_or_unsafe_object_prefix__when__validating__then__reject_by_setting_name(String prefix) {
+        var values=F3TestInputs.values();
+        values.put("PAWBRIDGE_STORAGE_OBJECT_PREFIX",prefix);
+        assertThatThrownBy(()->PostWriteSettings.fromEnvironment(values::get))
+                .hasMessage("Missing or invalid explicit setting: PAWBRIDGE_STORAGE_OBJECT_PREFIX");
     }
 }
