@@ -32,8 +32,27 @@ class S3ProductImagesTest {
     }
 
     @Test void givenInputReadFailure__whenUploading__thenWrapIOExceptionWithoutPuttingObject() throws Exception {
-        MultipartFile file=mock(MultipartFile.class);when(file.getSize()).thenReturn(1L);when(file.getContentType()).thenReturn("image/png");when(file.getInputStream()).thenThrow(new IOException("synthetic read failure"));
-        assertThatThrownBy(()->subject.uploadImage(file)).isInstanceOf(RuntimeException.class).hasMessage("Failed to upload image").hasCauseInstanceOf(IOException.class);verifyNoInteractions(client);
+        MultipartFile file = mock(MultipartFile.class);
+        when(file.getSize()).thenReturn(1L);
+        when(file.getContentType()).thenReturn("image/png");
+        when(file.getBytes()).thenThrow(new IOException("synthetic read failure"));
+
+        assertThatThrownBy(() -> subject.uploadImage(file))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Failed to upload image")
+                .hasCauseInstanceOf(IOException.class);
+        verifyNoInteractions(client);
+    }
+
+    @Test void givenUploadedBody__whenSdkRequestsTheStreamMoreThanOnce__thenEveryStreamHasTheFullImage() throws Exception {
+        byte[] bytes = {1, 2, 3};
+        subject.uploadImage(new MockMultipartFile("file", "photo.png", "image/png", bytes));
+        var body = ArgumentCaptor.forClass(RequestBody.class);
+        verify(client).putObject(any(PutObjectRequest.class), body.capture());
+
+        assertThat(body.getValue().contentLength()).isEqualTo(bytes.length);
+        assertThat(body.getValue().contentStreamProvider().newStream().readAllBytes()).containsExactly(bytes);
+        assertThat(body.getValue().contentStreamProvider().newStream().readAllBytes()).containsExactly(bytes);
     }
 
     @Test void givenR2Failure__whenUploading__thenPropagateWithoutRetryOrCompensation() {

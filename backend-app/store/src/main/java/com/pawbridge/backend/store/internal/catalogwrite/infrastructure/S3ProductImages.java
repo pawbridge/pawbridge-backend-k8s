@@ -43,7 +43,7 @@ public final class S3ProductImages {
         String extension = originalFilename != null && originalFilename.contains(".")
                 ? originalFilename.substring(originalFilename.lastIndexOf("."))
                 : "";
-        
+
         // Store in 'products/' folder
         String key = "products/" + UUID.randomUUID() + extension;
 
@@ -54,12 +54,17 @@ public final class S3ProductImages {
                     .contentType(file.getContentType())
                     .build();
 
-            s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
+            // Not fromInputStream: with chunked encoding disabled the SDK signs the payload by reading the
+            // body once and then needs a second stream to send it. The part stream Tomcat provides for an
+            // uploaded file (Files.newInputStream) cannot be reset, so the send would be empty while the
+            // Content-Length is still announced and the storage waits for the rest. Bytes can be re-read.
+            byte[] imageBytes = file.getBytes();
+            s3Client.putObject(putObjectRequest, RequestBody.fromBytes(imageBytes));
 
             return publicBaseUrl + "/" + key;
 
         } catch (IOException e) {
-             throw new RuntimeException("Failed to upload image", e);
+            throw new RuntimeException("Failed to upload image", e);
         }
     }
 
