@@ -21,9 +21,10 @@ import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.transaction.support.TransactionOperations;
 
-/** Google protocol I/O precedes this adapter; account creation and refresh persistence stay separate. */
+/** Provider protocol I/O precedes this adapter; account creation and refresh persistence stay separate. */
 public final class JdbcSocialLogin implements SocialLogin {
     private static final String FIND_USER="SELECT user_id,email,name,role,care_reg_no,provider FROM pawbridge_user.users WHERE lower(email)=lower(?) AND lower(provider)=lower(?)";
+    private static final String FIND_USER_BY_PROVIDER_ID="SELECT user_id,email,name,role,care_reg_no,provider FROM pawbridge_user.users WHERE provider = ? AND provider_id = ?";
     private static final String INSERT_USER="INSERT INTO pawbridge_user.users(email,name,nickname,password,role,care_reg_no,provider,provider_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)";
     private static final String LOCK_USER="SELECT user_id FROM pawbridge_user.users WHERE user_id = ? FOR UPDATE";
     private static final String FIND_REFRESH="SELECT refresh_token_id FROM pawbridge_user.refresh_tokens WHERE user_id = ?";
@@ -44,52 +45,76 @@ public final class JdbcSocialLogin implements SocialLogin {
     }
 
     @Override public SocialUser load(String registrationId,java.util.Map<String,Object> attributes) {
-        if(!"google".equalsIgnoreCase(registrationId))
-            throw new SocialLoginRejectedException("지원하지 않는 로그인 방식입니다: "+registrationId);
-        String email=(String)attributes.get("email");
-        if(email==null || email.isEmpty())throw new SocialLoginRejectedException("이메일 정보를 가져올 수 없습니다");
-        String name=(String)attributes.get("name");
-        String providerId=(String)attributes.get("sub");
-        try {return loadAccount(email,name,providerId);}
-        catch(DataIntegrityViolationException duplicate) {
+        SocialProfile profile=SocialProfile.from(registrationId,attributes);
+        try {
+            return loadAccount(profile);
+        } catch(DataIntegrityViolationException duplicate) {
             // The failed attempt must finish rollback and cleanup before the single permitted retry.
-            return loadAccount(email,name,providerId);
+            return loadAccount(profile);
         }
     }
 
-    private SocialUser loadAccount(String email,String name,String providerId) {
+    private SocialUser loadAccount(SocialProfile profile) {
         return transactions.execute(status->{
-            List<SocialUser> existing=findUser(email,"GOOGLE");
-            if(!existing.isEmpty())return existing.getFirst();
-            if(!findUser(email,"LOCAL").isEmpty())
+            List<SocialUser> existing=findExisting(profile);
+            if(!existing.isEmpty()) {
+                return existing.getFirst();
+            }
+            if(!findUser(profile.email(),"LOCAL").isEmpty()) {
                 throw new SocialLoginRejectedException("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.");
+            }
+            if(profile.identifiedByProviderId() && !findUser(profile.email(),profile.provider()).isEmpty()) {
+                // Same provider and email but another provider ID: never relink an account by email alone.
+                throw new SocialLoginRejectedException("이미 다른 소셜 계정에 연결된 이메일입니다. 관리자에게 문의해주세요.");
+            }
             String nickname=nicknames.get();
-            return insertUser(email,name,providerId,nickname);
+            return insertUser(profile,nickname);
         });
     }
 
+    /**
+     * Google keeps its original email lookup. Naver uses its per-application user ID because the
+     * contact email can change and is not proof of account ownership.
+     */
+    private List<SocialUser> findExisting(SocialProfile profile) {
+        if(!profile.identifiedByProviderId()) {
+            return findUser(profile.email(),profile.provider());
+        }
+        List<SocialUser> found=jdbc.query(FIND_USER_BY_PROVIDER_ID,JdbcSocialLogin::user,profile.provider(),profile.providerId());
+        if(found.size()>1) {
+            throw new IncorrectResultSizeDataAccessException(1,found.size());
+        }
+        return found;
+    }
+
     private List<SocialUser> findUser(String email,String provider) {
-        List<SocialUser> found=jdbc.query(FIND_USER,(row,n)->new SocialUser(row.getLong("user_id"),row.getString("email"),
-                row.getString("name"),row.getString("role"),row.getString("care_reg_no"),row.getString("provider")),email,provider);
+        List<SocialUser> found=jdbc.query(FIND_USER,JdbcSocialLogin::user,email,provider);
         if(found.size()>1)throw new IncorrectResultSizeDataAccessException(1,found.size());
         return found;
     }
 
-    private SocialUser insertUser(String email,String name,String providerId,String nickname) {
+    private static SocialUser user(java.sql.ResultSet row,int number) throws SQLException {
+        return new SocialUser(row.getLong("user_id"),row.getString("email"),row.getString("name"),
+                row.getString("role"),row.getString("care_reg_no"),row.getString("provider"));
+    }
+
+    private SocialUser insertUser(SocialProfile profile,String nickname) {
+        String email=profile.email();
+        String name=profile.name();
         LocalDateTime timestamp=now.get();var generated=new GeneratedKeyHolder();
         jdbc.update(connection->{
             PreparedStatement statement=connection.prepareStatement(INSERT_USER,new String[]{"user_id"});
             try {
                 statement.setString(1,email);statement.setString(2,name);statement.setString(3,nickname);
                 statement.setString(4,"OAuth2");statement.setString(5,"ROLE_USER");statement.setString(6,null);
-                statement.setString(7,"GOOGLE");statement.setString(8,providerId);
+                statement.setString(7,profile.provider());statement.setString(8,profile.providerId());
                 statement.setTimestamp(9,Timestamp.valueOf(timestamp),utc());statement.setTimestamp(10,Timestamp.valueOf(timestamp),utc());
                 return statement;
             } catch(SQLException | RuntimeException | Error failure) { closeFailed(statement,failure);throw failure; }
         },generated);
         Number id=generated.getKey();
         if(id==null)throw new IllegalStateException("Social account ID was not returned");
-        return new SocialUser(id.longValue(),email,name,"ROLE_USER",null,"GOOGLE");
+        return new SocialUser(id.longValue(),email,name,"ROLE_USER",null,profile.provider());
     }
 
     @Override public AuthSessions.Tokens complete(SocialUser user) {

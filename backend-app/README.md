@@ -655,6 +655,14 @@ ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`�
 종료 시 로컬 세션을 먼저 분리해 동기·지연 close callback의 중복 Redis/User I/O를 막고 기존 lease 만료를 사용한다. 이는 모의 callback 검증이며 실제 JVM·소켓 종료 시간의 증거는 아니다. 신규·관련 단위/HTTP·인가·프로토콜·조립과 계층 검사는 수행했으나 실제 Redis Lua/리스너·WebSocket·채팅 DB 통합은 아직 미실행이다. 선택 CI의 관리자 페이지 PG11을 채팅의 통합 검증으로 세지 않는다.
 
 
+## Naver 로그인 추가
+
+`pawbridge.auth.naver-enabled`(환경변수 `PAWBRIDGE_AUTH_NAVER_ENABLED`)는 기본 false다. true면 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`(경로 `/login/oauth2/code/naver`)를 요구하고, 없거나 경로가 다르면 시작할 때 실패한다. Google과 Naver는 각자 켜고 끌 수 있으며, 보안 체인은 켜진 공급자의 authorization·callback 경로만 받는다.
+
+Naver는 Spring 기본 제공자가 아니어서 authorize·token·user-info 주소를 직접 등록한다. user-info 응답은 `response` 안에 `id`·`email`·`name`을 담는다. 회원은 `provider=NAVER`와 Naver `id`(애플리케이션마다 다른 값)로 찾는다. 연락처 이메일은 바뀔 수 있고 소유 증명이 아니므로 이메일로는 찾거나 연결하지 않는다. 같은 이메일의 LOCAL 회원이 있으면 Google과 같은 문구로 거절하고, 같은 이메일의 다른 Naver ID 회원이 있으면 별도 문구로 거절한다. 회원 생성·닉네임·refresh 저장은 Google과 같은 `JdbcSocialLogin` 경로를 쓴다.
+
+클래스 이름은 공급자 공용 `Social*`로 바꿨다(Google 동작·설정 키는 그대로). 실제 Naver 서버 호출과 운영 키 적용은 이 변경에 포함하지 않는다.
+
 ## 기존 Google 로그인 편입
 
 `pawbridge.auth.google-enabled`는 기본 false다. true에서는 기존 AuthSessions·JwtSessionTokens와 명시 Google client/secret/callback·frontend 설정을 요구한다. 정확한 Google authorization/callback 두 경로만 별도 보안 체인으로 조립하며 REST의 STATELESS JWT 경계를 유지한다. OAuth 요청 state는 기존 Spring의 임시 HttpSession 저장 방식을 사용한다. Google 네트워크 호출·자격증명·운영 설정을 이 구현 과정에서 실행하거나 변경하지 않았다.

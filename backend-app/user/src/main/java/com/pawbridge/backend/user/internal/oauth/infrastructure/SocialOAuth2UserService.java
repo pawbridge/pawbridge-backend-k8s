@@ -12,7 +12,7 @@ import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 
 public final class SocialOAuth2UserService implements OAuth2UserService<OAuth2UserRequest,OAuth2User> {
-    private static final java.util.Set<String> SAFE_REASONS=java.util.Set.of("이메일 정보를 가져올 수 없습니다","이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.","로그인 처리 중 오류가 발생했습니다");
+    private static final java.util.Set<String> SAFE_REASONS=java.util.Set.of("이메일 정보를 가져올 수 없습니다","이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.","이미 다른 소셜 계정에 연결된 이메일입니다. 관리자에게 문의해주세요.","로그인 처리 중 오류가 발생했습니다");
     private static final Logger LOG=LoggerFactory.getLogger(SocialOAuth2UserService.class);
     private final SocialLogin login;
     private final OAuth2UserService<OAuth2UserRequest,OAuth2User> remote;
