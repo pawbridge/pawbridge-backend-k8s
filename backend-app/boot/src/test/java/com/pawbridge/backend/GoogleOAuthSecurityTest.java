@@ -45,6 +45,29 @@ class GoogleOAuthSecurityTest {
         mvc.perform(get("/login/oauth2/code/google/extra")).andExpect(status().isForbidden());
         verifyNoInteractions(login,sessions,tokens);
     }
+    @Test void given__allowed_origin__when__preflighting_the_google_chain__then__answer_with_cors_headers_without_starting_oauth()throws Exception{
+        mvc.perform(options("/oauth2/authorization/google")
+                        .header("Origin","https://www.pawbridge.kr")
+                        .header("Access-Control-Request-Method","GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin","https://www.pawbridge.kr"))
+                .andExpect(header().string("Access-Control-Allow-Credentials","true"));
+        verifyNoInteractions(login,sessions,tokens);
+    }
+    @Test void given__disallowed_origin__when__preflighting_the_google_chain__then__reject_with_403()throws Exception{
+        mvc.perform(options("/oauth2/authorization/google")
+                        .header("Origin","https://evil.example")
+                        .header("Access-Control-Request-Method","GET"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist("Access-Control-Allow-Origin"));
+        verifyNoInteractions(login,sessions,tokens);
+    }
+    @Test void given__allowed_origin__when__starting_authorization__then__the_redirect_carries_the_cors_header()throws Exception{
+        mvc.perform(get("/oauth2/authorization/google").header("Origin","https://www.pawbridge.kr"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Access-Control-Allow-Origin","https://www.pawbridge.kr"));
+        verifyNoInteractions(login,sessions,tokens);
+    }
     @Test void given__google_unspecified_or_disabled__when__assembling_configuration__then__register_no_oauth_client_or_security_chain(){
         for(String flag:new String[]{"absent","false"}){
             var runner=new ApplicationContextRunner().withUserConfiguration(GoogleOAuthConfiguration.class);

@@ -62,7 +62,7 @@ public class ReadSecurityConfiguration {
             @Value("${pawbridge.email-verification.enabled:false}") String emailVerificationFlag,
             @Value("${pawbridge.local-signup.enabled:false}") String localSignupFlag,
             @Value("${pawbridge.password-reset.enabled:false}") String passwordResetFlag,
-            @Value("${pawbridge.cors.allowed-origin-patterns:" + GatewayCors.DEFAULT_ORIGIN_PATTERNS + "}") String corsOriginPatterns) throws Exception {
+            @Value(GatewayCors.ORIGIN_PATTERNS_VALUE) String corsOriginPatterns) throws Exception {
 
         var animalImagesEnabled=(org.springframework.security.web.util.matcher.RequestMatcher)request -> "true".equalsIgnoreCase(animalImagesFlag);
         var animalImageWriting=new AndRequestMatcher(animalImagesEnabled,new OrRequestMatcher(
