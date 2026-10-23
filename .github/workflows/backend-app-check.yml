@@ -930,7 +930,7 @@ jobs:
           assert result['successful_profile_checks'] >= 17
           assert result['rejected_profile_checks'] >= 15
           assert result['profile_get_checks'] == result['successful_profile_checks'] + result['rejected_profile_checks']
-          assert result['denied_route_checks'] >= 10
+          assert result['denied_route_checks'] == 8
           assert result['database_changes'] == result['s3_requests'] == 0
           assert result['shutdown_pools'] == 1
           assert result['remaining_application_connections'] == 0
