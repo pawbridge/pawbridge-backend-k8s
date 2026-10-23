@@ -1,5 +1,6 @@
 package com.pawbridge.backend.boot.configuration;
 
+import com.pawbridge.backend.boot.security.GatewayCors;
 import com.pawbridge.backend.user.internal.login.application.LocalLogin;
 import com.pawbridge.backend.user.internal.login.infrastructure.JdbcLocalLogin;
 import com.pawbridge.backend.user.internal.login.web.LocalLoginFilter;
@@ -27,6 +28,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.filter.CorsFilter;
 
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.auth",name="local-enabled",havingValue="true",matchIfMissing=false)
@@ -37,18 +39,41 @@ public class LocalLoginConfiguration {
         if(!sessionsEnabled)throw new IllegalArgumentException("Local login requires explicitly enabled auth sessions");
         return new JdbcLocalLogin(jdbc,new TransactionTemplate(manager),tokens);
     }
-    @Bean @Order(0)
-    SecurityFilterChain localLoginSecurity(HttpSecurity http,LocalLogin login)throws Exception {
-        UserDetailsService users=email->login.findByEmail(email).map(LocalLoginPrincipal::new)
-                .orElseThrow(()->new UsernameNotFoundException("사용자를 찾을 수 없습니다: "+email));
-        var provider=new DaoAuthenticationProvider();provider.setUserDetailsService(users);provider.setPasswordEncoder(new BCryptPasswordEncoder());
-        var manager=new ProviderManager(provider);
-        return http.securityMatcher(new AntPathRequestMatcher(LocalLoginFilter.PATH))
-                .csrf(AbstractHttpConfigurer::disable).httpBasic(AbstractHttpConfigurer::disable).formLogin(AbstractHttpConfigurer::disable)
-                .logout(AbstractHttpConfigurer::disable).requestCache(AbstractHttpConfigurer::disable)
-                .sessionManagement(session->session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .securityContext(context->context.securityContextRepository(new RequestAttributeSecurityContextRepository()).requireExplicitSave(true))
-                .authenticationManager(manager).authorizeHttpRequests(requests->requests.anyRequest().permitAll())
-                .addFilterBefore(new LocalLoginFilter(manager,login),UsernamePasswordAuthenticationFilter.class).build();
+    @Bean
+    @Order(0)
+    SecurityFilterChain localLoginSecurity(
+            HttpSecurity http,
+            LocalLogin login,
+            @Value(GatewayCors.ORIGIN_PATTERNS_VALUE) String corsOriginPatterns) throws Exception {
+        UserDetailsService users = email -> login.findByEmail(email)
+                .map(LocalLoginPrincipal::new)
+                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다: " + email));
+
+        var provider = new DaoAuthenticationProvider();
+        provider.setUserDetailsService(users);
+        provider.setPasswordEncoder(new BCryptPasswordEncoder());
+        var manager = new ProviderManager(provider);
+
+        var securityContextRepository = new RequestAttributeSecurityContextRepository();
+        var localLoginFilter = new LocalLoginFilter(manager, login);
+
+        return http
+                .securityMatcher(new AntPathRequestMatcher(LocalLoginFilter.PATH))
+                .csrf(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable)
+                .formLogin(AbstractHttpConfigurer::disable)
+                .logout(AbstractHttpConfigurer::disable)
+                .requestCache(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .securityContext(context -> context
+                        .securityContextRepository(securityContextRepository)
+                        .requireExplicitSave(true))
+                .authenticationManager(manager)
+                .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
+                // The browser sends a preflight OPTIONS before the cross-origin login POST. CorsFilter sits before
+                // LocalLoginFilter, so the preflight is answered here and never reaches authentication.
+                .addFilterAt(GatewayCors.filter(corsOriginPatterns), CorsFilter.class)
+                .addFilterBefore(localLoginFilter, UsernamePasswordAuthenticationFilter.class)
+                .build();
     }
 }

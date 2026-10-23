@@ -1,5 +1,6 @@
 package com.pawbridge.backend.boot.configuration;
 
+import com.pawbridge.backend.boot.security.GatewayCors;
 import com.pawbridge.backend.user.internal.oauth.application.GoogleLogin;
 import com.pawbridge.backend.user.internal.oauth.infrastructure.GoogleOAuth2UserService;
 import com.pawbridge.backend.user.internal.oauth.web.GoogleOAuth2FailureHandler;
@@ -20,6 +21,7 @@ import org.springframework.security.oauth2.client.registration.InMemoryClientReg
 import org.springframework.security.oauth2.client.web.HttpSessionOAuth2AuthorizationRequestRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
+import org.springframework.web.filter.CorsFilter;
 
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.auth",name="google-enabled",havingValue="true",matchIfMissing=false)
@@ -39,18 +41,39 @@ public class GoogleOAuthConfiguration {
     @Bean GoogleOAuth2UserService googleOAuth2UserService(GoogleLogin login){return new GoogleOAuth2UserService(login);}
     @Bean GoogleOAuth2SuccessHandler googleOAuth2SuccessHandler(GoogleLogin login,@Value("${oauth2.redirect-uri:${OAUTH2_REDIRECT_URI:}}") String frontend){requireUri(frontend,null);return new GoogleOAuth2SuccessHandler(login,frontend);}
     @Bean GoogleOAuth2FailureHandler googleOAuth2FailureHandler(@Value("${oauth2.redirect-uri:${OAUTH2_REDIRECT_URI:}}") String frontend){requireUri(frontend,null);return new GoogleOAuth2FailureHandler(frontend);}
-    @Bean @Order(1)
-    SecurityFilterChain googleOAuthSecurity(HttpSecurity http,ClientRegistrationRepository clients,GoogleOAuth2UserService users,
-            GoogleOAuth2SuccessHandler success,GoogleOAuth2FailureHandler failure)throws Exception{
-        return http.securityMatcher("/oauth2/authorization/google","/login/oauth2/code/google")
-                .csrf(AbstractHttpConfigurer::disable).httpBasic(AbstractHttpConfigurer::disable).formLogin(AbstractHttpConfigurer::disable)
-                .logout(AbstractHttpConfigurer::disable).requestCache(AbstractHttpConfigurer::disable)
-                .sessionManagement(session->session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .securityContext(context->context.securityContextRepository(new RequestAttributeSecurityContextRepository()).requireExplicitSave(true))
-                .authorizeHttpRequests(requests->requests.anyRequest().permitAll())
-                .oauth2Login(oauth->oauth.clientRegistrationRepository(clients)
-                    .authorizationEndpoint(endpoint->endpoint.authorizationRequestRepository(new HttpSessionOAuth2AuthorizationRequestRepository()))
-                    .userInfoEndpoint(endpoint->endpoint.userService(users)).successHandler(success).failureHandler(failure))
+    @Bean
+    @Order(1)
+    SecurityFilterChain googleOAuthSecurity(
+            HttpSecurity http,
+            ClientRegistrationRepository clients,
+            GoogleOAuth2UserService users,
+            GoogleOAuth2SuccessHandler success,
+            GoogleOAuth2FailureHandler failure,
+            @Value(GatewayCors.ORIGIN_PATTERNS_VALUE) String corsOriginPatterns) throws Exception {
+        var securityContextRepository = new RequestAttributeSecurityContextRepository();
+        var authorizationRequestRepository = new HttpSessionOAuth2AuthorizationRequestRepository();
+
+        return http
+                .securityMatcher("/oauth2/authorization/google", "/login/oauth2/code/google")
+                .csrf(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable)
+                .formLogin(AbstractHttpConfigurer::disable)
+                .logout(AbstractHttpConfigurer::disable)
+                .requestCache(AbstractHttpConfigurer::disable)
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .securityContext(context -> context
+                        .securityContextRepository(securityContextRepository)
+                        .requireExplicitSave(true))
+                .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
+                // Same CORS policy as every other chain, so the policy cannot differ by which chain matches a path.
+                .addFilterAt(GatewayCors.filter(corsOriginPatterns), CorsFilter.class)
+                .oauth2Login(oauth -> oauth
+                        .clientRegistrationRepository(clients)
+                        .authorizationEndpoint(endpoint -> endpoint
+                                .authorizationRequestRepository(authorizationRequestRepository))
+                        .userInfoEndpoint(endpoint -> endpoint.userService(users))
+                        .successHandler(success)
+                        .failureHandler(failure))
                 .build();
     }
     private static void requireUri(String value,String path){
