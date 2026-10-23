@@ -16,10 +16,60 @@ Gateway 없이도 운영할 수 있도록 Gateway가 하던 네 가지를 이 �
 
 - **CORS**: `GatewayCors`가 Gateway `globalcors`와 같은 값(origin 패턴 `localhost/127.0.0.1:3000·5173`, `pawbridge.kr`, `www.pawbridge.kr`, `*.pawbridge.kr`, 메서드 GET/POST/PUT/DELETE/PATCH/OPTIONS, 허용 헤더 Authorization·Content-Type·Accept·x-user-id, 노출 헤더 Retry-After·Authorization, 자격 증명 허용)을 만든다. `ReadSecurityConfiguration`(주 체인), `LocalLoginConfiguration`(로컬 로그인 체인), `GoogleOAuthConfiguration`(Google OAuth 체인)이 모두 이 필터를 보안 체인의 CORS 위치에 넣어 preflight가 인증 전에 응답된다. 로그인·OAuth는 주 체인과 별도의 `SecurityFilterChain`이라 각 체인에 따로 넣어야 하며, 세 체인은 `GatewayCors.ORIGIN_PATTERNS_VALUE`로 같은 속성과 기본값을 읽는다. origin은 `pawbridge.cors.allowed-origin-patterns`(쉼표 구분)로 덮어쓴다. 차이: 허용되지 않은 origin의 preflight가 아닌 실제 요청은 403 대신 CORS 헤더 없이 정상 처리한다(Origin을 보내는 서버 간 호출과 F16 계약 검사의 응답이 바뀌지 않게 하며, 브라우저는 헤더가 없으면 응답을 막는다). preflight는 원본처럼 거절한다.
 - **유실동물 검색 제한**: `pawbridge.animal-lost-search.enabled=true`일 때만 `POST /api/v1/animals/lost-candidates`에 `LostSearchLimitsFilter`(보안 체인 뒤)를 건다. 속성과 기본값은 원본 그대로 `lost-search.max-request-bytes=6291456`, `max-concurrent=2`, `requests-per-minute=30`, `timeout-seconds=50`. 응답은 413(크기), 415(multipart 아님), 503+`Retry-After: 3`(동시 초과), 429+`Retry-After: 60`(분당 초과), 400(빈 본문), 504이고 본문은 원본과 같은 `{"message":"..."}`다. 하위 호출(Python)은 `PythonLostSearchClient`가 서버 설정의 `X-Internal-Api-Key`만 보내므로 클라이언트의 `Authorization`·`X-User-Id`·`X-Internal-Api-Key`는 전달되지 않고, 필터도 핸들러에 보이는 요청에서 이 헤더와 `Transfer-Encoding`을 숨긴다. **원본과 다른 점**: (1) 서블릿 컨테이너가 multipart를 직접 파싱하므로 본문을 필터에서 버퍼링하지 않는다. 크기는 선언된 `Content-Length`로 판단하고, `Content-Length`가 없는 chunked 업로드는 411로 거절한다(리버스 프록시가 보통 길이를 채운다). 선언 길이는 컨테이너가 강제한다. 적용 여부는 디코딩된 경로(`UrlPathHelper`)로 판단해 `lost-%63andidates` 같은 인코딩 표기로 제한을 우회할 수 없고(실제 Tomcat 시험으로 확인), 동시성 permit은 본문(multipart)을 모두 받은 뒤에 잡아 느린 업로드가 permit을 오래 쥐지 못한다. 별도의 총 업로드 시간 제한은 없다. (2) 전체 50초는 요청을 중단시켜 강제하지 않는다. 하위 Python 호출의 연결 3초·읽기 45초 타임아웃(초과 시 서비스가 503)이 실제 상한이고, 타임아웃이 핸들러 밖으로 새면 504를 낸다. `timeout-seconds`는 값 검증만 한다. AI 큐 도입은 이 범위 밖이다.
-- **헬스체크**: `spring-boot-starter-actuator`를 추가하고 `management.endpoints.web.exposure.include=health,info`와 프로브 활성(`/actuator/health/liveness`·`/readiness`)으로 노출을 제한한다. 보안 설정은 `GET /actuator/health`와 `/actuator/health/**`만 permitAll이며 `info`를 포함한 나머지는 기존 `denyAll`에 걸린다. `show-details`는 원본의 `always` 대신 `never`다(인증 없이 DB 등 세부 상태가 보이지 않게). Prometheus 엔드포인트는 노출하지 않는다(관측성 복구 때 다룬다). 쿠버네티스 프로브는 세부 지표가 섞이지 않는 `/actuator/health/liveness`·`/readiness`를 쓰고, 전체 `/actuator/health`에서는 메일 지표를 끈다(`management.health.mail.enabled=false`). 빌드 파일(`boot/build.gradle`)이 바뀌어 구조 selftest 재사용 기준이 깨지므로 CI가 구조 검사를 직접 실행한다.
+- **헬스체크**: `spring-boot-starter-actuator`를 추가하고 `management.endpoints.web.exposure.include=health,info,prometheus`와 프로브 활성(`/actuator/health/liveness`·`/readiness`)으로 노출을 제한한다(관리 포트를 분리한 뒤에는 관리 포트에서만 제공된다). 보안 설정은 `GET /actuator/health`와 `/actuator/health/**`만 permitAll이며 `info`를 포함한 나머지는 기존 `denyAll`에 걸린다. `show-details`는 원본의 `always` 대신 `never`다(인증 없이 DB 등 세부 상태가 보이지 않게). Prometheus 지표는 별도 관리 포트에서만 노출한다(아래 "내부 지표 엔드포인트"). 쿠버네티스 프로브는 세부 지표가 섞이지 않는 `/actuator/health/liveness`·`/readiness`를 쓰고, 전체 `/actuator/health`에서는 메일 지표를 끈다(`management.health.mail.enabled=false`). 빌드 파일(`boot/build.gradle`)이 바뀌어 구조 selftest 재사용 기준이 깨지므로 CI가 구조 검사를 직접 실행한다.
 - **구 경로 호환(임시)**: `LegacyApiPathFilter`는 Gateway `RewritePath`(`/api/(?<segment>.*)` → `/api/v1/${segment}`)를 서블릿 필터로 옮긴 **전환 기간 임시 필터**다. 보안 체인보다 앞(order -150)에서 요청 URI·servletPath를 `/api/v1/...`로 감싸 Security 매처와 MVC가 새 경로로 판단한다. Gateway 라우트의 경로·메서드 조합(예: `/api/animals/**`는 GET/OPTIONS/POST/PUT/PATCH/DELETE, `/api/places`는 GET/OPTIONS, `/api/carts/items/{skuId}`는 PATCH/DELETE/OPTIONS)만 바꾸고 나머지는 건드리지 않아 기존 `denyAll`이 막는다(`/api/carts/reset`, `/api/batch/**`, `/internal/**` 등). `/api/payments/**`도 `/api/v1/payments/**`로 재작성한다(결제 승인 경로가 `/api/v1/payments/confirm`으로 통일되어, 원본에서 재작성 제외였던 이유가 사라졌다). `/api/v1/users/internal/**`·`/api/users/internal/**`는 원본 JWT 필터와 같은 404 본문을 낸다. `/api/v1/**` 요청은 변하지 않는다. 내부 경로 404 판단과 재작성 후 servletPath는 디코딩된 경로 기준이다. 병합 후 PostgreSQL 스모크(`f2_ci.py`, `f3_ci.py`, `f12_ci.py`)는 구 별칭이 v1과 같은 응답을 주고 내부 사용자 경로가 404인 새 계약을 단언하도록 고쳤다. `boot` MockMvc 테스트 중 구 별칭 거부를 단언하는 것들은 보안 체인만 로드하므로(재작성 필터는 체인 밖) 그대로이며, 재작성 동작은 `GatewayFeaturesHttpTest`가 다룬다. 구 경로의 `POST /api/animals/lost-candidates`는 원본에서 보호소·관리자 전용 경로로만 닿았으므로 재작성하지 않는다(공개 업로드 경로가 구 별칭으로 열리지 않게). 원본 JWT 필터의 `X-User-*` 헤더 주입은 옮기지 않는다. 이 실행기는 Bearer 토큰을 자체 서명 검증으로 처리하고 요청 헤더의 사용자 정보를 신뢰하지 않으며, 헤더를 받는 별도 서비스가 없다. **제거 계획**: 프론트가 `/api/v1`로 바뀐 뒤 `pawbridge.legacy-api-paths.enabled=false`로 끄고(기본 true) 문제가 없으면 `LegacyApiPathFilter`와 설정·테스트를 삭제한다.
 
 원본 Gateway의 경로별 특수 처리 대조: 방문자 경로의 Authorization 제거는 이 실행기에서 방문자 경로가 토큰을 읽지 않으므로 동등하고(F16 검사가 불량 Authorization을 보낸다), SSE 무제한 응답 시간은 `PrivateNoteStreamRegistry`의 emitter가 토큰 수명으로 직접 관리하므로 Gateway 타임아웃에 해당하는 것이 없으며, WebSocket은 `/api/v1/chats/socket`을 보안이 permitAll하고 `pawbridge.chat.allowed-origins`로 origin을 검사하며(구 경로 `/api/chats/socket`으로의 업그레이드는 시험하지 않았다), OAuth 경로는 `GoogleOAuthConfiguration`의 별도 체인이 인증 없이 처리한다. 원본이 외부에서 막던 `/internal/**`는 서비스 간 호출(`/internal/animals/lost-gallery` 등, `X-Internal-Api-Key` 검증)이 같은 포트를 쓰므로 막지 않는다. 외부 노출 차단은 인그레스 쪽 책임이다.
+
+## 내부 지표 엔드포인트
+
+사내(호스트 안) Prometheus가 긁어 가는 지표를 **별도 관리 포트**에서만 제공한다. 공개 포트(`PAWBRIDGE_SERVER_PORT`)에는 Actuator가 전혀 올라가지 않는다.
+
+| 항목 | 값 |
+|---|---|
+| 관리 포트 | `PAWBRIDGE_MANAGEMENT_PORT`, 기본 `9464` |
+| 바인드 주소 | `PAWBRIDGE_MANAGEMENT_ADDRESS`, 기본 `127.0.0.1`. 컨테이너에서만 `0.0.0.0`으로 지정한다 |
+| 수집 경로 | `GET /actuator/prometheus` |
+| 프로브 | `GET /actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness` (관리 포트에서 제공, 세부 정보 없음) |
+
+- **호스트에 게시하지 않는다.** compose에서 관리 포트를 `ports:`에 적지 않는다(`9464:9464`, `0.0.0.0:9464` 모두 금지). 같은 docker 네트워크의 Prometheus만 서비스 이름으로 접근한다. 인증이 없으므로 네트워크 격리가 유일한 보호다.
+- **보안.** 관리 포트로 들어온 요청은 전용 보안 체인(`ManagementSecurityConfiguration`)이 가장 먼저 받아 `GET /actuator/prometheus`와 `GET /actuator/health`·`/actuator/health/**`만 인증 없이 허용하고 나머지는 모두 403으로 거부한다. 공개 조회 경로, 로컬 로그인, Google OAuth 체인이 허용하는 경로도 관리 포트에서는 열리지 않는다. 공개 포트의 체인은 바뀌지 않았고 `/actuator/prometheus`는 403이다.
+- **노출 엔드포인트**는 `health`, `info`, `prometheus`뿐이며 `info`는 보안 체인이 막는다. 관리 포트를 따로 두면 `/actuator/health`는 공개 포트에서 더 이상 제공되지 않는다(404). 쿠버네티스/호스트 프로브는 관리 포트를 보도록 바꾼다.
+- **지표.** JVM·프로세스·시스템(`jvm_*`, `process_*`, `system_*`), HikariCP 풀 `pawbridge-db`(`hikaricp_connections*`; `HikariDataSource` 빈이 하나라 Spring Boot가 자동으로 연결한다), HTTP 서버 요청(`http_server_requests_seconds*`, 요청 템플릿 기준 `uri` 태그와 50ms~5s 7개 버킷), Tomcat 스레드(`tomcat_threads_*`, `server.tomcat.mbeanregistry.enabled=true`), Logback 레벨별 건수(`logback_events_total`)가 있다. 모든 지표에 `application` 태그가 붙는다. Spring Security 필터 관측은 시계열이 너무 많아 끈다.
+- **결제 보상 기록.** `pawbridge.payments.enabled=true`일 때만 게이지 `pawbridge_payment_compensation_open`을 등록한다. `pawbridge_payment.payment_compensation_records`에서 `resolved_at IS NULL`인 행 수이고, 읽기 전용 트랜잭션 템플릿으로 최대 60초에 한 번만 조회해 캐시한다. 조회가 실패하면 `NaN`을 60초간 보고한다(오래된 숫자로 장애를 가리지 않는다). 앱 계정의 `payment_compensation_records` SELECT 권한이 필요하다. 0보다 크면 수동 취소·정산 대상이 있다는 뜻이다.
+- **다른 포트 설정.** `PAWBRIDGE_MANAGEMENT_PORT`를 공개 포트와 같게 하면 관리 포트가 분리되지 않아 `/actuator/health`만 공개 포트에서 열리고 `/actuator/prometheus`는 403이라 수집할 수 없다. 운영에서는 분리된 포트를 쓴다.
+
+compose 예(앱과 Prometheus가 같은 네트워크, 관리 포트는 게시하지 않음):
+
+```yaml
+services:
+  backend-app:
+    image: pawbridge/backend-app:<tag>
+    environment:
+      PAWBRIDGE_SERVER_PORT: "8080"
+      PAWBRIDGE_MANAGEMENT_PORT: "9464"
+      PAWBRIDGE_MANAGEMENT_ADDRESS: "0.0.0.0"   # 컨테이너 안에서만; 호스트로는 게시하지 않는다
+    ports:
+      - "127.0.0.1:8080:8080"                   # 공개 포트만. 9464는 절대 적지 않는다
+    networks: [observability]
+  prometheus:
+    image: prom/prometheus:<tag>
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks: [observability]
+networks:
+  observability: {}
+```
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: pawbridge-backend-app
+    metrics_path: /actuator/prometheus
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["backend-app:9464"]
+```
 
 ## 업무 경계와 호출
 

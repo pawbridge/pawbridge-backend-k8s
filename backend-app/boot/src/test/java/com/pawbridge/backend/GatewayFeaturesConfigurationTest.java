@@ -58,15 +58,17 @@ class GatewayFeaturesConfigurationTest {
     }
 
     @Test
-    void given__runtime_properties__when__reading__then__expose_only_health_and_info_and_keep_the_rewrite_on() throws Exception {
+    void given__runtime_properties__when__reading__then__expose_only_health_info_and_prometheus_on_a_separate_loopback_port_and_keep_the_rewrite_on() throws Exception {
         var properties = new Properties();
         try (InputStream in = getClass().getResourceAsStream("/application.properties")) { properties.load(in); }
-        assertThat(properties.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,info");
+        assertThat(properties.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,info,prometheus");
+        assertThat(properties.getProperty("management.server.port")).isEqualTo("${PAWBRIDGE_MANAGEMENT_PORT:9464}");
+        assertThat(properties.getProperty("management.server.address")).isEqualTo("${PAWBRIDGE_MANAGEMENT_ADDRESS:127.0.0.1}");
         assertThat(properties.getProperty("management.endpoint.health.probes.enabled")).isEqualTo("true");
         assertThat(properties.getProperty("management.endpoint.health.show-details")).isEqualTo("never");
         assertThat(properties.getProperty("management.health.mail.enabled")).isEqualTo("false");
         assertThat(properties.getProperty("pawbridge.legacy-api-paths.enabled")).isEqualTo("true");
-        assertThat(properties.stringPropertyNames()).noneMatch(name -> name.contains("prometheus"));
+        assertThat(properties.getProperty("server.address")).isEqualTo("127.0.0.1");
     }
 
     @Test
