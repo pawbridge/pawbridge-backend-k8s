@@ -346,10 +346,10 @@ POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
 POST_READS_WORKFLOW_SHA256 = 'a73beaf5ecdad118fc7350779b377e8ba63f485f2df7ee2cc3141464e8cae709'
-POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'ba55d483ab7394a3cece9dc18a78451e33554d261a7ff56a0cbe9c25a0a7ec3d',
+POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '6b74d6ef8e53cd7605e193efe6831a0a412c69799ac6700b7dcf927827cbafdf',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
- 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '4bdbb3498ef7933b0ab6271ae51e180eea3b5364f5311d18d4f4a301caa5130b',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java': '68b7ddc3c3bfe9b9456b3b6bd838a2978220875aa9237f922e6f6ebe09e6adf4',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminPostReadConfiguration.java': 'c1553ebbb7e6c4ed39ff4170f9f801f4566763faa053ee3ecbb672525abe4dbc',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AdminUserDirectoryConfiguration.java': '9722165e8be597e1f9a757666470f32e84d21deb7f26b0fccc64b9adb66f761d',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/AnimalReportConfiguration.java': '82e4bbd9afb201dd3c963446424088d9ca1b5a48c76776c395809a6da01c01e3',
@@ -365,7 +365,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'ba55d483ab7394a3cece9
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ShelterMembershipConfiguration.java': '551bdf7d4636fadc3bc16f1225acf9207108641ec2413e8f378c42a7558c60d9',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserAnimalActivitiesConfiguration.java': 'fb437d7d6766a8528cf079cd13602de8f2e17a0927eee9aaba9c8c0f3d709080',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/UserStoreMyPageConfiguration.java': '0d60cc16f06ea31cfd8e67ec34712974d6cb5d5e776fcd0682a86401eb222661',
- 'backend-app/boot/src/main/resources/application.properties': 'b5ac9b6dabd4b43e23d78b12a4b5009fb0935a96102f2004f733996e32436984',
+ 'backend-app/boot/src/main/resources/application.properties': '1b0e6ab9d068630a7ec667b647b18bb9eeae86590406dd38a6558a9c79264115',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostMutationHttpTest.java': 'feca1b7a4f4f7c6cb6c97d06157ef1cea8005722b64c1a90258df18af4ca18fb',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostReadHttpTest.java': 'ee591506da75a0841f5322f7d3d5f2db6a1654a5034c1d70b1a88bd8cced891b',
  'backend-app/boot/src/test/java/com/pawbridge/backend/AdminPostStatisticsHttpTest.java': '8042c41ce6a179c48aa170fd448f2769c948efc5f2d66a9c59d86abef42cb93b',
@@ -871,7 +871,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'ba55d483ab7394a3cece9
  'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/OwnedPostgresqlStoreOrderHistoryTest.java': 'db1585ab2ffca292564f34628ea7fdb8de20938fa05e24f9b499ada279b2d792',
  'backend-app/boot/src/test/resources/owned-postgresql/store-order-history-owned-schema.sql': '8ce980cb07524f7e8129c7f940744ee36dcdce5a3166b4d7c179e8f509b7cdea',
  'backend-app/store/src/test/java/com/pawbridge/backend/store/internal/directorder/web/OrderReadControllerTest.java': '370b0795ed9a9d5263041427be3a8338b222f3d29087d01071d8ea14c100a3a0',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeCoreIntegrationTest.java': '7d2240b27d6b9c26d54ec241b53fb7eb36ab4a193a3e17b2f9b50f20106f0727',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PawBridgeCoreIntegrationTest.java': 'dd4f0d04772b84463633bac95fffe9c23b9dfe8ebeeba758fb9c6f5cc08aa260',
  'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/chatbot/infrastructure/client/FeignPythonChatbotClient.java': 'f7dde447789f89f92a269f7d56462f48e9b1a559f13c310c0fd625984e50d116',
  'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/chatbot/infrastructure/client/PythonChatbotClient.java': '9fb1f2ba878a7b71359eaf1e5ccce3ef32905671aa73ae48722ee7022b6c9b1f',
  'backend-app/animal/src/main/java/com/pawbridge/backend/animal/internal/chatbot/infrastructure/client/dto/PythonChatbotMessageRequest.java': '780a9c4c7b2cb00f99343c7478d3145eb726a0fa2d8053fc5f5de5d65d5fa1c4',
@@ -1130,7 +1130,7 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'ba55d483ab7394a3cece9
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/security/GatewayCors.java': 'a7a9b4bae260bf9a6dabb1f2ea94c2415815627b6f07597c66328e7c01101656',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/security/LegacyApiPathFilter.java': 'a3742f1769f72ec5544a34b483ed1dc95348951874389747ca7a4661fccdc354',
  'backend-app/boot/src/main/java/com/pawbridge/backend/boot/security/LostSearchLimitsFilter.java': '6146fc6a2790968f4c7cb14bcde7503a70861e71da5b41b31351fe2be1a600b6',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/GatewayFeaturesConfigurationTest.java': '73af5561bcc4cbc5d1f7db32531e654111bf6dfbd33dd02efd1066177ea46130',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/GatewayFeaturesConfigurationTest.java': 'a9b1b05a95daf702265daef81b8fb32ffc3e3ee2718e9f544e5fe14f5e272010',
  'backend-app/boot/src/test/java/com/pawbridge/backend/GatewayFeaturesHttpTest.java': '17e25830db595e8884e2f32c4fa004519ef2f4c2f2a738bbf49d728bfa9951c1',
  'backend-app/boot/src/test/java/com/pawbridge/backend/GatewayFeaturesUnitTest.java': '15cb0c98e0792eda77ee2800746a15dd044873d0da1775b12020141604fef640',
  'backend-app/boot/src/test/java/com/pawbridge/backend/GatewayFeaturesTomcatTest.java': '836f867d512cda5e643b77be42feb2524955f81726878693d098e1254d223ac9',
@@ -1183,7 +1183,12 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': 'ba55d483ab7394a3cece9
  'backend-app/scripts/test_f16_ci_guards.py': 'abed1c8c535f99d8f0f5e472cb72124688aaec039db75040a33c29f5fa4555f1',
  'backend-app/scripts/test_f20_ci_guards.py': '9c04e69fcce30061adec2354baed0620f6172a910b7bcfac2b5350952226d28b',
  'backend-app/scripts/test_f24_ci_guards.py': '6ad9bf2ad433cded91f15de162b52a5e9fd62e92cb0adbca7e34f7184ae72830',
- 'backend-app/scripts/test_f4_ci_startup.py': '490aba2b419b932d287725637de7b3590a0094e446d8ed1a172925beacff30bf'}
+ 'backend-app/scripts/test_f4_ci_startup.py': '490aba2b419b932d287725637de7b3590a0094e446d8ed1a172925beacff30bf',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/ManagementSecurityConfiguration.java': '415e307648aee5429cde1eb8824a4996f080f1d9fc2bd5176d9f09254ff4eec5',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/configuration/PaymentCompensationMetricsConfiguration.java': 'cd376d1292ed0eaca2b344d664b863db0f0c21edae24eb1856d76bad90568b23',
+ 'backend-app/boot/src/main/java/com/pawbridge/backend/boot/security/ManagementServerRequestMatcher.java': '342cc16c14f3e6bb6b9bf67564243459b59e17092826fa64d192190af1889efa',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/PrometheusManagementPortHttpTest.java': '525f864500fca37bd28d1556b1ff46f6e24d49411e51ad5dd9261453c2933872',
+ 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration/PaymentCompensationMetricsConfigurationTest.java': 'ba5d3d3a5a977d904b7af8022a6d95b39d8d7c6b79357ab3d873ddacb8feb296'}
 # Only the identical, previously successful TestKit inputs may be referenced.
 # Actual architecture and compiled business-package checks still run on every candidate.
 ARCHITECTURE_SELFTEST_REFERENCE_RUN = 39577223965
@@ -1534,7 +1539,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 838
+                or len(POST_READS_APP_HASHES) != 843
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

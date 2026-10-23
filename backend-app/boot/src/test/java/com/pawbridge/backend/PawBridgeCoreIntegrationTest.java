@@ -56,7 +56,9 @@ class PawBridgeCoreIntegrationTest {
     void given__explicit_core_modules_and_writers__when__main_assembles_and_security_rejects__then__share_named_resources_without_borrowing_and_close_them() {
         var resources = new Resources();
         runner(resources).run(context -> {
-            assertThat(context).hasNotFailed().hasSingleBean(SecurityFilterChain.class);
+            assertThat(context).hasNotFailed();
+            // The public chain plus the management-port chain, which never matches a request on the main port.
+            assertThat(context.getBeansOfType(SecurityFilterChain.class)).containsOnlyKeys("postReadSecurity", "managementSecurity");
             assertThat(context.getBeansOfType(DataSource.class)).containsOnlyKeys("dataSource");
             assertThat(context.getBeansOfType(EntityManagerFactory.class)).containsOnlyKeys(
                     "storeMemberEntityManagerFactory", "animalCommandEntityManagerFactory", "storeDirectOrderEntityManagerFactory");
