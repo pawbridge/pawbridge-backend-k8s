@@ -7,7 +7,6 @@ import jakarta.persistence.EntityManagerFactory;
 import java.util.Map;
 import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,7 +21,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /** Imported only through the enabled MyPage feature; no global entity or repository scan. */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(prefix = "pawbridge.user-store-mypage", name = "backend", havingValue = "module")
 class StoreMemberJpaConfiguration {
     static final String MODEL = "com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.";
     static final String[] MANAGED_TYPES = {MODEL + "BaseEntity", MODEL + "Wishlist", MODEL + "ProductSKU",

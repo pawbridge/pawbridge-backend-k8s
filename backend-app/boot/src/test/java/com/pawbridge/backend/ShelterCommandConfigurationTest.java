@@ -83,15 +83,6 @@ class ShelterCommandConfigurationTest {
     }
 
     @Test
-    void given__new_shelter_writes_with_http_membership_approval__when__assembling__then__reject_the_uncoordinated_backend() {
-        writer(mock(DataSource.class)).withPropertyValues("pawbridge.shelter-commands.enabled=true","pawbridge.shelter-membership.enabled=true",
-                "pawbridge.shelter-membership.animal-backend=http").run(context->{
-            assertThat(context).hasFailed();
-            assertThat(context.getStartupFailure()).hasRootCauseInstanceOf(IllegalArgumentException.class);
-        });
-    }
-
-    @Test
     void given__different_user_lookup_source__when__assembling_shelter_writes__then__reject_before_any_database_access() throws Exception {
         DataSource source=mock(DataSource.class),other=mock(DataSource.class);
         runner().withPropertyValues("pawbridge.shelter-commands.enabled=true")

@@ -680,7 +680,7 @@ Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/
 
 ### 본인 스토어 내정보 조회
 
-`pawbridge.user-store-mypage.enabled=true`와 명시적인 `service.store.url`일 때만 `/api/v1/users/me/wishlists`, `/orders`, `/cart`의 GET을 조립합니다. 기본은 비활성이고 활성 요청은 기존 JWT에서 검증한 본인 ID만 사용합니다. Store 소유의 읽기 API를 호출하며 새 SQL·DDL·권한·장바구니 생성·이벤트 발행은 없습니다.
+`pawbridge.user-store-mypage.enabled=true`일 때만 `/api/v1/users/me/wishlists`, `/orders`, `/cart`의 GET을 조립합니다. 기본은 비활성이고 활성 요청은 기존 JWT에서 검증한 본인 ID만 사용합니다. 같은 프로세스의 Store 공개 읽기 API(`StoreMemberReads`)를 호출하며 새 SQL·DDL·권한·장바구니 생성·이벤트 발행은 없습니다.
 
 원문 `f06a72a06bd26662c647bde780dfc7a27bf7349c`의 회원 존재 확인 → 같은 읽기 TX 안 Store HTTP 순서를 유지하고, 기존 회원 프로필7열 조회와 기존 reader/TX를 재사용합니다. 원문의 exists 조회보다 넓은 기존 projection이며 응답으로 회원 정보를 내보내지 않습니다. 목록 Page/정렬/DTO·없는 장바구니204·없는 회원400·외부 오류500을 보존합니다. 예외 응답과 진단에는 외부 본문/인증값을 넣지 않습니다.
 
@@ -728,7 +728,7 @@ Root는 공통 Gradle/Boot/정책/인가 합집합을 독립 대조했습니다.
 
 ### User 내정보의 Store 모듈 호출
 
-기존 `pawbridge.user-store-mypage.enabled`는 기본 false이며, 활성화 시 backend 기본값 http를 보존합니다. 명시 `pawbridge.user-store-mypage.backend=module`에서만 User의 회원 확인 트랜잭션을 끝낸 뒤 Store 공개 API로 본인의 위시리스트·주문·장바구니를 조회합니다. 이 모드에 HTTP origin/client는 필요 없고, 알 수 없는 backend는 조립을 거부합니다. 본인 JWT와 기존 3GET·cart 없음204 계약을 재사용합니다.
+기존 `pawbridge.user-store-mypage.enabled`는 기본 false입니다. 활성화하면 User의 회원 확인 트랜잭션을 끝낸 뒤 Store 공개 API로 본인의 위시리스트·주문·장바구니를 조회합니다. 구 Store 서비스 HTTP 경로와 `pawbridge.user-store-mypage.backend`·`service.store.url` 설정은 제거했습니다. 본인 JWT와 기존 3GET·cart 없음204 계약을 재사용합니다.
 
 Store는 동일 reader/TM에 별도 readOnly REPEATABLE_READ·TX5/query5초를 조립합니다. 주문 헤더·상품 조회를 같은 스냅샷에 두기 위한 후보 선택이며 원문 기본 격리/timeout과 완전히 같다는 주장은 아닙니다. User→Store.api만 허용하고, Community→User→Store의 실제 resolved artifact는 허용하면서 Community의 Store 직접 의존/실제 API 참조/임의 파일 우회는 계속 거부합니다.
 
@@ -759,7 +759,7 @@ source25사례·일반 독립검수와 새 합집합 Boot22사례·production co
 
 ### 보호소 회원승인의 Animal 모듈 조회
 
-기존 `pawbridge.shelter-membership.enabled`는 기본 false이고, `pawbridge.shelter-membership.animal-backend`의 기본값은 http입니다. 명시 module일 때만 승인 중 보호소 등록번호를 Animal 공개 API로 조회하며 외부 origin/client를 만들지 않습니다. User→Animal.api만 추가하고 Animal→User나 Community의 직접 Animal 의존/참조는 계속 차단합니다.
+기존 `pawbridge.shelter-membership.enabled`는 기본 false입니다. 활성화하면 승인 중 보호소 등록번호를 Animal 공개 API로 조회하며 외부 origin/client를 만들지 않습니다. 구 Animal 서비스 HTTP 경로와 `pawbridge.shelter-membership.animal-backend`·`animal-base-url` 설정은 제거했습니다. User→Animal.api만 추가하고 Animal→User나 Community의 직접 Animal 의존/참조는 계속 차단합니다.
 
 Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named reader/TM/ObjectMapper를 사용합니다. 기존 ShelterReads 빈이 없으면 동일 구현을 내부용으로 생성하며 공개 Shelter 경로를 켜지 않습니다. Reader RO REQUIRES_NEW와 기존 User writer는 분리합니다. 원문의 관리자/회원/잠금/상태검증·null/id/care 검증 및 원문 missing500→User503 분류를 보존합니다. 실제 Reader 권한·트랜잭션 suspend/resume·연결/잠금은 미검증입니다.
 
@@ -773,9 +773,9 @@ Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named 
 
 ## User 동물 조회와 찜 단일 트랜잭션
 
-`pawbridge.user-animal-activities.animal-backend`는 기본 `http`이며, 명시 `module`일 때만 Animal의 순수 Java `AnimalMemberReads`로 본인 동물·찜 목록을 읽는다. 보호소 API와 같은 reader를 사용하지만 공개 Animal 경로를 추가로 활성화하지 않는다. reader는 별도 읽기 manager의 read-only REQUIRES_NEW이며 User writer와 분리된다. 원문 MANUAL 목록, 입력 ID 순서·중복/부재 처리, nullable 필드, JPA 속성 경로 정렬과 페이지 중복 제거 의미를 유지한다. 후보 SQL의 owned PostgreSQL 관측과 원문 JPA 실행 비교는 구분한다.
+`pawbridge.user-animal-activities.enabled=true`이면 Animal의 순수 Java `AnimalMemberReads`로 본인 동물·찜 목록을 읽는다. 구 Animal 서비스 HTTP 경로와 `pawbridge.user-animal-activities.animal-backend`·`service.animal.url` 설정은 제거했다. 보호소 API와 같은 reader를 사용하지만 공개 Animal 경로를 추가로 활성화하지 않는다. reader는 별도 읽기 manager의 read-only REQUIRES_NEW이며 User writer와 분리된다. 원문 MANUAL 목록, 입력 ID 순서·중복/부재 처리, nullable 필드, JPA 속성 경로 정렬과 페이지 중복 제거 의미를 유지한다. 후보 SQL의 owned PostgreSQL 관측과 원문 JPA 실행 비교는 구분한다.
 
-찜 추가·삭제는 `pawbridge.user-animal-activities.enabled=true`일 때 User writer 트랜잭션 하나에서 `pawbridge_user.favorites` INSERT/DELETE와 `pawbridge_animal.animals.favorite_count` 증감(`updated_at` 갱신)을 함께 처리한다. 증감은 Animal 공개 API `AnimalFavoriteCounts.adjust(animalId, +1/-1)`가 같은 `writeJdbc`·`writeTransactionManager`로 수행하며 자체 트랜잭션을 열지 않는다. 감소는 기존 값이 양수일 때만 수행한다. Outbox(`FAVORITE_ADDED`/`FAVORITE_REMOVED`)·전달기(DB 폴링)·`processed_events` 영수증·`FavoriteCompensation` 보상과 `pawbridge.favorite-delivery.*` 설정(`user-outbox-floor`/`animal-outbox-floor` 포함)은 제거했다. 이벤트 큐가 필요해지면 다시 도입한다. `animal-backend=http`여도 증감은 로컬 `pawbridge_animal.animals`를 갱신한다(이전 전달기와 같음).
+찜 추가·삭제는 `pawbridge.user-animal-activities.enabled=true`일 때 User writer 트랜잭션 하나에서 `pawbridge_user.favorites` INSERT/DELETE와 `pawbridge_animal.animals.favorite_count` 증감(`updated_at` 갱신)을 함께 처리한다. 증감은 Animal 공개 API `AnimalFavoriteCounts.adjust(animalId, +1/-1)`가 같은 `writeJdbc`·`writeTransactionManager`로 수행하며 자체 트랜잭션을 열지 않는다. 감소는 기존 값이 양수일 때만 수행한다. Outbox(`FAVORITE_ADDED`/`FAVORITE_REMOVED`)·전달기(DB 폴링)·`processed_events` 영수증·`FavoriteCompensation` 보상과 `pawbridge.favorite-delivery.*` 설정(`user-outbox-floor`/`animal-outbox-floor` 포함)은 제거했다. 이벤트 큐가 필요해지면 다시 도입한다.
 
 동작: 이미 찜했으면 409, 존재하지 않는 동물을 찜하면 404(`동물을 찾을 수 없습니다`)이며 찜 행도 같은 트랜잭션에서 롤백한다(UPDATE 영향 행 0). 이전에는 성공 응답 뒤 최대 4회 재시도 끝에 보상으로 취소했다. 찜하지 않은 동물의 삭제는 기존처럼 404이다. 이미 사라진 동물의 찜은 계속 삭제할 수 있다(영향 행 0이어도 삭제는 커밋하고 증감만 건너뛴다). 찜 수는 커밋 즉시 일관된다(이전: 폴링 1초 이상+재시도 지연). 회원 삭제가 `favorite_count`를 줄이지 않는 기존 갭은 구 시스템과 같고 이번에 바꾸지 않았다.
 
@@ -790,7 +790,7 @@ P6 이후 파일 기반 합성 PG 시험은 실행할 클래스의 환경변수 
 
 ## Store 회원 목록의 원문 JPA 재사용
 
-명시 `pawbridge.user-store-mypage.enabled=true`와 `backend=module`일 때 주문·찜 목록은 원래 Store의 model/enum/base13개와 DTO2개를 패키지·import만 바꿔 재사용한다. Repository2개는 ID 페이지 조회와 선택한 부모의 상세 graph 조회로 확장한다. 정렬은 이전 모듈 JDBC가 지원한 찜25·주문12 scalar 속성을 모두 보존하고, 찜에는 한 단계 부모 카테고리 id/name만 추가해 정확27/12개를 허용한다. underscore/camel alias는 기존 Spring Data 속성 해석을 사용한다. 재귀 경로와 컬렉션 정렬, 정렬5개 이상·size2000 초과는 Store 읽기 트랜잭션과 SQL 전에 고정 오류로 거부한다. 이번 PR 초기에 추가했던 컬렉션 정렬은 부모 페이지를 증폭하므로 의도적으로 제외한다. 기존 User Runtime 오류 응답·기본 HTTP backend·순수 Store API를 유지하고 Cart는 기존 JDBC 읽기를 사용한다.
+`pawbridge.user-store-mypage.enabled=true`일 때 주문·찜 목록은 원래 Store의 model/enum/base13개와 DTO2개를 패키지·import만 바꿔 재사용한다. Repository2개는 ID 페이지 조회와 선택한 부모의 상세 graph 조회로 확장한다. 정렬은 이전 모듈 JDBC가 지원한 찜25·주문12 scalar 속성을 모두 보존하고, 찜에는 한 단계 부모 카테고리 id/name만 추가해 정확27/12개를 허용한다. underscore/camel alias는 기존 Spring Data 속성 해석을 사용한다. 재귀 경로와 컬렉션 정렬, 정렬5개 이상·size2000 초과는 Store 읽기 트랜잭션과 SQL 전에 고정 오류로 거부한다. 이번 PR 초기에 추가했던 컬렉션 정렬은 부모 페이지를 증폭하므로 의도적으로 제외한다. 기존 User Runtime 오류 응답·순수 Store API를 유지하고 Cart는 기존 JDBC 읽기를 사용한다.
 
 Store EMF는 entity9와 mapped superclass1만 명시하고 공유 단일 pool(`pawbridge-db`)을 쓴다. 별도 명명 JpaTM의 RO/RR/5초 안에서 entity→DTO 변환까지 마친다. 전역 JPA/entity/repository 자동스캔, OSIV, schema 생성·변경·validate는 켜지 않는다. schema는 pawbridge_store, 물리 naming과 UTC를 고정하며 bootstrap JDBC metadata 조회도 끈다. 기존 JdbcTM은 다른 업무에서 그대로 유지한다. 같은 DataSource에서 JPA 트랜잭션 매니저를 다른 트랜잭션 안에서 시작하지 않는다.
 

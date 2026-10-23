@@ -177,8 +177,8 @@ class PawBridgeCoreIntegrationTest {
                     context.getBeanFactory().registerSingleton("postWriteSettings", write);
                     context.getBeanFactory().addBeanPostProcessor(resources);
                 }).withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false",
-                        "pawbridge.user-animal-activities.enabled=true", "pawbridge.user-animal-activities.animal-backend=module",
-                        "pawbridge.user-store-mypage.enabled=true", "pawbridge.user-store-mypage.backend=module",
+                        "pawbridge.user-animal-activities.enabled=true",
+                        "pawbridge.user-store-mypage.enabled=true",
                         "pawbridge.animal-commands.enabled=true", "pawbridge.store-direct-orders.enabled=true",
                         "pawbridge.auth.google-enabled=false", "pawbridge.auth.sessions-enabled=false", "pawbridge.chat.enabled=false",
                         "pawbridge.jobs.cleanup-enabled=false", "pawbridge.user-maintenance.enabled=false",
