@@ -322,89 +322,49 @@ class EnvironmentWorkflowPolicyTest(unittest.TestCase):
         self.assertIn('persist-credentials: false', text)
 
 
-class WorkflowPublicationPolicyTest(unittest.TestCase):
-    FROZEN = {
-        'api-gateway-ci.yml': (
-            'Set up Helm', 'Set up Docker Buildx', 'Log in to Docker Hub',
-            'Build and optionally publish API Gateway image',
-            'Verify published API Gateway image digest', 'Check out Infra repository',
-            'Require isolated dev destination', 'Update API Gateway image reference',
-            'Validate API Gateway image Helm override', 'Create Infra draft pull request'),
-        'store-service-ci.yml': (
-            'Set up Helm', 'Set up Docker Buildx',
-            'Refuse an existing or unverified Store image tag', 'Log in to Docker Hub',
-            'Build and optionally publish Store Service image',
-            'Build and optionally publish migration image', 'Verify published migration digest',
-            'Verify published Store Service image digest', 'Check out Infra repository',
-            'Require isolated dev destination', 'Update Store image reference',
-            'Validate Store image Helm override', 'Create Infra pull request'),
-        '_java-service-image.yml': (
-            'Set up Helm', 'Set up Docker Buildx', 'Log in to Docker Hub',
-            'Build and optionally publish service image',
-            'Build and optionally publish migration image', 'Verify published migration digest',
-            'Verify published image digest', 'Check out Infra repository', 'id:infra-base',
-            'Require isolated dev destination', 'Update service image reference',
-            'Validate digest-aware Infra Helm override', 'Create or update Infra draft pull request')}
+class RetiredServiceWorkflowTest(unittest.TestCase):
+    """Old MSA service code is gone; only the required result checks remain."""
+
+    REQUIRED = {
+        'api-gateway-ci.yml': 'Gateway CI result',
+        'store-service-ci.yml': 'Store CI result',
+        'remaining-services-image-ci.yml': 'Remaining Java CI result',
+    }
 
     def workflow(self, name):
         return (ROOT / '.github/workflows' / name).read_text()
 
-    def steps(self, text):
-        return list(re.finditer(r'^      - ((?:name|id|uses):[^\n]*\n.*?)'
-                                r'(?=^      - |^  [A-Za-z0-9_-]+:|\Z)',
-                                text, re.M | re.S))
-
-    def test_given_preserved_publishers__when_transition_runs__then_every_external_step_is_literal_false(self):
-        total_pushes = 0
-        for name, names in self.FROZEN.items():
+    def test_given_branch_protection__when_retired_workflows_run__then_report_each_required_check(self):
+        for name, check in self.REQUIRED.items():
             with self.subTest(workflow=name):
                 text = self.workflow(name)
-                blocks = {}
-                for step in self.steps(text):
-                    first = step.group(1).splitlines()[0]
-                    key = first.removeprefix('name: ').strip()
-                    if first.startswith('id:'):
-                        key = 'id:' + first.split(':', 1)[1].strip()
-                    blocks[key] = step.group(1)
-                for step_name in names:
-                    with self.subTest(step=step_name):
-                        self.assertIn(step_name, blocks)
-                        self.assertIn('        if: ${{ false }}\n', blocks[step_name])
-                pushes = re.findall(r'^          push: (.+)$', text, re.M)
-                self.assertTrue(pushes)
-                self.assertTrue(all(value == 'false' for value in pushes), pushes)
-                total_pushes += len(pushes)
-        self.assertEqual(36, sum(len(names) for names in self.FROZEN.values()))
-        self.assertEqual(5, total_pushes)
-        publisher = re.search(r'^  service-image-publish:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)',
-                              self.workflow('remaining-services-image-ci.yml'), re.M | re.S).group(1)
-        self.assertIn('    if: ${{ false }}', publisher)
-        self.assertNotIn('secrets:', publisher)
+                self.assertIn('pull_request:', text)
+                self.assertIn('push:', text)
+                self.assertEqual(2, text.count('      - dev\n'))
+                self.assertEqual(2, text.count('      - main\n'))
+                self.assertNotIn('paths:', text)
+                jobs = re.findall(r'^  ([A-Za-z0-9_-]+):$', text.split('\njobs:\n', 1)[1], re.M)
+                self.assertEqual(['ci-result'], jobs)
+                self.assertIn('    name: ' + check + '\n', text)
 
-    def test_given_validation_jobs__when_running__then_no_publication_secret_is_available(self):
-        for name in (*self.FROZEN, 'remaining-services-image-ci.yml', 'environment-contract.yml'):
+    def test_given_retired_workflows__when_running__then_no_secret_checkout_or_build_is_used(self):
+        for name in self.REQUIRED:
             with self.subTest(workflow=name):
                 text = self.workflow(name)
-                self.assertNotRegex(text, r'secrets:\s*inherit')
-                for secret in re.finditer(r'secrets\.(?:DOCKERHUB_TOKEN|INFRA_REPO_TOKEN)', text):
-                    containing = [step.group(1) for step in self.steps(text)
-                                  if step.start() <= secret.start() < step.end()]
-                    self.assertEqual(1, len(containing), 'Publication secret escaped a frozen step')
-                    self.assertIn('        if: ${{ false }}\n', containing[0])
+                self.assertNotIn('secrets', text)
+                self.assertNotIn('uses:', text)
+                self.assertNotIn('gradlew', text)
+                self.assertIn('contents: read', text)
 
-    def test_given_selection_cli_outputs__when_callers_export_them__then_every_gate_input_is_connected(self):
-        for name in ('api-gateway-ci.yml', 'store-service-ci.yml', 'remaining-services-image-ci.yml'):
-            with self.subTest(workflow=name):
-                selection = re.search(r'^  selection:\n(.*?)(?=^  [A-Za-z0-9_-]+:|\Z)',
-                                      self.workflow(name), re.M | re.S).group(1)
-                for field in ('selected', 'matrix', 'count'):
-                    mapping = re.search(r'^      '+field+r': \$\{\{ steps\.([\w-]+)\.outputs\.'+field+r' \}\}$',
-                                        selection, re.M)
-                    self.assertIsNotNone(mapping, field+' must reach the gate from the actual selection step')
-                    step_id = mapping.group(1)
-                    self.assertTrue(re.search(r'(?:^      - id: |^        id: )'+re.escape(step_id)+r'$',
-                                              selection, re.M), 'Mapped output step must exist')
-                    self.assertIn('ci_branch_policy.py select --group', selection)
+    def test_given_old_service_directories__when_listing__then_only_migration_sql_remains(self):
+        listed = subprocess.run(['git', 'ls-files'], cwd=ROOT, capture_output=True,
+                                text=True, check=True).stdout.split()
+        tracked = [path for path in listed
+                   if re.match(r'[a-z]+-service/', path) or path.startswith(('api-gateway/', 'integration-service/'))]
+        self.assertTrue(tracked)
+        for path in tracked:
+            with self.subTest(path=path):
+                self.assertRegex(path, r'^[a-z]+-service/src/migration/resources/db/(postgresql|migration)/V[0-9]+__[a-z0-9_]+\.sql$')
 
 
 if __name__ == '__main__':
