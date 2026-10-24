@@ -78,15 +78,20 @@ class JdbcLocalLoginTest {
 
     static final class Fixture {
         final List<String> events=new ArrayList<>();final Tx tx=new Tx(events);final RecordingJdbc jdbc=new RecordingJdbc(tx,events);
-        final JwtSessionTokens tokens=mock(JwtSessionTokens.class);final JdbcAuthSessionStore sessions=mock(JdbcAuthSessionStore.class);final JdbcLocalLogin login;
+        final JwtSessionTokens tokens=mock(JwtSessionTokens.class);
+        final JdbcAuthSessionStore sessions=mock(JdbcAuthSessionStore.class);
+        final JdbcLocalLogin login;
         Fixture(){
             when(tokens.access(any())).thenAnswer(call->{events.add("access");return "safe-access";});
             login=new JdbcLocalLogin(jdbc,new TransactionTemplate(tx),tokens,sessions);
         }
     }
     static final class RecordingJdbc extends JdbcTemplate {
-        final Tx tx;final List<String> events;
-        String password="synthetic-hash",lastSql;Object[] lastArgs;int userRows=1;
+        final Tx tx;
+        final List<String> events;
+        String password="synthetic-hash",lastSql;
+        Object[] lastArgs;
+        int userRows=1;
         RecordingJdbc(Tx tx,List<String> events){this.tx=tx;this.events=events;}
         @Override public <T> List<T> query(String sql,RowMapper<T> mapper,Object...args){
             assertFalse(tx.active);lastSql=sql;lastArgs=args;var result=new ArrayList<T>();

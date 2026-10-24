@@ -45,21 +45,30 @@ class JdbcSocialLoginTest {
         var f=new Fixture();var attributes=new HashMap<>(ATTRIBUTES);
         if(example.equals("missing-email"))attributes.remove("email");if(example.equals("empty-email"))attributes.put("email","");
         assertThrows(SocialLoginRejectedException.class,()->f.login.load(example.equals("unsupported")?"other":"google",attributes));
-        assertTrue(f.events.isEmpty());assertTrue(f.jdbc.bindings.isEmpty());assertEquals(0,f.nicknames);verifyNoInteractions(f.sessions);
+        assertTrue(f.events.isEmpty());
+        assertTrue(f.jdbc.bindings.isEmpty());
+        assertEquals(0,f.nicknames);
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
     void given__existing_google_user__when__loading_again__then__preserve_stored_profile_role_and_skip_local_lookup_nickname_or_update() {
         var f=new Fixture();f.jdbc.google=List.of(EXISTING);
         assertEquals(EXISTING,f.login.load("GOOGLE",ATTRIBUTES));
-        assertEquals(List.of("begin","user:GOOGLE","commit","cleanup"),f.events);assertEquals(0,f.nicknames);assertTrue(f.jdbc.bindings.isEmpty());verifyNoInteractions(f.sessions);
+        assertEquals(List.of("begin","user:GOOGLE","commit","cleanup"),f.events);
+        assertEquals(0,f.nicknames);
+        assertTrue(f.jdbc.bindings.isEmpty());
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
     void given__local_account_with_same_email__when__loading_google__then__reject_without_linking_or_inserting() {
         var f=new Fixture();f.jdbc.local=List.of(EXISTING);
         assertEquals("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.",assertThrows(SocialLoginRejectedException.class,()->f.login.load("google",ATTRIBUTES)).getMessage());
-        assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","rollback","cleanup"),f.events);assertEquals(0,f.nicknames);assertTrue(f.jdbc.bindings.isEmpty());verifyNoInteractions(f.sessions);
+        assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","rollback","cleanup"),f.events);
+        assertEquals(0,f.nicknames);
+        assertTrue(f.jdbc.bindings.isEmpty());
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
@@ -70,7 +79,10 @@ class JdbcSocialLoginTest {
         Map<Integer,Object> values=f.jdbc.bindings.getFirst();
         Map.of(1,"social@example.test",2,"Social",3,"nickname1",4,"OAuth2",5,"ROLE_USER",7,"GOOGLE",8,"provider-sub",9,Timestamp.valueOf(NOW),10,Timestamp.valueOf(NOW))
                 .forEach((key,value)->assertEquals(value,values.get(key)));
-        assertTrue(values.containsKey(6));assertNull(values.get(6));assertEquals(List.of("UTC","UTC"),f.jdbc.calendarZones);verifyNoInteractions(f.sessions);
+        assertTrue(values.containsKey(6));
+        assertNull(values.get(6));
+        assertEquals(List.of("UTC","UTC"),f.jdbc.calendarZones);
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
@@ -78,7 +90,8 @@ class JdbcSocialLoginTest {
         var f=new Fixture();var failure=new DataIntegrityViolationException("synthetic unique");f.jdbc.userFailure=failure;
         assertSame(failure,assertThrows(RuntimeException.class,()->f.login.load("google",ATTRIBUTES)));
         assertEquals(2,f.nicknames);assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup",
-                "begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup"),f.events);verifyNoInteractions(f.sessions);
+                "begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup"),f.events);
+        verifyNoInteractions(f.sessions);
     }
 
     @ParameterizedTest @ValueSource(booleans={false,true})
@@ -90,7 +103,9 @@ class JdbcSocialLoginTest {
         var expected=new ArrayList<>(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup","begin","user:GOOGLE"));
         if(!racedAccount)expected.addAll(List.of("user:LOCAL","nickname","insert-user"));
         expected.addAll(List.of("commit","cleanup"));assertEquals(expected,f.events);
-        assertEquals(racedAccount?1:2,f.nicknames);assertEquals(racedAccount?1:2,f.jdbc.writes);verifyNoInteractions(f.sessions);
+        assertEquals(racedAccount?1:2,f.nicknames);
+        assertEquals(racedAccount?1:2,f.jdbc.writes);
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
@@ -133,9 +148,13 @@ class JdbcSocialLoginTest {
 
     @Test
     void given__multiple_rows_where_source_requires_optional_one__when__loading__then__do_not_choose_an_arbitrary_row() {
-        var f=new Fixture();f.jdbc.google=List.of(EXISTING,EXISTING);
-        assertThrows(IncorrectResultSizeDataAccessException.class,()->f.login.load("google",ATTRIBUTES));
-        assertEquals(0,f.jdbc.writes);assertEquals(0,f.nicknames);
+        var f = new Fixture();
+        f.jdbc.google = List.of(EXISTING, EXISTING);
+
+        assertThrows(IncorrectResultSizeDataAccessException.class, () -> f.login.load("google", ATTRIBUTES));
+
+        assertEquals(0, f.jdbc.writes);
+        assertEquals(0, f.nicknames);
     }
 
     private static final Map<String,Object> NAVER_ATTRIBUTES=Map.of("resultcode","00","message","success",
@@ -201,16 +220,21 @@ class JdbcSocialLoginTest {
 
     private static final class Fixture {
         final List<String> events=new ArrayList<>();final RecordingJdbc jdbc=new RecordingJdbc(events);final Manager manager=new Manager(events);
-        final JdbcAuthSessionStore sessions=mock(JdbcAuthSessionStore.class);final JdbcSocialLogin login;int nicknames;
+        final JdbcAuthSessionStore sessions=mock(JdbcAuthSessionStore.class);
+        final JdbcSocialLogin login;
+        int nicknames;
         Fixture(){
             Supplier<String> nickname=()->{events.add("nickname");return "nickname"+(++nicknames);};
             login=new JdbcSocialLogin(jdbc,new TransactionTemplate(manager),sessions,nickname,()->NOW);
         }
     }
     private static final class RecordingJdbc extends JdbcTemplate {
-        final List<String> events;List<SocialUser> google=List.of(),local=List.of(),naverById=List.of(),naverByEmail=List.of();
+        final List<String> events;
+        List<SocialUser> google=List.of(),local=List.of(),naverById=List.of(),naverByEmail=List.of();
         final List<Map<Integer,Object>> bindings=new ArrayList<>();final List<String> calendarZones=new ArrayList<>();
-        RuntimeException userFailure;int writes,userFailuresRemaining=Integer.MAX_VALUE;SocialUser googleAfterFailure;
+        RuntimeException userFailure;
+        int writes,userFailuresRemaining=Integer.MAX_VALUE;
+        SocialUser googleAfterFailure;
         RecordingJdbc(List<String> events){this.events=events;}
         private static ResultSet row(SocialUser user) throws SQLException {
             var row=mock(ResultSet.class);
