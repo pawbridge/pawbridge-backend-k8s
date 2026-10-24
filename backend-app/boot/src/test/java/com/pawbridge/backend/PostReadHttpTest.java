@@ -100,6 +100,18 @@ class PostReadHttpTest {
         verifyNoInteractions(readPost);
     }
 
+    @Test
+    void given__failed_async_stream__when__tomcat_includes_error_page__then__security_does_not_deny_it() throws Exception {
+        mvc.perform(get("/error").with(request -> {
+                    request.setDispatcherType(jakarta.servlet.DispatcherType.INCLUDE);
+                    request.setAttribute(jakarta.servlet.RequestDispatcher.ERROR_STATUS_CODE, 500);
+                    request.setAttribute(jakarta.servlet.RequestDispatcher.ERROR_REQUEST_URI, "/api/v1/notes/stream");
+                    return request;
+                }))
+                .andExpect(status().isInternalServerError());
+        verifyNoInteractions(readPost);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"GET /api/v1/posts", "GET /api/v1/users/internal/7/nickname", "GET /error",
             "GET /api/posts/read/42", "HEAD /api/v1/posts/read/42", "OPTIONS /api/v1/posts/read/42",
