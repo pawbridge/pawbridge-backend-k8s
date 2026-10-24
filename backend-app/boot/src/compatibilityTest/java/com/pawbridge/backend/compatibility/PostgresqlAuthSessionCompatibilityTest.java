@@ -449,7 +449,7 @@ class PostgresqlAuthSessionCompatibilityTest {
         for (long id : users) {
             execute("DELETE FROM pawbridge_user.auth_sessions WHERE user_id=" + id);
             assertThat(scalar("SELECT (SELECT count(*) FROM pawbridge_user.contact_deletions WHERE user_id=" + id + ")+(SELECT count(*) FROM pawbridge_user.favorites WHERE user_id=" + id
-                    + ")+(SELECT count(*) FROM pawbridge_user.refresh_tokens WHERE user_id=" + id + ")+(SELECT count(*) FROM pawbridge_user.shelter_applications WHERE user_id=" + id
+                    + ")+(SELECT count(*) FROM pawbridge_user.shelter_applications WHERE user_id=" + id
                     + ")+(SELECT count(*) FROM pawbridge_community.private_note_members WHERE member_id=" + id + ")")).isEqualTo("0");
             execute("DELETE FROM pawbridge_user.users WHERE user_id=" + id);
         }

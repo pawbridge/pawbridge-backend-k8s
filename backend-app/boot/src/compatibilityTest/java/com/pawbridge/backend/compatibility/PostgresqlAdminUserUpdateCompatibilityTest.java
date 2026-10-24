@@ -238,7 +238,7 @@ private static final String MEMBER_PROOF="source_sha=f06a72a06bd26662c647bde780d
     private void cleanup() throws Exception {
         if (owner == null) return;
         for (long id : inserted) {
-            assertThat(scalar("SELECT (SELECT count(*) FROM pawbridge_user.contact_deletions WHERE user_id="+id+")+(SELECT count(*) FROM pawbridge_user.favorites WHERE user_id="+id+")+(SELECT count(*) FROM pawbridge_user.refresh_tokens WHERE user_id="+id+")+(SELECT count(*) FROM pawbridge_user.shelter_applications WHERE user_id="+id+")+(SELECT count(*) FROM pawbridge_community.private_note_members WHERE member_id="+id+")")).isEqualTo("0");
+            assertThat(scalar("SELECT (SELECT count(*) FROM pawbridge_user.contact_deletions WHERE user_id="+id+")+(SELECT count(*) FROM pawbridge_user.favorites WHERE user_id="+id+")+(SELECT count(*) FROM pawbridge_user.shelter_applications WHERE user_id="+id+")+(SELECT count(*) FROM pawbridge_community.private_note_members WHERE member_id="+id+")")).isEqualTo("0");
             execute("DELETE FROM pawbridge_user.users WHERE user_id=" + id);
         }
         inserted.clear();

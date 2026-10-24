@@ -46,7 +46,6 @@ public final class JdbcUserDeletion implements UserDeletion {
         }
         transactions.executeWithoutResult(status -> {
             jdbc.update("DELETE FROM pawbridge_user.favorites WHERE user_id=?", userId);
-            jdbc.update("DELETE FROM pawbridge_user.refresh_tokens WHERE user_id=?", userId);
             jdbc.update("DELETE FROM pawbridge_user.shelter_applications WHERE user_id=?", userId);
             // Preserve deleteById: missing at lookup is a no-op, disappearance after lookup is stale.
             var users = jdbc.query("SELECT user_id FROM pawbridge_user.users WHERE user_id=?",

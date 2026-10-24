@@ -342,7 +342,7 @@ POST_STATISTICS_SEOUL_METHOD = POST_STATISTICS_SINGLE_METHODS[0]
 POST_READS = 'user-community-integration'
 # The actual PostStats feature head is not fixed. Root replaces this and the matching test BASE before publication.
 POST_READS_BASE = '990e7b3459dbbefb7c2bf877b6a2cf0891d54e68'
-POST_READS_WORKFLOW_SHA256 = '66833f8ac6c07b1559337383d0edcf3ee0fa6a93213c88f029ce8c9030adedde'
+POST_READS_WORKFLOW_SHA256 = '571a677665b357fd0ff96919ccb83c66a9a26d88cc992a7f824ebc12be0c1771'
 POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '6b74d6ef8e53cd7605e193efe6831a0a412c69799ac6700b7dcf927827cbafdf',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/F5LegacyPostOracle.java': 'e253a659bdb66826d97404a44bafb0bc4af7f0bd372838db892e8f2ef673cd01',
  'backend-app/boot/src/compatibilityTest/java/com/pawbridge/backend/compatibility/PostgresqlAdminPostReadCompatibilityTest.java': 'e9dcb46dae6716a6ae3a7998ae64ce69fb458a11c082c85cd8bbc3f4415c2127',
