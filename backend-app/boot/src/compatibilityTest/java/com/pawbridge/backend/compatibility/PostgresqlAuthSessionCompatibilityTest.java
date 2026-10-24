@@ -418,7 +418,7 @@ class PostgresqlAuthSessionCompatibilityTest {
     private String sessionRows(long userId) throws Exception {
         return scalar("SELECT json_build_object("
                 + "'sessions',(SELECT COALESCE(json_agg(s ORDER BY session_id),'[]'::json) FROM pawbridge_user.auth_sessions s WHERE user_id=" + userId + "),"
-                + "'history',(SELECT COALESCE(json_agg(h ORDER BY token_hash),'[]'::json) FROM pawbridge_user.auth_session_token_history h"
+                + "'history',(SELECT COALESCE(json_agg(h ORDER BY h.token_hash),'[]'::json) FROM pawbridge_user.auth_session_token_history h"
                 + " JOIN pawbridge_user.auth_sessions s USING (session_id) WHERE s.user_id=" + userId + "))::text");
     }
 
