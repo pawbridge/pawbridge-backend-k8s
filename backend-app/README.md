@@ -623,13 +623,15 @@ ADMIN PUT `/api/v1/admin/users/{userId}`는 기존 writer의 한 TX에서 회원
 
 ## refresh 회전과 logout
 
-`pawbridge.auth.sessions-enabled`는 기본 false다. true일 때만 공개 POST `/api/v1/auth/refresh`와 인증이 필요한 POST `/api/v1/auth/logout`을 조립한다. 기존 `PostWriteSettings`의 같은 키·writer·트랜잭션 관리자를 사용하며 외부 `X-User-*` 값은 인증 근거로 쓰지 않는다. 두 TTL 설정 `jwt.access-token-expiration`, `jwt.refresh-token-expiration`은 원문과 같은 밀리초 단위로 명시 입력하며 새 운영 기본값을 만들지 않는다. false인 기존 기동은 TTL을 요구하지 않는다.
+`pawbridge.auth.sessions-enabled`는 기본 false다. true일 때만 POST `/api/v1/auth/refresh`와 POST `/api/v1/auth/logout`을 조립한다. 두 경로 모두 access token 없이 받으며(permitAll), 컨트롤러가 `Origin`이 CORS 설정 목록의 정확한 값(`*` 패턴은 제외)이고 `Content-Type`이 `application/json`일 때만 처리한다. 그 밖에는 403이다. 다른 사이트의 폼이나 단순 요청은 이 두 조건을 만들 수 없고, 쿠키도 SameSite=Lax라 다른 사이트의 POST에는 실리지 않는다. Strict 대신 Lax를 쓰는 이유는 일부 WebKit·인앱 브라우저가 다른 사이트에서 돌아오는 소셜 로그인 callback에서 Strict 쿠키를 버리기 때문이다. 입력 TTL은 `jwt.access-token-expiration`(access), `jwt.refresh-token-expiration`(세션 유휴 만료), `pawbridge.auth.session-absolute-days`(절대 만료, 기본 30일)다.
 
-refresh는 body의 refreshToken 검증→저장 행 조회→DB 만료 시각의 strict 비교→현재 회원 필드 조회→두 토큰 발급→선택한 PK의 token/expiry 갱신 순서로 한 writer 트랜잭션에서 처리한다. 원문의 createdAt·밀리초에서 초로 내림한 DB 만료·현재 회원 claim을 보존한다. 이미 만료된 행을 삭제한 뒤 Runtime 예외로 롤백하는 원문은 실제 SQL DELETE 전에 롤백되므로 후보는 이를 물리 삭제로 바꾸지 않는다. 실제 비교 결과는 PG gate에서 확인한다.
+refresh 토큰은 32바이트 SecureRandom 값을 패딩 없는 base64url로 만든 불투명 값이다. DB `pawbridge_user.auth_sessions`(user-service V4)에는 소문자 hex SHA-256만 저장한다. 토큰은 `__Secure-pb_refresh` 쿠키(Domain 없음, `Path=/api/v1/auth`, HttpOnly, Secure, SameSite=Lax, Max-Age=유휴·절대 만료 중 이른 쪽까지 남은 초)로만 오가며, 응답 본문과 redirect 주소에는 넣지 않는다. 구 경로 `/api/auth/refresh`는 쿠키 Path와 맞지 않아 쿠키가 전송되지 않는다.
 
-logout은 인증된 사용자에게 속한 refresh 행을 먼저 선택하고 해당 PK만 지운다. 선택 뒤 별도 트랜잭션에서 추가된 행까지 일괄 삭제하지 않는다. 원문처럼 이미 발급된 access token을 별도 차단 목록에 넣지 않으며, CAS·version·nonce·새 계정 연결 정책도 추가하지 않는다. 동시에 같은 refresh를 읽은 두 요청이 모두 성공할 수 있고 최종 저장값은 마지막 갱신 결과일 수 있다. 후보 TT15는 원문 무제한 대기와 같다고 주장하지 않는다.
+refresh는 쿠키만 읽는다(본문 무시). 한 UPDATE로 `token_hash=:old`이고 폐기·만료되지 않은 세션만 새 해시로 바꾸며 `rotated_at`, `last_used_at`, `expires_at=LEAST(now+유휴, absolute_expires_at)`를 갱신하고, 물러난 해시는 같은 트랜잭션에서 `auth_session_token_history`에 남긴다. 시각은 모두 DB의 `CURRENT_TIMESTAMP`다. 현재 토큰이 아니면 이력에서 찾는다. 어느 세대든 60초보다 오래전에 물러난 토큰이면 재사용으로 보고 그 세션만 폐기·커밋한 뒤 401과 쿠키 삭제를 반환한다. 60초 안에 물러난 토큰이면서 가장 최근 회전에서 물러났고 후속 토큰이 한 번도 쓰이지 않았으면(`last_used_at = rotated_at`) 회전 응답이 유실된 것으로 보고, 세션 행을 잠근 뒤 조건을 다시 확인해 한 번 더 회전하고 쿠키를 준다. 동시에 온 다른 요청은 잠금 뒤 조건이 맞지 않아 access token만 받는다. 이력에 없으면 401과 쿠키 삭제다. access token claim은 매번 `users`에서 다시 읽는다. logout은 쿠키의 세션을 폐기하고 항상 쿠키를 지우며 같은 요청을 반복해도 200이다.
 
-고정 앱23개에 한정한 `auth-sessions` CI는 공통 빌드·단위 검사, 기존 member24와 명시 admin24 준비, 새7컬럼 권한의 합성 확장, 원문 실제 JPA와 UTC17·Seoul 정상회전1 비교를 요구한다. 실패한 경우에도 새7권한만 회수하고 원래 admin strict를 검증하며, 원래 PG 실패와 권한 복구 실패를 각각 감사한다. full은 권한 복구 뒤 방문26표를 준비한다. 새 테이블·seed 생성 JAR·별도 source set·원문 fetch는 없다. 실제 PostgreSQL과 hosted CI는 게시 후 판단하며 운영 키·TTL이나 현재 로그인 정책은 변경하지 않았다.
+로그인(LOCAL·소셜)마다 회원 행을 `FOR UPDATE`로 잠근 같은 트랜잭션에서 세션을 새로 만들고, 활성 세션이 5개를 넘으면 `last_used_at`이 오래된 순으로 폐기한다. 관리자가 역할을 낮추면(ADMIN→SHELTER/USER, SHELTER→USER), 비밀번호를 변경·재설정하면, 회원 삭제를 시작하면(`contact_deletions` 표시) 각각 같은 트랜잭션에서 그 회원의 세션을 모두 폐기한다. 올리는 변경은 폐기하지 않는다. 회원 행 삭제는 FK `ON DELETE CASCADE`로 세션과 이력을 지운다. `pawbridge.jobs.cleanup-enabled=true`이면 1시간마다 만료됐거나 폐기 후 하루가 지난 세션을 1000행씩 지운다. 토큰 값과 해시는 로그에 남기지 않는다. 새 코드는 `refresh_tokens`에 쓰지 않으며, 이 테이블은 후속 단계에서 제거한다.
+
+`auth-sessions` PostgreSQL 비교(`PostgresqlAuthSessionCompatibilityTest`)는 원문 JWT refresh와 더 이상 비교하지 않는다. `f29_ci.py auth-sessions-prepare`가 기존 admin24 fixture에 검토된 V4 DDL(해시 고정)과 두 테이블의 writer 정확 열 권한을 추가하고, 시험은 회전·이력 기록·유실 응답 복구·동시 grace 요청·두 세대 전 토큰 재사용·만료·5개 제한·logout·전체 폐기·정리·권한 회수·회원 삭제 연쇄를 실제 DB에서 확인한다. 복구 단계는 추가 권한을 회수하고 두 테이블을 지운다. 이 비교는 hosted CI 전용이다.
 
 ## 관리자 게시글 기간·오늘 통계
 
@@ -659,17 +661,17 @@ ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`�
 
 `pawbridge.auth.naver-enabled`(환경변수 `PAWBRIDGE_AUTH_NAVER_ENABLED`)는 기본 false다. true면 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`(경로 `/login/oauth2/code/naver`)를 요구하고, 없거나 경로가 다르면 시작할 때 실패한다. Google과 Naver는 각자 켜고 끌 수 있으며, 보안 체인은 켜진 공급자의 authorization·callback 경로만 받는다.
 
-Naver는 Spring 기본 제공자가 아니어서 authorize·token·user-info 주소를 직접 등록한다. user-info 응답은 `response` 안에 `id`·`email`·`name`을 담는다. 회원은 `provider=NAVER`와 Naver `id`(애플리케이션마다 다른 값)로 찾는다. 연락처 이메일은 바뀔 수 있고 소유 증명이 아니므로 이메일로는 찾거나 연결하지 않는다. 같은 이메일의 LOCAL 회원이 있으면 Google과 같은 문구로 거절하고, 같은 이메일의 다른 Naver ID 회원이 있으면 별도 문구로 거절한다. 회원 생성·닉네임·refresh 저장은 Google과 같은 `JdbcSocialLogin` 경로를 쓴다.
+Naver는 Spring 기본 제공자가 아니어서 authorize·token·user-info 주소를 직접 등록한다. user-info 응답은 `response` 안에 `id`·`email`·`name`을 담는다. 회원은 `provider=NAVER`와 Naver `id`(애플리케이션마다 다른 값)로 찾는다. 연락처 이메일은 바뀔 수 있고 소유 증명이 아니므로 이메일로는 찾거나 연결하지 않는다. 같은 이메일의 LOCAL 회원이 있으면 Google과 같은 문구로 거절하고, 같은 이메일의 다른 Naver ID 회원이 있으면 별도 문구로 거절한다. 회원 생성·닉네임·세션 생성은 Google과 같은 `JdbcSocialLogin` 경로를 쓴다.
 
 클래스 이름은 공급자 공용 `Social*`로 바꿨다(Google 동작·설정 키는 그대로). 실제 Naver 서버 호출과 운영 키 적용은 이 변경에 포함하지 않는다.
 
 ## 기존 Google 로그인 편입
 
-`pawbridge.auth.google-enabled`는 기본 false다. true에서는 기존 AuthSessions·JwtSessionTokens와 명시 Google client/secret/callback·frontend 설정을 요구한다. 정확한 Google authorization/callback 두 경로만 별도 보안 체인으로 조립하며 REST의 STATELESS JWT 경계를 유지한다. OAuth 요청 state는 기존 Spring의 임시 HttpSession 저장 방식을 사용한다. Google 네트워크 호출·자격증명·운영 설정을 이 구현 과정에서 실행하거나 변경하지 않았다.
+`pawbridge.auth.google-enabled`는 기본 false다. true에서는 auth session 저장소(`pawbridge.auth.sessions-enabled=true`)와 명시 Google client/secret/callback·frontend 설정을 요구한다. 정확한 Google authorization/callback 두 경로만 별도 보안 체인으로 조립하며 REST의 STATELESS JWT 경계를 유지한다. OAuth 요청 state는 기존 Spring의 임시 HttpSession 저장 방식을 사용한다. Google 네트워크 호출·자격증명·운영 설정을 이 구현 과정에서 실행하거나 변경하지 않았다.
 
-Google의 이메일/공급자로 기존 회원을 우선 찾고 LOCAL 충돌은 자동 연결하지 않는다. 신규 회원의 기존 닉네임·ROLE_USER·provider ID와 감사시각을 보존한다. 기존 User nickname 저장소를 재사용하며 Google 외부 I/O 후 회원 생성 TX와 refresh 저장 TX를 분리한다. 계정 연결·LOCAL 폐지·Naver는 추가하지 않는다. unique 충돌의 원래1회 추가시도는 실패 TX 종료 뒤 별도 TX로 이동하며, 최초 refresh 저장은 같은 회원 행 잠금 뒤 재조회한다. 실제 JPA flush/23505·동시 가입·DB 감사시각의 동등성은 아직 PostgreSQL 비교로 입증하지 않았다.
+Google의 이메일/공급자로 기존 회원을 우선 찾고 LOCAL 충돌은 자동 연결하지 않는다. 신규 회원의 기존 닉네임·ROLE_USER·provider ID와 감사시각을 보존한다. 기존 User nickname 저장소를 재사용하며 Google 외부 I/O 후 회원 생성 TX와 세션 생성 TX를 분리한다. 계정 연결·LOCAL 폐지는 추가하지 않는다. unique 충돌의 원래1회 추가시도는 실패 TX 종료 뒤 별도 TX로 이동하며, 세션 생성은 같은 회원 행 잠금 뒤 수행한다. 실제 JPA flush/23505·동시 가입·DB 감사시각의 동등성은 아직 PostgreSQL 비교로 입증하지 않았다.
 
-성공 redirect는 원문처럼 access/refresh query를 유지한다. 임의 예외/원격 응답을 실패 주소에 복사하지 않고 정해진 문구만 허용한다. redirect URL 전체를 DEBUG로 기록하던 framework 경로는 같은 응답의 servlet redirect로 제한했고, 재현 RED→수정 GREEN으로 토큰 미기록을 확인했다. 이는 실제 HTTP framework TRACE 전체 로그의 검증이 아니며 query 토큰 자체의 전달 방식 개선은 후속 P8 계약이다.
+성공 redirect는 refresh 쿠키를 설정하고 설정된 frontend 주소로 토큰 query 없이 보낸다. frontend는 이어서 refresh를 호출해 access token을 받는다. 임의 예외/원격 응답을 실패 주소에 복사하지 않고 정해진 문구만 허용한다(실패 처리는 그대로다).
 
 가까운 업무·설정·state/오류·JWT REST·기본 비활성·DEBUG 회귀의 고유30사례는 분할 실행으로 통과했고 계층383class도 검사했다. 실제 Google 인증 교환/브라우저 쿠키·활성 JAR·DB/Redis 통합은 아직 미실행이다. 고정 User 합집합 입력의 선택 CI는 공통 빌드/단위·기존 관리자 페이지 PG11과 cleanup만 실행하며 Google 통합이나 전체 full 성공으로 확대하지 않는다.
 
@@ -1215,25 +1217,15 @@ Animal·Store·Payment 생산 코드를 합친 최종 조립에서는 기존 Mai
 
 `pawbridge.auth.local-enabled`는 기본 false다. true에서는 기존 `pawbridge.auth.sessions-enabled=true`, 명명된 writer/JdbcTransactionManager와 기존 JWT issuer를 요구한다. 정확한 `/api/v1/auth/login`에만 별도 보안 체인을 조립하고, 인증 관리자·BCrypt·DAO는 해당 체인 내부에서만 구성한다. 전역 인증 관리자·인코더·서블릿 필터를 추가하지 않는다. 기본 비활성 및 다른 인증·업무 경로의 보안은 유지한다.
 
-원문 필터의 JSON email/password 입력, 대소문자를 구분하지 않는 이메일 조회, 기본 BCrypt와 미존재 계정 숨김, 200 응답의 userId/email/name/role/careRegNo/accessToken/refreshToken, 401 문구를 보존한다. 원문 필터는 메서드 제한 없이 같은 경로를 처리하고 DTO의 MVC 검증을 실행하지 않는다. 새 POST 전용·이메일 형식·provider/삭제 상태 정책은 추가하지 않았다. 인증된 DB 계정 정보만 토큰에 사용하고 요청의 사용자·권한 헤더나 Bearer 값으로 비밀번호 인증을 우회하지 않는다. 토큰은 응답 본문에만 전달하며 세션 쿠키를 만들지 않는다.
+원문 필터의 JSON email/password 입력, 대소문자를 구분하지 않는 이메일 조회, 기본 BCrypt와 미존재 계정 숨김, 200 응답의 userId/email/name/role/careRegNo/accessToken, 401 문구를 보존한다. refreshToken은 본문에서 빠지고 refresh 쿠키로만 전달한다. 원문 필터는 메서드 제한 없이 같은 경로를 처리하고 DTO의 MVC 검증을 실행하지 않는다. 새 POST 전용·이메일 형식·provider/삭제 상태 정책은 추가하지 않았다. 인증된 DB 계정 정보만 토큰에 사용하고 요청의 사용자·권한 헤더나 Bearer 값으로 비밀번호 인증을 우회하지 않는다. access token은 응답 본문, refresh token은 refresh 쿠키로만 전달하며 서버 HttpSession은 만들지 않는다.
 
-이메일·refresh 조회와 BCrypt 인증은 save 트랜잭션 밖에서 수행하고, 기존 refresh 행 갱신 또는 새 행 삽입만 개별 writer 트랜잭션에 둔다. 원문의 전체 로그인 트랜잭션·행 잠금 부재와 동시 첫 로그인 경합은 해결된 것으로 표시하지 않는다. 복수 단건 조회 결과를 임의 한 행으로 정상화하지 않으며, 조회 실패의 일반401과 인증 후 저장 실패의 예외 전파를 구분한다. 파싱·내부 인증·저장 예외는 기존 실패 경계를 유지하면서 비밀번호·토큰이 원인 메시지나 principal 문자열에 노출되지 않도록 고정 메시지와 비밀 없는 표현을 사용한다.
+이메일 조회와 BCrypt 인증은 save 트랜잭션 밖에서 수행하고, 회원 행 잠금·세션 생성·5개 초과분 폐기만 개별 writer 트랜잭션에 둔다. 복수 단건 조회 결과를 임의 한 행으로 정상화하지 않으며, 조회 실패의 일반401과 인증 후 저장 실패의 예외 전파를 구분한다. 파싱·내부 인증·저장 예외는 기존 실패 경계를 유지하면서 비밀번호·토큰이 원인 메시지나 principal 문자열에 노출되지 않도록 고정 메시지와 비밀 없는 표현을 사용한다.
 
 JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경된 실제 Main 기존2사례가 성공했고 현재 생산 구조·업무 패키지 검사1003클래스를 통과했다. 첫 Boot 컴파일의 지원되지 않는 DAO 생성자는 기존 지원 API의 setter 조립으로만 교정했다. 실제 PostgreSQL 로그인·실계정·메일·운영 인증은 실행하지 않았다. 가입·비밀번호 재설정·계정 연결·LOCAL 폐지·Naver·운영 활성화는 포함하지 않는다.
 
-#### LOCAL 로그인 writer 권한 증분과 적용 순서
+#### LOCAL 로그인 writer 권한 증분(삭제)
 
-`f29_ci.py`가 auth-session 단계까지 누적한 writer `pawbridge_f3_writer` 권한 중 로그인 관련 부분은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `refresh_tokens`의 `SELECT(refresh_token_id,token,user_id,expires_at)`·`UPDATE(token,expires_at)`·`DELETE`다. 이 밖에 앞선 member/admin 단계의 `users` 일부 열 UPDATE와 DELETE 권한도 누적돼 있다. 누적 권한에는 `users.password` SELECT와 `refresh_tokens` INSERT가 없다. LOCAL 로그인은 이메일 조회에서 `password`를 읽고 첫 로그인에서 `refresh_tokens`에 새 행을 넣으므로 이 권한만으로는 실패한다(SQLSTATE 42501).
-
-`boot/src/test/resources/owned-postgresql/local-login-writer-grants.sql`은 이 차이만 보충하는 증분이다. `SELECT(password) ON users`와 `INSERT(token,user_id,expires_at,created_at) ON refresh_tokens` 두 권한만 추가한다. `refresh_token_id`는 원문 V1의 identity 열이라 기본값 생성에 sequence 권한이 필요 없으므로 sequence 권한을 추가하지 않는다. `refresh_token_id`를 명시한 INSERT는 열 권한이 없어 거부된다. 기존 권한은 회수하지 않는다.
-
-적용 순서:
-
-1. 기존 strict F29 준비와 그 검증을 먼저 끝낸다. 증분은 F29 기준선의 일부가 아니다.
-2. 테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v login_writer=pawbridge_f3_writer -f local-login-writer-grants.sql`로 증분을 한 번 적용한다.
-3. 증분 적용 뒤에는 writer의 `users` SELECT 열 집합과 `refresh_tokens` INSERT 열 집합이 F29 strict 검증의 정확 집합과 달라지므로, 같은 역할에 strict F29 준비·검증을 다시 실행하지 않는다. 다시 실행하려면 먼저 두 권한을 `REVOKE`한다.
-
-`OwnedPostgresqlLocalLoginWriterTest`(`owned-postgresql` 태그, 일반 `test`·CI에서는 제외)는 `f29_ci.py`의 strict 준비를 실행한 것이 아니라, auth-session 이후 로그인 관련 권한 부분집합을 재현한 새 합성 PostgreSQL에 증분을 적용한 상태를 한 번 확인했다. 증분 전 비밀번호 조회·첫 INSERT 거부(42501) 재현은 저장소 밖 준비 기록에만 남아 있다. 시험은 정확한 열 권한 집합, 실제 BCrypt 비밀번호 조회, 첫 로그인 INSERT와 재로그인 동일 행 UPDATE, sequence 권한 없이 identity 생성, writer의 추가 쓰기 거부, reader의 `password`·`refresh_tokens` 조회 거부를 확인했다. 이 fixture는 F29 전체 권한 재현이 아니며 writer의 `users` UPDATE·DELETE도 주지 않는다. reader의 `refresh_tokens` INSERT·UPDATE·DELETE 거부는 단언하지 않는다(이번 증분은 writer에만 적용된다). 시험은 이미 종료한 일회용 합성 서버의 식별값에 고정돼 있어 그대로 재실행할 수 없다. CI는 이 증분을 준비하거나 재검증하지 않으므로, 이후 `JdbcLocalLogin`의 SQL이 바뀌면 권한 불일치를 CI가 잡지 못한다. 실제 운영 DB 역할의 권한 결정과 LOCAL 로그인 활성화는 이 문서가 승인하는 범위가 아니다.
+`refresh_tokens` 쓰기를 검증하던 일회용 증분 `local-login-writer-grants.sql`과 `OwnedPostgresqlLocalLoginWriterTest`는 로그인이 `auth_sessions`에 쓰게 되면서 삭제했다. 이 시험은 이미 종료한 일회용 서버에 고정돼 재실행할 수 없었다. 세션 생성 SQL의 권한은 위 `auth-sessions` PostgreSQL 비교가 writer 정확 열 권한으로 확인한다. LOCAL 로그인의 `users.password` 조회 권한은 그 비교 범위 밖이다.
 
 ### LOCAL 비밀번호 변경
 
@@ -1241,7 +1233,7 @@ JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경�
 
 원문 DTO의 `currentPassword` NotBlank, `newPassword` NotBlank와 8~20자 영문·숫자·특수문자(`@$!%*#?&`) 패턴과 메시지를 유지한다. 검증 실패는 원문처럼 `field: message`를 `, `로 이은 400이고 거부된 값은 응답·로그에 남기지 않는다. 기존 writer `writeTransactionManager` 한 트랜잭션(timeout 10초, 기존 F13과 같은 값) 안에서 회원 조회→`provider`가 정확히 `LOCAL`이 아니면 400 `소셜 로그인 사용자는 비밀번호를 변경할 수 없습니다.`→기본 강도 BCrypt로 현재 비밀번호 확인 실패 시 400 `현재 비밀번호가 일치하지 않습니다.`→원문 문자열 동일 시 400 `현재 비밀번호와 동일한 비밀번호로 변경할 수 없습니다.`→새 BCrypt 해시와 `updated_at`(UTC 바인딩) 두 열 UPDATE 순서를 유지한다. 회원 부재는 400 `존재하지 않는 회원입니다.`, 그 밖의 예외는 500 `서버 에러!`이며 성공은 200 `비밀번호가 변경되었습니다.`·data:null이다. BCrypt는 이 기능 안에서만 생성하고 전역 `PasswordEncoder` bean을 등록하지 않는다. 새 pool·DDL·의존성은 없다.
 
-원문 결함과 차이는 고치지 않고 활성화 전 확인 항목으로 남긴다. 비밀번호 변경 뒤에도 기존 refresh token과 access token을 폐기하지 않는다(원문과 같음). 회원 행 잠금이 없어 동시 변경은 마지막 쓰기가 남는다. 원문은 JPA 전체 행 flush였지만 후보는 `password`·`updated_at`만 갱신하므로 동시에 바뀐 다른 열을 덮지 않는다. 삭제 대기 등 회원 상태는 원문처럼 확인하지 않는다. 현재 비밀번호 확인에 시도 횟수 제한이 없어 탈취한 access token으로 온라인 대입이 가능하다(원문과 같음). 원문 검증 실패 handler는 `rejected value`를 포함한 예외 메시지를 error 로그에 남겨 패턴 검증에 실패한 새 비밀번호가 평문으로 기록될 수 있었으나, 후보는 이 로그를 재현하지 않는다.
+원문 결함과 차이는 고치지 않고 활성화 전 확인 항목으로 남긴다. 비밀번호 변경은 같은 트랜잭션에서 그 회원의 refresh 세션을 모두 폐기한다(auth sessions가 켜졌을 때). 이미 발급된 access token은 만료까지 유효하다. 회원 행 잠금이 없어 동시 변경은 마지막 쓰기가 남는다. 원문은 JPA 전체 행 flush였지만 후보는 `password`·`updated_at`만 갱신하므로 동시에 바뀐 다른 열을 덮지 않는다. 삭제 대기 등 회원 상태는 원문처럼 확인하지 않는다. 현재 비밀번호 확인에 시도 횟수 제한이 없어 탈취한 access token으로 온라인 대입이 가능하다(원문과 같음). 원문 검증 실패 handler는 `rejected value`를 포함한 예외 메시지를 error 로그에 남겨 패턴 검증에 실패한 새 비밀번호가 평문으로 기록될 수 있었으나, 후보는 이 로그를 재현하지 않는다.
 
 #### 비밀번호 변경 writer 권한 증분과 적용 순서
 
@@ -1261,7 +1253,7 @@ JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경�
 
 원문과 다른 점: ① 재설정은 원문 JPA 전체 행 flush 대신 `password`·`updated_at` 두 열만 UPDATE한다. ② 오류 로그는 예외 메시지를 남기지 않고 클래스·상위 프레임만 남기며, 원문이 errorType을 log.error·warn으로 남기던 재설정(메일 발송 실패 포함)·가입 일부 지점은 예외를 로그 없이 삼키므로 운영에서 발송 실패가 보이지 않는다. ③ Redis는 `spring.data.redis.host/port/database/username/password`로 이 기능 전용 Lettuce 연결(연결·명령 timeout 2초)을 따로 만든다(회원 채팅 Redis와 공유하지 않으며 둘 다 켜면 연결이 2개다. 이 팩토리는 `defaultCandidate=false`로 등록해 회원 채팅의 이름 없는 `RedisConnectionFactory` 주입이 모호해지지 않게 했다). ④ 가입 트랜잭션은 writer 기본 timeout 15초를 상속한다(원문은 timeout 없음). ⑤ 메일 transport 실패(`MailException`)는 원문처럼 가공하지 않고 500 `서버 에러!`로 나간다. ⑥ SMTP 클라이언트 timeout·STARTTLS 속성(`mail.smtp.auth/starttls/connectiontimeout/timeout/writetimeout`)을 `application.properties` 기본값으로 원문 값 그대로 두었고 host·username·password는 환경 변수(`SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`)로만 받는다.
 
-원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **`POST /api/v1/email/send`는 인증 없이 임의 주소로 메일을 보낼 수 있다**(제한은 주소별 5분 5회뿐이라 서로 다른 수신자나 IP 단위 제한이 없다). Redis 키가 이메일 대소문자를 그대로 쓰는데 계정 조회는 대소문자를 무시하므로 같은 계정을 가리키는 대소문자 변형마다 발송·검증 횟수 제한이 따로 적용되어 6자리 코드 추측 제한을 우회할 수 있다. 검증 횟수 확인과 증가가 원자적이지 않아 동시 요청이 5회를 넘길 수 있다. 인증 표지는 이메일 문자열에만 묶여 1시간 동안 유효하다. 가입 비밀번호 규칙은 6자 이상뿐이다(변경·재설정은 8~20자 패턴). 닉네임 충돌 재시도와 동시 가입 충돌이 같은 PostgreSQL 트랜잭션 안에서 다시 시도하므로 실패한 문장 뒤 재시도는 대개 500으로 끝난다(실제 DB에서 검증하지 않음). 재설정 성공 뒤에도 기존 refresh·access 토큰을 폐기하지 않는다. 재설정 요청 응답은 같지만 계정이 있을 때만 메일을 보내므로 응답 시간 차이로 계정 존재를 추정할 수 있다. 발송 실패도 발송 횟수를 소모한다.
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **`POST /api/v1/email/send`는 인증 없이 임의 주소로 메일을 보낼 수 있다**(제한은 주소별 5분 5회뿐이라 서로 다른 수신자나 IP 단위 제한이 없다). Redis 키가 이메일 대소문자를 그대로 쓰는데 계정 조회는 대소문자를 무시하므로 같은 계정을 가리키는 대소문자 변형마다 발송·검증 횟수 제한이 따로 적용되어 6자리 코드 추측 제한을 우회할 수 있다. 검증 횟수 확인과 증가가 원자적이지 않아 동시 요청이 5회를 넘길 수 있다. 인증 표지는 이메일 문자열에만 묶여 1시간 동안 유효하다. 가입 비밀번호 규칙은 6자 이상뿐이다(변경·재설정은 8~20자 패턴). 닉네임 충돌 재시도와 동시 가입 충돌이 같은 PostgreSQL 트랜잭션 안에서 다시 시도하므로 실패한 문장 뒤 재시도는 대개 500으로 끝난다(실제 DB에서 검증하지 않음). 재설정 성공은 같은 트랜잭션에서 refresh 세션을 모두 폐기하지만(auth sessions가 켜졌을 때) 이미 발급된 access token은 만료까지 유효하다. 재설정 요청 응답은 같지만 계정이 있을 때만 메일을 보내므로 응답 시간 차이로 계정 존재를 추정할 수 있다. 발송 실패도 발송 횟수를 소모한다.
 
 #### 가입·재설정 writer 권한 증분과 활성화 전 조건
 

@@ -2,6 +2,7 @@ package com.pawbridge.backend.user.internal.login.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.user.internal.login.application.LocalLogin;
+import com.pawbridge.backend.user.internal.session.web.RefreshCookies;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import java.io.IOException;
 import java.util.ArrayList;
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.InternalAuthenticationServiceException;
@@ -33,14 +35,20 @@ public final class LocalLoginFilter extends UsernamePasswordAuthenticationFilter
             throw new InternalAuthenticationServiceException("Local login authentication failed");
         }catch(IOException failure){throw new RuntimeException("로그인 요청 처리 중 오류가 발생했습니다.");}
     }
-    @Override protected void successfulAuthentication(HttpServletRequest request,HttpServletResponse response,
-            FilterChain chain,Authentication authentication)throws IOException {
-        var account=((LocalLoginPrincipal)authentication.getPrincipal()).account();
-        com.pawbridge.backend.user.internal.session.application.AuthSessions.Tokens tokens;
-        try{tokens=login.complete(account);}
-        catch(RuntimeException failure){throw new IllegalStateException("Local login completion failed: "+failure.getClass().getName());}
-        write(response,200,"로그인에 성공했습니다.",new LoginResponse(account.userId(),account.email(),account.name(),
-                account.role(),account.careRegNo(),tokens.accessToken(),tokens.refreshToken()));
+    @Override
+    protected void successfulAuthentication(HttpServletRequest request, HttpServletResponse response,
+            FilterChain chain, Authentication authentication) throws IOException {
+        var account = ((LocalLoginPrincipal) authentication.getPrincipal()).account();
+        LocalLogin.CompletedLogin completed;
+        try {
+            completed = login.complete(account);
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException("Local login completion failed: " + failure.getClass().getName());
+        }
+        response.addHeader(HttpHeaders.SET_COOKIE, RefreshCookies.issue(completed.refreshToken()).toString());
+        var body = new LoginResponse(account.userId(), account.email(), account.name(), account.role(),
+                account.careRegNo(), completed.accessToken());
+        write(response, 200, "로그인에 성공했습니다.", body);
     }
     @Override protected void unsuccessfulAuthentication(HttpServletRequest request,HttpServletResponse response,
             AuthenticationException failure)throws IOException {
@@ -55,6 +63,8 @@ public final class LocalLoginFilter extends UsernamePasswordAuthenticationFilter
     public record LoginRequest(@Email @NotBlank String email,@NotBlank String password){
         @Override public String toString(){return "LocalLoginRequest";}
     }
-    private record LoginResponse(long userId,String email,String name,String role,String careRegNo,String accessToken,String refreshToken){}
+    /** The refresh token is deliberately absent: it travels only in the HttpOnly refresh cookie. */
+    private record LoginResponse(long userId, String email, String name, String role, String careRegNo,
+            String accessToken) { }
     private record Envelope(int code,String message,Object data){}
 }

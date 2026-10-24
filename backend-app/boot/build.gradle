@@ -1109,7 +1109,7 @@ tasks.named('compileCompatibilityTestJava') { dependsOn tasks.named('prepareF13A
 
 tasks.register('authSessionCompatibilityTest', Test) {
     group = 'verification'
-    description = 'Compares selected refresh/logout actual JpaTM with the same owned twenty-four-table writer fixture.'
+    description = 'Checks cookie refresh sessions with the owned twenty-four-table writer fixture plus auth_sessions.'
     testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
     classpath = sourceSets.compatibilityTest.runtimeClasspath
     useJUnitPlatform()
@@ -1127,10 +1127,10 @@ tasks.register('authSessionCompatibilityTest', Test) {
     outputs.upToDateWhen { false }
 }
 
-// One existing method, not a second business matrix: original LocalDateTime/JPA UTC vs JDBC Calendar mapping.
+// One method, not a second business matrix: session times come from the database clock in either JVM zone.
 tasks.register('authSessionCompatibilitySeoulTest', Test) {
     group = 'verification'
-    description = 'Compares selected refresh/logout actual JpaTM with the same owned twenty-four-table writer fixture.'
+    description = 'Checks cookie refresh sessions with the owned twenty-four-table writer fixture plus auth_sessions.'
     testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
     classpath = sourceSets.compatibilityTest.runtimeClasspath
     useJUnitPlatform()
@@ -1142,7 +1142,7 @@ tasks.register('authSessionCompatibilitySeoulTest', Test) {
     systemProperty 'auth.sessions.fixture.receipt', rootProject.file('build/ci/auth-sessions-fixture-write.txt').absolutePath
     systemProperty 'auth.sessions.oracle.receipt', rootProject.file('build/ci/f13-auth-sessions-oracle-sha256.txt').absolutePath
     filter {
-        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest.givenCurrentClaimsAndMicrosecondStoredExpiry__whenRotatingThenReplaying__thenPreserveCreatedAtAndOnlyChangeTheSelectedRefresh'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest.givenCurrentClaimsAndAnActiveSession__whenRotating__thenIssueCurrentClaimsAndRecordTheRetiredHash'
         failOnNoMatchingTests = true
     }
     outputs.upToDateWhen { false }

@@ -3,6 +3,7 @@ package com.pawbridge.backend.user.internal.deletion.infrastructure;
 import com.pawbridge.backend.user.internal.deletion.application.MemberCleanupUnavailableException;
 import com.pawbridge.backend.user.internal.deletion.application.UserDeletion;
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException;
+import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker;
 import java.util.function.LongConsumer;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -13,11 +14,18 @@ public final class JdbcUserDeletion implements UserDeletion {
     private final JdbcOperations jdbc;
     private final TransactionOperations transactions;
     private final LongConsumer communityCleanup;
+    private final UserSessionRevoker sessions;
 
     public JdbcUserDeletion(JdbcOperations jdbc, TransactionOperations transactions, LongConsumer communityCleanup) {
+        this(jdbc, transactions, communityCleanup, UserSessionRevoker.NONE);
+    }
+
+    public JdbcUserDeletion(JdbcOperations jdbc, TransactionOperations transactions, LongConsumer communityCleanup,
+            UserSessionRevoker sessions) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.communityCleanup = communityCleanup;
+        this.sessions = sessions;
     }
 
     @Override
@@ -27,6 +35,8 @@ public final class JdbcUserDeletion implements UserDeletion {
                     (row, rowNumber) -> row.getLong(1), userId);
             if (users.isEmpty()) throw new UserNotFoundException();
             jdbc.update("INSERT INTO pawbridge_user.contact_deletions(user_id) VALUES (?) ON CONFLICT DO NOTHING", userId);
+            // A member pending deletion must not refresh while the community cleanup runs or awaits a retry.
+            sessions.revokeAll(userId);
         });
         try {
             communityCleanup.accept(userId);

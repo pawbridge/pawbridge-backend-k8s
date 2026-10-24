@@ -1,16 +1,16 @@
 package com.pawbridge.backend.user.internal.login.infrastructure;
 
 import com.pawbridge.backend.user.internal.login.application.LocalLogin;
+import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
 import java.sql.*;
-import java.time.LocalDateTime;
 import java.util.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.*;
-import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.core.*;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
@@ -19,7 +19,6 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class JdbcLocalLoginTest {
-    static final LocalDateTime NOW=LocalDateTime.of(2030,2,3,4,5,6,123456000);
     static final LocalLogin.Account ACCOUNT=new LocalLogin.Account(7,"stored@fixture.invalid","Stored","synthetic-hash","ROLE_SHELTER","CARE");
 
     @ParameterizedTest @NullAndEmptySource @ValueSource(strings={"OAuth2","synthetic-hash"})
@@ -38,62 +37,61 @@ class JdbcLocalLoginTest {
         else assertThrows(IncorrectResultSizeDataAccessException.class,()->f.login.findByEmail("synthetic@fixture.invalid"));
         assertEquals(List.of("user-query"),f.events);verifyNoInteractions(f.tokens);
     }
+    @Test
+    void given__authenticated_account__when__completing__then__issue_access_first_and_create_a_session_in_one_transaction() {
+        var f = new Fixture();
+        var issued = new IssuedRefreshToken("synthetic-session-token", 1_209_600);
+        when(f.sessions.create(7L)).thenAnswer(call -> {
+            assertTrue(f.tx.active);
+            f.events.add("create-session");
+            return issued;
+        });
+
+        var result = f.login.complete(ACCOUNT);
+
+        assertEquals("safe-access", result.accessToken());
+        assertSame(issued, result.refreshToken());
+        assertEquals("LocalLogin.CompletedLogin", result.toString());
+        assertEquals(List.of("access", "begin", "create-session", "commit"), f.events);
+        verify(f.tokens).access(new JwtSessionTokens.UserClaims(7, ACCOUNT.email(), ACCOUNT.name(), ACCOUNT.role(), ACCOUNT.careRegNo()));
+        assertFalse(f.tx.active);
+    }
+
     @ParameterizedTest @ValueSource(booleans={false,true})
-    void given__new_or_existing_refresh__when__completing__then__lookup_outside_save_transaction_and_keep_original_bindings(boolean existing)throws Exception {
-        var f=new Fixture();f.jdbc.ids=existing?List.of(31L):List.of();
-        var result=f.login.complete(ACCOUNT);
-        assertEquals("safe-access",result.accessToken());assertEquals("safe-refresh",result.refreshToken());
-        assertEquals(List.of("access","refresh","refresh-query","begin",existing?"update":"insert","commit"),f.events);
-        verify(f.tokens).access(new JwtSessionTokens.UserClaims(7,ACCOUNT.email(),ACCOUNT.name(),ACCOUNT.role(),ACCOUNT.careRegNo()));
-        verify(f.jdbc.statement).setString(1,"safe-refresh");
-        var calendar=org.mockito.ArgumentCaptor.forClass(Calendar.class);
-        if(existing){
-            assertEquals("UPDATE pawbridge_user.refresh_tokens SET token = ?, expires_at = ? WHERE refresh_token_id = ?",f.jdbc.lastSql);
-            verify(f.jdbc.statement).setTimestamp(eq(2),eq(Timestamp.valueOf(NOW.plusSeconds(1))),calendar.capture());
-            verify(f.jdbc.statement).setLong(3,31L);assertEquals(List.of(false),f.clockTransactions);
-        }else{
-            assertEquals("INSERT INTO pawbridge_user.refresh_tokens(token,user_id,expires_at,created_at) VALUES (?,?,?,?)",f.jdbc.lastSql);
-            verify(f.jdbc.statement).setLong(2,7L);
-            verify(f.jdbc.statement).setTimestamp(eq(3),eq(Timestamp.valueOf(NOW.plusSeconds(1))),calendar.capture());
-            verify(f.jdbc.statement).setTimestamp(eq(4),eq(Timestamp.valueOf(NOW)),any(Calendar.class));assertEquals(List.of(false,true),f.clockTransactions);
+    void given__session_write_or_commit_failure__when__completing__then__propagate_without_retry_or_success_result(boolean commit) {
+        var f = new Fixture();
+        RuntimeException failure = commit
+                ? new TransactionSystemException("synthetic commit")
+                : new DataAccessResourceFailureException("synthetic write");
+        if (commit) {
+            f.tx.commitFailure = failure;
+            when(f.sessions.create(7L)).thenReturn(new IssuedRefreshToken("synthetic-session-token", 1));
+        } else {
+            when(f.sessions.create(7L)).thenThrow(failure);
         }
-        assertEquals("UTC",calendar.getValue().getTimeZone().getID());assertFalse(f.tx.active);
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> f.login.complete(ACCOUNT)));
+
+        assertEquals(List.of("access", "begin", commit ? "commit" : "rollback"), f.events);
+        verify(f.sessions).create(7L);
     }
-    @ParameterizedTest @ValueSource(booleans={false,true})
-    void given__write_or_commit_failure__when__saving__then__propagate_without_retry_or_success_result(boolean commit) {
-        var f=new Fixture();RuntimeException failure=commit?new TransactionSystemException("synthetic commit"):new DataAccessResourceFailureException("synthetic write");
-        if(commit)f.tx.commitFailure=failure;else f.jdbc.writeFailure=failure;
-        assertSame(failure,assertThrows(RuntimeException.class,()->f.login.complete(ACCOUNT)));
-        assertEquals(List.of("access","refresh","refresh-query","begin","insert",commit?"commit":"rollback"),f.events);
-        assertEquals(1,f.jdbc.writes);
-    }
-    @Test void given__multiple_refresh_rows__when__completing__then__fail_before_save_transaction_without_arbitrary_choice() {
-        var f=new Fixture();f.jdbc.ids=List.of(1L,2L);
-        assertThrows(IncorrectResultSizeDataAccessException.class,()->f.login.complete(ACCOUNT));
-        assertEquals(List.of("access","refresh","refresh-query"),f.events);assertEquals(0,f.jdbc.writes);
-    }
-    @Test void given__selected_row_disappears__when__saving__then__rollback_original_stale_write_failure() {
-        var f=new Fixture();f.jdbc.ids=List.of(31L);f.jdbc.changed=0;
-        assertThrows(OptimisticLockingFailureException.class,()->f.login.complete(ACCOUNT));
-        assertEquals(List.of("access","refresh","refresh-query","begin","update","rollback"),f.events);
-    }
-    @Test void given__prepared_binding_failure__when__saving__then__close_statement_and_rollback()throws Exception {
-        var f=new Fixture();var failure=new SQLException("synthetic bind");doThrow(failure).when(f.jdbc.statement).setString(1,"safe-refresh");
-        assertSame(failure,assertThrows(UncategorizedSQLException.class,()->f.login.complete(ACCOUNT)).getSQLException());
-        verify(f.jdbc.statement).close();assertEquals("rollback",f.events.getLast());
-    }
+
     static final class Fixture {
         final List<String> events=new ArrayList<>();final Tx tx=new Tx(events);final RecordingJdbc jdbc=new RecordingJdbc(tx,events);
-        final List<Boolean> clockTransactions=new ArrayList<>();final JwtSessionTokens tokens=mock(JwtSessionTokens.class);final JdbcLocalLogin login;
+        final JwtSessionTokens tokens=mock(JwtSessionTokens.class);
+        final JdbcAuthSessionStore sessions=mock(JdbcAuthSessionStore.class);
+        final JdbcLocalLogin login;
         Fixture(){
             when(tokens.access(any())).thenAnswer(call->{events.add("access");return "safe-access";});
-            when(tokens.refresh()).thenAnswer(call->{events.add("refresh");return "safe-refresh";});when(tokens.refreshExpiration()).thenReturn(1234L);
-            login=new JdbcLocalLogin(jdbc,new TransactionTemplate(tx),tokens,()->{clockTransactions.add(tx.active);return NOW;});
+            login=new JdbcLocalLogin(jdbc,new TransactionTemplate(tx),tokens,sessions);
         }
     }
     static final class RecordingJdbc extends JdbcTemplate {
-        final Tx tx;final List<String> events;final PreparedStatement statement=mock(PreparedStatement.class);
-        List<Long> ids=List.of();String password="synthetic-hash",lastSql;Object[] lastArgs;int userRows=1,changed=1,writes;RuntimeException writeFailure;
+        final Tx tx;
+        final List<String> events;
+        String password="synthetic-hash",lastSql;
+        Object[] lastArgs;
+        int userRows=1;
         RecordingJdbc(Tx tx,List<String> events){this.tx=tx;this.events=events;}
         @Override public <T> List<T> query(String sql,RowMapper<T> mapper,Object...args){
             assertFalse(tx.active);lastSql=sql;lastArgs=args;var result=new ArrayList<T>();
@@ -105,18 +103,10 @@ class JdbcLocalLoginTest {
                         when(row.getString("password")).thenReturn(password);when(row.getString("role")).thenReturn(ACCOUNT.role());
                         when(row.getString("care_reg_no")).thenReturn(ACCOUNT.careRegNo());result.add(mapper.mapRow(row,i));}
                 }else{
-                    assertEquals("SELECT refresh_token_id FROM pawbridge_user.refresh_tokens WHERE user_id = ?",sql);assertArrayEquals(new Object[]{7L},args);events.add("refresh-query");
-                    for(long id:ids){var row=mock(ResultSet.class);when(row.getLong("refresh_token_id")).thenReturn(id);result.add(mapper.mapRow(row,result.size()));}
+                    throw new AssertionError("Unexpected query");
                 }
                 return result;
             }catch(SQLException failure){throw new AssertionError(failure);}
-        }
-        @Override public int update(PreparedStatementCreator creator){
-            assertTrue(tx.active);writes++;
-            try{
-                var connection=mock(Connection.class);when(connection.prepareStatement(anyString())).thenAnswer(call->{lastSql=call.getArgument(0);events.add(lastSql.startsWith("UPDATE")?"update":"insert");return statement;});
-                creator.createPreparedStatement(connection);if(writeFailure!=null)throw writeFailure;return changed;
-            }catch(SQLException failure){throw new UncategorizedSQLException("synthetic binding",lastSql,failure);}
         }
     }
     static final class Tx implements PlatformTransactionManager {

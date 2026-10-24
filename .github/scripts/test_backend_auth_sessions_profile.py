@@ -180,9 +180,9 @@ class AuthSessionsProfileTest(unittest.TestCase):
             path=folder/('TEST-'+profile.AUTH_REPORT_CLASS+'.xml');ET.ElementTree(suite).write(path);paths.append(path)
         return paths
 
-    def test_given_all_seven_methods_and_only_one_seoul_boundary__when_verifying__then_require_the_exact_eighteen_invocations(self):
-        self.assertEqual((1,4,3,2,2,3,2),tuple(count for _,count in profile.AUTH_METHOD_CASES))
-        self.assertEqual(7,len(profile.AUTH_METHOD_CASES))
+    def test_given_all_auth_methods_and_only_one_seoul_case__when_verifying__then_require_the_exact_invocations(self):
+        self.assertEqual((1,4,1,1,1,1,3,4,1),tuple(count for _,count in profile.AUTH_METHOD_CASES))
+        self.assertEqual(9,len(profile.AUTH_METHOD_CASES))
         self.assertEqual(17,len(set(profile.AUTH_REPORT_CASES)))
         self.assertEqual(profile.AUTH_METHOD_CASES[0][0],profile.AUTH_SEOUL_METHOD)
         with tempfile.TemporaryDirectory() as tmp:

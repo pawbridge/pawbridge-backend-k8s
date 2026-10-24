@@ -732,7 +732,7 @@ def member_database_snapshot():
     return value
 
 
-def _member_require_fixture_without_user_writer_acl(*, auth_sessions=False):
+def _member_require_fixture_without_user_writer_acl():
     owner=member_require_identity()
     # Initial DDL is hash-pinned and all six relations must be absent before creation.
     # Recheck complete column inventory, owner, PK/FK/index counts and exact app ACL.
@@ -747,9 +747,6 @@ def _member_require_fixture_without_user_writer_acl(*, auth_sessions=False):
     selects={'refresh_tokens':('user_id',),'shelter_applications':('user_id',),'member_chat_rooms':('room_id','first_member_id','second_member_id'),
              'member_chat_room_members':('member_id','room_id'),'member_chat_messages':('sender_id',),'member_chat_requests':('sender_id',)}
     updates={'member_chat_rooms':('first_member_id','second_member_id'),'member_chat_messages':('sender_id',)}
-    if auth_sessions:
-        selects['refresh_tokens']=('refresh_token_id','token','user_id','expires_at')
-        updates['refresh_tokens']=('token','expires_at')
     deletes=set(inventory)-{'member_chat_messages'}
     for _,relation,_ in MEMBER_TABLES:
         table=relation.split('.')[1];columns,constraints,indexes,fks=inventory[table]
@@ -1123,20 +1120,51 @@ def admin_visit_collection_prepare():
     _visit_collection_extend(owner, admin_visit_collection_fixture_proof(owner), admin_visit_collection_require_fixture, admin_visit_collection_database_snapshot)
 
 
-# Optional late auth-session writer ACL. Earlier member/admin strict paths remain exact and unchanged.
+# Optional late auth-session fixture: the reviewed V4 auth_sessions table plus exact writer rights.
+# Earlier member/admin strict paths remain exact and unchanged; restore drops the table again.
 AUTH_SESSIONS_RECEIPT = 'auth-sessions-fixture-write.txt'
+AUTH_SESSIONS_DDL = 'user-service/src/migration/resources/db/postgresql/V4__auth_sessions.sql'
+AUTH_SESSIONS_DDL_SHA = 'deaebdf721705d2cfe17fb06abab2d75b41c014924ce6426ede205a10021b8c3'
+AUTH_SESSIONS_COLUMNS = ('session_id', 'user_id', 'token_hash', 'rotated_at', 'created_at',
+                         'last_used_at', 'expires_at', 'absolute_expires_at', 'revoked_at')
+AUTH_SESSIONS_INSERT = ('user_id', 'token_hash', 'created_at', 'last_used_at', 'expires_at', 'absolute_expires_at')
+AUTH_SESSIONS_UPDATE = ('token_hash', 'rotated_at', 'last_used_at', 'expires_at', 'revoked_at')
+AUTH_HISTORY_COLUMNS = ('token_hash', 'session_id', 'rotated_at')
 AUTH_SESSIONS_GRANTS = ('GRANT SELECT(email,name) ON pawbridge_user.users TO pawbridge_f3_writer;\n'
-                        'GRANT SELECT(refresh_token_id,token,expires_at),UPDATE(token,expires_at) '
-                        'ON pawbridge_user.refresh_tokens TO pawbridge_f3_writer;')
+                        'GRANT SELECT(' + ','.join(AUTH_SESSIONS_COLUMNS) + '),'
+                        'INSERT(' + ','.join(AUTH_SESSIONS_INSERT) + '),'
+                        'UPDATE(' + ','.join(AUTH_SESSIONS_UPDATE) + '),DELETE '
+                        'ON pawbridge_user.auth_sessions TO pawbridge_f3_writer;\n'
+                        'GRANT SELECT(' + ','.join(AUTH_HISTORY_COLUMNS) + '),'
+                        'INSERT(' + ','.join(AUTH_HISTORY_COLUMNS) + ') '
+                        'ON pawbridge_user.auth_session_token_history TO pawbridge_f3_writer;')
+
+
+def auth_sessions_ddl():
+    artifact = ROOT.parent / AUTH_SESSIONS_DDL
+    try:
+        if artifact.is_symlink() or not artifact.is_file():
+            raise ValueError()
+        raw = artifact.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != AUTH_SESSIONS_DDL_SHA:
+            raise ValueError()
+        return raw.decode('utf-8')
+    except (OSError, UnicodeError, ValueError):
+        raise SystemExit('Auth session V4 DDL differs from the reviewed bytes') from None
 
 
 def auth_sessions_fixture_proof(owner):
     return ('owner=' + owner + '\nsource_sha=f06a72a06bd26662c647bde780dfc7a27bf7349c\n'
-            'fixture=administrator User update plus refresh/logout writer\n'
-            'new_business_ddl=0\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\n'
+            'fixture=administrator User update plus refresh session tables and writer\n'
+            'new_business_ddl=1\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\n'
             'writer_user_select=user_id,nickname,role,care_reg_no,email,name\n'
-            'writer_refresh_select=refresh_token_id,token,user_id,expires_at\n'
-            'writer_refresh_update=token,expires_at\nwriter_refresh_insert=0\n'
+            'writer_session_select=' + ','.join(AUTH_SESSIONS_COLUMNS) + '\n'
+            'writer_session_insert=' + ','.join(AUTH_SESSIONS_INSERT) + '\n'
+            'writer_session_update=' + ','.join(AUTH_SESSIONS_UPDATE) + '\n'
+            'writer_session_delete=1\n'
+            'writer_history_select=' + ','.join(AUTH_HISTORY_COLUMNS) + '\n'
+            'writer_history_insert=' + ','.join(AUTH_HISTORY_COLUMNS) + '\n'
+            + AUTH_SESSIONS_DDL_SHA + '  auth-session-ddl\n'
             + hashlib.sha256(AUTH_SESSIONS_GRANTS.encode()).hexdigest() + '  auth-session-exact-grants\n')
 
 
@@ -1170,11 +1198,47 @@ def auth_sessions_require_identity():
     return owner
 
 
+def _auth_require_table_acl(table, columns, select, insert, update, delete, identity):
+    relation = 'pawbridge_user.' + table
+    expected = 'ARRAY[' + ','.join(f4.literal(c) for c in columns) + ']::text[]'
+    inventory = ("SELECT (SELECT array_agg(attname::text ORDER BY attnum)=" + expected
+                 + " FROM pg_attribute WHERE attrelid='" + relation + "'::regclass AND attnum>0 AND NOT attisdropped)"
+                 + " AND (SELECT relkind='r' AND relpersistence='p' AND pg_get_userbyid(relowner)='postgres'"
+                 + " FROM pg_class WHERE oid='" + relation + "'::regclass)")
+    if owned_sql(inventory) != 't':
+        raise SystemExit('Auth session table inventory or owner differs')
+    for mode, allowed in [('SELECT', select), ('INSERT', insert), ('UPDATE', update), ('REFERENCES', ())]:
+        predicate = 'column_name IN (' + ','.join(f4.literal(c) for c in allowed) + ')' if allowed else 'false'
+        query = ("SELECT bool_and(has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'" + mode
+                 + "')=(" + predicate + ")) FROM information_schema.columns"
+                 + " WHERE table_schema='pawbridge_user' AND table_name='" + table + "'")
+        if owned_sql(query) != 't':
+            raise SystemExit('Auth session writer column ACL differs')
+    rights = ("SELECT has_table_privilege('pawbridge_f3_writer','" + relation + "','DELETE')=" + str(delete).lower()
+              + " AND NOT has_table_privilege('pawbridge_f3_writer','" + relation + "','SELECT,INSERT,UPDATE,TRUNCATE,REFERENCES,TRIGGER')"
+              + " AND NOT has_table_privilege('pawbridge_f2_reader','" + relation + "','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')"
+              + " AND (SELECT bool_and(NOT has_column_privilege('pawbridge_f2_reader','" + relation + "',column_name,'SELECT,INSERT,UPDATE,REFERENCES'))"
+              + " FROM information_schema.columns WHERE table_schema='pawbridge_user' AND table_name='" + table + "')")
+    if identity:
+        rights += (" AND NOT has_sequence_privilege('pawbridge_f3_writer',pg_get_serial_sequence('" + relation + "','"
+                   + identity + "'),'USAGE,SELECT,UPDATE')")
+    if owned_sql(rights) != 't':
+        raise SystemExit('Auth session table rights differ')
+
+
+def _auth_sessions_require_table_acl():
+    _auth_require_table_acl('auth_sessions', AUTH_SESSIONS_COLUMNS, AUTH_SESSIONS_COLUMNS, AUTH_SESSIONS_INSERT,
+                            AUTH_SESSIONS_UPDATE, True, 'session_id')
+    _auth_require_table_acl('auth_session_token_history', AUTH_HISTORY_COLUMNS, AUTH_HISTORY_COLUMNS,
+                            AUTH_HISTORY_COLUMNS, (), False, None)
+
+
 def auth_sessions_require_fixture():
     owner = auth_sessions_require_identity()
-    _member_require_fixture_without_user_writer_acl(auth_sessions=True)
+    _member_require_fixture_without_user_writer_acl()
     _member_require_user_writer_acl(('user_id','nickname','role','care_reg_no','email','name'),
                                   ('user_id','nickname','updated_at','role','care_reg_no'))
+    _auth_sessions_require_table_acl()
     return owner
 
 
@@ -1186,19 +1250,26 @@ def auth_sessions_prepare():
     f21.check_receipt(target, auth_sessions_fixture_proof(owner), allow_missing=True)
     if target.exists():
         raise SystemExit('Refusing an existing auth session fixture receipt')
+    ddl = auth_sessions_ddl()
+    if owned_sql("SELECT to_regclass('pawbridge_user.auth_sessions') IS NULL"
+                 " AND to_regclass('pawbridge_user.auth_session_token_history') IS NULL") != 't':
+        raise SystemExit('Refusing an existing auth session table')
     before = member_database_snapshot()
-    owned_sql(input_text='BEGIN;\n' + AUTH_SESSIONS_GRANTS + '\nCOMMIT;\n')
+    # V4 uses unqualified names as Flyway runs it with the pawbridge_user default schema.
+    owned_sql(input_text='BEGIN;\nSET LOCAL search_path TO pawbridge_user;\n' + ddl + '\n'
+              + AUTH_SESSIONS_GRANTS + '\nCOMMIT;\n')
     with target.open('x') as output:
         output.write(auth_sessions_fixture_proof(owner))
     auth_sessions_require_fixture()
     if member_database_snapshot() != before:
-        raise SystemExit('Auth ACL extension changed existing twenty-four tables')
+        raise SystemExit('Auth session extension changed existing twenty-four tables')
 
 
-# Remove only the seven auth-only column rights; retain all original administrator/member privileges.
+# Remove only the auth-only user column rights and the two session tables; retain all original
+# administrator/member privileges.
 AUTH_SESSIONS_REVOKES = ('REVOKE SELECT(email,name) ON pawbridge_user.users FROM pawbridge_f3_writer;\n'
-                         'REVOKE SELECT(refresh_token_id,token,expires_at),UPDATE(token,expires_at) '
-                         'ON pawbridge_user.refresh_tokens FROM pawbridge_f3_writer;')
+                         'DROP TABLE IF EXISTS pawbridge_user.auth_session_token_history;\n'
+                         'DROP TABLE IF EXISTS pawbridge_user.auth_sessions;')
 
 
 def auth_sessions_restore():
@@ -1216,8 +1287,9 @@ def auth_sessions_restore():
 def auth_sessions_denied_privilege(kind):
     owner = auth_sessions_require_fixture()
     clauses = {'email-read': 'SELECT(email) ON pawbridge_user.users',
-               'rotate-write': 'UPDATE(token) ON pawbridge_user.refresh_tokens',
-               'logout-delete': 'DELETE ON pawbridge_user.refresh_tokens'}
+               'rotate-write': 'UPDATE(token_hash) ON pawbridge_user.auth_sessions',
+               'history-write': 'INSERT(token_hash) ON pawbridge_user.auth_session_token_history',
+               'cleanup-delete': 'DELETE ON pawbridge_user.auth_sessions'}
     if kind not in clauses:
         raise SystemExit('Unknown auth session privilege check')
     clause = clauses[kind]

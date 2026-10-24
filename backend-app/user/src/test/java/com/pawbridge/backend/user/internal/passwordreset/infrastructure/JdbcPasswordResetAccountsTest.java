@@ -73,4 +73,29 @@ class JdbcPasswordResetAccountsTest {
 
         assertThrows(IllegalStateException.class, () -> accounts.updatePassword(7, "ENC"));
     }
+
+    @Test
+    void given__a_successful_reset__when__updating__then__revoke_every_session_of_the_member_after_the_write() {
+        var events = new java.util.ArrayList<String>();
+        when(jdbc.update(any(PreparedStatementCreator.class))).thenAnswer(invocation -> {
+            events.add("password");
+            return 1;
+        });
+        var revoking = new JdbcPasswordResetAccounts(jdbc, () -> NOW, userId -> events.add("revoke-" + userId));
+
+        revoking.updatePassword(7, "ENC");
+
+        assertEquals(List.of("password", "revoke-7"), events);
+    }
+
+    @Test
+    void given__no_row_changed__when__resetting__then__do_not_revoke_sessions() {
+        when(jdbc.update(any(PreparedStatementCreator.class))).thenReturn(0);
+        var revoked = new java.util.ArrayList<Long>();
+        var revoking = new JdbcPasswordResetAccounts(jdbc, () -> NOW, revoked::add);
+
+        assertThrows(IllegalStateException.class, () -> revoking.updatePassword(7, "ENC"));
+
+        assertEquals(List.of(), revoked);
+    }
 }

@@ -97,6 +97,33 @@ class JdbcUserPasswordStoreTest {
         verify(jdbc.statement).close();
     }
 
+    @Test
+    void given__a_successful_password_write__when__updating__then__revoke_every_session_of_the_member_afterwards() throws SQLException {
+        var jdbc = new RecordingJdbc();
+        var revoked = new java.util.ArrayList<Long>();
+        var store = new JdbcUserPasswordStore(jdbc, () -> UPDATED, userId -> {
+            assertEquals("UPDATE pawbridge_user.users SET password = ?, updated_at = ? WHERE user_id = ?",
+                    normalized(jdbc.updateSql));
+            revoked.add(userId);
+        });
+
+        store.updatePassword(52L, "$2a$10$synthetic.new");
+
+        assertEquals(java.util.List.of(52L), revoked);
+    }
+
+    @Test
+    void given__an_unexpected_update_count__when__updating__then__do_not_revoke_sessions() throws SQLException {
+        var jdbc = new RecordingJdbc();
+        jdbc.changed = 0;
+        var revoked = new java.util.ArrayList<Long>();
+        var store = new JdbcUserPasswordStore(jdbc, () -> UPDATED, revoked::add);
+
+        assertThrows(IllegalStateException.class, () -> store.updatePassword(52L, "$2a$10$synthetic.new"));
+
+        assertEquals(java.util.List.of(), revoked);
+    }
+
     private static String normalized(String sql) {
         return sql.replaceAll("\\s+", " ").strip();
     }

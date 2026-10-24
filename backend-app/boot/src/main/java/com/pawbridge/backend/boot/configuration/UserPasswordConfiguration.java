@@ -7,6 +7,9 @@ import com.pawbridge.backend.user.internal.password.infrastructure.BcryptPasswor
 import com.pawbridge.backend.user.internal.password.infrastructure.JdbcUserPasswordStore;
 import com.pawbridge.backend.user.internal.password.web.UserPasswordController;
 import com.pawbridge.backend.user.internal.password.web.UserPasswordExceptionHandler;
+import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker;
+import java.time.LocalDateTime;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -18,9 +21,12 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @EnableTransactionManagement(proxyTargetClass = true)
 @ConditionalOnProperty(prefix = "pawbridge.user-password", name = "enabled", havingValue = "true", matchIfMissing = false)
 public class UserPasswordConfiguration {
+    /** A password change revokes every refresh session of the member in the same transaction. */
     @Bean
-    UserPasswordStore userPasswordStore(@Qualifier("writeJdbc") JdbcTemplate jdbc) {
-        return new JdbcUserPasswordStore(jdbc);
+    UserPasswordStore userPasswordStore(@Qualifier("writeJdbc") JdbcTemplate jdbc,
+            ObjectProvider<UserSessionRevoker> sessions) {
+        UserSessionRevoker revoker = sessions.getIfAvailable(() -> UserSessionRevoker.NONE);
+        return new JdbcUserPasswordStore(jdbc, LocalDateTime::now, revoker);
     }
 
     // Kept local to this feature: no global PasswordEncoder bean is registered.

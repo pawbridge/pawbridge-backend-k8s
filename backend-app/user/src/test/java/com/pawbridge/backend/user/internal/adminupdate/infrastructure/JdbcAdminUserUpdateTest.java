@@ -115,6 +115,53 @@ class JdbcAdminUserUpdateTest {
         assertSame(failure, thrown.getSQLException()); verify(f.jdbc.statement).close(); assertEquals(1, f.tx.rollbacks);
     }
 
+    @ParameterizedTest
+    @MethodSource("roleChanges")
+    void given__a_role_change__when__updating__then__revoke_all_sessions_only_on_a_demotion_inside_the_same_transaction(
+            Role current, Role requested, boolean revokes) {
+        var f = new Fixture();
+        f.jdbc.role = current;
+        f.jdbc.care = current == Role.ROLE_SHELTER ? "A" : null;
+        List<Long> revoked = new ArrayList<>();
+        var transaction = new TransactionTemplate(f.tx);
+        transaction.setTimeout(15);
+        var query = new JdbcAdminUserUpdate(f.jdbc, transaction, () -> MODIFIED, userId -> {
+            assertTrue(f.tx.active);
+            assertEquals("update", f.jdbc.events.getLast());
+            revoked.add(userId);
+        });
+
+        query.update(8, new Changes(null, requested, null));
+
+        assertEquals(revokes ? List.of(8L) : List.of(), revoked);
+        assertEquals(1, f.tx.commits);
+    }
+
+    static Stream<Arguments> roleChanges() {
+        return Stream.of(
+                Arguments.of(Role.ROLE_ADMIN, Role.ROLE_USER, true),
+                Arguments.of(Role.ROLE_SHELTER, Role.ROLE_USER, true),
+                Arguments.of(Role.ROLE_USER, Role.ROLE_ADMIN, false),
+                Arguments.of(Role.ROLE_SHELTER, Role.ROLE_ADMIN, false));
+    }
+
+    @Test
+    void given__a_demotion_whose_revocation_fails__when__updating__then__roll_back_the_role_change_too() {
+        var f = new Fixture();
+        f.jdbc.role = Role.ROLE_ADMIN;
+        var transaction = new TransactionTemplate(f.tx);
+        transaction.setTimeout(15);
+        var failure = new org.springframework.dao.DataAccessResourceFailureException("synthetic revoke");
+        var query = new JdbcAdminUserUpdate(f.jdbc, transaction, () -> MODIFIED, userId -> {
+            throw failure;
+        });
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> query.update(8, new Changes(null, Role.ROLE_USER, null))));
+
+        assertEquals(1, f.tx.rollbacks);
+        assertEquals(0, f.tx.commits);
+    }
+
     private static final class Fixture {
         final RecordingTransactions tx = new RecordingTransactions();
         final RecordingJdbc jdbc = new RecordingJdbc(tx);

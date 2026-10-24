@@ -5,7 +5,8 @@ import static org.mockito.Mockito.*;
 
 import com.pawbridge.backend.user.internal.oauth.application.SocialLogin.SocialUser;
 import com.pawbridge.backend.user.internal.oauth.application.SocialLoginRejectedException;
-import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
+import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -44,21 +45,30 @@ class JdbcSocialLoginTest {
         var f=new Fixture();var attributes=new HashMap<>(ATTRIBUTES);
         if(example.equals("missing-email"))attributes.remove("email");if(example.equals("empty-email"))attributes.put("email","");
         assertThrows(SocialLoginRejectedException.class,()->f.login.load(example.equals("unsupported")?"other":"google",attributes));
-        assertTrue(f.events.isEmpty());assertTrue(f.jdbc.bindings.isEmpty());assertEquals(0,f.nicknames);verifyNoInteractions(f.tokens);
+        assertTrue(f.events.isEmpty());
+        assertTrue(f.jdbc.bindings.isEmpty());
+        assertEquals(0,f.nicknames);
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
     void given__existing_google_user__when__loading_again__then__preserve_stored_profile_role_and_skip_local_lookup_nickname_or_update() {
         var f=new Fixture();f.jdbc.google=List.of(EXISTING);
         assertEquals(EXISTING,f.login.load("GOOGLE",ATTRIBUTES));
-        assertEquals(List.of("begin","user:GOOGLE","commit","cleanup"),f.events);assertEquals(0,f.nicknames);assertTrue(f.jdbc.bindings.isEmpty());verifyNoInteractions(f.tokens);
+        assertEquals(List.of("begin","user:GOOGLE","commit","cleanup"),f.events);
+        assertEquals(0,f.nicknames);
+        assertTrue(f.jdbc.bindings.isEmpty());
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
     void given__local_account_with_same_email__when__loading_google__then__reject_without_linking_or_inserting() {
         var f=new Fixture();f.jdbc.local=List.of(EXISTING);
         assertEquals("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.",assertThrows(SocialLoginRejectedException.class,()->f.login.load("google",ATTRIBUTES)).getMessage());
-        assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","rollback","cleanup"),f.events);assertEquals(0,f.nicknames);assertTrue(f.jdbc.bindings.isEmpty());verifyNoInteractions(f.tokens);
+        assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","rollback","cleanup"),f.events);
+        assertEquals(0,f.nicknames);
+        assertTrue(f.jdbc.bindings.isEmpty());
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
@@ -69,7 +79,10 @@ class JdbcSocialLoginTest {
         Map<Integer,Object> values=f.jdbc.bindings.getFirst();
         Map.of(1,"social@example.test",2,"Social",3,"nickname1",4,"OAuth2",5,"ROLE_USER",7,"GOOGLE",8,"provider-sub",9,Timestamp.valueOf(NOW),10,Timestamp.valueOf(NOW))
                 .forEach((key,value)->assertEquals(value,values.get(key)));
-        assertTrue(values.containsKey(6));assertNull(values.get(6));assertEquals(List.of("UTC","UTC"),f.jdbc.calendarZones);verifyNoInteractions(f.tokens);
+        assertTrue(values.containsKey(6));
+        assertNull(values.get(6));
+        assertEquals(List.of("UTC","UTC"),f.jdbc.calendarZones);
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
@@ -77,7 +90,8 @@ class JdbcSocialLoginTest {
         var f=new Fixture();var failure=new DataIntegrityViolationException("synthetic unique");f.jdbc.userFailure=failure;
         assertSame(failure,assertThrows(RuntimeException.class,()->f.login.load("google",ATTRIBUTES)));
         assertEquals(2,f.nicknames);assertEquals(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup",
-                "begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup"),f.events);verifyNoInteractions(f.tokens);
+                "begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup"),f.events);
+        verifyNoInteractions(f.sessions);
     }
 
     @ParameterizedTest @ValueSource(booleans={false,true})
@@ -89,44 +103,58 @@ class JdbcSocialLoginTest {
         var expected=new ArrayList<>(List.of("begin","user:GOOGLE","user:LOCAL","nickname","insert-user","rollback","cleanup","begin","user:GOOGLE"));
         if(!racedAccount)expected.addAll(List.of("user:LOCAL","nickname","insert-user"));
         expected.addAll(List.of("commit","cleanup"));assertEquals(expected,f.events);
-        assertEquals(racedAccount?1:2,f.nicknames);assertEquals(racedAccount?1:2,f.jdbc.writes);verifyNoInteractions(f.tokens);
-    }
-
-    @ParameterizedTest @ValueSource(booleans={false,true})
-    void given__new_or_existing_refresh_row__when__completing_login__then__issue_existing_claims_then_persist_in_a_separate_transaction(boolean existing) {
-        var f=new Fixture();f.jdbc.refreshIds=existing?List.of(31L):List.of();
-        var result=f.login.complete(EXISTING);
-        assertEquals("safe-access",result.accessToken());assertEquals("safe-refresh",result.refreshToken());
-        verify(f.tokens).access(new JwtSessionTokens.UserClaims(7,"social@example.test","Stored","ROLE_ADMIN","care"));
-        assertEquals(List.of("access","refresh","refresh-expiration","begin","lock-user","refresh-query",existing?"update-refresh":"insert-refresh","commit","cleanup"),f.events);
-        Map<Integer,Object> values=f.jdbc.bindings.getFirst();assertEquals("safe-refresh",values.get(1));
-        if(existing){assertEquals(Timestamp.valueOf(NOW.plusSeconds(600)),values.get(2));assertEquals(31L,values.get(3));}
-        else{assertEquals(7L,values.get(2));assertEquals(Timestamp.valueOf(NOW.plusSeconds(600)),values.get(3));assertEquals(Timestamp.valueOf(NOW),values.get(4));}
-        assertFalse(f.jdbc.calendarZones.isEmpty());assertTrue(f.jdbc.calendarZones.stream().allMatch("UTC"::equals));assertEquals(0,f.nicknames);
-    }
-
-    @ParameterizedTest @ValueSource(booleans={false,true})
-    void given__refresh_write_or_commit_failure__when__completing_login__then__propagate_without_retry_or_success_result(boolean commit) {
-        var f=new Fixture();RuntimeException failure=commit?new TransactionSystemException("synthetic commit"):new DataAccessResourceFailureException("synthetic refresh");
-        if(commit)f.manager.failure=failure;else f.jdbc.refreshFailure=failure;
-        assertSame(failure,assertThrows(RuntimeException.class,()->f.login.complete(EXISTING)));
-        assertEquals(List.of("access","refresh","refresh-expiration","begin","lock-user","refresh-query","insert-refresh",commit?"commit":"rollback","cleanup"),f.events);
-        assertEquals(1,f.jdbc.writes);
+        assertEquals(racedAccount?1:2,f.nicknames);
+        assertEquals(racedAccount?1:2,f.jdbc.writes);
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
-    void given__user_disappeared_before_refresh_completion__when__locking__then__fail_without_refresh_lookup_or_writes() {
-        var f=new Fixture();f.jdbc.userPresent=false;
-        assertThrows(IncorrectResultSizeDataAccessException.class,()->f.login.complete(EXISTING));
-        assertEquals(List.of("access","refresh","refresh-expiration","begin","lock-user","rollback","cleanup"),f.events);
-        assertEquals(0,f.jdbc.writes);
+    void given__existing_social_user__when__completing_login__then__create_one_session_inside_a_separate_transaction() {
+        var f = new Fixture();
+        var issued = new IssuedRefreshToken("synthetic-session-token", 1_209_600);
+        when(f.sessions.create(7L)).thenAnswer(call -> {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+            f.events.add("create-session");
+            return issued;
+        });
+
+        assertSame(issued, f.login.complete(EXISTING));
+
+        assertEquals(List.of("begin", "create-session", "commit", "cleanup"), f.events);
+        verify(f.sessions).create(7L);
+        verifyNoMoreInteractions(f.sessions);
+        assertEquals(0, f.jdbc.writes);
+        assertEquals(0, f.nicknames);
     }
 
     @ParameterizedTest @ValueSource(booleans={false,true})
-    void given__multiple_rows_where_source_requires_optional_one__when__loading_or_completing__then__do_not_choose_an_arbitrary_row(boolean refresh) {
-        var f=new Fixture();if(refresh)f.jdbc.refreshIds=List.of(1L,2L);else f.jdbc.google=List.of(EXISTING,EXISTING);
-        assertThrows(IncorrectResultSizeDataAccessException.class,()->{if(refresh)f.login.complete(EXISTING);else f.login.load("google",ATTRIBUTES);});
-        assertEquals(0,f.jdbc.writes);assertEquals(0,f.nicknames);
+    void given__session_write_or_commit_failure__when__completing_login__then__propagate_without_retry_or_success_result(boolean commit) {
+        var f = new Fixture();
+        RuntimeException failure = commit
+                ? new TransactionSystemException("synthetic commit")
+                : new DataAccessResourceFailureException("synthetic session");
+        if (commit) {
+            f.manager.failure = failure;
+            when(f.sessions.create(7L)).thenReturn(new IssuedRefreshToken("synthetic-session-token", 1));
+        } else {
+            when(f.sessions.create(7L)).thenThrow(failure);
+        }
+
+        assertSame(failure, assertThrows(RuntimeException.class, () -> f.login.complete(EXISTING)));
+
+        assertEquals(List.of("begin", commit ? "commit" : "rollback", "cleanup"), f.events);
+        verify(f.sessions).create(7L);
+    }
+
+    @Test
+    void given__multiple_rows_where_source_requires_optional_one__when__loading__then__do_not_choose_an_arbitrary_row() {
+        var f = new Fixture();
+        f.jdbc.google = List.of(EXISTING, EXISTING);
+
+        assertThrows(IncorrectResultSizeDataAccessException.class, () -> f.login.load("google", ATTRIBUTES));
+
+        assertEquals(0, f.jdbc.writes);
+        assertEquals(0, f.nicknames);
     }
 
     private static final Map<String,Object> NAVER_ATTRIBUTES=Map.of("resultcode","00","message","success",
@@ -144,7 +172,7 @@ class JdbcSocialLoginTest {
         assertEquals("Naver",values.get(2));
         assertEquals("NAVER",values.get(7));
         assertEquals("naver-user-id",values.get(8));
-        verifyNoInteractions(f.tokens);
+        verifyNoInteractions(f.sessions);
     }
 
     @Test
@@ -192,19 +220,21 @@ class JdbcSocialLoginTest {
 
     private static final class Fixture {
         final List<String> events=new ArrayList<>();final RecordingJdbc jdbc=new RecordingJdbc(events);final Manager manager=new Manager(events);
-        final JwtSessionTokens tokens=mock(JwtSessionTokens.class);final JdbcSocialLogin login;int nicknames;
+        final JdbcAuthSessionStore sessions=mock(JdbcAuthSessionStore.class);
+        final JdbcSocialLogin login;
+        int nicknames;
         Fixture(){
-            when(tokens.access(any())).thenAnswer(call->{events.add("access");return "safe-access";});
-            when(tokens.refresh()).thenAnswer(call->{events.add("refresh");return "safe-refresh";});
-            when(tokens.refreshExpiration()).thenAnswer(call->{events.add("refresh-expiration");return 600_999L;});
             Supplier<String> nickname=()->{events.add("nickname");return "nickname"+(++nicknames);};
-            login=new JdbcSocialLogin(jdbc,new TransactionTemplate(manager),tokens,nickname,()->NOW);
+            login=new JdbcSocialLogin(jdbc,new TransactionTemplate(manager),sessions,nickname,()->NOW);
         }
     }
     private static final class RecordingJdbc extends JdbcTemplate {
-        final List<String> events;List<SocialUser> google=List.of(),local=List.of(),naverById=List.of(),naverByEmail=List.of();List<Long> refreshIds=List.of();
+        final List<String> events;
+        List<SocialUser> google=List.of(),local=List.of(),naverById=List.of(),naverByEmail=List.of();
         final List<Map<Integer,Object>> bindings=new ArrayList<>();final List<String> calendarZones=new ArrayList<>();
-        RuntimeException userFailure,refreshFailure;int writes,userFailuresRemaining=Integer.MAX_VALUE;SocialUser googleAfterFailure;boolean userPresent=true;
+        RuntimeException userFailure;
+        int writes,userFailuresRemaining=Integer.MAX_VALUE;
+        SocialUser googleAfterFailure;
         RecordingJdbc(List<String> events){this.events=events;}
         private static ResultSet row(SocialUser user) throws SQLException {
             var row=mock(ResultSet.class);
@@ -219,10 +249,7 @@ class JdbcSocialLoginTest {
         @Override public <T> List<T> query(String sql,RowMapper<T> mapper,Object... args) {
             var result=new ArrayList<T>();
             try {
-                if(sql.equals("SELECT user_id FROM pawbridge_user.users WHERE user_id = ? FOR UPDATE")){
-                    assertTrue(TransactionSynchronizationManager.isActualTransactionActive());events.add("lock-user");assertArrayEquals(new Object[]{7L},args);
-                    if(userPresent){var row=mock(ResultSet.class);when(row.getLong("user_id")).thenReturn(7L);result.add(mapper.mapRow(row,0));}
-                }else if(sql.contains("provider_id = ?")){
+                if(sql.contains("provider_id = ?")){
                     events.add("user-id:"+args[0]);assertEquals("naver-user-id",args[1]);
                     for(var user:naverById)result.add(mapper.mapRow(row(user),0));
                 }else if(sql.startsWith("SELECT user_id")){
@@ -232,9 +259,7 @@ class JdbcSocialLoginTest {
                         when(row.getString("name")).thenReturn(user.name());when(row.getString("role")).thenReturn(user.role());when(row.getString("care_reg_no")).thenReturn(user.careRegNo());when(row.getString("provider")).thenReturn(user.provider());result.add(mapper.mapRow(row,0));
                     }
                 }else{
-                    assertTrue(TransactionSynchronizationManager.isActualTransactionActive());assertEquals("lock-user",events.getLast());
-                    events.add("refresh-query");assertTrue(sql.contains("FROM pawbridge_user.refresh_tokens WHERE user_id = ?"));assertArrayEquals(new Object[]{7L},args);
-                    for(long id:refreshIds){var row=mock(ResultSet.class);when(row.getLong("refresh_token_id")).thenReturn(id);result.add(mapper.mapRow(row,0));}
+                    throw new AssertionError("Unexpected query");
                 }
                 return result;
             }catch(SQLException failure){throw new IllegalStateException(failure);}
@@ -243,15 +268,10 @@ class JdbcSocialLoginTest {
             writes++;events.add("insert-user");if(userFailure!=null && userFailuresRemaining-->0){if(googleAfterFailure!=null)google=List.of(googleAfterFailure);throw userFailure;}
             bind(creator);keys.getKeyList().add(Map.of("user_id",19L));return 1;
         }
-        @Override public int update(PreparedStatementCreator creator){
-            writes++;int before=events.size();bind(creator);if(events.size()==before)throw new AssertionError("missing write SQL");
-            if(refreshFailure!=null)throw refreshFailure;return 1;
-        }
         private void bind(PreparedStatementCreator creator){
             var values=new HashMap<Integer,Object>();bindings.add(values);var connection=mock(Connection.class);var statement=mock(PreparedStatement.class);
             try {
                 when(connection.prepareStatement(anyString(),any(String[].class))).thenAnswer(call->{assertTrue(((String)call.getArgument(0)).contains("INSERT INTO pawbridge_user.users"));assertArrayEquals(new String[]{"user_id"},(String[])call.getArgument(1));return statement;});
-                when(connection.prepareStatement(anyString())).thenAnswer(call->{String sql=call.getArgument(0);events.add(sql.startsWith("UPDATE")?"update-refresh":"insert-refresh");return statement;});
                 doAnswer(call->{values.put(call.getArgument(0),call.getArgument(1));return null;}).when(statement).setString(anyInt(),nullable(String.class));
                 doAnswer(call->{values.put(call.getArgument(0),call.getArgument(1));return null;}).when(statement).setLong(anyInt(),anyLong());
                 doAnswer(call->{values.put(call.getArgument(0),call.getArgument(1));calendarZones.add(((java.util.Calendar)call.getArgument(2)).getTimeZone().getID());return null;}).when(statement).setTimestamp(anyInt(),any(Timestamp.class),any(java.util.Calendar.class));
