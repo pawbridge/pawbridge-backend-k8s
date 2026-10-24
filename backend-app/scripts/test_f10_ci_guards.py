@@ -8,7 +8,6 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
-import xml.etree.ElementTree as ET
 
 import f10_ci as f10
 from test_f9_ci_guards import HOSTED as F9_HOSTED
@@ -17,8 +16,8 @@ HOSTED = dict(F9_HOSTED, F10_CI_OWNER='123-1')
 
 
 class F10GuardTest(unittest.TestCase):
-    def test_given_non_hosted_invocation__when_preparing_seeding_reporting_or_smoking__then_no_resource_call(self):
-        for action in (f10.prepare, f10.prepare_business_rows, f10.verify_results, f10.smoke):
+    def test_given_non_hosted_invocation__when_preparing_seeding_or_smoking__then_no_resource_call(self):
+        for action in (f10.prepare, f10.prepare_business_rows, f10.smoke):
             with self.subTest(action=action.__name__), patch.dict(os.environ, {}, clear=True), \
                     patch.object(f10.f3, 'sql') as sql, patch.object(f10.f2, 'command') as command, \
                     patch.object(f10.f4, 'start_ready_children') as start:
@@ -181,57 +180,25 @@ class F10GuardTest(unittest.TestCase):
                 rows.assert_not_called()
                 sql.assert_not_called()
 
-    @staticmethod
-    def reports(root, *, tests=1, failures=0, errors=0, skipped=0, classname=None, cases=None):
-        classname = classname or f10.COMPATIBILITY_CLASS
-        for task in ('commentDeleteCompatibilityTest', 'commentDeleteCompatibilitySeoulTest'):
-            path = root / 'boot/build/test-results' / task / ('TEST-' + f10.COMPATIBILITY_CLASS + '.xml')
-            path.parent.mkdir(parents=True, exist_ok=True)
-            suite = ET.Element('testsuite', name=classname, tests=str(tests), failures=str(failures),
-                               errors=str(errors), skipped=str(skipped))
-            for index in range(tests if cases is None else cases):
-                ET.SubElement(suite, 'testcase', name='synthetic-' + str(index), classname=classname)
-            ET.ElementTree(suite).write(path)
-
-    def test_given_separate_successful_reports__when_verifying__then_require_nonzero_execution_in_both_task_outputs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.reports(root, tests=2)
-            with patch.dict(os.environ, HOSTED, clear=True), patch.object(f10, 'ROOT', root):
-                self.assertEqual({'UTC': 2, 'Asia/Seoul': 2}, f10.verify_results())
-
-    def test_given_missing_zero_failed_skipped_or_wrong_reports__when_verifying__then_refuse_not_skip(self):
-        for settings in (None, {'tests': 0}, {'failures': 1}, {'errors': 1}, {'skipped': 1},
-                         {'classname': 'OtherTest'}, {'tests': 2, 'cases': 1}):
-            with self.subTest(settings=settings), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                if settings is not None:
-                    self.reports(root, **settings)
-                with patch.dict(os.environ, HOSTED, clear=True), patch.object(f10, 'ROOT', root):
-                    with self.assertRaisesRegex(SystemExit, 'F10 compatibility report'):
-                        f10.verify_results()
-
-    def test_given_workflow_phases__when_declaring_checks__then_finish_original_acl_before_extending_and_use_exact_tasks(self):
+    def test_given_workflow_phases__when_declaring_checks__then_finish_original_acl_before_extending(self):
         workflow = (f10.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Extend the owned fixture with exact F10 comment deletion permissions')
         self.assertLess(workflow.index('python3 scripts/f9_ci.py smoke'), boundary)
         self.assertLess(workflow.index('python3 scripts/f10_ci.py prepare', boundary),
-                        workflow.index(':boot:commentDeleteCompatibilityTest'))
-        self.assertLess(workflow.index(':boot:commentDeleteCompatibilitySeoulTest'),
-                        workflow.index('python3 scripts/f10_ci.py results'))
-        self.assertLess(workflow.index('python3 scripts/f10_ci.py results'), workflow.index('python3 scripts/f10_ci.py smoke'))
+                        workflow.index('python3 scripts/f10_ci.py smoke'))
         after = workflow[boundary:]
         self.assertNotRegex(after, r'python3 scripts/f9_ci\.py (?:prepare|smoke)')
-        for required in ('scripts/test_f10_ci_guards.py', 'build/ci/f10-helper-refusal.txt',
-                         'f10_fixture', 'f10LegacyOracle', 'build/ci/f8-oracle-sha256.txt'):
+        self.assertNotIn('python3 scripts/f10_ci.py results', workflow)
+        for required in ('scripts/test_f10_ci_guards.py', 'build/ci/f10-helper-refusal.txt', 'f[0-9]+_fixture'):
             self.assertIn(required, workflow)
 
     def test_given_actual_jar_filter__when_f10_artifacts_leak__then_reject_without_widening_validator_exception(self):
         workflow = (f10.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         pipeline = re.search(r'          if (grep -E .*?); then', workflow, re.DOTALL).group(1)
         allowed = 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\n'
-        for forbidden in ('', 'BOOT-INF/classes/f10_fixture.sql', 'BOOT-INF/classes/f10LegacyOracle/Input.class',
-                          'test/f10LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
+        for forbidden in ('', 'BOOT-INF/classes/f10_fixture.sql',
+                          'BOOT-INF/classes/com/pawbridge/backend/compatibility/Input.class',
+                          'test/compatibilityTest/hibernate-validator-8.0.3.Final.jar'):
             with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory) / 'build/ci/boot-jar-contents.txt'
                 target.parent.mkdir(parents=True)

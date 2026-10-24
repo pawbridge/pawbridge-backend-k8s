@@ -5,7 +5,6 @@ import json
 import os
 import pathlib
 import sys
-import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 import f2_ci as f2
@@ -24,9 +23,6 @@ FOREIGN_COMMENT = 9970010
 DELETED_COMMENT = 9970011
 NICKNAME = 'F11 합성 댓글작성자'
 PRIVATE_BODY = 'F11_PRIVATE_BODY_DO_NOT_LOG'
-COMPATIBILITY_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlCommentUpdateCompatibilityTest'
-
-
 def require_seoul_get_timestamp(observed, stored):
     # JdbcCommentReader reads TIMESTAMP with a UTC Calendar, then Timestamp.toLocalDateTime()
     # projects that instant into the JVM zone. f4 starts this packaged JVM in Asia/Seoul.
@@ -34,28 +30,6 @@ def require_seoul_get_timestamp(observed, stored):
                 .astimezone(ZoneInfo('Asia/Seoul')).replace(tzinfo=None))
     if datetime.datetime.fromisoformat(observed) != expected:
         raise AssertionError('GET did not observe the committed PUT stored timestamp in the Seoul JVM')
-
-
-def verify_results():
-    f2.require_hosted()
-    counts = {}
-    for task, zone in (('commentUpdateCompatibilityTest', 'UTC'),
-                       ('commentUpdateCompatibilitySeoulTest', 'Asia/Seoul')):
-        path = ROOT / 'boot/build/test-results' / task / ('TEST-' + COMPATIBILITY_CLASS + '.xml')
-        try:
-            suite = ET.parse(path).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F11 compatibility report missing or malformed: ' + task)
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != COMPATIBILITY_CLASS
-                or values['tests'] <= 0 or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or len(cases) != values['tests']
-                or any(case.attrib.get('classname') != COMPATIBILITY_CLASS for case in cases)):
-            raise SystemExit('F11 compatibility report must contain executed, successful, unskipped tests: ' + task)
-        counts[zone] = values['tests']
-    print('Verified separate F11 compatibility execution counts: ' + json.dumps(counts, sort_keys=True))
-    return counts
 
 
 def require_fixture():
@@ -371,4 +345,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

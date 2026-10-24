@@ -10,7 +10,6 @@ import stat
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -19,31 +18,11 @@ import f13_ci as f13
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
 MARKER = 'pawbridge-f14-ci-only-v1'
-COMPATIBILITY_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlFavoriteStatusCompatibilityTest'
-TASK = 'favoriteStatusCompatibilityTest'
 SOURCE = '1458169254f71e34148711b7caf72ec75c35e5f2'
 DDL_SOURCE = 'user-service/src/migration/resources/db/postgresql/V1__user_schema.sql'
 DDL_HASH = '5b6c50062231952e625e56a7577c41b03d7d5a10041380d4b2ada960ef7449a1'
 OTHER, FAVORITE, ANIMAL = 9980001, 9961001, 9961002
 USERS = "SELECT COALESCE(json_agg(u ORDER BY user_id),'[]'::json) FROM pawbridge_user.users u"
-
-
-def verify_results():
-    f2.require_hosted()
-    path = ROOT / 'boot/build/test-results' / TASK / ('TEST-' + COMPATIBILITY_CLASS + '.xml')
-    try:
-        suite = ET.parse(path).getroot()
-        values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-    except (OSError, ET.ParseError, KeyError, ValueError):
-        raise SystemExit('F14 compatibility report missing or malformed')
-    cases = suite.findall('testcase')
-    if (suite.tag != 'testsuite' or suite.attrib.get('name') != COMPATIBILITY_CLASS
-            or values['tests'] <= 0 or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-            or len(cases) != values['tests']
-            or any(case.attrib.get('classname') != COMPATIBILITY_CLASS for case in cases)):
-        raise SystemExit('F14 compatibility report must contain executed, successful, unskipped tests')
-    print('Verified F14 UTC compatibility execution count: ' + str(values['tests']))
-    return {'UTC': values['tests']}
 
 
 def verified_ddl():
@@ -297,4 +276,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

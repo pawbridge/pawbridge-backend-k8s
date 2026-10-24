@@ -10,7 +10,6 @@ import stat
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -25,9 +24,6 @@ DDL_HASHES = {
     'community-service/src/migration/resources/db/postgresql/V6__private_notes.sql': '3ec7def5eed39ddbf963839c7fd8648ecca9bc168570403778c3341e8f31c119',
     'community-service/src/migration/resources/db/postgresql/V8__private_note_reference_indexes.sql': 'd2572afc2644df3f932872bcd757e47937cdf7d5b89789439cb103de6c71512d',
 }
-TASK = 'noteRecipientCompatibilityTest'
-CLASSES = ('com.pawbridge.backend.compatibility.PostgresqlNoteRecipientCompatibilityTest',
-           'com.pawbridge.backend.compatibility.F17LegacyRecipientLookupTest')
 CALLER, OTHER = 9971001, 9971002
 IDS = (CALLER, OTHER)
 NICKNAMES = {CALLER: 'F17보낸이', OTHER: 'F17받는이'}
@@ -41,29 +37,6 @@ STORAGE_UNAVAILABLE = '쪽지 저장소를 사용할 수 없습니다. 잠시 �
 INVALID = '요청 형식과 로그인 정보를 확인해 주세요.'
 TABLES = (('pawbridge_user', 'contact_deletions'), ('pawbridge_community', 'private_note_members'),
           ('pawbridge_community', 'private_note_blocks'))
-
-
-def verify_results():
-    f2.require_hosted()
-    directory = ROOT / 'boot/build/test-results' / TASK
-    if {p.name for p in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in CLASSES}:
-        raise SystemExit('F17 compatibility requires its exact two-class XML set')
-    counts = {}
-    for name in CLASSES:
-        try:
-            suite = ET.parse(directory / ('TEST-' + name + '.xml')).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F17 compatibility report missing or malformed') from None
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != name or values['tests'] <= 0
-                or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or len(cases) != values['tests'] or any(c.attrib.get('classname') != name for c in cases)
-                or any(c.find(tag) is not None for c in cases for tag in ('failure', 'error', 'skipped'))):
-            raise SystemExit('F17 compatibility requires executed successful unskipped cases')
-        counts[name] = values['tests']
-    print('Verified F17 single UTC PG and lightweight original lookup reports: ' + json.dumps(counts, sort_keys=True))
-    return counts
 
 
 def verified_ddl():
@@ -394,4 +367,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

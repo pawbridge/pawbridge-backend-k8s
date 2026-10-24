@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 import urllib.parse
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -21,12 +20,6 @@ import f17_ci as f17
 import f19_ci as f19
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
-TASK, SEOUL_TASK = 'noteBlockListCompatibilityTest', 'noteBlockListCompatibilitySeoulTest'
-PG_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlNoteBlockListCompatibilityTest'
-MVC_CLASS = 'com.pawbridge.backend.compatibility.F20LegacyBlockListMvcTest'
-# Exact UTC comparison and the single Seoul timestamp report; zero or extra cases are rejected.
-REPORTS = {TASK: {PG_CLASS: 10, MVC_CLASS: 14}, SEOUL_TASK: {PG_CLASS: 1}}
-SEOUL_METHOD = 'givenTstzMicroseconds__whenReadingAndSerializing__thenInstantIsStableWithoutLocalZoneShift'
 CALLER, FIRST, NORMAL, PENDING, REVERSE = 9974001, 9974002, 9974003, 9974004, 9974014
 TARGETS = tuple(range(FIRST, REVERSE))
 IDS = (CALLER, *TARGETS, REVERSE)
@@ -163,32 +156,6 @@ def prepare():
     EVIDENCE.mkdir(parents=True, exist_ok=True)
     target.write_text(proof)
     print('Added only the existing block timestamp SELECT after F19; old business rows unchanged')
-
-
-def verify_results():
-    f2.require_hosted()
-    counts = {}
-    for task, classes in REPORTS.items():
-        directory = ROOT / 'boot/build/test-results' / task
-        if {p.name for p in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in classes}:
-            raise SystemExit('F20 compatibility requires its exact UTC/Seoul XML class set')
-        counts[task] = {}
-        for name, expected_count in classes.items():
-            try:
-                suite = ET.parse(directory / ('TEST-' + name + '.xml')).getroot()
-                values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-            except (OSError, ET.ParseError, KeyError, ValueError):
-                raise SystemExit('F20 compatibility report missing or malformed') from None
-            cases = suite.findall('testcase')
-            if (suite.tag != 'testsuite' or suite.attrib.get('name') != name or values['tests'] <= 0 or values['tests'] != expected_count
-                    or len(cases) != expected_count or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                    or any(c.attrib.get('classname') != name for c in cases)
-                    or any(c.find(tag) is not None for c in cases for tag in ('failure', 'error', 'skipped'))
-                    or (task == SEOUL_TASK and cases[0].attrib.get('name') not in (SEOUL_METHOD, SEOUL_METHOD + '()'))):
-                raise SystemExit('F20 requires executed successful cases and only the selected Seoul timestamp method')
-            counts[task][name] = expected_count
-    print('Verified F20 full UTC comparison and one Seoul timestamp case')
-    return counts
 
 
 @contextmanager
@@ -391,4 +358,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

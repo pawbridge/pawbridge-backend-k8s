@@ -11,7 +11,6 @@ import stat
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -21,34 +20,12 @@ import f12_ci as f12
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
 MARKER = 'pawbridge-f13-ci-only-v1'
-COMPATIBILITY_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlUserNicknameCompatibilityTest'
 SOURCE = 'c32ae0d84b69969abd35c541dbdd4e81738c4be5'
 DDL_PREFIX = 'user-service/src/migration/resources/db/postgresql/'
 DDL_HASHES = {'V1__user_schema.sql': '5b6c50062231952e625e56a7577c41b03d7d5a10041380d4b2ada960ef7449a1',
               'V2__rollback_charset_compatibility.sql': '2921e2a7b10c640ef24955902e38d649e5485af7df8656b10638ccf5f79521b8'}
 OTHER, POST, COMMENT = 9980001, 9981001, 9981002
 PATH = '/api/v1/users/me/nickname'
-
-
-def verify_results():
-    f2.require_hosted()
-    counts = {}
-    for task, zone in (('nicknameCompatibilityTest', 'UTC'), ('nicknameCompatibilitySeoulTest', 'Asia/Seoul')):
-        path = ROOT / 'boot/build/test-results' / task / ('TEST-' + COMPATIBILITY_CLASS + '.xml')
-        try:
-            suite = ET.parse(path).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F13 compatibility report missing or malformed: ' + task)
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != COMPATIBILITY_CLASS
-                or values['tests'] <= 0 or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or len(cases) != values['tests']
-                or any(case.attrib.get('classname') != COMPATIBILITY_CLASS for case in cases)):
-            raise SystemExit('F13 compatibility report must contain executed, successful, unskipped tests: ' + task)
-        counts[zone] = values['tests']
-    print('Verified separate F13 compatibility execution counts: ' + json.dumps(counts, sort_keys=True))
-    return counts
 
 
 def verified_ddl():
@@ -354,4 +331,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

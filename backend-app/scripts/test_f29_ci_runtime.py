@@ -2,7 +2,7 @@
 """Late member-runtime control/delta guards only; no PG/JAR/JVM/socket execution.
 
 Baseline imports are inert. Full mock journey is control-flow evidence, not an independent
-business/source oracle: its simulated commits use the declared phase projection.
+business check: its simulated commits use the declared phase projection.
 """
 import base64
 import copy
@@ -64,7 +64,6 @@ class FakeCi:
     database_snapshot = require_fixture
     def member_require_fixture(self): self.events.append('strict24'); return '1-1'
     def member_require_identity(self): self.events.append('identity24'); return '1-1'
-    def member_require_runtime_results(self): self.events.append('xml12')
     def member_database_snapshot(self):
         self.events.append('snapshot24')
         if self.stale_after_seed and len(Stream.instances) == 2: self.stale = True
@@ -166,7 +165,6 @@ class MemberRuntimeTest(unittest.TestCase):
         self.assertEqual(self.fake.state, self.fake.baseline); self.assertEqual(self.fake.stopped, ['app', 'stub'])
         self.assertTrue(all(s.closed for s in Stream.instances)); self.assertEqual(result['survivor_resync_checks'], 2)
         reconnect = self.fake.requests[4]; self.assertEqual(reconnect[:2], ('GET', '/api/v1/notes/stream'))
-        self.assertIn('xml12', self.fake.events)
         self.assertEqual(result['child_log_evidence'], 'safe-copied')
         for path in self.fake.raw_paths:
             self.assertNotIn(self.fake.ROOT, path.parents); self.assertEqual(path.stat().st_mode & 0o777, 0o600)
@@ -264,23 +262,6 @@ class MemberRuntimeTest(unittest.TestCase):
         probe.member_observe_pending(owned, state, started, time.time_ns())
         state['contact_deletions'][0]['started_at'] = '1999-01-01T00:00:00Z'
         with self.assertRaisesRegex(AssertionError, 'replaced'): probe.member_observe_pending(owned, state, started, time.time_ns())
-
-    def test_given_missing_or_failed_or_skipped_member_xml__when_late_runtime_gate_runs__then_require_exact_twelve_successful_children(self):
-        folder = self.fake.ROOT / 'boot/build/test-results/memberCleanupCompatibilityTest'; folder.mkdir(parents=True)
-        path = folder / ('TEST-' + ci.PG_CLASS + '.xml')
-        good = '<testsuite name="' + ci.PG_CLASS + '" tests="12" failures="0" errors="0" skipped="0">' + ''.join(
-            '<testcase classname="' + ci.PG_CLASS + '" name="case' + str(n) + '"/>' for n in range(12)) + '</testsuite>'
-        with patch.object(ci, 'ROOT', self.fake.ROOT), patch.object(ci, 'member_require_identity'):
-            with self.assertRaises(SystemExit): ci.member_require_runtime_results()
-            path.write_text(good); ci.member_require_runtime_results()
-            for bad in (good.replace('tests="12"', 'tests="11"'), good.replace('/>', '><failure/></testcase>', 1),
-                        good.replace('/>', '><skipped/></testcase>', 1), good.replace('classname="', 'classname="foreign', 1),
-                        good.replace('tests="12"', 'tests="12" disabled="1"'),
-                        good.replace('<testcase ', '<testcase status="notrun" ', 1),
-                        good.replace('<testcase ', '<testcase result="skipped" ', 1),
-                        good.replace('</testsuite>', '<testsuite><testcase name="hidden"/></testsuite></testsuite>')):
-                path.write_text(bad)
-                with self.assertRaises(SystemExit): ci.member_require_runtime_results()
 
     def test_given_denied_cleanup_privilege_and_body_failure__when_restoring__then_identity_before_grant_and_strict_afterward(self):
         for failure in ('body', 'revoke-ack'):

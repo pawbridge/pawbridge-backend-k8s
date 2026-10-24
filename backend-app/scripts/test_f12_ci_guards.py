@@ -1,5 +1,4 @@
-"""Mock-only F12 target, fixture, projection, oracle and staged CI checks."""
-import hashlib
+"""Mock-only F12 target, fixture, projection and staged CI checks."""
 import json
 import os
 from pathlib import Path
@@ -9,10 +8,8 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
-import xml.etree.ElementTree as ET
 
 import f12_ci as f12
-import prepare_f12_legacy_oracle as oracle
 from test_f11_ci_guards import HOSTED as F11_HOSTED
 
 HOSTED = dict(F11_HOSTED, F12_CI_OWNER='123-1')
@@ -130,90 +127,16 @@ class F12GuardTest(unittest.TestCase):
         workflow = (f12.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Extend the owned fixture with exact F12 profile columns and reader permissions')
         self.assertLess(workflow.index('python3 scripts/f11_ci.py smoke'), boundary)
-        self.assertLess(workflow.index('python3 scripts/f12_ci.py prepare', boundary), workflow.index(':boot:profileCompatibilityTest'))
-        self.assertLess(workflow.index(':boot:profileCompatibilitySeoulTest'), workflow.index('python3 scripts/f12_ci.py results'))
-        self.assertLess(workflow.index('python3 scripts/f12_ci.py results'), workflow.index('python3 scripts/f12_ci.py smoke'))
+        self.assertLess(workflow.index('python3 scripts/f12_ci.py prepare', boundary), workflow.index('python3 scripts/f12_ci.py smoke'))
+        self.assertNotIn('python3 scripts/f12_ci.py results', workflow)
         self.assertLess(workflow.index('python3 scripts/f12_ci.py smoke'), workflow.index('- name: Remove only the owned disposable fixture'))
         self.assertNotRegex(workflow[boundary:], r'python3 scripts/f(?:[2-9]|10|11)_ci\.py (?:prepare|smoke)')
-        for required in ('scripts/test_f12_ci_guards.py', 'f12-helper-refusal.txt', 'f12-oracle-sha256.txt',
-                         'f12_fixture', 'f12LegacyOracle', 'backend-app/**/build/test-results/**/TEST-*.xml'):
+        for required in ('scripts/test_f12_ci_guards.py', 'f12-helper-refusal.txt',
+                         'f[0-9]+_fixture', 'backend-app/**/build/test-results/**/TEST-*.xml'):
             self.assertIn(required, workflow)
 
-    def test_given_declared_profile_tasks__when_selecting__then_use_only_f12_and_leave_ancestor_class_filters_intact(self):
-        build = (f12.ROOT / 'boot/build.gradle').read_text()
-        original = build.split("['compatibilityTest':", 1)[1].split("['commentDeleteCompatibilityTest':", 1)[0]
-        profile = build.split("['profileCompatibilityTest':", 1)[1].split("tasks.named('profileCompatibilitySeoulTest')", 1)[0]
-        self.assertIn("filter.excludeTestsMatching '" + f12.COMPATIBILITY_CLASS + "'", original)
-        self.assertIn("includeTestsMatching '" + f12.COMPATIBILITY_CLASS + "'", profile)
-        self.assertEqual(1, profile.count('includeTestsMatching'))
-        for required in ('failOnNoMatchingTests = true', "systemProperty 'user.timezone', zone",
-                         "systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'",
-                         "shouldRunAfter tasks.named('commentUpdateCompatibilitySeoulTest')"):
-            self.assertIn(required, profile)
-
-    def test_given_wrong_oracle_paths__when_extracting__then_fixed_source_and_no_git_or_write(self):
-        self.assertEqual('5473c4ccd95ae974c79acc7030228d4a717af3b3', oracle.SOURCE)
-        self.assertEqual({oracle.PREFIX + 'com/pawbridge/userservice/dto/response/UserInfoResponseDto.java':
-                          '55e9001190998829dd1d9c87c04f70ed1af88388ac73a29d9950f0241418d341'}, oracle.EXPECTED)
-        root = Path('/synthetic').resolve()
-        output = root / 'backend-app/boot/build/generated/sources/f12LegacyOracle/java'
-        evidence = root / 'backend-app/build/ci/f12-oracle-sha256.txt'
-        for target, report in ((root / 'outside', evidence), (output, root / 'outside')):
-            with self.subTest(target=target, report=report), patch.object(oracle.subprocess, 'check_output') as git:
-                with self.assertRaisesRegex(SystemExit, 'Refusing non-dedicated F12 oracle output'):
-                    oracle.extract(root, target, report)
-                git.assert_not_called()
-
-    def test_given_tampered_shared_user_or_role__when_extracting__then_no_new_source_or_evidence(self):
-        for source in oracle.SHARED:
-            for failure in ('hash', 'missing', 'differing-existing'):
-                with self.subTest(source=source, failure=failure), tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory).resolve()
-                    output = root / 'backend-app/boot/build/generated/sources/f12LegacyOracle/java'
-                    evidence = root / 'backend-app/build/ci/f12-oracle-sha256.txt'
-                    content = b'synthetic fixed source'
-                    shared = root / 'backend-app/boot/build/generated/sources/f3LegacyOracle/java' / source[len(oracle.PREFIX):]
-                    if failure != 'missing':
-                        shared.parent.mkdir(parents=True)
-                        shared.write_bytes(b'different' if failure == 'differing-existing' else content)
-                    expected = hashlib.sha256(content).hexdigest() if failure != 'hash' else 'wrong'
-                    with patch.object(oracle, 'SHARED', (source,)), patch.dict(oracle.f3.EXPECTED, {source: expected}, clear=True), \
-                            patch.object(oracle.subprocess, 'check_output', return_value=content):
-                        with self.assertRaisesRegex(SystemExit, 'Shared F3 User/Role differs from fixed F12 input'):
-                            oracle.extract(root, output, evidence)
-                    self.assertFalse(output.exists())
-                    self.assertFalse(evidence.exists())
-
-    def test_given_tampered_new_dto__when_extracting__then_no_source_or_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f12LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f12-oracle-sha256.txt'
-            with patch.object(oracle, 'SHARED', ()), patch.object(oracle.subprocess, 'check_output', return_value=b'tampered'):
-                with self.assertRaisesRegex(SystemExit, 'Legacy F12 input checksum mismatch'):
-                    oracle.extract(root, output, evidence)
-            self.assertFalse(output.exists())
-            self.assertFalse(evidence.exists())
-
-    def test_given_differing_existing_dto__when_extracting__then_preserve_existing_bytes_and_no_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f12LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f12-oracle-sha256.txt'
-            relative, content = 'synthetic/Input.java', b'synthetic fixed source'
-            target = output / relative
-            target.parent.mkdir(parents=True)
-            target.write_bytes(b'existing different source')
-            with patch.object(oracle, 'SHARED', ()), \
-                    patch.dict(oracle.EXPECTED, {oracle.PREFIX + relative: hashlib.sha256(content).hexdigest()}, clear=True), \
-                    patch.object(oracle.subprocess, 'check_output', return_value=content):
-                with self.assertRaisesRegex(SystemExit, 'Refusing to overwrite differing F12 oracle input'):
-                    oracle.extract(root, output, evidence)
-            self.assertEqual(b'existing different source', target.read_bytes())
-            self.assertFalse(evidence.exists())
-
     def test_given_non_hosted_invocation__when_preparing_seeding_reporting_or_smoking__then_no_resource_call(self):
-        for action in (f12.prepare, f12.prepare_business_rows, f12.verify_results, f12.smoke):
+        for action in (f12.prepare, f12.prepare_business_rows, f12.smoke):
             with self.subTest(action=action.__name__), patch.dict(os.environ, {}, clear=True), \
                     patch.object(f12.f3, 'sql') as sql, patch.object(f12.f2, 'command') as command, \
                     patch.object(f12.f4, 'start_ready_children') as start:
@@ -318,55 +241,12 @@ class F12GuardTest(unittest.TestCase):
                 rows.assert_not_called()
                 sql.assert_not_called()
 
-    @staticmethod
-    def reports(root, *, tests=1, failures=0, errors=0, skipped=0, classname=None, cases=None):
-        classname = classname or f12.COMPATIBILITY_CLASS
-        for task in ('profileCompatibilityTest', 'profileCompatibilitySeoulTest'):
-            path = root / 'boot/build/test-results' / task / ('TEST-' + f12.COMPATIBILITY_CLASS + '.xml')
-            path.parent.mkdir(parents=True, exist_ok=True)
-            suite = ET.Element('testsuite', name=classname, tests=str(tests), failures=str(failures),
-                               errors=str(errors), skipped=str(skipped))
-            for index in range(tests if cases is None else cases):
-                ET.SubElement(suite, 'testcase', name='synthetic-' + str(index), classname=classname)
-            ET.ElementTree(suite).write(path)
-
-    def test_given_separate_successful_reports__when_verifying__then_require_nonzero_execution_in_both_task_outputs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.reports(root, tests=2)
-            with patch.dict(os.environ, HOSTED, clear=True), patch.object(f12, 'ROOT', root):
-                self.assertEqual({'UTC': 2, 'Asia/Seoul': 2}, f12.verify_results())
-
-    def test_given_missing_zero_failed_skipped_or_wrong_reports__when_verifying__then_refuse_not_skip(self):
-        for settings in (None, {'tests': 0}, {'failures': 1}, {'errors': 1}, {'skipped': 1},
-                         {'classname': 'OtherTest'}, {'tests': 2, 'cases': 1}):
-            with self.subTest(settings=settings), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                if settings is not None:
-                    self.reports(root, **settings)
-                with patch.dict(os.environ, HOSTED, clear=True), patch.object(f12, 'ROOT', root):
-                    with self.assertRaisesRegex(SystemExit, 'F12 compatibility report'):
-                        f12.verify_results()
-        for task in ('profileCompatibilityTest', 'profileCompatibilitySeoulTest'):
-            for failure in ('missing', 'malformed'):
-                with self.subTest(task=task, failure=failure), tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory)
-                    self.reports(root)
-                    report = root / 'boot/build/test-results' / task / ('TEST-' + f12.COMPATIBILITY_CLASS + '.xml')
-                    if failure == 'missing':
-                        report.unlink()
-                    else:
-                        report.write_text('<testsuite')
-                    with patch.dict(os.environ, HOSTED, clear=True), patch.object(f12, 'ROOT', root):
-                        with self.assertRaisesRegex(SystemExit, 'F12 compatibility report'):
-                            f12.verify_results()
-
     def test_given_actual_jar_filter__when_f12_artifacts_leak__then_reject_without_widening_validator_exception(self):
         workflow = (f12.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         pipeline = re.search(r'          if (grep -E .*?); then', workflow, re.DOTALL).group(1)
         allowed = 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\n'
-        for forbidden in ('', 'BOOT-INF/classes/f12_fixture.sql', 'BOOT-INF/classes/f12LegacyOracle/Input.class',
-                          'test/f12LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
+        for forbidden in ('', 'BOOT-INF/classes/f12_fixture.sql', 'BOOT-INF/classes/com/pawbridge/backend/compatibility/Input.class',
+                          'test/compatibilityTest/hibernate-validator-8.0.3.Final.jar'):
             with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory) / 'build/ci/boot-jar-contents.txt'
                 target.parent.mkdir(parents=True)

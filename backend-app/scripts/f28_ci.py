@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""F28 hosted fixture/XML prefix. Runtime smoke is owned and appended separately.
+"""F28 hosted fixture preparation and packaged mailbox deletion smoke.
 
-No local PostgreSQL, original extraction, HTTP or JVM is started by preparation.
-Exact provider expectations fail closed; hosted PG/JAR evidence is required separately. No new Seoul task.
+No local PostgreSQL, HTTP or JVM is started by preparation. Packaged journey counts fail closed.
 """
 from contextlib import contextmanager
 import hashlib
 import json
-from pathlib import Path
-import re
 import subprocess
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -19,19 +15,9 @@ import f20_ci as f20
 import f21_ci as f21
 import f22_ci as f22
 import f27_ci as f27
-import prepare_f28_legacy_oracle as oracle
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
 SOURCE = 'f06a72a06bd26662c647bde780dfc7a27bf7349c'
-SOURCE_FILES = 20
-STREAM_SOURCE = 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteStream.java'
-STREAM_SHA256 = '3215dd7b9f3958049ea3065bc550883838bfeacc46d75e350cbc29f26a9504eb'
-TASK = 'noteDeletionCompatibilityTest'
-PG_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlNoteDeletionCompatibilityTest'
-MVC_CLASS = 'com.pawbridge.backend.compatibility.F28LegacyNoteDeletionMvcTest'
-# PG17 is a reviewed provider expectation, MVC11 is locally measured; neither claims hosted success.
-# Runtime counts are statically reviewed journey contracts, not executed HTTP evidence.
-REPORTS = {TASK: {PG_CLASS: 17, MVC_CLASS: 11}}
 COUNTERS = ('request_checks', 'nonstreaming_checks', 'delete_checks', 'successful_delete_checks', 'rejected_delete_checks', 'get_checks', 'notification_checks', 'detail_checks', 'list_checks', 'stream_open_checks', 'stream_ready_checks', 'resync_checks', 'other_resync_checks', 'storage_unavailable_checks', 'member_unavailable_checks', 'recovery_checks', 'repeated_delete_checks', 'not_found_checks', 'authentication_checks', 'adjacent_denied_checks', 'approved_database_write_checks', 'deleted_mailbox_rows', 'deleted_note_rows', 'cleared_request_links', 'cleared_reply_links')
 EXPECTED_JAR_COUNTS = {'request_checks': 18, 'nonstreaming_checks': 16, 'delete_checks': 9, 'successful_delete_checks': 3, 'rejected_delete_checks': 6, 'get_checks': 9, 'notification_checks': 3, 'detail_checks': 3, 'list_checks': 1, 'stream_open_checks': 2, 'stream_ready_checks': 2, 'resync_checks': 3, 'other_resync_checks': 0, 'storage_unavailable_checks': 2, 'member_unavailable_checks': 1, 'recovery_checks': 3, 'repeated_delete_checks': 1, 'not_found_checks': 3, 'authentication_checks': 1, 'adjacent_denied_checks': 1, 'approved_database_write_checks': 3, 'deleted_mailbox_rows': 3, 'deleted_note_rows': 2, 'cleared_request_links': 1, 'cleared_reply_links': 1}
 NOTES = 'pawbridge_community.private_notes'
@@ -79,8 +65,6 @@ def fixture_proof(owner):
 
 def verified_requests_ddl(inputs):
     """Four original LF fragments; only schema qualification adapts the original DDL."""
-    if any(oracle.EXPECTED.get(path) != digest for path, digest in DDL_HASHES.items()):
-        raise SystemExit('F28 request migration pins differ from the fixed source closure')
     try:
         if any(hashlib.sha256(inputs[path]).hexdigest() != digest for path, digest in DDL_HASHES.items()):
             raise SystemExit('F28 request migration bytes differ')
@@ -138,22 +122,18 @@ def require_owner():
     return owner
 
 
-def verified_sources():
-    """Read fixed Git blobs, not working-tree legacy paths; produce no generated file."""
+def verified_ddl_sources():
+    """Read the two pinned migration Git blobs, not working-tree paths; produce no generated file."""
     f2.require_hosted()
-    if (oracle.SOURCE != SOURCE or len(oracle.EXPECTED) != SOURCE_FILES
-            or len(oracle.SHARED) != 13 or len(oracle.OUTPUTS) != 3
-            or oracle.EXPECTED.get(STREAM_SOURCE) != STREAM_SHA256):
-        raise SystemExit('F28 fixed twenty-source closure or original Stream pin differs')
     inputs = {}
-    for path, expected in oracle.EXPECTED.items():
+    for path, expected in DDL_HASHES.items():
         try:
             raw = subprocess.check_output(['git', 'show', SOURCE + ':' + path], cwd=ROOT.parent,
                                           stderr=subprocess.PIPE)
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            raise SystemExit('F28 fixed original source object is unavailable') from None
+            raise SystemExit('F28 fixed migration source object is unavailable') from None
         if hashlib.sha256(raw).hexdigest() != expected:
-            raise SystemExit('F28 fixed original source checksum differs')
+            raise SystemExit('F28 fixed migration source checksum differs')
         inputs[path] = raw
     return inputs
 
@@ -361,7 +341,7 @@ def prepare():
     f21.check_receipt(target, proof, allow_missing=True)
     if target.exists():
         raise SystemExit('F28 refuses an existing deletion fixture receipt')
-    ddl = verified_requests_ddl(verified_sources())
+    ddl = verified_requests_ddl(verified_ddl_sources())
     before = f27.database_snapshot()  # Last sixteen-table snapshot, before requests exists.
     if (not isinstance(before, dict) or set(before) != {row[0] for row in SNAPSHOT_TABLES[:-1]}
             or any(not isinstance(rows, list) for rows in before.values())):
@@ -396,103 +376,14 @@ def denied_privilege(kind):
         require_fixture()
 
 
-def require_measurements(kind='results'):
+def require_measurements(kind='jar'):
     f2.require_hosted()
-    if kind not in ('results', 'jar'):
-        raise ValueError('F28 measurement gate is limited to results or jar')
-    if (not isinstance(REPORTS, dict) or set(REPORTS) != {TASK}
-            or not isinstance(REPORTS.get(TASK), dict) or set(REPORTS[TASK]) != {PG_CLASS, MVC_CLASS}
-            or any(type(n) is not int or n <= 0 for classes in REPORTS.values() for n in classes.values())):
-        raise SystemExit('F28 original providers and PG/MVC counts remain unmeasured')
-    if kind == 'jar' and (not COUNTERS or not isinstance(EXPECTED_JAR_COUNTS, dict)
+    if kind != 'jar':
+        raise ValueError('F28 measurement gate is limited to the packaged journey')
+    if (not COUNTERS or not isinstance(EXPECTED_JAR_COUNTS, dict)
             or set(EXPECTED_JAR_COUNTS) != set(COUNTERS)
             or any(type(n) is not int or n < 0 for n in EXPECTED_JAR_COUNTS.values())):
         raise SystemExit('F28 packaged journey counts remain unmeasured')
-
-
-def _plain_file(path):
-    if path.is_symlink() or path.resolve() != path or not path.is_file():
-        raise SystemExit('F28 oracle evidence or generated path is missing or redirected')
-    return path.read_bytes()
-
-
-def require_oracle_receipt():
-    """Match source/shared/generated identities; selected method/LF proofs remain extractor-owned."""
-    f2.require_hosted()
-    if (oracle.SOURCE != SOURCE or len(oracle.EXPECTED) != SOURCE_FILES
-            or len(oracle.SHARED) != 13 or len(oracle.OUTPUTS) != 3
-            or oracle.EXPECTED.get(STREAM_SOURCE) != STREAM_SHA256):
-        raise SystemExit('F28 oracle manifest differs from the fixed twenty-source closure')
-    try:
-        lines = _plain_file(ROOT.parent / oracle.EVIDENCE_PATH).decode('utf-8').splitlines()
-        if not lines or lines[0] != 'source_sha=' + SOURCE:
-            raise SystemExit('F28 oracle evidence source identity differs')
-        categories = {}
-        for line in lines[1:]:
-            match = re.fullmatch(r'([0-9a-f]{64})  (source|shared-byte-identity|shared-adapted-identity|generated) (.+)', line)
-            if match:
-                digest, category, name = match.groups()
-                bucket = categories.setdefault(category, {})
-                if name in bucket:
-                    raise SystemExit('F28 oracle evidence repeats an identity entry')
-                bucket[name] = digest
-        if categories.get('source') != oracle.EXPECTED:
-            raise SystemExit('F28 oracle evidence lacks the exact twenty full source hashes')
-        shared = {relative: oracle.EXPECTED[source] for source, relative in oracle.SHARED.items()}
-        if categories.get('shared-byte-identity') != shared:
-            raise SystemExit('F28 oracle evidence shared source identities differ')
-        for source, relative in oracle.SHARED.items():
-            if hashlib.sha256(_plain_file(ROOT.parent / relative)).hexdigest() != oracle.EXPECTED[source]:
-                raise SystemExit('F28 shared generated bytes differ from their fixed original')
-        adapted = {oracle.F18_ADAPTED_PATH: oracle.F18_ADAPTED_SHA256}
-        if (categories.get('shared-adapted-identity') != adapted
-                or hashlib.sha256(_plain_file(ROOT.parent / oracle.F18_ADAPTED_PATH)).hexdigest() != oracle.F18_ADAPTED_SHA256):
-            raise SystemExit('F28 existing adapted advice identity differs')
-        generated = categories.get('generated', {})
-        if set(generated) != set(oracle.OUTPUTS):
-            raise SystemExit('F28 oracle evidence generated output set differs')
-        for relative in oracle.OUTPUTS:
-            if hashlib.sha256(_plain_file(ROOT.parent / oracle.OUTPUT_ROOT / relative)).hexdigest() != generated[relative]:
-                raise SystemExit('F28 original wrapper bytes differ from extractor evidence')
-    except (OSError, UnicodeError, KeyError, TypeError):
-        raise SystemExit('F28 original oracle identity evidence is missing or malformed') from None
-
-
-def verify_results():
-    require_measurements()
-    require_owner()
-    require_oracle_receipt()
-    result = {}
-    try:
-        for task, classes in REPORTS.items():
-            directory = ROOT / 'boot/build/test-results' / task
-            if {p.name for p in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in classes}:
-                raise SystemExit('F28 exact UTC XML class set differs')
-            result[task] = {}
-            for name, expected in classes.items():
-                target = directory / ('TEST-' + name + '.xml')
-                suite = ET.fromstring(_plain_file(target))
-                cases = suite.findall('testcase')
-                if suite.tag != 'testsuite' or suite.get('name') != name:
-                    raise SystemExit('F28 XML suite FQN differs')
-                values = {k: int(suite.attrib[k]) for k in ('tests', 'failures', 'errors', 'skipped')}
-                if (values != {'tests': expected, 'failures': 0, 'errors': 0, 'skipped': 0}
-                        or len(cases) != expected or len(list(suite.iter('testcase'))) != expected
-                        or int(suite.get('disabled', '0')) != 0):
-                    raise SystemExit('F28 XML aggregate or actual testcase counts differ')
-                if any(suite.find('.//' + tag) is not None for tag in ('failure', 'error', 'skipped')):
-                    raise SystemExit('F28 XML contains a hidden unsuccessful result')
-                if any(case.get('classname') != name for case in cases):
-                    raise SystemExit('F28 XML actual testcase FQN differs')
-                result[task][name] = values
-    except (OSError, ET.ParseError, KeyError, ValueError):
-        raise SystemExit('F28 compatibility XML is missing or malformed') from None
-    EVIDENCE.mkdir(parents=True, exist_ok=True)
-    (EVIDENCE / 'f28-results.json').write_text(json.dumps(result, sort_keys=True) + '\n')
-    print('Verified measured F28 UTC PG/MVC XML; no new Seoul task')
-
-
-# Root appends runtime deletion/token/SSE smoke and the final CLI after this fixture/XML prefix.
 
 
 def smoke():
@@ -505,4 +396,4 @@ def smoke():
 if __name__ == "__main__":
     import sys
     f2.require_hosted()
-    {"prepare": prepare, "results": verify_results, "smoke": smoke}[sys.argv[1]]()
+    {"prepare": prepare, "smoke": smoke}[sys.argv[1]]()

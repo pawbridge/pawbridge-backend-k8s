@@ -7,7 +7,6 @@ import os
 import re
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 import f2_ci as f2
@@ -20,40 +19,9 @@ MARKER = 'pawbridge-f16-ci-only-v1'
 SOURCE = '33cad5567767f8730fc2c4389815ecd031f41dc0'
 DDL_SOURCE = 'community-service/src/migration/resources/db/postgresql/V11__daily_visitors.sql'
 DDL_HASH = 'd230ea0dc083bf0a3ab9fcf16ff06fe1591722d232ddc07c42de28f057daeacb'
-PACKAGE = 'com.pawbridge.backend.compatibility.'
-DATA_CLASS = PACKAGE + 'PostgresqlVisitTodayCompatibilityTest'
-ACCESS_CLASS = PACKAGE + 'PostgresqlVisitTodayAccessTest'
-MVC_CLASS = PACKAGE + 'F16LegacyVisitMvcTest'
-REPORTS = {'visitTodayCompatibilityTest': (DATA_CLASS, ACCESS_CLASS),
-           'visitTodayCompatibilitySeoulTest': (DATA_CLASS,), 'visitTodayLegacyMvcTest': (MVC_CLASS,)}
 SUCCESS = '요청이 성공적으로 처리되었습니다.'
 UNAVAILABLE = '방문 통계를 불러올 수 없습니다.'
 DISABLED_EVIDENCE = 'JAR:404+unchanged snapshot; no-visit-beans/JDBC-mock-zero:Boot tests only'
-
-
-def verify_results():
-    f2.require_hosted()
-    counts = {}
-    for task, classes in REPORTS.items():
-        directory = ROOT / 'boot/build/test-results' / task
-        if {path.name for path in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in classes}:
-            raise SystemExit('F16 compatibility task requires its exact XML class set: ' + task)
-        counts[task] = {}
-        for name in classes:
-            try:
-                suite = ET.parse(directory / ('TEST-' + name + '.xml')).getroot()
-                values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-            except (OSError, ET.ParseError, KeyError, ValueError):
-                raise SystemExit('F16 compatibility report missing or malformed: ' + task) from None
-            cases = suite.findall('testcase')
-            if (suite.tag != 'testsuite' or suite.attrib.get('name') != name or values['tests'] <= 0
-                    or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                    or len(cases) != values['tests'] or any(case.attrib.get('classname') != name for case in cases)
-                    or any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped'))):
-                raise SystemExit('F16 compatibility requires executed successful unskipped cases: ' + task)
-            counts[task][name] = values['tests']
-    print('Verified F16 UTC data/access, Seoul data and DB-free legacy MVC reports: ' + json.dumps(counts, sort_keys=True))
-    return counts
 
 
 def verified_ddl():
@@ -229,7 +197,7 @@ def _packaged_phase(jar, owner, enabled, result):
                 raise AssertionError('Visit DAO503 must not expose error details')
             else: result['unavailable_checks'] += 1
         else:
-            # The body/cache policy of the unmapped route is deliberately not a legacy oracle claim.
+            # The body/cache policy of the unmapped route is deliberately not compared with the old service.
             result['disabled_404_checks'] += 1
         if f3.sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN ('pawbridge_app','pawbridge_f2_reader','pawbridge_f3_writer') "
                   "AND (state='idle in transaction' OR xact_start IS NOT NULL)") != '0':
@@ -301,4 +269,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

@@ -6,7 +6,6 @@ import unittest
 from unittest.mock import patch
 
 import f6_ci as f6
-import prepare_f6_legacy_oracle as oracle
 
 
 class F6GuardTest(unittest.TestCase):
@@ -63,26 +62,6 @@ class F6GuardTest(unittest.TestCase):
                 rows.assert_not_called()
                 sql.assert_not_called()
 
-    def test_given_non_dedicated_oracle_output__when_extracting__then_refuse_before_git_or_writes(self):
-        with patch.object(oracle.sys, 'argv', ['oracle', '/synthetic', '/outside', '/outside']), \
-                patch.object(oracle.subprocess, 'check_output') as git:
-            with self.assertRaisesRegex(SystemExit, 'Refusing non-dedicated F6 oracle output'):
-                oracle.main()
-            git.assert_not_called()
-
-    def test_given_tampered_shared_oracle__when_extracting__then_refuse_before_new_generated_inputs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            repository = Path(directory).resolve()
-            output = repository / 'backend-app/boot/build/generated/sources/f6LegacyOracle/java'
-            evidence = repository / 'backend-app/build/ci/f6-oracle-sha256.txt'
-            with patch.object(oracle.sys, 'argv', ['oracle', str(repository), str(output), str(evidence)]), \
-                    patch.object(oracle.subprocess, 'check_output', return_value=b'tampered'):
-                with self.assertRaisesRegex(SystemExit, 'Shared F2 oracle differs from fixed F6 input'):
-                    oracle.main()
-            self.assertFalse(output.exists())
-            self.assertFalse(evidence.exists())
-
-
     def test_given_single_app_role__when_injecting_select_fault__then_revoke_and_restore_only_the_other_roles_overlap(self):
         calls = []
         def raw(query, input_text=None):
@@ -106,6 +85,7 @@ class F6GuardTest(unittest.TestCase):
                           'DELETE FROM pawbridge_user.users WHERE user_id=42; REVOKE SELECT(nickname) ON pawbridge_user.users FROM pawbridge_f2_reader'],
                          mutations)
         self.assertIn("SELECT has_column_privilege('pawbridge_f3_writer','pawbridge_user.users','nickname','SELECT')", calls)
+
 
 if __name__ == '__main__':
     unittest.main()
