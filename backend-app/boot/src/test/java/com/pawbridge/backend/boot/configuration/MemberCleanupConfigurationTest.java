@@ -10,10 +10,13 @@ import com.pawbridge.backend.community.internal.note.application.ContactMemberCl
 import com.pawbridge.backend.community.internal.note.web.PrivateNoteStreamRegistry;
 import com.pawbridge.backend.user.api.ContactMemberQuery;
 import com.pawbridge.backend.user.internal.deletion.application.UserDeletion;
+import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker;
 import java.util.function.LongConsumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.JdbcTransactionManager;
@@ -100,8 +103,27 @@ class MemberCleanupConfigurationTest {
     @Test
     void given__public_community_cleanup__when__wiring_user_deletion__then__consume_only_that_api_without_a_module_cycle_or_outer_transaction() {
         var cleanup=mock(ContactMemberCleanup.class);
-        var deletion=new MemberCleanupConfiguration(false).userDeletion(jdbc,manager,cleanup);
+        var deletion=new MemberCleanupConfiguration(false).userDeletion(jdbc,manager,cleanup,sessions(null));
         ((LongConsumer)ReflectionTestUtils.getField(deletion,"communityCleanup")).accept(Long.MAX_VALUE);
         verify(cleanup).remove(Long.MAX_VALUE);verifyNoMoreInteractions(cleanup);verifyNoInteractions(jdbc,manager);
+        assertThat(ReflectionTestUtils.getField(deletion, "sessions")).isSameAs(UserSessionRevoker.NONE);
+    }
+
+    @Test
+    void given__auth_sessions_enabled__when__wiring_user_deletion__then__revoke_through_the_session_store() {
+        UserSessionRevoker revoker = userId -> { };
+
+        var deletion = new MemberCleanupConfiguration(false)
+                .userDeletion(jdbc, manager, mock(ContactMemberCleanup.class), sessions(revoker));
+
+        assertThat(ReflectionTestUtils.getField(deletion, "sessions")).isSameAs(revoker);
+    }
+
+    private static ObjectProvider<UserSessionRevoker> sessions(UserSessionRevoker revoker) {
+        var factory = new DefaultListableBeanFactory();
+        if (revoker != null) {
+            factory.registerSingleton("sessionRevoker", revoker);
+        }
+        return factory.getBeanProvider(UserSessionRevoker.class);
     }
 }

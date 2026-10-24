@@ -1,6 +1,7 @@
 package com.pawbridge.backend.user.internal.passwordreset.infrastructure;
 
 import com.pawbridge.backend.user.internal.passwordreset.application.PasswordResetAccounts;
+import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -28,14 +29,20 @@ public final class JdbcPasswordResetAccounts implements PasswordResetAccounts {
 
     private final JdbcOperations jdbc;
     private final Supplier<LocalDateTime> modifiedAt;
+    private final UserSessionRevoker sessions;
 
     public JdbcPasswordResetAccounts(JdbcOperations jdbc) {
         this(jdbc, LocalDateTime::now);
     }
 
     public JdbcPasswordResetAccounts(JdbcOperations jdbc, Supplier<LocalDateTime> modifiedAt) {
+        this(jdbc, modifiedAt, UserSessionRevoker.NONE);
+    }
+
+    public JdbcPasswordResetAccounts(JdbcOperations jdbc, Supplier<LocalDateTime> modifiedAt, UserSessionRevoker sessions) {
         this.jdbc = jdbc;
         this.modifiedAt = modifiedAt;
+        this.sessions = sessions;
     }
 
     @Override
@@ -54,6 +61,8 @@ public final class JdbcPasswordResetAccounts implements PasswordResetAccounts {
         if (changed != 1) {
             throw new IllegalStateException("Password reset affected an unexpected number of rows");
         }
+        // Same transaction as the password write: a leaked refresh cookie stops working with the old password.
+        sessions.revokeAll(userId);
     }
 
     private PreparedStatement prepareUpdate(Connection connection, long userId, String encodedPassword,

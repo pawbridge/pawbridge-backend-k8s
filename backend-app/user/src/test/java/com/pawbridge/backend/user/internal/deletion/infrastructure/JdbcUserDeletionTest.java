@@ -42,6 +42,23 @@ class JdbcUserDeletionTest {
         f.returned();
     }
 
+    @Test
+    void givenAuthSessions__whenDeletionStarts__thenRevokeEverySessionInThePendingMarkerTransaction() {
+        var f = new Fixture();
+        var tx = new TransactionTemplate(f.manager);
+        tx.setTimeout(15);
+        var deletion = new JdbcUserDeletion(f.jdbc, tx, id -> f.events.add("community"), userId -> {
+            assertTrue(f.manager.active);
+            f.events.add("revoke-" + userId);
+        });
+
+        deletion.delete(7);
+
+        assertEquals(List.of("begin", "lock", "pending", "revoke-7", "commit", "cleanup", "community",
+                "begin", "favorites", "refresh_tokens", "shelter_applications", "lookup", "users", "commit", "cleanup"), f.events);
+        f.returned();
+    }
+
     @ParameterizedTest
     @ValueSource(longs = {-1, 0, 7})
     void givenAbsentIdIncludingNonpositiveId__whenDeleting__thenQueryTheOriginalIdAndFailMissingWithoutCommunityOrPending(long id) {

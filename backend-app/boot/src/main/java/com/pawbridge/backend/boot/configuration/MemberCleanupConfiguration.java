@@ -13,6 +13,7 @@ import com.pawbridge.backend.user.internal.deletion.application.UserDeletion;
 import com.pawbridge.backend.user.internal.deletion.infrastructure.JdbcUserDeletion;
 import com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionController;
 import com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionExceptionHandler;
+import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -57,12 +58,15 @@ public class MemberCleanupConfiguration {
         return new CleanupContactMember(members, store);
     }
 
+    /** Starting a deletion revokes the member's refresh sessions together with the pending marker. */
     @Bean
     UserDeletion userDeletion(@Qualifier("writeJdbc") JdbcTemplate jdbc,
-            @Qualifier("writeTransactionManager") JdbcTransactionManager manager, ContactMemberCleanup cleanup) {
+            @Qualifier("writeTransactionManager") JdbcTransactionManager manager, ContactMemberCleanup cleanup,
+            ObjectProvider<UserSessionRevoker> sessions) {
         var transaction = new TransactionTemplate(manager);
         transaction.setTimeout(15);
-        return new JdbcUserDeletion(jdbc, transaction, cleanup::remove);
+        UserSessionRevoker revoker = sessions.getIfAvailable(() -> UserSessionRevoker.NONE);
+        return new JdbcUserDeletion(jdbc, transaction, cleanup::remove, revoker);
     }
 
     @Bean
