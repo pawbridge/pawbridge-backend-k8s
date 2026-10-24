@@ -161,6 +161,14 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
                     rejectArchitecture("${module.path} production compiler sourcepath must stay inside the module")
                 }
             }
+            // Kotlin compiles the same main source set first. Its task type is not referenced here
+            // because TestKit fixtures apply this guard without the Kotlin Gradle plugin.
+            def compileKotlin = module.tasks.findByName(main.getCompileTaskName('kotlin'))
+            compileKotlin?.sources?.files?.each { source ->
+                if (!source.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    rejectArchitecture("${module.path} production compiler sources must stay inside the module")
+                }
+            }
             def processResources = module.tasks.named(main.processResourcesTaskName).get()
             processResources.source.files.each { resource ->
                 if (!resource.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
@@ -169,7 +177,8 @@ def verifyArchitecture = tasks.register('verifyArchitecture') {
             }
             def productionClasspaths = [main.compileClasspath, main.runtimeClasspath,
                                         compileJava.classpath, compileJava.options.annotationProcessorPath,
-                                        module.configurations.getByName(main.annotationProcessorConfigurationName)]
+                                        module.configurations.getByName(main.annotationProcessorConfigurationName),
+                                        compileKotlin?.libraries]
                                         .findAll { it != null }
             productionClasspaths.each { classpath ->
                 classpath.files.each { artifact ->
@@ -258,6 +267,17 @@ def isPureJdkType = { String name ->
         jdkTypeCache[name] = allowed
     }
     jdkTypeCache[name]
+}
+
+// The Kotlin standard library and its nullability annotations are the language runtime that
+// kotlinc references from every class, as javac does java.lang. kotlinx.* libraries
+// (coroutines, serialization) stay ordinary external technology.
+def isLanguageRuntimeType = { String name ->
+    def normalized = name
+    while (normalized.endsWith('[]')) {
+        normalized = normalized.substring(0, normalized.length() - 2)
+    }
+    isPureJdkType(name) || normalized.startsWith('kotlin.') || normalized.startsWith('org.jetbrains.annotations.')
 }
 
 def verifyBusinessPackages = tasks.register('verifyBusinessPackages') {
@@ -356,13 +376,13 @@ def verifyBusinessPackages = tasks.register('verifyBusinessPackages') {
                     // itself an API (or JDK) type, so inherited API contracts are checked too.
                     def allowedApi = target != null && target.boundary == 'api' &&
                         (target.module == origin.module || allowedDependencies[origin.module].contains(target.module))
-                    if (!allowedApi && !isPureJdkType(targetName)) {
+                    if (!allowedApi && !isLanguageRuntimeType(targetName)) {
                         reject('API_SIGNATURE', detail)
                     }
                 }
                 if (origin.role == 'domain') {
                     def ownDomain = target != null && target.module == origin.module && target.role == 'domain'
-                    if (!ownDomain && !isPureJdkType(targetName)) {
+                    if (!ownDomain && !isLanguageRuntimeType(targetName)) {
                         reject('DOMAIN_JDK_ONLY', detail)
                     }
                 }
@@ -405,6 +425,10 @@ tasks.named('check') {
 subprojects {
     plugins.withId('java') {
         tasks.withType(JavaCompile).configureEach {
+            dependsOn verifyArchitecture
+        }
+        // Lazy name match: Kotlin compile tasks exist only where the Kotlin plugin is applied.
+        tasks.named { it ==~ /compile\w*Kotlin/ }.configureEach {
             dependsOn verifyArchitecture
         }
         tasks.withType(ProcessResources).configureEach {

@@ -295,7 +295,14 @@ CI는 원래 두 열 User fixture의 F3~F11 PG/XML/JAR 회귀를 모두 끝낸 �
 - api에는 JDK/허용 api만 노출하며 타 업무 internal 접근과 내부 타입 signature 누출을 거부한다.
 - domain은 자기 domain과 기술을 제외한 JDK만 허용한다. application은 web/infrastructure/JPA/JDBC/HTTP/Feign/TransactionTemplate을 참조하지 않는다. Spring 선언 예외는 Transactional/Propagation/Isolation뿐이다.
 - application 검사는 명시 기술 blacklist이며 임의 외부 라이브러리의 모든 의미를 판정하는 샌드박스는 아니다. 리플렉션·업무 책임도 코드 리뷰한다.
-- ArchUnit은 빌드 도구이며 앱 runtime에 포함하지 않는다. Kotlin 도입 시 별도 compiled fixture로 언어 runtime 경계를 검증한다.
+- ArchUnit은 빌드 도구이며 앱 runtime에 포함하지 않는다.
+- Kotlin 표준 라이브러리(`kotlin.*`)와 `org.jetbrains.annotations.*`는 kotlinc가 모든 class에 넣는 언어 runtime이라 api·domain에서도 JDK처럼 허용한다. `kotlinx.*`(coroutines·serialization 등)는 일반 외부 기술로 남는다. TestKit의 compiled marker fixture가 두 경계를 검증한다.
+
+### Kotlin 혼합 빌드
+
+- 루트 `build.gradle`이 모든 모듈에 Kotlin 1.9.25(Spring Boot 3.4.11 BOM의 `kotlin.version`), kotlin-spring(all-open), kotlin-jpa(no-arg)를 적용한다. JPA `@Entity`·`@MappedSuperclass`·`@Embeddable`도 all-open으로 Java처럼 non-final이다. JVM 대상은 21이고 `-Xjsr305=strict`를 쓴다. `kotlin-reflect`와 `jackson-module-kotlin`은 모든 모듈의 `implementation`에 있다.
+- 모듈 `build.gradle`에는 Kotlin plugin을 쓰지 않는다. 구조 TestKit fixture가 실제 모듈 스크립트를 Kotlin plugin 없는 루트에 복사해 적용하기 때문이다.
+- `.kt`는 `src/main/kotlin` 또는 `src/main/java`에 둘 수 있다. Kotlin이 먼저 컴파일되고 Java가 그 class를 본다. 같은 모듈의 Java Lombok 생성 멤버는 Kotlin에서 보이지 않으므로 Lombok class는 함께 Kotlin으로 옮기거나 일반 Java 접근자로 바꾼다.
 
 ## GitHub-hosted 검증과 oracle
 
