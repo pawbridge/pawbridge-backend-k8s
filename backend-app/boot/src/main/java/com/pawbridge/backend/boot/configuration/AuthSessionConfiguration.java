@@ -11,13 +11,19 @@ import com.pawbridge.backend.user.internal.session.web.AuthSessionController;
 import com.pawbridge.backend.user.internal.session.web.AuthSessionExceptionHandler;
 import java.util.Arrays;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.JdbcTransactionManager;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Configuration(proxyBeanMethods=false)
@@ -74,5 +80,62 @@ public class AuthSessionConfiguration {
                 .filter(origin -> !origin.isEmpty())
                 .filter(origin -> !origin.contains("*"))
                 .toList();
+    }
+
+    /** Runs with the other retention jobs: only when pawbridge.jobs.cleanup-enabled=true. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(prefix = "pawbridge.jobs", name = "cleanup-enabled", havingValue = "true", matchIfMissing = false)
+    @EnableScheduling
+    static class AuthSessionCleanupConfiguration {
+        private static final Logger log = LoggerFactory.getLogger(AuthSessionCleanupConfiguration.class);
+
+        @Bean
+        @DependsOn("writeDataSource")
+        ThreadPoolTaskScheduler authSessionCleanupScheduler() {
+            var scheduler = new ThreadPoolTaskScheduler();
+            scheduler.setPoolSize(1);
+            scheduler.setThreadNamePrefix("auth-session-cleanup-");
+            scheduler.setAcceptTasksAfterContextClose(false);
+            scheduler.setWaitForTasksToCompleteOnShutdown(false);
+            scheduler.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
+            scheduler.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+            scheduler.setRemoveOnCancelPolicy(true);
+            scheduler.setAwaitTerminationSeconds(5);
+            scheduler.setErrorHandler(failure ->
+                    log.warn("Auth session cleanup failed ({})", failure.getClass().getSimpleName()));
+            return scheduler;
+        }
+
+        @Bean
+        AuthSessionCleanupJob authSessionCleanupJob(JdbcAuthSessionStore store,
+                @Qualifier("writeTransactionManager") JdbcTransactionManager manager) {
+            var transaction = new TransactionTemplate(manager);
+            transaction.setTimeout(15);
+            return new AuthSessionCleanupJob(store, transaction);
+        }
+    }
+
+    public static final class AuthSessionCleanupJob {
+        static final int BATCH_SIZE = 1000;
+        static final int MAX_BATCHES_PER_RUN = 50;
+
+        private final JdbcAuthSessionStore store;
+        private final TransactionTemplate transaction;
+
+        public AuthSessionCleanupJob(JdbcAuthSessionStore store, TransactionTemplate transaction) {
+            this.store = store;
+            this.transaction = transaction;
+        }
+
+        /** Small batches in separate transactions keep each delete short; leftovers wait for the next run. */
+        @Scheduled(scheduler = "authSessionCleanupScheduler", initialDelay = 600000, fixedDelay = 3600000)
+        public void deleteFinishedSessions() {
+            for (int batch = 0; batch < MAX_BATCHES_PER_RUN; batch++) {
+                Integer deleted = transaction.execute(status -> store.deleteFinished(BATCH_SIZE));
+                if (deleted == null || deleted < BATCH_SIZE) {
+                    return;
+                }
+            }
+        }
     }
 }

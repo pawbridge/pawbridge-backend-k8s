@@ -55,6 +55,7 @@ class AuthSessionConfigurationTest {
                     assertThat(policy.reuseGrace()).isEqualTo(Duration.ofSeconds(60));
                     var store = context.getBean(JdbcAuthSessionStore.class);
                     assertThat(ReflectionTestUtils.getField(store, "jdbc")).isSameAs(context.getBean("writeJdbc"));
+                    assertThat(context.getBeansOfType(AuthSessionConfiguration.AuthSessionCleanupJob.class)).isEmpty();
                 });
     }
 
@@ -75,6 +76,35 @@ class AuthSessionConfigurationTest {
                     assertThat((java.util.Set<Object>) ReflectionTestUtils.getField(controller, "allowedOrigins"))
                             .containsExactlyInAnyOrder("https://www.pawbridge.kr", "https://pawbridge.kr");
                 });
+    }
+
+    @Test
+    void given__cleanup_jobs_enabled__when__assembling__then__register_the_session_cleanup_job_on_its_own_scheduler() {
+        inputs().withPropertyValues("pawbridge.auth.sessions-enabled=true", "jwt.access-token-expiration=600000",
+                        "jwt.refresh-token-expiration=1209600000", "pawbridge.jobs.cleanup-enabled=true")
+                .withInitializer(context -> context.getBeanFactory().registerSingleton("writeDataSource", mock(javax.sql.DataSource.class)))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    var job = context.getBean(AuthSessionConfiguration.AuthSessionCleanupJob.class);
+                    assertThat(ReflectionTestUtils.getField(job, "store")).isSameAs(context.getBean(JdbcAuthSessionStore.class));
+                    var scheduled = AuthSessionConfiguration.AuthSessionCleanupJob.class
+                            .getMethod("deleteFinishedSessions").getAnnotation(org.springframework.scheduling.annotation.Scheduled.class);
+                    assertThat(scheduled.scheduler()).isEqualTo("authSessionCleanupScheduler");
+                    assertThat(context.getBean("authSessionCleanupScheduler")).isNotNull();
+                });
+    }
+
+    @Test
+    void given__a_full_batch_then_a_partial_one__when__cleaning__then__stop_after_the_partial_batch() {
+        var store = mock(JdbcAuthSessionStore.class);
+        when(store.deleteFinished(1000)).thenReturn(1000, 3);
+        var manager = mock(org.springframework.transaction.PlatformTransactionManager.class);
+        when(manager.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+
+        new AuthSessionConfiguration.AuthSessionCleanupJob(store, new TransactionTemplate(manager)).deleteFinishedSessions();
+
+        verify(store, times(2)).deleteFinished(1000);
+        verify(manager, times(2)).commit(any());
     }
 
     private ApplicationContextRunner inputs(){return inputs(F3TestInputs.settings());}
