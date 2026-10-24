@@ -340,7 +340,9 @@ public class ReadSecurityConfiguration {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .securityContext(context -> context.securityContextRepository(streamContexts).requireExplicitSave(true))
                 .authorizeHttpRequests(requests -> requests
-                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        // When an async stream fails after its response was committed, Tomcat renders the error page
+                        // by INCLUDE instead of ERROR. Clients cannot create either dispatch; both only render /error.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.INCLUDE).permitAll()
                         .requestMatchers(health, healthProbe).permitAll()
                         .requestMatchers(storeOrderAdministrationRoutes, catalogManagementWriting).hasRole("ADMIN")
                         .requestMatchers(chatbotMessages, galleryFeedRoutes, animalTravelReading, animalLostSearchRoute, animalDiscoveryReading, animalExtraDiscoveryReading, animalRecommendationReading, animalShelterReading, animalShelterDiscoveryReading, publicAnimalStatistics, storeCatalog).permitAll()
