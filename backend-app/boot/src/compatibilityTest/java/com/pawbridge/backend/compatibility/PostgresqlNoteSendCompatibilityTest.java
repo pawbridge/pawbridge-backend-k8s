@@ -657,7 +657,7 @@ class PostgresqlNoteSendCompatibilityTest {
  void givenUserLoadedBeforeAnIndependentOwnedDelete__whenBothAttemptTheFinalDelete__thenReturn500AndRollbackWhilePreservingTheAlreadyCommittedCommunityCleanup()throws Exception{
   for(boolean source:new boolean[]{true,false})try(var round=new MemberCleanupRound(source,true)){
    // Valid child-free users must not acquire FK locks before deleteById/findById and hide the race.
-   execute("BEGIN; DELETE FROM pawbridge_user.favorites WHERE user_id="+CALLER+"; DELETE FROM pawbridge_user.refresh_tokens WHERE user_id="+CALLER+"; DELETE FROM pawbridge_user.shelter_applications WHERE user_id="+CALLER+"; COMMIT;");
+   execute("BEGIN; DELETE FROM pawbridge_user.favorites WHERE user_id="+CALLER+"; DELETE FROM pawbridge_user.shelter_applications WHERE user_id="+CALLER+"; COMMIT;");
    String before=memberSnapshot();var externalDeletes=new AtomicInteger();var completion=new AtomicInteger(-1);
    Runnable disappear=()->{
     assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();
@@ -668,7 +668,7 @@ class PostgresqlNoteSendCompatibilityTest {
     });
     try{
      requireMemberIdentity();
-     for(String table:List.of("favorites","refresh_tokens","shelter_applications"))assertThat(scalar("SELECT count(*) FROM pawbridge_user."+table+" WHERE user_id="+CALLER)).isZero();
+     for(String table:List.of("favorites","shelter_applications"))assertThat(scalar("SELECT count(*) FROM pawbridge_user."+table+" WHERE user_id="+CALLER)).isZero();
      try(Connection outside=admin()){
       outside.setAutoCommit(false);
       try{
@@ -824,7 +824,6 @@ class PostgresqlNoteSendCompatibilityTest {
   for(long id:NAMESPACE){sql.append("INSERT INTO pawbridge_user.users(user_id,email,name,nickname,provider,role) VALUES(").append(id).append(",'member-cleanup-").append(id).append("@fixture.invalid','Cleanup fixture','Cleanup").append(id).append("','GOOGLE','ROLE_USER');");sql.append("INSERT INTO pawbridge_community.private_note_members(member_id) VALUES(").append(id).append(");");}
   for(long id:List.of(CALLER,TARGET)){
    sql.append("INSERT INTO pawbridge_user.favorites(favorite_id,user_id,animal_id,created_at) VALUES(").append(id).append(',').append(id).append(",1,'2032-02-29 15:00:00.123456');");
-   sql.append("INSERT INTO pawbridge_user.refresh_tokens(refresh_token_id,user_id,token,created_at,expires_at) VALUES(").append(id).append(',').append(id).append(",'member-cleanup-").append(id).append("','2032-02-29 15:00:00.123456','2033-02-28 15:00:00.123456');");
    sql.append("INSERT INTO pawbridge_user.shelter_applications(id,user_id,shelter_name,status,requested_at) VALUES(").append(id).append(',').append(id).append(",'Synthetic','PENDING','2032-02-29 15:00:00.123456');");
   }
   if(priorPending)sql.append("INSERT INTO pawbridge_user.contact_deletions(user_id,started_at) VALUES(").append(CALLER).append(",'2032-02-29T15:00:00.123456Z');");
@@ -860,7 +859,7 @@ class PostgresqlNoteSendCompatibilityTest {
   memberRemove(expected,"chat_members",r->r.get("member_id").asText().equals(caller));memberRemove(expected,"chat_requests",r->r.get("sender_id").asText().equals(caller));
   memberRemove(expected,"chat_messages",r->r.get("room_id").asText().equals(lastRoom));for(var row:expected.get("chat_messages")){var r=(ObjectNode)row;if(r.path("sender_id").asText().equals(caller))r.putNull("sender_id");}
   memberRemove(expected,"chat_rooms",r->r.get("room_id").asText().equals(lastRoom));for(var row:expected.get("chat_rooms")){var r=(ObjectNode)row;for(String field:List.of("first_member_id","second_member_id"))if(r.path(field).asText().equals(caller))r.putNull(field);}
-  if(finalUser){for(String table:List.of("users","favorites","refresh_tokens","shelter_applications","pending"))memberRemove(expected,table,r->r.get("user_id").asText().equals(caller));}
+  if(finalUser){for(String table:List.of("users","favorites","shelter_applications","pending"))memberRemove(expected,table,r->r.get("user_id").asText().equals(caller));}
   assertThat(json(memberSnapshot()).equals(expected)).as("Exact fixed24-table deletion delta; counterpart/private data is not rendered").isTrue();
  }
  private void memberRemove(ObjectNode state,String key,java.util.function.Predicate<JsonNode> predicate){var out=new ObjectMapper().createArrayNode();for(var row:state.get(key))if(!predicate.test(row))out.add(row);state.set(key,out);}

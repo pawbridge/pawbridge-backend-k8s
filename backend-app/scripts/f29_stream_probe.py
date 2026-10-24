@@ -538,7 +538,8 @@ def member_expected(ci, owned, phase):
         for r in expected['chat_rooms']:
             if r['room_id'] == MEMBER_ROOM: r['first_member_id'] = None
     if phase == 'final':
-        for name in ('users', 'favorites', 'refresh_tokens', 'shelter_applications', 'contact_deletions'):
+        # Member deletion no longer touches the legacy refresh_tokens row; the owned cleanup removes it.
+        for name in ('users', 'favorites', 'shelter_applications', 'contact_deletions'):
             expected[name] = [r for r in expected[name] if r['user_id'] != CALLER]
     return member_ordered(ci, expected)
 

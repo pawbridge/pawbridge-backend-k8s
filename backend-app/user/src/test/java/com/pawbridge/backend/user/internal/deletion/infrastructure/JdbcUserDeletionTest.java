@@ -33,12 +33,12 @@ class JdbcUserDeletionTest {
         f.deletion.delete(7);
 
         assertEquals(List.of("begin", "lock", "pending", "commit", "cleanup", "community",
-                "begin", "favorites", "refresh_tokens", "shelter_applications", "lookup", "users", "commit", "cleanup"), f.events);
+                "begin", "favorites", "shelter_applications", "lookup", "users", "commit", "cleanup"), f.events);
         assertEquals(2, f.manager.commits);
         assertEquals(0, f.manager.rollbacks);
         assertFalse(f.state.user);
         assertFalse(f.state.pending);
-        assertFalse(f.state.favorites || f.state.tokens || f.state.applications);
+        assertFalse(f.state.favorites || f.state.applications);
         f.returned();
     }
 
@@ -55,7 +55,7 @@ class JdbcUserDeletionTest {
         deletion.delete(7);
 
         assertEquals(List.of("begin", "lock", "pending", "revoke-7", "commit", "cleanup", "community",
-                "begin", "favorites", "refresh_tokens", "shelter_applications", "lookup", "users", "commit", "cleanup"), f.events);
+                "begin", "favorites", "shelter_applications", "lookup", "users", "commit", "cleanup"), f.events);
         f.returned();
     }
 
@@ -84,7 +84,7 @@ class JdbcUserDeletionTest {
         assertEquals("쪽지 정리가 완료되지 않았습니다. 회원 삭제를 다시 시도해 주세요.", failure.getMessage());
         assertNull(failure.getCause());
         assertEquals(List.of("begin", "lock", "pending", "commit", "cleanup", "community"), f.events);
-        assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.tokens && f.state.applications);
+        assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.applications);
         assertEquals(1, f.manager.commits);
         f.returned();
         f.communityFails = false;
@@ -97,7 +97,7 @@ class JdbcUserDeletionTest {
         assertFalse(f.state.user);
         assertFalse(f.state.pending);
         assertEquals(List.of("begin", "lock", "pending", "commit", "cleanup", "community",
-                "begin", "favorites", "refresh_tokens", "shelter_applications", "lookup", "users", "commit", "cleanup"), f.events);
+                "begin", "favorites", "shelter_applications", "lookup", "users", "commit", "cleanup"), f.events);
         f.returned();
     }
 
@@ -127,7 +127,7 @@ class JdbcUserDeletionTest {
 
         assertEquals(1, f.manager.commits);
         assertEquals(1, f.manager.rollbacks);
-        assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.tokens && f.state.applications);
+        assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.applications);
         var deletes = Arrays.stream(FinalDelete.values()).limit(phase.ordinal() + 1).map(v -> v.table).toList();
         assertEquals(deletes, f.events.subList(7, f.events.size() - 2).stream().filter(v -> !v.equals("lookup")).toList());
         assertEquals(phase == FinalDelete.USER, f.events.contains("lookup"));
@@ -150,7 +150,7 @@ class JdbcUserDeletionTest {
         f.deletion.delete(7);
 
         assertEquals(List.of("begin", "lock", "pending", "commit", "cleanup", "community",
-                "begin", "favorites", "refresh_tokens", "shelter_applications", "lookup", "commit", "cleanup"), f.events);
+                "begin", "favorites", "shelter_applications", "lookup", "commit", "cleanup"), f.events);
         assertEquals(2, f.manager.commits);
         assertEquals(0, f.manager.rollbacks);
         f.returned();
@@ -165,22 +165,22 @@ class JdbcUserDeletionTest {
 
         assertEquals(1, f.manager.commits);
         assertEquals(1, f.manager.rollbacks);
-        assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.tokens && f.state.applications);
+        assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.applications);
         assertEquals(List.of("begin", "lock", "pending", "commit", "cleanup", "community",
-                "begin", "favorites", "refresh_tokens", "shelter_applications", "lookup", "users", "rollback", "cleanup"), f.events);
+                "begin", "favorites", "shelter_applications", "lookup", "users", "rollback", "cleanup"), f.events);
         f.returned();
     }
 
     private enum FinalDelete {
-        FAVORITES("favorites"), TOKENS("refresh_tokens"), APPLICATIONS("shelter_applications"), USER("users");
+        FAVORITES("favorites"), APPLICATIONS("shelter_applications"), USER("users");
         final String table;
         FinalDelete(String table) { this.table = table; }
     }
 
     private static final class State {
-        boolean user = true, pending, favorites = true, tokens = true, applications = true;
-        boolean[] values() { return new boolean[]{user, pending, favorites, tokens, applications}; }
-        void restore(boolean[] v) { user = v[0]; pending = v[1]; favorites = v[2]; tokens = v[3]; applications = v[4]; }
+        boolean user = true, pending, favorites = true, applications = true;
+        boolean[] values() { return new boolean[]{user, pending, favorites, applications}; }
+        void restore(boolean[] v) { user = v[0]; pending = v[1]; favorites = v[2]; applications = v[3]; }
     }
 
     private static final class Fixture {
@@ -253,7 +253,6 @@ class JdbcUserDeletionTest {
             if (phase == FinalDelete.USER && finalDeleteCount != 1) return finalDeleteCount;
             switch (phase) {
                 case FAVORITES -> f.state.favorites = false;
-                case TOKENS -> f.state.tokens = false;
                 case APPLICATIONS -> f.state.applications = false;
                 case USER -> { f.state.user = false; f.state.pending = false; }
             }
