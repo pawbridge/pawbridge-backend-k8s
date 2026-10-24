@@ -325,6 +325,7 @@ jobs:
             .github/scripts/backend_contract_profile.py
             .github/scripts/ci_branch_policy.py
             user-service/src/migration/resources/db/postgresql/V4__auth_sessions.sql
+            user-service/src/migration/resources/db/postgresql/V5__drop_refresh_tokens.sql
           sparse-checkout-cone-mode: false
 
       - name: Require the immutable F21 original-source Git object
