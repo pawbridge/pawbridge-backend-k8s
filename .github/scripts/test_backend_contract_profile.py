@@ -4,9 +4,12 @@ import copy
 import contextlib
 import io
 import json
+from pathlib import Path
+import tempfile
 import types
 import unittest
 from unittest.mock import Mock, patch
+import xml.etree.ElementTree as ET
 
 import backend_contract_profile as profile
 
@@ -28,7 +31,7 @@ def steps(mode):
                     'conclusion': 'success' if key in required else 'skipped'}
               for key in profile.ALL_SMOKES}
     if mode == profile.FULL:
-        for key in profile.POST_READS_FULL_CONTRACTS + profile.POST_STATISTICS_FULL_CONTRACTS + profile.AUTH_FULL_CONTRACTS + profile.VISIT_FULL_CONTRACTS:
+        for key in profile.FULL_CONTRACTS:
             result[key] = {'outcome': 'success', 'conclusion': 'success'}
     result['owned_cleanup'] = {'outcome': 'success', 'conclusion': 'success'}
     return result
@@ -113,7 +116,7 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual('passed', result['status'])
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
-                self.assertEqual(29 + (10 if mode == profile.FULL else 0), len(result['step_results']))
+                self.assertEqual(29 + (3 if mode == profile.FULL else 0), len(result['step_results']))
 
     def test_given_other_source_base_head_tree_run_or_jar__when_auditing__then_reject_stale_evidence(self):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
@@ -215,13 +218,6 @@ class ContractProfileTest(unittest.TestCase):
                          changed_paths=Mock(return_value=list(reversed(PATHS))),
                          git=Mock(return_value=(ctx['tree_sha'] + '\n').encode()))
                 with patch.dict('sys.modules', {'ci_branch_policy': common}), \
-                        patch.object(profile, 'verify_note_expiry_inputs', return_value=False), \
-                        patch.object(profile, 'verify_member_management_inputs', return_value=False), \
-                        patch.object(profile, 'verify_signup_statistics_inputs', return_value=False), \
-                        patch.object(profile, 'verify_auth_sessions_inputs', return_value=False), \
-                    patch.object(profile, 'verify_post_statistics_inputs', return_value=False), patch.object(profile, 'verify_post_reads_inputs', return_value=False), \
-                        patch.object(profile, 'verify_visit_collection_inputs', return_value=False), \
-                        patch.object(profile, 'verify_admin_member_update_inputs', return_value=False), \
                         patch.dict(profile.os.environ, env, clear=True), \
                         patch.object(profile.Path, 'read_text', return_value=json.dumps(payload)):
                     actual, paths = profile.runtime_context()
@@ -231,13 +227,7 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual(ctx['source_sha'], actual['source_sha'])
                 self.assertEqual(ctx['head_sha'] if event == 'pull_request' else ctx['source_sha'], actual['head_sha'])
                 self.assertEqual(PATHS, paths)
-                self.assertEqual(set(profile.IDENTITY_KEYS) | {'note_expiry_scope_verified', 'member_management_scope_verified', 'signup_statistics_scope_verified', 'admin_member_update_scope_verified', 'visit_collection_scope_verified', 'auth_sessions_scope_verified', 'post_statistics_scope_verified', 'post_reads_scope_verified'}, set(actual))
-                self.assertIs(False, actual['note_expiry_scope_verified'])
-                self.assertIs(False, actual['member_management_scope_verified'])
-                self.assertIs(False, actual['signup_statistics_scope_verified'])
-                self.assertIs(False, actual['admin_member_update_scope_verified'])
-                self.assertIs(False, actual['visit_collection_scope_verified'])
-                self.assertIs(False, actual['auth_sessions_scope_verified'])
+                self.assertEqual(set(profile.IDENTITY_KEYS), set(actual))
 
     def test_given_payload_base_differs_from_common_policy_input__when_loading__then_refuse_context(self):
         payload = {'pull_request': {'base': {'sha': profile.PILOT_BASE}}}
@@ -268,6 +258,101 @@ class ContractProfileTest(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertEqual('Contract profile verification failed.\n', stderr.getvalue())
         self.assertEqual('failed', write.call_args.args[2]['status'])
+
+
+class AuthSessionReportTest(unittest.TestCase):
+    """The only remaining PostgreSQL compatibility report: refresh/logout sessions."""
+
+    def reports(self, root):
+        paths = []
+        for sub, names in (('utc', profile.AUTH_REPORT_CASES), ('seoul', (profile.AUTH_SEOUL_METHOD + '()',))):
+            folder = root / sub
+            folder.mkdir()
+            suite = ET.Element('testsuite', name=profile.AUTH_REPORT_CLASS, tests=str(len(names)),
+                               failures='0', errors='0', skipped='0')
+            for name in names:
+                ET.SubElement(suite, 'testcase', name=name, classname=profile.AUTH_REPORT_CLASS)
+            path = folder / ('TEST-' + profile.AUTH_REPORT_CLASS + '.xml')
+            ET.ElementTree(suite).write(path)
+            paths.append(path)
+        return paths
+
+    def test_given_all_auth_methods_and_only_one_seoul_case__when_verifying__then_require_the_exact_invocations(self):
+        self.assertEqual((1, 4, 1, 1, 1, 1, 3, 4, 1), tuple(count for _, count in profile.AUTH_METHOD_CASES))
+        self.assertEqual(9, len(profile.AUTH_METHOD_CASES))
+        self.assertEqual(17, len(set(profile.AUTH_REPORT_CASES)))
+        self.assertEqual(profile.AUTH_METHOD_CASES[0][0], profile.AUTH_SEOUL_METHOD)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            self.reports(root)
+            profile.verify_auth_sessions_report(root / 'utc', root / 'seoul')
+
+    def test_given_missing_wrong_nested_disabled_or_unsuccessful_reports__when_verifying__then_refuse_before_claiming_pg_success(self):
+        defects = ('missing', 'extra-file', 'file-name', 'wrong-root', 'wrong-class', 'wrong-count',
+                   'wrong-label', 'duplicate-label', 'nested-case', 'failure-attr', 'missing-failure-attr',
+                   'error-child', 'skipped-child', 'disabled-attr', 'disabled-child', 'bad-status',
+                   'bad-result', 'malformed', 'file-link', 'directory-link', 'seoul-extra')
+        rewritten_elsewhere = ('missing', 'file-name', 'malformed', 'file-link', 'directory-link', 'seoul-extra')
+        for defect in defects:
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                path, seoul = self.reports(root)
+                tree = ET.parse(path)
+                suite = tree.getroot()
+                if defect == 'missing':
+                    path.unlink()
+                elif defect == 'extra-file':
+                    path.with_name('TEST-extra.xml').write_bytes(path.read_bytes())
+                elif defect == 'file-name':
+                    path.rename(path.with_name('TEST-wrong.xml'))
+                elif defect == 'wrong-root':
+                    suite.tag = 'testsuites'
+                elif defect == 'wrong-class':
+                    suite[0].set('classname', 'Other')
+                elif defect == 'wrong-count':
+                    suite.set('tests', '7')
+                elif defect == 'wrong-label':
+                    suite[0].set('name', 'unknown()')
+                elif defect == 'duplicate-label':
+                    suite[1].set('name', suite[0].get('name'))
+                elif defect == 'nested-case':
+                    case = suite[0]
+                    suite.remove(case)
+                    ET.SubElement(suite, 'wrapper').append(case)
+                elif defect == 'failure-attr':
+                    suite.set('failures', '1')
+                elif defect == 'missing-failure-attr':
+                    del suite.attrib['failures']
+                elif defect == 'error-child':
+                    ET.SubElement(suite[0], 'error')
+                elif defect == 'skipped-child':
+                    ET.SubElement(suite[0], 'skipped')
+                elif defect == 'disabled-attr':
+                    suite[0].set('disabled', '1')
+                elif defect == 'disabled-child':
+                    ET.SubElement(suite[0], 'disabled')
+                elif defect == 'bad-status':
+                    suite[0].set('status', 'notrun')
+                elif defect == 'bad-result':
+                    suite[0].set('result', 'ignored')
+                elif defect == 'malformed':
+                    path.write_text('<bad')
+                elif defect == 'file-link':
+                    path.rename(path.with_name('actual.xml'))
+                    path.symlink_to(path.with_name('actual.xml'))
+                elif defect == 'directory-link':
+                    (root / 'utc').rename(root / 'actual')
+                    (root / 'utc').symlink_to(root / 'actual', target_is_directory=True)
+                elif defect == 'seoul-extra':
+                    seoul_tree = ET.parse(seoul)
+                    seoul_tree.getroot().set('tests', '2')
+                    ET.SubElement(seoul_tree.getroot(), 'testcase', name=profile.AUTH_METHOD_CASES[1][0] + '()',
+                                  classname=profile.AUTH_REPORT_CLASS)
+                    seoul_tree.write(seoul)
+                if defect not in rewritten_elsewhere:
+                    tree.write(path)
+                with self.assertRaises(profile.ProfileBlocked):
+                    profile.verify_auth_sessions_report(root / 'utc', root / 'seoul')
 
 
 if __name__ == '__main__':
