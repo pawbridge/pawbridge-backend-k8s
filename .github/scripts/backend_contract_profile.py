@@ -255,23 +255,20 @@ AUTH_SKIPPED_CONTRACTS = ('pg_note_expiry', 'pg_member_cleanup', 'pg_admin_updat
                           'compile_admin_update', 'compile_visit_collection', 'fixture_visit_collection',
                           'fixture_admin_visit_collection', 'pg_visit_collection')
 AUTH_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
-AUTH_METHOD_CASES = (('givenCurrentClaimsAndMicrosecondStoredExpiry__whenRotatingThenReplaying__thenPreserveCreatedAtAndOnlyChangeTheSelectedRefresh',
+AUTH_METHOD_CASES = (('givenCurrentClaimsAndAnActiveSession__whenRotatingThenReplaying__thenRotateOnceAndAnswerOnlyTheConcurrentReplay',
   1),
- ('givenRejectedRefreshInputs__whenCallingTheTransactionalSourceAndCandidate__thenPreservePrecedenceAndNoMutation',
-  4),
- ('givenLogoutSelectionAndAnIndependentLaterInsert__whenDeletingByUser__thenRemoveOnlySelectedRowsWithoutReadingUser',
-  3),
- ('givenAnAlreadyLoadedRefreshDisappearsInAnotherTransaction__whenUpdatingOrDeletingIt__thenBothFailAndRollbackRemainingSelectedRows',
-  2),
- ('givenBothRequestsReadTheSameRefreshBeforeEitherWrites__whenRotatingWithoutVersionOrCas__thenBothMayCommitAndTheLastStoredTokenIsOneReturnedValue',
-  2),
- ('givenExactlyOneRequiredWriterPrivilegeIsRevoked__whenCallingThenRestoring__thenFailServerSideWithoutPartialMutationAndRecover',
-  3),
- ('givenAnOwnedDeferredConstraintRejectsTheRefreshUpdate__whenCommitting__thenBothExposeServerFailureAndRestoreTheEntireSnapshot',
-  2))
-AUTH_REPORT_CASES = (AUTH_METHOD_CASES[0][0] + '()',) + tuple(
-    method + '[' + str(index) + ']' for method,count in AUTH_METHOD_CASES[1:] for index in range(1,count+1))
-AUTH_SEOUL_METHOD = 'givenCurrentClaimsAndMicrosecondStoredExpiry__whenRotatingThenReplaying__thenPreserveCreatedAtAndOnlyChangeTheSelectedRefresh'
+ ('givenInactiveOrUnknownTokens__whenRefreshing__thenRejectWithoutAnyMutation', 4),
+ ('givenAReplacedTokenAfterTheGraceWindow__whenRefreshing__thenRevokeOnlyThatSessionAndKeepTheRevocation', 1),
+ ('givenTwoRequestsWithTheSameToken__whenRotatingConcurrently__thenOneRotatesAndTheOtherReceivesAccessOnly', 1),
+ ('givenSixLoginsOfOneUser__whenCreatingSessions__thenKeepOnlyTheFiveMostRecentlyUsedActive', 1),
+ ('givenLogoutRevokeAllOrCleanup__whenWriting__thenChangeOnlyTheTargetedSessions', 3),
+ ('givenExactlyOneRequiredWriterPrivilegeIsRevoked__whenCalling__thenFailServerSideWithoutPartialMutationAndRecover', 3),
+ ('givenADeletedUser__whenDeletingTheAccountRow__thenItsSessionsCascade', 1))
+# Single-case methods are reported as name(), parameterized ones as name[index].
+AUTH_REPORT_CASES = tuple(
+    method + '()' if count == 1 else method + '[' + str(index) + ']'
+    for method, count in AUTH_METHOD_CASES for index in range(1, count + 1))
+AUTH_SEOUL_METHOD = 'givenCurrentClaimsAndAnActiveSession__whenRotatingThenReplaying__thenRotateOnceAndAnswerOnlyTheConcurrentReplay'
 
 POST_STATISTICS = 'admin-post-statistics'
 # Future Auth feature head is not fixed; root replaces this and the matching new test BASE before publication.
@@ -1501,7 +1498,7 @@ def verify_visit_collection_report(utc_directory, seoul_directory):
 
 
 def verify_auth_sessions_report(utc_directory, seoul_directory):
-    """Require all seventeen method/index labels and only the designated Seoul boundary case."""
+    """Require every auth session method/index label and only the designated Seoul case."""
     for folder, expected in ((utc_directory, AUTH_REPORT_CASES),
                              (seoul_directory, (AUTH_SEOUL_METHOD + '()',))):
         try:

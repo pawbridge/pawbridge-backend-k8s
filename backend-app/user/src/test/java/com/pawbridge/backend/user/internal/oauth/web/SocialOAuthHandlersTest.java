@@ -8,7 +8,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.pawbridge.backend.user.internal.oauth.application.SocialLogin;
 import com.pawbridge.backend.user.internal.oauth.infrastructure.SocialOAuthPrincipal;
-import com.pawbridge.backend.user.internal.session.application.AuthSessions;
+import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Map;
@@ -24,20 +24,50 @@ import org.springframework.security.oauth2.core.*;
 class SocialOAuthHandlersTest {
     private static final String FRONT="https://fixture.invalid/oauth/callback";
     private static final String PRIVATE="synthetic-private-access-refresh-secret";
+    private static final String SYNTHETIC_REFRESH="c3ludGhldGljLXJlZnJlc2gtdG9rZW4tdmFsdWUtMDEy";
     private HttpServletResponse response()throws Exception{var r=mock(HttpServletResponse.class);when(r.encodeRedirectURL(anyString())).thenAnswer(call->call.getArgument(0));return r;}
-    @Test void given__persisted_google_user__when__success_completes__then__retain_original_query_token_redirect()throws Exception{
-        var login=mock(SocialLogin.class);var user=new SocialLogin.SocialUser(7,"fixture@example.invalid","name","ROLE_USER",null,"GOOGLE");
-        when(login.complete(user)).thenReturn(new AuthSessions.Tokens("synthetic-access","synthetic-refresh"));var response=response();
-        Logger redirect=(Logger)LoggerFactory.getLogger(org.springframework.security.web.DefaultRedirectStrategy.class);
-        var previous=redirect.getLevel();var events=new ListAppender<ILoggingEvent>();events.start();redirect.addAppender(events);redirect.setLevel(ch.qos.logback.classic.Level.DEBUG);
-        try{
-            new SocialOAuth2SuccessHandler(login,FRONT).onAuthenticationSuccess(mock(HttpServletRequest.class),response,
-                    new UsernamePasswordAuthenticationToken(new SocialOAuthPrincipal(user,Map.of()),null));
-            var url=ArgumentCaptor.forClass(String.class);verify(response).sendRedirect(url.capture());
-            assertEquals(FRONT+"?accessToken=synthetic-access&refreshToken=synthetic-refresh",url.getValue());verify(login).complete(user);
-            for(var event:events.list){assertFalse(event.getFormattedMessage().contains("synthetic-access"));assertFalse(event.getFormattedMessage().contains("synthetic-refresh"));}
-        }finally{redirect.setLevel(previous);redirect.detachAppender(events);events.stop();}
+    @Test
+    void given__persisted_social_user__when__success_completes__then__redirect_without_tokens_and_set_the_refresh_cookie() throws Exception {
+        var login = mock(SocialLogin.class);
+        var user = new SocialLogin.SocialUser(7, "fixture@example.invalid", "name", "ROLE_USER", null, "GOOGLE");
+        when(login.complete(user)).thenReturn(new IssuedRefreshToken(SYNTHETIC_REFRESH, 1_209_600));
+        var response = response();
+        Logger redirect = (Logger) LoggerFactory.getLogger(org.springframework.security.web.DefaultRedirectStrategy.class);
+        var previous = redirect.getLevel();
+        var events = new ListAppender<ILoggingEvent>();
+        events.start();
+        redirect.addAppender(events);
+        redirect.setLevel(ch.qos.logback.classic.Level.DEBUG);
+        try {
+            new SocialOAuth2SuccessHandler(login, FRONT).onAuthenticationSuccess(mock(HttpServletRequest.class), response,
+                    new UsernamePasswordAuthenticationToken(new SocialOAuthPrincipal(user, Map.of()), null));
+
+            var url = ArgumentCaptor.forClass(String.class);
+            verify(response).sendRedirect(url.capture());
+            assertEquals(FRONT, url.getValue());
+            assertNull(java.net.URI.create(url.getValue()).getRawQuery());
+
+            var cookie = ArgumentCaptor.forClass(String.class);
+            verify(response).addHeader(eq("Set-Cookie"), cookie.capture());
+            assertEquals("__Secure-pb_refresh=" + SYNTHETIC_REFRESH + "; Path=/api/v1/auth; Max-Age=1209600; "
+                    + "Expires=" + cookieExpiry(cookie.getValue()) + "; Secure; HttpOnly; SameSite=Strict", cookie.getValue());
+            assertFalse(cookie.getValue().contains("Domain="));
+            verify(login).complete(user);
+            for (var event : events.list) {
+                assertFalse(event.getFormattedMessage().contains(SYNTHETIC_REFRESH));
+            }
+        } finally {
+            redirect.setLevel(previous);
+            redirect.detachAppender(events);
+            events.stop();
+        }
     }
+
+    private static String cookieExpiry(String header) {
+        int start = header.indexOf("Expires=") + "Expires=".length();
+        return header.substring(start, header.indexOf(';', start));
+    }
+
     @ParameterizedTest @ValueSource(strings={"provider","forged-processing","db-completion"})
     void given__exception_containing_private_tokens__when__redirecting_failure__then__emit_only_fixed_url_and_type_only_log(String source)throws Exception{
         var response=response();var request=mock(HttpServletRequest.class);

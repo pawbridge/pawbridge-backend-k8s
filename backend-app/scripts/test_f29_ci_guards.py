@@ -669,18 +669,44 @@ class AuthSessionsFixtureGuardTest(unittest.TestCase):
                 patch.object(f29,'auth_sessions_require_fixture',side_effect=lambda:events.append('new') or OWNER), \
                 patch.object(f29,'auth_sessions_require_identity',side_effect=lambda:events.append('identity') or OWNER), \
                 patch.object(f29,'member_database_snapshot',return_value={'all24':'same'}), \
-                patch.object(f29,'owned_sql',side_effect=lambda query='',input_text=None:events.append(input_text or query) or ''):
+                patch.object(f29,'auth_sessions_ddl',side_effect=lambda:events.append('ddl') or 'CREATE TABLE auth_sessions ();'), \
+                patch.object(f29,'owned_sql',side_effect=lambda query='',input_text=None:events.append(input_text or query) or ('t' if 'to_regclass' in query else '')):
             f29.auth_sessions_prepare()
             self.assertEqual(f29.auth_sessions_fixture_proof(OWNER),(Path(directory)/f29.AUTH_SESSIONS_RECEIPT).read_text())
             self.assertEqual(1,events.count('old')); self.assertLess(events.index('source'),next(i for i,e in enumerate(events) if 'GRANT ' in e))
+            write=next(e for e in events if 'GRANT ' in e)
+            self.assertTrue(write.startswith('BEGIN;\nSET LOCAL search_path TO pawbridge_user;\nCREATE TABLE auth_sessions ();\n'))
+            self.assertTrue(write.endswith(f29.AUTH_SESSIONS_GRANTS+'\nCOMMIT;\n'))
             old.reset_mock()
             with self.assertRaisesRegex(RuntimeError,'original failure'):
                 with f29.auth_sessions_denied_privilege('rotate-write'): raise RuntimeError('original failure')
             old.assert_not_called()
-            self.assertEqual('GRANT UPDATE(token) ON pawbridge_user.refresh_tokens TO pawbridge_f3_writer',events[-2])
+            self.assertEqual('GRANT UPDATE(token_hash) ON pawbridge_user.auth_sessions TO pawbridge_f3_writer',events[-2])
             self.assertEqual('new',events[-1]); self.assertIn('identity',events)
 
 
+
+    def test_given_an_existing_auth_table__when_preparing__then_refuse_before_any_write(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(f29,'EVIDENCE',Path(directory).resolve()), \
+                patch.object(f29.f2,'require_hosted'), patch.object(f29,'admin_update_require_fixture',return_value=OWNER), \
+                patch.object(f29,'auth_sessions_require_oracle_receipt'), \
+                patch.object(f29,'auth_sessions_ddl',return_value='CREATE TABLE auth_sessions ();'), \
+                patch.object(f29,'member_database_snapshot') as snapshot, \
+                patch.object(f29,'owned_sql',return_value='f') as sql:
+            with self.assertRaisesRegex(SystemExit,'existing auth session table'): f29.auth_sessions_prepare()
+            self.assertEqual([], [call for call in sql.call_args_list if 'input_text' in call.kwargs])
+            snapshot.assert_not_called(); self.assertFalse((Path(directory)/f29.AUTH_SESSIONS_RECEIPT).exists())
+
+    def test_given_changed_v4_bytes__when_reading_the_auth_ddl__then_refuse_without_exposing_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve()/'backend-app'; root.mkdir()
+            ddl=root.parent/f29.AUTH_SESSIONS_DDL; ddl.parent.mkdir(parents=True); ddl.write_text('-- private mutation\n')
+            with patch.object(f29,'ROOT',root):
+                with self.assertRaisesRegex(SystemExit,'V4 DDL differs') as failure: f29.auth_sessions_ddl()
+            self.assertNotIn('private',str(failure.exception))
+
+    def test_given_the_reviewed_v4_bytes__when_reading_the_auth_ddl__then_return_them(self):
+        self.assertIn('CREATE TABLE auth_sessions (',f29.auth_sessions_ddl())
 
     def test_given_auth_pg_failure_or_incomplete_acl__when_restoring__then_require_identity_revoke_only_seven_new_rights_and_revalidate_admin(self):
         for identity_ok in (True,False):
@@ -696,7 +722,8 @@ class AuthSessionsFixtureGuardTest(unittest.TestCase):
                 f29.auth_sessions_restore()
                 sql.assert_called_once_with(input_text='BEGIN;\n'+f29.AUTH_SESSIONS_REVOKES+'\nCOMMIT;\n')
                 old.assert_called_once_with(); self.assertEqual(2,snapshot.call_count)
-                self.assertEqual(2,f29.AUTH_SESSIONS_REVOKES.count('REVOKE '))
+                self.assertEqual(1,f29.AUTH_SESSIONS_REVOKES.count('REVOKE '))
+                self.assertIn('DROP TABLE IF EXISTS pawbridge_user.auth_sessions;',f29.AUTH_SESSIONS_REVOKES)
                 for forbidden in ('DELETE','SELECT(user_id)','nickname','UPDATE(role','UPDATE(care_reg_no','GRANT ','SEQUENCE','INSERT'):
                     self.assertNotIn(forbidden,f29.AUTH_SESSIONS_REVOKES)
 

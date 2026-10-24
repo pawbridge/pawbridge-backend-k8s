@@ -1,80 +1,113 @@
 package com.pawbridge.backend.user.internal.session.infrastructure;
 
-import com.pawbridge.backend.user.internal.session.application.AuthSessions;
 import com.pawbridge.backend.user.internal.session.application.AuthSessionRejectedException;
 import com.pawbridge.backend.user.internal.session.application.AuthSessionRejectedException.Reason;
-import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException;
-import java.sql.Timestamp;
-import java.sql.SQLException;
-import java.time.LocalDateTime;
-import java.util.Calendar;
-import java.util.TimeZone;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
-import org.springframework.dao.OptimisticLockingFailureException;
+import com.pawbridge.backend.user.internal.session.application.AuthSessions;
+import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.ReplacedToken;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.Rotation;
+import java.util.List;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.transaction.support.TransactionOperations;
 
+/** Refresh-token rotation and logout. Token values and hashes are never logged. */
 public final class JdbcAuthSessions implements AuthSessions {
+    private static final Logger log = LoggerFactory.getLogger(JdbcAuthSessions.class);
+    private static final String FIND_USER_CLAIMS =
+            "SELECT user_id, email, name, role, care_reg_no FROM pawbridge_user.users WHERE user_id = ?";
+
     private final JdbcOperations jdbc;
     private final TransactionOperations transactions;
-    private final JwtSessionTokens tokens;
-    private final Supplier<LocalDateTime> now;
+    private final JwtSessionTokens accessTokens;
+    private final JdbcAuthSessionStore store;
+    private final RefreshTokens refreshTokens;
 
-    public JdbcAuthSessions(JdbcOperations jdbc, TransactionOperations transactions, JwtSessionTokens tokens) {
-        this(jdbc,transactions,tokens,LocalDateTime::now);
+    public JdbcAuthSessions(JdbcOperations jdbc, TransactionOperations transactions, JwtSessionTokens accessTokens,
+            JdbcAuthSessionStore store, RefreshTokens refreshTokens) {
+        this.jdbc = jdbc;
+        this.transactions = transactions;
+        this.accessTokens = accessTokens;
+        this.store = store;
+        this.refreshTokens = refreshTokens;
     }
-    public JdbcAuthSessions(JdbcOperations jdbc, TransactionOperations transactions,
-            JwtSessionTokens tokens,Supplier<LocalDateTime> now) {
-        this.jdbc=jdbc;this.transactions=transactions;this.tokens=tokens;this.now=now;
-    }
+
     @Override
-    public Tokens refresh(String value) {
-        return transactions.execute(status -> {
-            if(!tokens.valid(value)) throw new AuthSessionRejectedException(Reason.INVALID);
-            var rows=jdbc.query("SELECT refresh_token_id, token, user_id, expires_at FROM pawbridge_user.refresh_tokens WHERE token = ?",
-                    (row,n) -> new StoredRefresh(row.getLong("refresh_token_id"),row.getLong("user_id"),
-                            row.getTimestamp("expires_at",utc()).toLocalDateTime()),value);
-            if(rows.isEmpty()) throw new AuthSessionRejectedException(Reason.MISSING);
-            var stored=rows.getFirst();
-            if(now.get().isAfter(stored.expiresAt())) {
-                // The source schedules managed remove then immediately throws: rollback occurs before flush.
-                // Do not introduce an observable JDBC DELETE or its permission/lock failure on this path.
-                throw new AuthSessionRejectedException(Reason.EXPIRED);
-            }
-            var users=jdbc.query("SELECT user_id, email, name, role, care_reg_no FROM pawbridge_user.users WHERE user_id = ?",
-                    (row,n) -> new JwtSessionTokens.UserClaims(row.getLong("user_id"),row.getString("email"),
-                            row.getString("name"),row.getString("role"),row.getString("care_reg_no")),stored.userId());
-            if(users.isEmpty())throw new UserNotFoundException();
-            String access=tokens.access(users.getFirst());
-            String refresh=tokens.refresh();
-            LocalDateTime expiresAt=now.get().plusSeconds(TimeUnit.MILLISECONDS.toSeconds(tokens.refreshExpiration()));
-            int changed=jdbc.update(connection -> {
-                var statement=connection.prepareStatement("UPDATE pawbridge_user.refresh_tokens SET token = ?, expires_at = ? WHERE refresh_token_id = ?");
-                try {
-                    statement.setString(1,refresh);statement.setTimestamp(2,Timestamp.valueOf(expiresAt),utc());
-                    statement.setLong(3,stored.id());return statement;
-                } catch(SQLException | RuntimeException | Error failure) {
-                    try { statement.close(); } catch(SQLException closing) { failure.addSuppressed(closing); }
-                    throw failure;
-                }
-            });
-            if(changed!=1) throw new OptimisticLockingFailureException("Refresh token disappeared during renewal");
-            return new Tokens(access,refresh);
-        });
+    public RefreshResult refresh(String presentedToken) {
+        if (presentedToken == null || presentedToken.isEmpty()) {
+            throw new AuthSessionRejectedException(Reason.MISSING);
+        }
+        if (!RefreshTokens.wellFormed(presentedToken)) {
+            throw new AuthSessionRejectedException(Reason.INVALID);
+        }
+        String presentedHash = RefreshTokens.hash(presentedToken);
+        String nextToken = refreshTokens.generate();
+        Outcome outcome = transactions.execute(status -> decide(presentedHash, nextToken));
+        // Thrown only after commit: a reuse revocation must persist even though the request is rejected.
+        if (outcome.rejection() != null) {
+            throw new AuthSessionRejectedException(outcome.rejection());
+        }
+        return outcome.result();
     }
+
+    private Outcome decide(String presentedHash, String nextToken) {
+        Optional<Rotation> rotation = store.rotate(presentedHash, RefreshTokens.hash(nextToken));
+        if (rotation.isPresent()) {
+            String accessToken = accessTokenFor(rotation.get().userId());
+            var refreshToken = new IssuedRefreshToken(nextToken, rotation.get().maxAgeSeconds());
+            return Outcome.success(new Rotated(accessToken, refreshToken));
+        }
+        Optional<ReplacedToken> replaced = store.findByPreviousHash(presentedHash);
+        if (replaced.isEmpty()) {
+            return Outcome.rejected(Reason.INVALID);
+        }
+        ReplacedToken session = replaced.get();
+        if (session.withinGrace() && session.active()) {
+            // Two tabs refreshed with the same cookie; the other request already set the new cookie.
+            return Outcome.success(new AccessOnly(accessTokenFor(session.userId())));
+        }
+        if (session.withinGrace()) {
+            return Outcome.rejected(Reason.INVALID);
+        }
+        store.revoke(session.sessionId());
+        log.warn("Refresh token reuse detected; revoked sessionId={} userId={}", session.sessionId(), session.userId());
+        return Outcome.rejected(Reason.REUSED);
+    }
+
+    private String accessTokenFor(long userId) {
+        List<JwtSessionTokens.UserClaims> users = jdbc.query(FIND_USER_CLAIMS,
+                (row, number) -> new JwtSessionTokens.UserClaims(
+                        row.getLong("user_id"),
+                        row.getString("email"),
+                        row.getString("name"),
+                        row.getString("role"),
+                        row.getString("care_reg_no")),
+                userId);
+        if (users.isEmpty()) {
+            // Sessions cascade with their user, so this means a concurrent deletion; undo the rotation.
+            throw new AuthSessionRejectedException(Reason.INVALID);
+        }
+        return accessTokens.access(users.getFirst());
+    }
+
     @Override
-    public void logout(long userId) {
-        transactions.executeWithoutResult(status -> {
-            // Derived repository deletion selects existing entities first. A later inserted row is not included.
-            var ids=jdbc.query("SELECT refresh_token_id FROM pawbridge_user.refresh_tokens WHERE user_id = ?",
-                    (row,n) -> row.getLong(1),userId);
-            for(long id:ids) {
-                if(jdbc.update("DELETE FROM pawbridge_user.refresh_tokens WHERE refresh_token_id = ?",id)!=1)
-                    throw new OptimisticLockingFailureException("Refresh token disappeared during logout");
-            }
-        });
+    public void logout(String presentedToken) {
+        if (!RefreshTokens.wellFormed(presentedToken)) {
+            return;
+        }
+        String presentedHash = RefreshTokens.hash(presentedToken);
+        transactions.executeWithoutResult(status -> store.revokeByTokenHash(presentedHash));
     }
-    private static Calendar utc() { return Calendar.getInstance(TimeZone.getTimeZone("UTC")); }
-    private record StoredRefresh(long id,long userId,LocalDateTime expiresAt) {}
+
+    private record Outcome(RefreshResult result, Reason rejection) {
+        static Outcome success(RefreshResult result) {
+            return new Outcome(result, null);
+        }
+
+        static Outcome rejected(Reason reason) {
+            return new Outcome(null, reason);
+        }
+    }
 }

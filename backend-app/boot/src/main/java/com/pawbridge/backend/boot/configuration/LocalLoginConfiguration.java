@@ -5,7 +5,7 @@ import com.pawbridge.backend.user.internal.login.application.LocalLogin;
 import com.pawbridge.backend.user.internal.login.infrastructure.JdbcLocalLogin;
 import com.pawbridge.backend.user.internal.login.web.LocalLoginFilter;
 import com.pawbridge.backend.user.internal.login.web.LocalLoginPrincipal;
-import com.pawbridge.backend.user.internal.session.application.AuthSessions;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,11 +33,14 @@ import org.springframework.web.filter.CorsFilter;
 @Configuration(proxyBeanMethods=false)
 @ConditionalOnProperty(prefix="pawbridge.auth",name="local-enabled",havingValue="true",matchIfMissing=false)
 public class LocalLoginConfiguration {
-    @Bean LocalLogin localLogin(@Qualifier("writeJdbc") JdbcTemplate jdbc,
-            @Qualifier("writeTransactionManager") JdbcTransactionManager manager,JwtSessionTokens tokens,
-            AuthSessions sessions,@Value("${pawbridge.auth.sessions-enabled:false}") boolean sessionsEnabled) {
-        if(!sessionsEnabled)throw new IllegalArgumentException("Local login requires explicitly enabled auth sessions");
-        return new JdbcLocalLogin(jdbc,new TransactionTemplate(manager),tokens);
+    @Bean
+    LocalLogin localLogin(@Qualifier("writeJdbc") JdbcTemplate jdbc,
+            @Qualifier("writeTransactionManager") JdbcTransactionManager manager, JwtSessionTokens tokens,
+            JdbcAuthSessionStore sessions, @Value("${pawbridge.auth.sessions-enabled:false}") boolean sessionsEnabled) {
+        if (!sessionsEnabled) {
+            throw new IllegalArgumentException("Local login requires explicitly enabled auth sessions");
+        }
+        return new JdbcLocalLogin(jdbc, new TransactionTemplate(manager), tokens, sessions);
     }
     @Bean
     @Order(0)

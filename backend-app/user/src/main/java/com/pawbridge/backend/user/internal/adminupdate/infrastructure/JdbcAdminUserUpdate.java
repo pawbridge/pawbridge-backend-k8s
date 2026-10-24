@@ -5,6 +5,7 @@ import com.pawbridge.backend.user.internal.adminupdate.application.ShelterApprov
 import com.pawbridge.backend.user.internal.nickname.application.NicknameDuplicateException;
 import com.pawbridge.backend.user.internal.nickname.infrastructure.JdbcUserNicknameStore;
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException;
+import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -22,6 +23,7 @@ public final class JdbcAdminUserUpdate implements AdminUserUpdate {
     private final TransactionOperations transaction;
     private final JdbcUserNicknameStore nicknames;
     private final Supplier<LocalDateTime> modifiedAt;
+    private final UserSessionRevoker sessions;
 
     public JdbcAdminUserUpdate(JdbcOperations jdbc, TransactionOperations transaction) {
         this(jdbc, transaction, LocalDateTime::now);
@@ -29,10 +31,16 @@ public final class JdbcAdminUserUpdate implements AdminUserUpdate {
 
     public JdbcAdminUserUpdate(JdbcOperations jdbc, TransactionOperations transaction,
             Supplier<LocalDateTime> modifiedAt) {
+        this(jdbc, transaction, modifiedAt, UserSessionRevoker.NONE);
+    }
+
+    public JdbcAdminUserUpdate(JdbcOperations jdbc, TransactionOperations transaction,
+            Supplier<LocalDateTime> modifiedAt, UserSessionRevoker sessions) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.nicknames = new JdbcUserNicknameStore(jdbc);
         this.modifiedAt = modifiedAt;
+        this.sessions = sessions;
     }
 
     @Override
@@ -66,7 +74,27 @@ public final class JdbcAdminUserUpdate implements AdminUserUpdate {
             LocalDateTime now = modifiedAt.get();
             int changed = jdbc.update(connection -> prepareUpdate(connection, userId, nextNickname, role, careRegNo, now));
             if (changed != 1) throw new IllegalStateException("Admin member update affected an unexpected row count");
+            if (isDemotion(current.role(), role)) {
+                // Same transaction as the role change: a demoted member cannot refresh into new access tokens.
+                sessions.revokeAll(userId);
+            }
         });
+    }
+
+    /**
+     * A member loses privileges when moving down ADMIN > SHELTER > USER. Moving up (for example a new
+     * administrator) keeps existing sessions.
+     */
+    static boolean isDemotion(Role before, Role after) {
+        return rank(after) < rank(before);
+    }
+
+    private static int rank(Role role) {
+        return switch (role) {
+            case ROLE_USER -> 0;
+            case ROLE_SHELTER -> 1;
+            case ROLE_ADMIN -> 2;
+        };
     }
 
     private PreparedStatement prepareUpdate(Connection connection, long userId, String nickname, Role role,

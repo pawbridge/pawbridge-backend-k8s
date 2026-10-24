@@ -13,7 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.pawbridge.backend.boot.configuration.LocalLoginConfiguration;
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration;
 import com.pawbridge.backend.user.internal.login.application.LocalLogin;
-import com.pawbridge.backend.user.internal.session.application.AuthSessions;
+import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +60,8 @@ class LocalLoginCorsHttpTest {
                 "ROLE_USER",
                 null);
         when(login.findByEmail("member@example.invalid")).thenReturn(Optional.of(account));
-        when(login.complete(any())).thenReturn(new AuthSessions.Tokens("synthetic-access", "synthetic-refresh"));
+        when(login.complete(any())).thenReturn(new LocalLogin.CompletedLogin("synthetic-access",
+                new IssuedRefreshToken("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", 60)));
     }
 
     @ParameterizedTest

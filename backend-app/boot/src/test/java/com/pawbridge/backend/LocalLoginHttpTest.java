@@ -8,7 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pawbridge.backend.boot.configuration.LocalLoginConfiguration;
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration;
 import com.pawbridge.backend.user.internal.login.application.LocalLogin;
-import com.pawbridge.backend.user.internal.session.application.AuthSessions;
+import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -44,32 +45,54 @@ class LocalLoginHttpTest {
     private static final String PASSWORD="synthetic-local-password";
     private static final String HASH=new BCryptPasswordEncoder(4).encode(PASSWORD);
     private static final String PRIVATE="synthetic-private-login-failure-marker";
-    private static final JwtSessionTokens TOKENS=new JwtSessionTokens(F3TestInputs.KEY,600000,1200000);
+    private static final JwtSessionTokens TOKENS=new JwtSessionTokens(F3TestInputs.KEY,600000);
+    private static final String REFRESH="CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
     @Autowired MockMvc mvc;
     @MockitoBean LocalLogin login;
 
     @ParameterizedTest @ValueSource(strings={"POST","GET"})
-    void given__valid_credentials_and_forged_identity__when__original_exact_login__then__real_bcrypt_and_original_body_tokens_without_session(String method)throws Exception{
-        String role=method.equals("POST")?"ROLE_USER":"ROLE_SHELTER";
-        String care=method.equals("POST")?null:"synthetic-care";
-        var account=account(HASH,role,care);
+    void given__valid_credentials_and_forged_identity__when__original_exact_login__then__real_bcrypt_access_in_body_and_refresh_only_in_cookie(String method) throws Exception {
+        String role = method.equals("POST") ? "ROLE_USER" : "ROLE_SHELTER";
+        String care = method.equals("POST") ? null : "synthetic-care";
+        var account = account(HASH, role, care);
         when(login.findByEmail("MiXeD@example.invalid")).thenReturn(Optional.of(account));
-        when(login.complete(account)).thenAnswer(invocation->new AuthSessions.Tokens(TOKENS.access(new JwtSessionTokens.UserClaims(7,account.email(),account.name(),role,care)),TOKENS.refresh()));
-        var result=mvc.perform(request(HttpMethod.valueOf(method),"/api/v1/auth/login").contentType("application/json")
-                        .content("{\"email\":\"MiXeD@example.invalid\",\"password\":\""+PASSWORD+"\"}")
-                        .header("Authorization","Bearer invalid").header("X-User-Id","999").header("X-User-Role","ROLE_ADMIN"))
-                .andExpect(status().isOk()).andExpect(header().doesNotExist("Set-Cookie")).andExpect(header().doesNotExist("Authorization"))
+        when(login.complete(account)).thenAnswer(invocation -> new LocalLogin.CompletedLogin(
+                TOKENS.access(new JwtSessionTokens.UserClaims(7, account.email(), account.name(), role, care)),
+                new IssuedRefreshToken(REFRESH, 1_209_600)));
+
+        var result = mvc.perform(request(HttpMethod.valueOf(method), "/api/v1/auth/login").contentType("application/json")
+                        .content("{\"email\":\"MiXeD@example.invalid\",\"password\":\"" + PASSWORD + "\"}")
+                        .header("Authorization", "Bearer invalid").header("X-User-Id", "999").header("X-User-Role", "ROLE_ADMIN"))
+                .andExpect(status().isOk()).andExpect(header().doesNotExist("Authorization"))
                 .andExpect(jsonPath("$.code").value(200)).andExpect(jsonPath("$.message").value("로그인에 성공했습니다."))
                 .andExpect(jsonPath("$.data.userId").value(7)).andExpect(jsonPath("$.data.email").value(account.email()))
                 .andExpect(jsonPath("$.data.name").value(account.name())).andExpect(jsonPath("$.data.role").value(role))
-                .andExpect(jsonPath("$.data.password").doesNotExist()).andReturn();
-        var data=new ObjectMapper().readTree(result.getResponse().getContentAsString()).path("data");assertThat(data.size()).isEqualTo(7);
-        if(care==null)assertThat(data.path("careRegNo").isNull()).isTrue();else assertThat(data.path("careRegNo").asText()).isEqualTo(care);
-        var parser=io.jsonwebtoken.Jwts.parser().verifyWith(F3TestInputs.KEY).build();
-        var access=parser.parseSignedClaims(data.path("accessToken").asText()).getPayload();
-        assertThat(access.get("userId",Number.class).longValue()).isEqualTo(7);assertThat(access.get("role",String.class)).isEqualTo(role);
-        var refresh=parser.parseSignedClaims(data.path("refreshToken").asText()).getPayload();assertThat(refresh).doesNotContainKey("userId");
-        assertThat(result.getRequest().getSession(false)).isNull();verify(login).findByEmail("MiXeD@example.invalid");verify(login).complete(account);verifyNoMoreInteractions(login);
+                .andExpect(jsonPath("$.data.password").doesNotExist())
+                .andExpect(jsonPath("$.data.refreshToken").doesNotExist())
+                .andReturn();
+
+        var data = new ObjectMapper().readTree(result.getResponse().getContentAsString()).path("data");
+        assertThat(data.size()).isEqualTo(6);
+        if (care == null) {
+            assertThat(data.path("careRegNo").isNull()).isTrue();
+        } else {
+            assertThat(data.path("careRegNo").asText()).isEqualTo(care);
+        }
+        var parser = io.jsonwebtoken.Jwts.parser().verifyWith(F3TestInputs.KEY).build();
+        var access = parser.parseSignedClaims(data.path("accessToken").asText()).getPayload();
+        assertThat(access.get("userId", Number.class).longValue()).isEqualTo(7);
+        assertThat(access.get("role", String.class)).isEqualTo(role);
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(REFRESH);
+
+        String cookie = result.getResponse().getHeader("Set-Cookie");
+        assertThat(cookie).startsWith("__Secure-pb_refresh=" + REFRESH + "; Path=/api/v1/auth; Max-Age=1209600; Expires=")
+                .endsWith("; Secure; HttpOnly; SameSite=Strict")
+                .doesNotContain("Domain=");
+        assertThat(result.getResponse().getHeaders("Set-Cookie")).hasSize(1);
+        assertThat(result.getRequest().getSession(false)).isNull();
+        verify(login).findByEmail("MiXeD@example.invalid");
+        verify(login).complete(account);
+        verifyNoMoreInteractions(login);
     }
     @ParameterizedTest @ValueSource(strings={"missing","wrong","oauth-placeholder","null-stored","missing-password"})
     void given__unknown_or_bad_credentials__when__login__then__same_hidden401_and_no_token_storage(String kind)throws Exception{
@@ -83,7 +106,7 @@ class LocalLoginHttpTest {
     }
     @Test void given__email_not_mvc_validated__when__original_filter_login__then__do_not_add_an_email_policy()throws Exception{
         var account=account(HASH,"ROLE_USER",null);when(login.findByEmail("not-email")).thenReturn(Optional.of(account));
-        when(login.complete(account)).thenReturn(new AuthSessions.Tokens("synthetic-access","synthetic-refresh"));
+        when(login.complete(account)).thenReturn(new LocalLogin.CompletedLogin("synthetic-access",new IssuedRefreshToken(REFRESH,60)));
         mvc.perform(post("/api/v1/auth/login").contentType("application/json").content("{\"email\":\"not-email\",\"password\":\""+PASSWORD+"\"}"))
                 .andExpect(status().isOk());verify(login).complete(account);
     }
@@ -112,7 +135,7 @@ class LocalLoginHttpTest {
     private static String trace(Throwable failure){var text=new StringWriter();failure.printStackTrace(new PrintWriter(text));return text.toString();}
     @TestConfiguration(proxyBeanMethods=false) static class Inputs{
         @Bean JwtSessionTokens sessionTokens(){return TOKENS;}
-        @Bean AuthSessions authSessions(){return mock(AuthSessions.class);}
+        @Bean JdbcAuthSessionStore authSessionStore(){return mock(JdbcAuthSessionStore.class);}
         @Bean("writeJdbc") JdbcTemplate jdbc(){return mock(JdbcTemplate.class);}
         @Bean("writeTransactionManager") JdbcTransactionManager manager(){return mock(JdbcTransactionManager.class);}
     }

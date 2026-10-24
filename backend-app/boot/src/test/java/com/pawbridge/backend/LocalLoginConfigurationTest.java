@@ -3,7 +3,7 @@ package com.pawbridge.backend;
 import com.pawbridge.backend.boot.configuration.LocalLoginConfiguration;
 import com.pawbridge.backend.user.internal.login.application.LocalLogin;
 import com.pawbridge.backend.user.internal.login.web.LocalLoginFilter;
-import com.pawbridge.backend.user.internal.session.application.AuthSessions;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore;
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -47,6 +47,7 @@ class LocalLoginConfigurationTest {
             assertThat(context).hasNotFailed();var login=context.getBean(LocalLogin.class);
             assertThat(ReflectionTestUtils.getField(login,"jdbc")).isSameAs(context.getBean("writeJdbc"));
             assertThat(ReflectionTestUtils.getField(login,"tokens")).isSameAs(context.getBean(JwtSessionTokens.class));
+            assertThat(ReflectionTestUtils.getField(login,"sessions")).isSameAs(context.getBean(JdbcAuthSessionStore.class));
             var saves=(TransactionTemplate)ReflectionTestUtils.getField(login,"saves");
             assertThat(saves.getTransactionManager()).isSameAs(context.getBean("writeTransactionManager"));
             var chain=(DefaultSecurityFilterChain)context.getBean(SecurityFilterChain.class);
@@ -65,7 +66,7 @@ class LocalLoginConfigurationTest {
         if(!missing.equals("jdbc"))runner=runner.withBean("writeJdbc",JdbcTemplate.class,()->mock(JdbcTemplate.class));
         if(!missing.equals("manager"))runner=runner.withBean("writeTransactionManager",JdbcTransactionManager.class,()->mock(JdbcTransactionManager.class));
         if(!missing.equals("tokens"))runner=runner.withBean(JwtSessionTokens.class,()->mock(JwtSessionTokens.class));
-        if(!missing.equals("sessions"))runner=runner.withBean(AuthSessions.class,()->mock(AuthSessions.class));
+        if(!missing.equals("sessions"))runner=runner.withBean(JdbcAuthSessionStore.class,()->mock(JdbcAuthSessionStore.class));
         return runner;
     }
     @Configuration(proxyBeanMethods=false) @EnableWebSecurity static class SecurityInputs {}
