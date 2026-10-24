@@ -254,6 +254,58 @@ class BusinessPackageArchitectureTest extends BusinessBuildFixture {
         assertCompiled(module, "internal.domain.TechnicalDomain");
     }
 
+    @Test
+    void givenKotlinCompiledDomainAndApi_whenCheck_thenAcceptsTheKotlinLanguageRuntime() throws IOException {
+        // Namespace markers for what kotlinc emits into every class: @Metadata, parameter null checks
+        // through Intrinsics and JetBrains nullability annotations on signatures.
+        technicalDeclarations("user", Map.of(
+                "kotlin.Metadata", """
+                        @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
+                        public @interface Metadata { int k() default 1; }
+                        """,
+                "kotlin.jvm.internal.Intrinsics", """
+                        public class Intrinsics {
+                            public static void checkNotNullParameter(Object value, String name) {}
+                        }
+                        """,
+                "org.jetbrains.annotations.Nullable", "public @interface Nullable {}"));
+        javaSource("user", "internal.domain.KotlinShapedName", """
+                @kotlin.Metadata
+                public final class KotlinShapedName {
+                    private final String value;
+                    public KotlinShapedName(String value) {
+                        kotlin.jvm.internal.Intrinsics.checkNotNullParameter(value, "value");
+                        this.value = value;
+                    }
+                }
+                """);
+        javaSource("user", "api.KotlinShapedContract", """
+                @kotlin.Metadata
+                public interface KotlinShapedContract {
+                    @org.jetbrains.annotations.Nullable
+                    String displayName(String userId);
+                }
+                """);
+
+        BuildResult result = runner("check").build();
+
+        assertTask(result, ":verifyBusinessPackages", SUCCESS);
+        assertCompiled("user", "internal.domain.KotlinShapedName");
+        assertCompiled("user", "api.KotlinShapedContract");
+    }
+
+    @Test
+    void givenDomainReferencesKotlinxLibrary_whenCheck_thenRejectsDomainRule() throws IOException {
+        technicalDeclarations("user", Map.of("kotlinx.coroutines.flow.Flow", "public interface Flow<T> {}"));
+        javaSource("user", "internal.domain.StreamingDomain",
+                "public class StreamingDomain { kotlinx.coroutines.flow.Flow<String> names; }");
+
+        BuildResult result = runner("check").buildAndFail();
+
+        assertPackageRejected(result, "DOMAIN_JDK_ONLY", "kotlinx.coroutines.flow.Flow");
+        assertCompiled("user", "internal.domain.StreamingDomain");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "com.pawbridge.backend.user.internal.web.UserController",

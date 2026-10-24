@@ -1,7 +1,14 @@
 plugins {
     id 'base'
     id 'org.springframework.boot' version '3.4.11' apply false
+    // Kotlin 1.9.25 is the version managed by the Spring Boot 3.4.11 BOM (kotlin.version).
+    id 'org.jetbrains.kotlin.jvm' version '1.9.25' apply false
+    id 'org.jetbrains.kotlin.plugin.spring' version '1.9.25' apply false
+    id 'org.jetbrains.kotlin.plugin.jpa' version '1.9.25' apply false
 }
+
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 allprojects {
     group = 'com.pawbridge.backend'
@@ -13,6 +20,35 @@ allprojects {
 }
 
 subprojects {
+    // Every module accepts Kotlin next to Java: Kotlin compiles first and Java sees its classes,
+    // and a module without .kt files skips the Kotlin compiler (NO-SOURCE). The plugin is applied
+    // here, before each module script: applied from the plugins.withId('java') callback below,
+    // KGP 1.9.25 fails with "KotlinPluginLifecycle cannot be started in ProjectState 'EXECUTED'".
+    apply plugin: 'org.jetbrains.kotlin.jvm'
+    // all-open for Spring stereotypes, so @Configuration/@Transactional proxies still work.
+    apply plugin: 'org.jetbrains.kotlin.plugin.spring'
+    // no-arg constructors for @Entity/@Embeddable/@MappedSuperclass, as Hibernate requires.
+    apply plugin: 'org.jetbrains.kotlin.plugin.jpa'
+
+    kotlin {
+        jvmToolchain(21)
+    }
+
+    // Keep JPA types non-final like their Java counterparts so Hibernate can still proxy them.
+    allOpen {
+        annotation('jakarta.persistence.Entity')
+        annotation('jakarta.persistence.MappedSuperclass')
+        annotation('jakarta.persistence.Embeddable')
+    }
+
+    tasks.withType(KotlinCompile).configureEach {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_21
+            // Treat Spring's @NonNull/@Nullable (JSR-305) as real Kotlin nullability.
+            freeCompilerArgs.add('-Xjsr305=strict')
+        }
+    }
+
     plugins.withId('java') {
         java {
             toolchain {
@@ -26,6 +62,9 @@ subprojects {
         }
 
         dependencies {
+            // Versions come from the Spring Boot platform each module already imports.
+            implementation 'org.jetbrains.kotlin:kotlin-reflect'
+            implementation 'com.fasterxml.jackson.module:jackson-module-kotlin'
             testImplementation platform('org.junit:junit-bom:5.11.4')
             testImplementation 'org.junit.jupiter:junit-jupiter'
             testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
