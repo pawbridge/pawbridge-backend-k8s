@@ -324,6 +324,7 @@ jobs:
             .github/workflows/backend-app-check.yml
             .github/scripts/backend_contract_profile.py
             .github/scripts/ci_branch_policy.py
+            user-service/src/migration/resources/db/postgresql/V4__auth_sessions.sql
           sparse-checkout-cone-mode: false
 
       - name: Require the immutable F21 original-source Git object
