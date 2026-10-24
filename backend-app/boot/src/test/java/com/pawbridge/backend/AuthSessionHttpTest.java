@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -53,7 +54,7 @@ class AuthSessionHttpTest {
     static final String PRESENTED = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     static final String NEXT = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
     static final String CLEAR_COOKIE = "__Secure-pb_refresh=; Path=/api/v1/auth; Max-Age=0; "
-            + "Expires=Thu, 1 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict";
+            + "Expires=Thu, 1 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Lax";
 
     @Autowired MockMvc mvc;
     @MockitoBean AuthSessions sessions;
@@ -84,7 +85,7 @@ class AuthSessionHttpTest {
 
         String cookie = result.getResponse().getHeader("Set-Cookie");
         assertThat(cookie).startsWith("__Secure-pb_refresh=" + NEXT + "; Path=/api/v1/auth; Max-Age=1209600; Expires=")
-                .endsWith("; Secure; HttpOnly; SameSite=Strict")
+                .endsWith("; Secure; HttpOnly; SameSite=Lax")
                 .doesNotContain("Domain=");
         assertThat(result.getResponse().getContentAsString()).doesNotContain(NEXT).doesNotContain("refreshToken");
         verify(sessions).refresh(PRESENTED);
@@ -205,6 +206,20 @@ class AuthSessionHttpTest {
 
         assertThat(output.getAll()).contains("Auth session request failed (TransactionSystemException)")
                 .doesNotContain("synthetic-private-token", "synthetic-private-sql", PRESENTED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/auth/refresh", "/api/v1/auth/logout"})
+    void given__a_browser_preflight_from_the_site__when__asking_for_a_credentialed_json_post__then__allow_exactly_that_origin(
+            String path) throws Exception {
+        mvc.perform(options(path)
+                        .header("Origin", ORIGIN)
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "content-type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+        verifyNoInteractions(sessions);
     }
 
     @ParameterizedTest

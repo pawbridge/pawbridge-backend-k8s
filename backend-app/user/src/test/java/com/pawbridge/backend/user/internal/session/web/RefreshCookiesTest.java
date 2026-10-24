@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 class RefreshCookiesTest {
 
     @Test
-    void given__an_issued_token__when__building_the_cookie__then__host_only_secure_strict_and_scoped_to_auth() {
+    void given__an_issued_token__when__building_the_cookie__then__host_only_secure_lax_and_scoped_to_auth() {
         var cookie = RefreshCookies.issue(new IssuedRefreshToken("synthetic-value", 1_209_600));
 
         assertEquals("__Secure-pb_refresh", cookie.getName());
@@ -24,7 +24,7 @@ class RefreshCookiesTest {
         assertEquals(null, cookie.getDomain());
         assertTrue(cookie.isHttpOnly());
         assertTrue(cookie.isSecure());
-        assertEquals("Strict", cookie.getSameSite());
+        assertEquals("Lax", cookie.getSameSite());
         assertEquals(Duration.ofSeconds(1_209_600), cookie.getMaxAge());
         assertTrue(cookie.toString().startsWith("__Secure-pb_refresh=synthetic-value; Path=/api/v1/auth; Max-Age=1209600; "));
     }
@@ -39,7 +39,7 @@ class RefreshCookiesTest {
         assertEquals(null, cookie.getDomain());
         assertTrue(cookie.isHttpOnly());
         assertTrue(cookie.isSecure());
-        assertEquals("Strict", cookie.getSameSite());
+        assertEquals("Lax", cookie.getSameSite());
         assertEquals(Duration.ZERO, cookie.getMaxAge());
         assertTrue(cookie.toString().contains("Max-Age=0"));
     }

@@ -10,6 +10,10 @@ import org.springframework.http.ResponseCookie;
 /**
  * The refresh-token cookie. The __Secure- prefix makes browsers refuse it without Secure; no Domain attribute
  * keeps it on the API host only, and the path limits it to the refresh and logout endpoints.
+ *
+ * <p>SameSite=Lax rather than Strict: some WebKit and in-app browsers drop a Strict cookie set during the
+ * cross-site social login callback. Lax still withholds it from cross-site POSTs, and both endpoints are
+ * POST-only and additionally require an exact allowed Origin and a JSON content type.
  */
 public final class RefreshCookies {
     public static final String NAME = "__Secure-pb_refresh";
@@ -47,6 +51,6 @@ public final class RefreshCookies {
                 .path(PATH)
                 .httpOnly(true)
                 .secure(true)
-                .sameSite("Strict");
+                .sameSite("Lax");
     }
 }

@@ -45,8 +45,8 @@ class LocalLoginHttpTest {
     private static final String PASSWORD="synthetic-local-password";
     private static final String HASH=new BCryptPasswordEncoder(4).encode(PASSWORD);
     private static final String PRIVATE="synthetic-private-login-failure-marker";
-    private static final JwtSessionTokens TOKENS=new JwtSessionTokens(F3TestInputs.KEY,600000);
-    private static final String REFRESH="CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+    private static final JwtSessionTokens TOKENS = new JwtSessionTokens(F3TestInputs.KEY, 600000);
+    private static final String REFRESH = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
     @Autowired MockMvc mvc;
     @MockitoBean LocalLogin login;
 
@@ -86,7 +86,7 @@ class LocalLoginHttpTest {
 
         String cookie = result.getResponse().getHeader("Set-Cookie");
         assertThat(cookie).startsWith("__Secure-pb_refresh=" + REFRESH + "; Path=/api/v1/auth; Max-Age=1209600; Expires=")
-                .endsWith("; Secure; HttpOnly; SameSite=Strict")
+                .endsWith("; Secure; HttpOnly; SameSite=Lax")
                 .doesNotContain("Domain=");
         assertThat(result.getResponse().getHeaders("Set-Cookie")).hasSize(1);
         assertThat(result.getRequest().getSession(false)).isNull();
@@ -104,11 +104,19 @@ class LocalLoginHttpTest {
                 .andExpect(status().isUnauthorized()).andExpect(content().json("{\"code\":401,\"message\":\"이메일 또는 비밀번호가 일치하지 않습니다.\",\"data\":null}",JsonCompareMode.STRICT));
         verify(login,never()).complete(any());
     }
-    @Test void given__email_not_mvc_validated__when__original_filter_login__then__do_not_add_an_email_policy()throws Exception{
-        var account=account(HASH,"ROLE_USER",null);when(login.findByEmail("not-email")).thenReturn(Optional.of(account));
-        when(login.complete(account)).thenReturn(new LocalLogin.CompletedLogin("synthetic-access",new IssuedRefreshToken(REFRESH,60)));
-        mvc.perform(post("/api/v1/auth/login").contentType("application/json").content("{\"email\":\"not-email\",\"password\":\""+PASSWORD+"\"}"))
-                .andExpect(status().isOk());verify(login).complete(account);
+    @Test
+    void given__email_not_mvc_validated__when__original_filter_login__then__do_not_add_an_email_policy() throws Exception {
+        var account = account(HASH, "ROLE_USER", null);
+        when(login.findByEmail("not-email")).thenReturn(Optional.of(account));
+        when(login.complete(account)).thenReturn(new LocalLogin.CompletedLogin("synthetic-access",
+                new IssuedRefreshToken(REFRESH, 60)));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"not-email\",\"password\":\"" + PASSWORD + "\"}"))
+                .andExpect(status().isOk());
+
+        verify(login).complete(account);
     }
     @Test void given__account_lookup_failure__when__dao_authentication__then__original_generic401_without_private_cause_in_logs(CapturedOutput output)throws Exception{
         when(login.findByEmail(anyString())).thenThrow(new DataAccessResourceFailureException(PRIVATE));
@@ -135,7 +143,10 @@ class LocalLoginHttpTest {
     private static String trace(Throwable failure){var text=new StringWriter();failure.printStackTrace(new PrintWriter(text));return text.toString();}
     @TestConfiguration(proxyBeanMethods=false) static class Inputs{
         @Bean JwtSessionTokens sessionTokens(){return TOKENS;}
-        @Bean JdbcAuthSessionStore authSessionStore(){return mock(JdbcAuthSessionStore.class);}
+        @Bean
+        JdbcAuthSessionStore authSessionStore() {
+            return mock(JdbcAuthSessionStore.class);
+        }
         @Bean("writeJdbc") JdbcTemplate jdbc(){return mock(JdbcTemplate.class);}
         @Bean("writeTransactionManager") JdbcTransactionManager manager(){return mock(JdbcTransactionManager.class);}
     }

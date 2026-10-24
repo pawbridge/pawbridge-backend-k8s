@@ -24,7 +24,7 @@ import org.springframework.security.oauth2.core.*;
 class SocialOAuthHandlersTest {
     private static final String FRONT="https://fixture.invalid/oauth/callback";
     private static final String PRIVATE="synthetic-private-access-refresh-secret";
-    private static final String SYNTHETIC_REFRESH="c3ludGhldGljLXJlZnJlc2gtdG9rZW4tdmFsdWUtMDEy";
+    private static final String SYNTHETIC_REFRESH = "c3ludGhldGljLXJlZnJlc2gtdG9rZW4tdmFsdWUtMDEy";
     private HttpServletResponse response()throws Exception{var r=mock(HttpServletResponse.class);when(r.encodeRedirectURL(anyString())).thenAnswer(call->call.getArgument(0));return r;}
     @Test
     void given__persisted_social_user__when__success_completes__then__redirect_without_tokens_and_set_the_refresh_cookie() throws Exception {
@@ -50,7 +50,7 @@ class SocialOAuthHandlersTest {
             var cookie = ArgumentCaptor.forClass(String.class);
             verify(response).addHeader(eq("Set-Cookie"), cookie.capture());
             assertEquals("__Secure-pb_refresh=" + SYNTHETIC_REFRESH + "; Path=/api/v1/auth; Max-Age=1209600; "
-                    + "Expires=" + cookieExpiry(cookie.getValue()) + "; Secure; HttpOnly; SameSite=Strict", cookie.getValue());
+                    + "Expires=" + cookieExpiry(cookie.getValue()) + "; Secure; HttpOnly; SameSite=Lax", cookie.getValue());
             assertFalse(cookie.getValue().contains("Domain="));
             verify(login).complete(user);
             for (var event : events.list) {
