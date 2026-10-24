@@ -206,7 +206,9 @@ class PostgresqlAuthSessionCompatibilityTest {
         var lost = (AuthSessions.Rotated) service.sessions.refresh(kept.value());
         long sessionId = Long.parseLong(scalar("SELECT session_id FROM pawbridge_user.auth_sessions WHERE token_hash="
                 + literal(RefreshTokens.hash(lost.refreshToken().value()))));
-        moveRotationsBack(sessionId, 59);
+        // Keep the retired token inside the 60-second grace window with room for the connections the
+        // checks below open; the last refresh of the same token must still see it as recent.
+        moveRotationsBack(sessionId, 50);
 
         var recovered = (AuthSessions.Rotated) service.sessions.refresh(kept.value());
 
