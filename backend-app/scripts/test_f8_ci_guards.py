@@ -1,5 +1,4 @@
-"""Mock-only F8 ownership/oracle checks: never open Docker, DB, sockets or a JVM."""
-import hashlib
+"""Mock-only F8 ownership checks: never open Docker, DB, sockets or a JVM."""
 import json
 import os
 from pathlib import Path
@@ -9,7 +8,6 @@ import unittest
 from unittest.mock import patch
 
 import f8_ci as f8
-import prepare_f8_legacy_oracle as oracle
 
 
 HOSTED = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'Linux',
@@ -193,40 +191,6 @@ class F8GuardTest(unittest.TestCase):
                     f8.smoke()
                 rows.assert_not_called()
                 sql.assert_not_called()
-
-    def test_given_non_dedicated_oracle_output__when_extracting__then_no_git_or_write(self):
-        with patch.object(oracle.subprocess, 'check_output') as git:
-            with self.assertRaisesRegex(SystemExit, 'Refusing non-dedicated F8 oracle output'):
-                oracle.extract('/synthetic', '/outside', '/outside')
-            git.assert_not_called()
-
-    def test_given_tampered_oracle_input__when_extracting__then_no_generated_files(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f8LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f8-oracle-sha256.txt'
-            with patch.object(oracle.subprocess, 'check_output', return_value=b'tampered'):
-                with self.assertRaisesRegex(SystemExit, 'Legacy F8 input checksum mismatch'):
-                    oracle.extract(root, output, evidence)
-            self.assertFalse(output.exists())
-            self.assertFalse(evidence.exists())
-
-    def test_given_differing_oracle_destination__when_extracting__then_no_overwrite_or_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f8LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f8-oracle-sha256.txt'
-            content = b'synthetic fixed source'
-            relative = 'synthetic/Input.java'
-            target = output / relative
-            target.parent.mkdir(parents=True)
-            target.write_bytes(b'existing different source')
-            with patch.dict(oracle.EXPECTED, {relative: hashlib.sha256(content).hexdigest()}, clear=True), \
-                    patch.object(oracle.subprocess, 'check_output', return_value=content):
-                with self.assertRaisesRegex(SystemExit, 'Refusing to overwrite differing F8 oracle input'):
-                    oracle.extract(root, output, evidence)
-            self.assertEqual(b'existing different source', target.read_bytes())
-            self.assertFalse(evidence.exists())
 
 
 if __name__ == '__main__':

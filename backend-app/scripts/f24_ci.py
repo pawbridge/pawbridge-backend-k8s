@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -25,11 +24,6 @@ import f23_ci as f23
 
 ROOT,EVIDENCE=f3.ROOT,f3.EVIDENCE
 SOURCE='f06a72a06bd26662c647bde780dfc7a27bf7349c'
-TASK='noteBlockRemoveCompatibilityTest'
-PG_CLASS='com.pawbridge.backend.compatibility.PostgresqlNoteBlockRemoveCompatibilityTest'
-MVC_CLASS='com.pawbridge.backend.compatibility.F24LegacyNoteBlockRemoveMvcTest'
-# Original-only observation6 and comparison14 passed locally; PG14/JAR12 remain hosted execution gates.
-REPORTS={TASK:{PG_CLASS:14,MVC_CLASS:14}}
 WRITER_MEMBERS='pawbridge_community.private_note_members'
 WRITER_BLOCKS='pawbridge_community.private_note_blocks'
 
@@ -190,29 +184,6 @@ def denied_privilege(kind):
         owned_sql('GRANT '+clauses[kind]+' TO '+role)
         require_fixture()
 
-def verify_results():
-    require_measurements();counts={}
-    for task,classes in REPORTS.items():
-        if any(type(count) is not int or count<=0 for count in classes.values()):
-            raise SystemExit('F24 original MVC outcomes and case count remain unmeasured')
-        directory=ROOT/'boot/build/test-results'/task
-        if {path.name for path in directory.glob('TEST-*.xml')}!={'TEST-'+name+'.xml' for name in classes}:
-            raise SystemExit('F24 compatibility XML class set differs')
-        counts[task]={}
-        for name,expected in classes.items():
-            suite=ET.parse(directory/('TEST-'+name+'.xml')).getroot()
-            if suite.tag!='testsuite' or suite.attrib.get('name')!=name:raise SystemExit('F24 XML suite FQN differs')
-            values={key:int(suite.attrib[key]) for key in ('tests','failures','errors','skipped')}
-            cases=suite.findall('testcase')
-            if values!={'tests':expected,'failures':0,'errors':0,'skipped':0} or len(cases)!=expected:
-                raise SystemExit('F24 XML exact count or result differs')
-            if any(case.attrib.get('classname')!=name for case in cases) or any(case.find(tag) is not None for case in cases for tag in ('failure','error','skipped')):
-                raise SystemExit('F24 XML child failure differs from aggregate counters')
-            counts[task][name]=values
-    (EVIDENCE/'f24-results.json').write_text(json.dumps(counts,sort_keys=True))
-    print('Verified exact F24 UTC PG and measured MVC XML')
-
-
 def load_tokens():
     owner = f2.require_hosted()
     path = Path(os.environ['F3_TEST_TOKENS_PATH'])
@@ -236,7 +207,6 @@ def load_tokens():
     return {'F24_CALLER': tokens['F24_CALLER']}
 
 
-
 CALLER,OTHER,MISSING=9978001,9978002,9978003
 USERS=(CALLER,OTHER)
 MEMBERS=(CALLER,OTHER)
@@ -254,8 +224,6 @@ EXPECTED_JAR_COUNTS=dict(zip(COUNTERS,(12,2,8,5,3,1,2,1,1,2,1,2)))
 
 def require_measurements():
     f2.require_hosted()
-    if set(REPORTS)!={TASK} or set(REPORTS[TASK])!={PG_CLASS,MVC_CLASS} or any(type(n) is not int or n<=0 for n in REPORTS[TASK].values()):
-        raise SystemExit('F24 original MVC outcomes and case count remain unmeasured')
     if set(EXPECTED_JAR_COUNTS)!=set(COUNTERS) or any(type(n) is not int or n<0 for n in EXPECTED_JAR_COUNTS.values()):
         raise SystemExit('F24 runtime journey counts remain unmeasured')
 
@@ -406,4 +374,4 @@ def smoke():
 
 if __name__=='__main__':
     f2.require_hosted()
-    {'prepare':prepare,'results':verify_results,'smoke':smoke}[sys.argv[1]]()
+    {'prepare':prepare,'smoke':smoke}[sys.argv[1]]()

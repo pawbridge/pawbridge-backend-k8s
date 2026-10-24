@@ -55,9 +55,7 @@ class PostgresqlAuthSessionCompatibilityTest {
     private static final long BASE = 9_985_800;
     private static final long ACCESS_MS = 120_999;
     private static final long REFRESH_MS = 600_999;
-    private static final String ORIGINAL_RECEIPT_SHA = "96e0d308622eedc6d41415fc6618af2114ade873cad7c50ca505690dcf4c4891";
     private static final String MEMBER_PROOF="source_sha=f06a72a06bd26662c647bde780dfc7a27bf7349c\nfixture=F29 plus User deletion and installed-chat cleanup\nnew_business_ddl=0\nsynthetic_tables_added=6\nsynthetic_identity_sequences_added=2\nnew_schema=0\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\ncf93ed908b18f63f59832cd0fe5bcf500ccf9e4c39972deeda5de446c4dd953d  member-ddl-fragment-0\neb3fe612fe9d4aff8372539b0d59e1da4c34266036ce88f1ed0ba51b88f5e139  member-ddl-fragment-1\nb705222e7a9c9a6964628c937cff63470e1dd30103b27111ae3c5d94d284e1ec  member-ddl-fragment-2\n7afb8a3d992eba1258d61a610a418133f56766e9def3eb2e105c584bedcd2fdb  member-ddl-fragment-3\n5604c03964f051343785c2d30f9bf20022d6a0c867152b6175168c4f5ea81754  member-exact-grants\n";
-    private static final String AUTH_ORACLE_SHA = "37f8491027f62e11e85f08fadd7afa2cfc5c8bc0cc93753935c8b96f5d67a58f";
     private static final String SESSION_COLUMNS = "session_id,user_id,token_hash,rotated_at,created_at,"
             + "last_used_at,expires_at,absolute_expires_at,revoked_at";
     private static final String AUTH_PROOF = "source_sha=f06a72a06bd26662c647bde780dfc7a27bf7349c\n"
@@ -564,13 +562,9 @@ class PostgresqlAuthSessionCompatibilityTest {
             String expected = "owner="+run+"\nsource_sha=c32ae0d84b69969abd35c541dbdd4e81738c4be5\nfixture=member cleanup plus administrator User update\nnew_business_ddl=0\nnew_marker=0\nsnapshot_tables=24\nreader_delta=0\nnew_sequence_acl=0\nwriter_user_select=user_id,nickname,role,care_reg_no\nwriter_user_update=user_id,nickname,updated_at,role,care_reg_no\n"+sha(grants.getBytes(java.nio.charset.StandardCharsets.UTF_8))+"  admin-user-exact-grants\n";
             assertThat(Files.readString(extra).equals(expected)).isTrue();
             assertThat(Files.readString(prior).equals("owner="+run+"\n"+MEMBER_PROOF)).isTrue();
-            Path oracle = receipt("admin.user.update.oracle.receipt", "f13-admin-update-oracle-sha256.txt");assertThat(oracle.getParent()).isEqualTo(extra.getParent());assertThat(sha(Files.readAllBytes(oracle))).isEqualTo(ORIGINAL_RECEIPT_SHA);
             Path auth = receipt("auth.sessions.fixture.receipt", "auth-sessions-fixture-write.txt");
             assertThat(auth.getParent()).isEqualTo(extra.getParent());
             assertThat(Files.readString(auth).equals("owner=" + run + "\n" + AUTH_PROOF)).isTrue();
-            Path authOracle = receipt("auth.sessions.oracle.receipt", "f13-auth-sessions-oracle-sha256.txt");
-            assertThat(authOracle.getParent()).isEqualTo(extra.getParent());
-            assertThat(sha(Files.readAllBytes(authOracle))).isEqualTo(AUTH_ORACLE_SHA);
             try(Connection c=owner.admin();var s=c.createStatement();var r=s.executeQuery("SELECT value||':'||owner FROM pawbridge_f13_fixture.marker")){assertThat(r.next()).isTrue();assertThat(r.getString(1)).isEqualTo("pawbridge-f13-ci-only-v1:"+run);}
         } catch (java.io.IOException | java.security.NoSuchAlgorithmException | SQLException failure) { throw new IllegalStateException("Owned auth-session evidence cannot be verified"); }
     }

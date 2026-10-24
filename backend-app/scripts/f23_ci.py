@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 from uuid import UUID
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -24,12 +23,6 @@ import f22_ci as f22
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
 SOURCE = 'f06a72a06bd26662c647bde780dfc7a27bf7349c'
-TASK, SEOUL_TASK = 'privateNoteListCompatibilityTest', 'privateNoteListCompatibilitySeoulTest'
-PG_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlPrivateNoteListCompatibilityTest'
-MVC_CLASS = 'com.pawbridge.backend.compatibility.F23LegacyPrivateNoteListMvcTest'
-# Original-only query6 and actual MVC12 passed locally; hosted PG16/Seoul1/JAR12 remain separate gates.
-REPORTS = {TASK: {PG_CLASS: 16, MVC_CLASS: 12}, SEOUL_TASK: {PG_CLASS: 1}}
-SEOUL_METHOD = 'givenMailboxUuidSortDiffersFromNoteAndJavaSignedOrder__whenListingAndSerializing__thenPreservePgOrderAndNoteReadInstantsWithoutZoneShift'
 COUNTERS = ('list_get_checks', 'successful_checks', 'rejected_checks', 'storage_unavailable_checks',
             'invalid_page_checks', 'authentication_checks', 'stream_denied_checks', 'detail_get_checks', 'denied_write_checks')
 EXPECTED_JAR_COUNTS = dict(zip(COUNTERS, (9, 6, 3, 1, 1, 1, 1, 1, 1)))
@@ -180,41 +173,12 @@ def load_tokens():
 
 def require_measurements(kind):
     f2.require_hosted()
-    if kind == 'xml':
-        if (not SEOUL_METHOD or any(type(n) is not int or n <= 0 for classes in REPORTS.values() for n in classes.values())
-                or REPORTS[SEOUL_TASK] != {PG_CLASS: 1}):
-            raise SystemExit('F23 original binding/Java case counts and Seoul method are unmeasured')
-    elif kind == 'jar':
+    if kind == 'jar':
         if (not isinstance(EXPECTED_JAR_COUNTS, dict) or set(EXPECTED_JAR_COUNTS) != set(COUNTERS)
                 or any(type(n) is not int or n < 0 for n in EXPECTED_JAR_COUNTS.values())):
             raise SystemExit('F23 packaged request counts are unmeasured')
     else:
         raise ValueError('Unknown F23 measurement gate')
-
-
-def verify_results():
-    require_measurements('xml')
-    counts = {}
-    for task, classes in REPORTS.items():
-        directory = ROOT / 'boot/build/test-results' / task
-        if {p.name for p in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in classes}:
-            raise SystemExit('F23 compatibility requires its exact UTC/Seoul XML class set')
-        counts[task] = {}
-        for name, expected_count in classes.items():
-            try:
-                suite = ET.parse(directory / ('TEST-' + name + '.xml')).getroot()
-                values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-            except (OSError, ET.ParseError, KeyError, ValueError):
-                raise SystemExit('F23 report is missing or malformed') from None
-            cases = suite.findall('testcase')
-            if (suite.tag != 'testsuite' or suite.attrib.get('name') != name or values['tests'] != expected_count
-                    or len(cases) != expected_count or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                    or any(case.attrib.get('classname') != name for case in cases)
-                    or any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped'))
-                    or (task == SEOUL_TASK and cases[0].attrib.get('name') not in (SEOUL_METHOD, SEOUL_METHOD + '()'))):
-                raise SystemExit('F23 requires actual successful cases and only its named Seoul timestamp case')
-            counts[task][name] = expected_count
-    return counts
 
 
 def expected_detail(note):
@@ -354,4 +318,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

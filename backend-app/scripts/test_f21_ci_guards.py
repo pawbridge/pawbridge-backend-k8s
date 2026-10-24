@@ -15,7 +15,6 @@ from unittest.mock import patch
 import urllib.parse
 
 import f21_ci as f21
-import prepare_f21_legacy_oracle as oracle
 from test_f17_ci_guards import HOSTED
 
 # Synthetic counts for testing guard branches; not an assertion that real F21 cases ran.
@@ -32,23 +31,6 @@ def source_bytes(path):
 def token(identity, expiry, role='ROLE_USER'):
     claims = base64.urlsafe_b64encode(json.dumps({'userId': identity, 'role': role, 'exp': expiry}).encode()).decode().rstrip('=')
     return 'synthetic.' + claims + '.signature'
-
-
-def oracle_sources():
-    values = {}
-    for source, digest in oracle.EXPECTED.items():
-        raw = subprocess.check_output(['git', 'show', oracle.SOURCE + ':' + source], cwd=f21.ROOT.parent)
-        if hashlib.sha256(raw).hexdigest() != digest: raise AssertionError('F21 fixed oracle guard input hash differs')
-        values[source] = raw
-    return values
-
-
-def shared_sources(root, sources):
-    for source, relative in oracle.SHARED.items():
-        target = root / relative; target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(sources[source])
-    text = sources[oracle.ADVICE].decode()
-    annotations = oracle.checked_section(text, oracle.ADVICE_ANNOTATIONS)
-    (root / oracle.F18_ADAPTED_PATH).write_bytes(text.replace(annotations, oracle.F18_ADAPTED_ANNOTATIONS, 1).encode())
 
 
 @contextmanager
@@ -103,19 +85,17 @@ def packaged_harness(directory, failure=None, mutation=False, storage_mutation=F
 class F21GuardTest(unittest.TestCase):
     def test_given_non_hosted_invocation__when_calling_actions__then_refuse_before_git_sql_or_children(self):
         actions = (f21.prepare, f21.verified_ddl, f21.require_fixture, f21.require_owner, f21.prepare_business_rows,
-                   lambda: f21.cleanup_business_rows(f21.OWNED), f21.load_tokens, f21.verify_results, f21.smoke)
+                   lambda: f21.cleanup_business_rows(f21.OWNED), f21.load_tokens, f21.smoke)
         for action in actions:
             with patch.dict(os.environ, {}, clear=True), patch.object(f21.f3, 'sql') as sql, patch.object(f21.f2, 'command') as command, \
                     patch.object(subprocess, 'check_output') as git, patch.object(f21.f4, 'start_ready_children') as start:
                 with self.assertRaisesRegex(SystemExit, 'restricted to this repository on GitHub-hosted Linux'): action()
                 sql.assert_not_called(); command.assert_not_called(); git.assert_not_called(); start.assert_not_called()
 
-    def test_given_unmeasured_real_counts__when_results_or_smoke_requested__then_stop_before_any_resource(self):
+    def test_given_unmeasured_real_counts__when_smoke_requested__then_stop_before_any_resource(self):
         with patch.dict(os.environ, HOSTED, clear=True), patch.object(f21, 'EXPECTED_JAR_COUNTS', None), \
-                patch.object(f21, 'REPORTS', {f21.TASK: {f21.PG_CLASS: None, f21.MVC_CLASS: None}, f21.SEOUL_TASK: {f21.PG_CLASS: None}}), \
                 patch.object(f21, 'require_fixture') as fixture, patch.object(f21.f3, 'sql') as sql, patch.object(f21.f4, 'start_ready_children') as start:
-            for action in (f21.verify_results, f21.smoke):
-                with self.assertRaisesRegex(SystemExit, 'unmeasured'): action()
+            with self.assertRaisesRegex(SystemExit, 'unmeasured'): f21.smoke()
             fixture.assert_not_called(); sql.assert_not_called(); start.assert_not_called()
 
     def test_given_fixed_original_migrations__when_building_ddl__then_two_tables_eight_indexes_and_nine_reader_columns_only(self):
@@ -284,24 +264,6 @@ class F21GuardTest(unittest.TestCase):
                 path.chmod(0o600); other = path.parent / 'other'; path.rename(other); path.symlink_to(other)
                 with self.assertRaises(SystemExit): f21.load_tokens()
 
-    def test_given_xml__when_reporting__then_require_exact_classes_positive_counts_named_seoul_case_and_no_hidden_child_failures(self):
-        reports = {f21.TASK: {f21.PG_CLASS: 2, f21.MVC_CLASS: 2}, f21.SEOUL_TASK: {f21.PG_CLASS: 1}}
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, HOSTED, clear=True), patch.object(f21, 'ROOT', Path(directory).resolve()), patch.object(f21, 'REPORTS', reports):
-            with self.assertRaises(SystemExit): f21.verify_results()
-            for task, classes in reports.items():
-                root = f21.ROOT / 'boot/build/test-results' / task; root.mkdir(parents=True)
-                for name, count in classes.items():
-                    cases = ''.join('<testcase classname="' + name + '" name="' + (f21.SEOUL_METHOD + '()' if task == f21.SEOUL_TASK else 'case' + str(i)) + '"/>' for i in range(count))
-                    (root / ('TEST-' + name + '.xml')).write_text('<testsuite name="' + name + '" tests="' + str(count) + '" failures="0" errors="0" skipped="0">' + cases + '</testsuite>')
-            self.assertEqual(2, len(f21.verify_results()))
-            target = f21.ROOT / 'boot/build/test-results' / f21.SEOUL_TASK / ('TEST-' + f21.PG_CLASS + '.xml'); good = target.read_text()
-            for bad in (good.replace(f21.SEOUL_METHOD, 'wrong'), good.replace('tests="1"', 'tests="0"'), good.replace('skipped="0"', 'skipped="1"'),
-                        good.replace('classname="com.', 'classname="foreign.'), *(good.replace('/></testsuite>', '><' + tag + '/></testcase></testsuite>') for tag in ('failure', 'error', 'skipped'))):
-                target.write_text(bad)
-                with self.assertRaises(SystemExit): f21.verify_results()
-            target.write_text(good); (target.parent / 'TEST-extra.xml').write_text('unexpected')
-            with self.assertRaisesRegex(SystemExit, 'exact UTC/Seoul'): f21.verify_results()
-
     def test_given_mocked_packaged_journey__when_observing__then_exact_payloads_recovery_ttl_calls_and_cleanup_without_claiming_real_execution(self):
         with tempfile.TemporaryDirectory() as directory, packaged_harness(directory) as (evidence, requests, sql, start, stop, cleanup, seed):
             calls = []; current = f21.load_tokens
@@ -380,94 +342,22 @@ class F21GuardTest(unittest.TestCase):
             subprocess.check_output(['git', 'cat-file', '-e', f21.SOURCE + '^{commit}'], cwd=root)
             with patch.dict(os.environ, HOSTED, clear=True), patch.object(f21, 'ROOT', root / 'backend-app'):
                 ddl, proof = f21.verified_ddl()
-                self.assertEqual(19, len(oracle_sources()))
             self.assertIn('source_sha=' + f21.SOURCE, proof); self.assertIn('CREATE TABLE pawbridge_community.private_notes', ddl)
             self.assertFalse((root / 'community-service').exists()); self.assertFalse((root / 'user-service').exists())
 
-    def test_given_wrong_or_redirected_oracle_destination__when_extracting__then_refuse_before_git_or_write(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve(); output, evidence = root / oracle.OUTPUT_ROOT, root / oracle.EVIDENCE_PATH
-            for target, receipt in ((root / 'wrong', evidence), (output, root / 'wrong')):
-                with patch.object(oracle.subprocess, 'check_output') as git, patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaises(SystemExit): oracle.extract(root, target, receipt)
-                    git.assert_not_called(); write.assert_not_called()
-            other = root / 'other'; other.mkdir(); output.parent.mkdir(parents=True); output.symlink_to(other, target_is_directory=True)
-            with patch.object(oracle.subprocess, 'check_output') as git, patch.object(Path, 'write_bytes') as write:
-                with self.assertRaises(SystemExit): oracle.extract(root, output, evidence)
-                git.assert_not_called(); write.assert_not_called()
-
-    def test_given_late_oracle_source_tamper__when_extracting__then_all_nineteen_validate_before_any_output(self):
-        sources = oracle_sources(); sources[next(reversed(sources))] = b'tampered'
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve(); output, evidence = root / oracle.OUTPUT_ROOT, root / oracle.EVIDENCE_PATH
-            with patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kw: sources[args[-1].split(':', 1)[1]]), patch.object(Path, 'write_bytes') as write:
-                with self.assertRaisesRegex(SystemExit, 'checksum mismatch'): oracle.extract(root, output, evidence)
-                write.assert_not_called(); self.assertFalse(output.exists()); self.assertFalse(evidence.exists())
-
-    def test_given_any_raw_or_adapted_shared_tamper__when_extracting__then_preserve_all_thirteen_reused_artifacts_before_output(self):
-        sources = oracle_sources()
-        for relative in (*oracle.SHARED.values(), oracle.F18_ADAPTED_PATH):
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve(); shared_sources(root, sources); (root / relative).write_bytes(b'preserve-tamper')
-                with patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kw: sources[args[-1].split(':', 1)[1]]), patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaises(SystemExit): oracle.extract(root, root / oracle.OUTPUT_ROOT, root / oracle.EVIDENCE_PATH)
-                    write.assert_not_called(); self.assertEqual(b'preserve-tamper', (root / relative).read_bytes())
-
-    def test_given_selected_unit_constant_annotation_or_logger_hash_mismatch__when_extracting__then_refuse_before_write(self):
-        sources = oracle_sources()
-        specifications = (oracle.SERVICE_UNITS[0], oracle.CONTROLLER_UNIT, oracle.ADVICE_UNITS[0], oracle.PAGE_SIZE,
-                          oracle.CONTROLLER_ANNOTATIONS, oracle.LOGGER, oracle.SOURCE_EVIDENCE_UNITS[0], oracle.DDL_UNITS[0])
-        for specification in specifications:
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve(); shared_sources(root, sources)
-                with patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kw: sources[args[-1].split(':', 1)[1]]), \
-                        patch.dict(specification, {'sha256': 'wrong'}), patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaises(SystemExit): oracle.extract(root, root / oracle.OUTPUT_ROOT, root / oracle.EVIDENCE_PATH)
-                    write.assert_not_called()
-
-    def test_given_output_receipt_or_duplicate_fqn_conflict__when_extracting__then_no_partial_write_and_existing_bytes_preserved(self):
-        sources = oracle_sources()
-        for kind in ('output', 'receipt', 'duplicate'):
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve(); shared_sources(root, sources)
-                output, evidence = root / oracle.OUTPUT_ROOT, root / oracle.EVIDENCE_PATH
-                target = output / oracle.OUTPUTS[-1] if kind == 'output' else evidence if kind == 'receipt' else root / 'backend-app/boot/src/test/java/other/F21LegacyNotificationsService.java'
-                target.parent.mkdir(parents=True, exist_ok=True)
-                original = b'preserve-conflict' if kind != 'duplicate' else b'package com.pawbridge.communityservice.contact; public class F21LegacyNotificationsService {}'
-                target.write_bytes(original)
-                with patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kw: sources[args[-1].split(':', 1)[1]]), patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaises(SystemExit): oracle.extract(root, output, evidence)
-                    write.assert_not_called(); self.assertEqual(original, target.read_bytes())
-
-    def test_given_all_fixed_oracle_inputs__when_extracting__then_three_unique_outputs_preserve_eleven_methods_annotated_cursor_four_handlers_and_shared_logger(self):
-        sources = oracle_sources()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve(); shared_sources(root, sources)
-            output, evidence = root / oracle.OUTPUT_ROOT, root / oracle.EVIDENCE_PATH
-            before = {relative: (root / relative).read_bytes() for relative in (*oracle.SHARED.values(), oracle.F18_ADAPTED_PATH)}
-            with patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kw: sources[args[-1].split(':', 1)[1]]): oracle.extract(root, output, evidence)
-            self.assertEqual((19, 12, 3), (len(sources), len(oracle.SHARED), len(list(output.rglob('*.java')))))
-            service, controller, advice = [(output / relative).read_text() for relative in oracle.OUTPUTS]
-            self.assertEqual(11, len(oracle.SERVICE_UNITS))
-            for specification in oracle.SERVICE_UNITS: self.assertIn(oracle.checked_method(sources[oracle.SERVICE].decode(), specification), service)
-            self.assertIn(oracle.checked_method(sources[oracle.CONTROLLER].decode(), oracle.CONTROLLER_UNIT), controller)
-            for specification in oracle.ADVICE_UNITS: self.assertIn(oracle.checked_method(sources[oracle.ADVICE].decode(), specification), advice)
-            self.assertIn(oracle.LOGGER['verbatim_utf8'], advice); self.assertIn(oracle.F21_ADVICE_ANNOTATIONS, advice)
-            self.assertEqual(before, {relative: (root / relative).read_bytes() for relative in before})
-            self.assertEqual(16, evidence.read_text().count('  wrapper-method ')); self.assertIn('source_sha=' + f21.SOURCE, evidence.read_text())
-
-    def test_given_workflow__when_integrating_f21__then_f20_finishes_first_exact_tasks_before_smoke_and_always_cleanup_with_jar_isolation(self):
+    def test_given_workflow__when_integrating_f21__then_f20_finishes_first_prepare_before_smoke_and_always_cleanup_with_jar_isolation(self):
         workflow = (f21.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F21 exact notes/mailbox')
         self.assertLess(workflow.index('python3 scripts/f20_ci.py smoke'), boundary)
         stage = workflow[boundary:]
-        for first, second in (('test_f21_ci_guards.py', 'python3 scripts/f21_ci.py prepare'), ('python3 scripts/f21_ci.py prepare', ':boot:' + f21.TASK),
-                              (':boot:' + f21.SEOUL_TASK, 'python3 scripts/f21_ci.py results'), ('python3 scripts/f21_ci.py results', 'python3 scripts/f21_ci.py smoke')):
+        for first, second in (('test_f21_ci_guards.py', 'python3 scripts/f21_ci.py prepare'),
+                              ('python3 scripts/f21_ci.py prepare', 'python3 scripts/f21_ci.py smoke')):
             self.assertLess(stage.index(first), stage.index(second))
-        self.assertEqual(1, stage.count(':boot:' + f21.TASK + ' ')); self.assertEqual(1, stage.count(':boot:' + f21.SEOUL_TASK))
+        self.assertNotIn('noteNotificationsCompatibility', workflow)
+        self.assertNotIn('python3 scripts/f21_ci.py results', workflow)
         cleanup = stage.index('- name: Remove only the owned disposable fixture'); self.assertIn('if: always()', stage[cleanup:cleanup + 180])
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-9]|20)_ci\.py (?:prepare|smoke)')
-        self.assertIn('f21-oracle-sha256.txt', workflow); self.assertIn('f21-fixture-reuse.txt', workflow); self.assertIn('f21-helper-refusal.txt', workflow)
+        self.assertIn('f21-fixture-reuse.txt', workflow); self.assertIn('f21-helper-refusal.txt', workflow)
         self.assertIn('sparse-checkout:', workflow); self.assertNotIn('            community-service\n', workflow)
         source_start = workflow.index('- name: Require the immutable F21 original-source Git object')
         source_end = workflow.index('\n      - name:', source_start)
@@ -481,7 +371,7 @@ class F21GuardTest(unittest.TestCase):
         self.assertEqual(1, source_step.count('GIT_CONFIG_COUNT=1')); self.assertNotIn('export GIT_CONFIG', source_step)
         denied = next(line for line in workflow.splitlines() if "if grep -E '" in line).split("if grep -E '", 1)[1].split("' build/ci/", 1)[0]
         allowed = next(line for line in workflow.splitlines() if "| grep -Ev '" in line).split("| grep -Ev '", 1)[1].split("'; then", 1)[0]
-        for value in ('BOOT-INF/classes/f21LegacyOracle/Input.class', 'BOOT-INF/classes/com/pawbridge/communityservice/contact/F21LegacyNotificationsService.class'):
+        for value in ('BOOT-INF/classes/com/pawbridge/backend/compatibility/F21Input.class', 'BOOT-INF/classes/com/pawbridge/communityservice/contact/F21LegacyNotificationsService.class'):
             self.assertIsNotNone(re.search(denied, value)); self.assertIsNone(re.search(allowed, value))
 
 

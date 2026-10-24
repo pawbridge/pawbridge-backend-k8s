@@ -1,9 +1,7 @@
-"""F28 fixture/XML controls only; no guard has been executed at private handoff.
+"""F28 fixture controls with mocked SQL and subprocess boundaries.
 
-The eventual unit run mocks SQL and subprocess boundaries. Pinned source input loading
-uses read-only Git objects, not legacy working-tree paths. These guards do not prove
-PostgreSQL syntax/ACL/rollback, original JpaTM, actual XML execution or SSE/JAR behavior.
-Runtime smoke/token/seed/cleanup guards are separately owned and not represented here.
+Pinned input loading uses read-only Git objects, not working-tree paths. These guards do not prove
+PostgreSQL syntax/ACL/rollback or SSE/JAR behavior; the packaged smoke is guarded separately.
 """
 from contextlib import ExitStack, contextmanager, redirect_stdout
 import hashlib
@@ -15,37 +13,20 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
-import xml.etree.ElementTree as ET
 
 import f28_ci as f28
-import prepare_f28_legacy_oracle as oracle
 
 READ_ONLY_GIT = subprocess.check_output
 HOSTED = {'GITHUB_ACTIONS': 'true', 'RUNNER_ENVIRONMENT': 'github-hosted', 'RUNNER_OS': 'Linux',
           'GITHUB_REPOSITORY': 'pawbridge/pawbridge-backend-k8s', 'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1'}
 OWNER = '123-1'
-MEASURED_XML = {f28.TASK: {f28.PG_CLASS: 2, f28.MVC_CLASS: 2}}
-# Copy these existing inputs into a minimal checkout. No standalone F28 SQL file exists; only four pinned original requests fragments are assembled.
-# Original Java/migration inputs remain immutable Git objects at oracle.SOURCE.
-MINIMAL_CHECKOUT_INPUTS = tuple('backend-app/scripts/f' + str(stage) + '_ci.py' for stage in range(2, 29)) + (
-    'backend-app/scripts/prepare_f26_legacy_oracle.py',
-    'backend-app/scripts/prepare_f27_legacy_oracle.py',
-    'backend-app/scripts/prepare_f28_legacy_oracle.py', 'backend-app/scripts/test_f28_ci_guards.py',
-    'backend-app/scripts/f2_fixture.sql', 'backend-app/scripts/f3_fixture.sql',
-    'backend-app/scripts/f4_fixture.sql', 'backend-app/scripts/f5_fixture.sql',
-    'backend-app/scripts/f7_fixture.sql', 'backend-app/scripts/f8_fixture.sql',
-    'backend-app/scripts/f9_fixture.sql', 'backend-app/scripts/f10_fixture.sql',
-    'backend-app/scripts/f11_fixture.sql', 'backend-app/scripts/f12_fixture.sql',
-    'backend-app/scripts/f13_fixture.sql', 'backend-app/scripts/f14_fixture.sql',
-    'backend-app/scripts/f15_fixture.sql', 'backend-app/scripts/f16_fixture.sql',
-    'backend-app/scripts/f17_fixture.sql')
 
 
 def pinned_sources():
     """Capture real fixed bytes before a shared subprocess mock; never call a mocked loader."""
     result = {}
-    for source, expected in oracle.EXPECTED.items():
-        raw = READ_ONLY_GIT(['git', 'show', oracle.SOURCE + ':' + source], cwd=f28.ROOT.parent,
+    for source, expected in f28.DDL_HASHES.items():
+        raw = READ_ONLY_GIT(['git', 'show', f28.SOURCE + ':' + source], cwd=f28.ROOT.parent,
                             stderr=subprocess.PIPE)
         if hashlib.sha256(raw).hexdigest() != expected:
             raise AssertionError('F28 fixed guard input checksum differs')
@@ -86,52 +67,10 @@ def preparation(directory, sources, events=None):
         yield root, evidence, events
 
 
-def oracle_evidence(root, sources):
-    """Real pinned source/shared bytes; controlled output bytes test receipt identities only."""
-    entries = ['source_sha=' + f28.SOURCE]
-    entries.extend(digest + '  source ' + source for source, digest in oracle.EXPECTED.items())
-    for source, relative in oracle.SHARED.items():
-        target = root.parent / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(sources[source])
-        entries.append(oracle.EXPECTED[source] + '  shared-byte-identity ' + relative)
-    advice = sources[oracle.ADVICE].decode('utf-8')
-    annotations = oracle.checked_section(advice, oracle.ADVICE_ANNOTATIONS)
-    adapted = advice.replace(annotations, oracle.F18_ADAPTED_ANNOTATIONS, 1).encode('utf-8')
-    if hashlib.sha256(adapted).hexdigest() != oracle.F18_ADAPTED_SHA256:
-        raise AssertionError('Fixed adapted advice test input differs')
-    target = root.parent / oracle.F18_ADAPTED_PATH
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(adapted)
-    entries.append(oracle.F18_ADAPTED_SHA256 + '  shared-adapted-identity ' + oracle.F18_ADAPTED_PATH)
-    for relative in oracle.OUTPUTS:
-        raw = ('synthetic identity output only: ' + relative).encode('utf-8')
-        target = root.parent / oracle.OUTPUT_ROOT / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(raw)
-        entries.append(hashlib.sha256(raw).hexdigest() + '  generated ' + relative)
-    target = root.parent / oracle.EVIDENCE_PATH
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text('\n'.join(entries) + '\n')
-    return target
-
-
-def xml_inputs(root):
-    for task, classes in MEASURED_XML.items():
-        directory = root / 'boot/build/test-results' / task
-        directory.mkdir(parents=True)
-        for name, count in classes.items():
-            suite = ET.Element('testsuite', name=name, tests=str(count), failures='0', errors='0', skipped='0')
-            for index in range(count):
-                ET.SubElement(suite, 'testcase', name='synthetic-' + str(index), classname=name)
-            ET.ElementTree(suite).write(directory / ('TEST-' + name + '.xml'))
-
-
 class F28FixtureGuardTest(unittest.TestCase):
-    def test_given_non_hosted_invocation__when_calling_fixture_or_xml_actions__then_refuse_before_sql_git_or_prior_stage(self):
-        actions = (f28.require_owner, f28.require_fixture, f28.verified_sources, f28.prepare,
-                   f28.database_snapshot, f28.require_requests_fixture, f28.require_absent_requests, f28.require_measurements, f28.require_oracle_receipt,
-                   f28.verify_results, lambda: f28.owned_sql('SELECT true'), lambda: f28.require_prior_receipts(OWNER))
+    def test_given_non_hosted_invocation__when_calling_fixture_actions__then_refuse_before_sql_git_or_prior_stage(self):
+        actions = (f28.require_owner, f28.require_fixture, f28.verified_ddl_sources, f28.prepare,
+                   f28.database_snapshot, f28.require_requests_fixture, f28.require_absent_requests, f28.require_measurements, lambda: f28.owned_sql('SELECT true'), lambda: f28.require_prior_receipts(OWNER))
         for action in actions:
             with self.subTest(action=action), patch.dict(os.environ, {}, clear=True), \
                     patch.object(f28.f3, 'sql') as sql, patch.object(f28.subprocess, 'check_output') as git, \
@@ -185,39 +124,30 @@ class F28FixtureGuardTest(unittest.TestCase):
                 target.unlink(); elsewhere = evidence / 'elsewhere'; elsewhere.write_text(f28.fixture_proof(OWNER)); target.symlink_to(elsewhere)
                 with self.assertRaises(SystemExit): f28.require_owner()
 
-    def test_given_sparse_checkout_without_legacy_directories__when_verifying_source_inputs__then_read_all_twenty_pinned_objects_including_stream(self):
+    def test_given_sparse_checkout_without_legacy_directories__when_verifying_ddl_inputs__then_read_only_the_two_pinned_migration_objects(self):
         sources = pinned_sources()  # Real bytes loaded before shared subprocess patch.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve() / 'backend-app'; root.mkdir()
             with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'ROOT', root), \
                     patch.object(f28.subprocess, 'check_output', side_effect=source_git(sources)) as git:
-                self.assertEqual(sources, f28.verified_sources())
-            self.assertEqual(20, git.call_count)
+                self.assertEqual(sources, f28.verified_ddl_sources())
+            self.assertEqual(2, git.call_count)
             self.assertFalse((root.parent / 'community-service').exists()); self.assertFalse((root.parent / 'user-service').exists())
-            self.assertIn(f28.STREAM_SOURCE, sources)
+            self.assertEqual(set(f28.DDL_HASHES), set(sources))
 
-    def test_given_tampered_legacy_or_new_stream_bytes__when_verifying_sources__then_reject_without_writes(self):
+    def test_given_tampered_migration_bytes__when_verifying_ddl_sources__then_reject_without_writes(self):
         sources = pinned_sources()
-        for source in (oracle.SERVICE, f28.STREAM_SOURCE):
+        for source in f28.DDL_HASHES:
             bad = dict(sources); bad[source] += b'\nchanged'
             with self.subTest(source=source), patch.dict(os.environ, HOSTED, clear=True), \
                     patch.object(f28.subprocess, 'check_output', side_effect=source_git(bad)), patch.object(Path, 'write_bytes') as write:
-                with self.assertRaisesRegex(SystemExit, 'checksum'): f28.verified_sources()
+                with self.assertRaisesRegex(SystemExit, 'checksum'): f28.verified_ddl_sources()
                 write.assert_not_called()
 
-    def test_given_missing_stream_wrong_source_or_unavailable_object__when_verifying_sources__then_fail_closed_without_private_git_errors(self):
-        bad = dict(oracle.EXPECTED); bad.pop(f28.STREAM_SOURCE)
-        with patch.dict(os.environ, HOSTED, clear=True), patch.object(oracle, 'EXPECTED', bad), \
-                patch.object(f28.subprocess, 'check_output') as git:
-            with self.assertRaisesRegex(SystemExit, 'twenty-source'): f28.verified_sources()
-            git.assert_not_called()
-        with patch.dict(os.environ, HOSTED, clear=True), patch.object(oracle, 'SOURCE', 'wrong'), \
-                patch.object(f28.subprocess, 'check_output') as git:
-            with self.assertRaises(SystemExit): f28.verified_sources()
-            git.assert_not_called()
+    def test_given_unavailable_migration_object__when_verifying_ddl_sources__then_fail_closed_without_private_git_errors(self):
         failure = subprocess.CalledProcessError(1, ['private-git-command'], output='private-value', stderr='private-error')
         with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28.subprocess, 'check_output', side_effect=failure):
-            with self.assertRaises(SystemExit) as actual: f28.verified_sources()
+            with self.assertRaises(SystemExit) as actual: f28.verified_ddl_sources()
         self.assertNotRegex(str(actual.exception), 'private-git|private-value|private-error')
 
     def test_given_five_inherited_tables__when_checking_catalog__then_enforce_exact_old_acl_and_only_delete_two_and_zero_acl_requests(self):
@@ -301,7 +231,7 @@ class F28FixtureGuardTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, preparation(directory, sources) as (_, evidence, events):
             f28.prepare()
             grant = next(event for event in events if event.startswith('BEGIN;'))
-            self.assertEqual(['old-full'] + ['source'] * 20 + ['prior16', 'absence', grant, 'new-full', 'new17'], events)
+            self.assertEqual(['old-full'] + ['source'] * 2 + ['prior16', 'absence', grant, 'new-full', 'new17'], events)
             self.assertEqual(f28.verified_requests_ddl(sources), grant)
             self.assertEqual(f28.fixture_proof(OWNER), (evidence / 'f28-fixture-write.txt').read_text())
             self.assertEqual(1, grant.count('CREATE TABLE ')); self.assertEqual(3, grant.count('CREATE INDEX ')); self.assertEqual(1, grant.count('GRANT ')); self.assertNotIn('pawbridge_f2_reader', grant); self.assertNotIn('GRANT SELECT', grant); self.assertNotIn('GRANT UPDATE', grant)
@@ -313,7 +243,7 @@ class F28FixtureGuardTest(unittest.TestCase):
                 receipt = evidence / 'f28-fixture-write.txt'
                 if phase == 'existing': receipt.write_text(f28.fixture_proof(OWNER))
                 target = f28.f27 if phase in ('old', 'snapshot') else f28
-                attribute = {'old': 'require_fixture', 'source': 'verified_sources', 'snapshot': 'database_snapshot', 'absence': 'require_absent_requests', 'grant': 'owned_sql'}.get(phase)
+                attribute = {'old': 'require_fixture', 'source': 'verified_ddl_sources', 'snapshot': 'database_snapshot', 'absence': 'require_absent_requests', 'grant': 'owned_sql'}.get(phase)
                 output = io.StringIO()
                 with ExitStack() as stack:
                     if attribute: stack.enter_context(patch.object(target, attribute, side_effect=SystemExit('controlled failure')))
@@ -370,75 +300,18 @@ class F28FixtureGuardTest(unittest.TestCase):
                         if phase == 'revoke': self.fail('body after failed revoke')
                 strict.assert_called_once()
 
-    def test_given_unmeasured_counts_or_wrong_exact_class_set__when_requesting_results__then_stop_before_identity_or_oracle_io(self):
-        bad_reports = ({f28.TASK: {f28.PG_CLASS: None, f28.MVC_CLASS: None}},
-                       {f28.TASK: {f28.PG_CLASS: True, f28.MVC_CLASS: 2}},
-                       {f28.TASK: {'foreign': 2}},
-                       {f28.TASK: {f28.PG_CLASS: 2, f28.MVC_CLASS: 2}, 'foreign-task': {f28.PG_CLASS: 1}})
-        for reports in bad_reports:
-            with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'REPORTS', reports), \
-                    patch.object(f28, 'require_owner') as owner, patch.object(f28, 'require_oracle_receipt') as receipt:
-                with self.assertRaisesRegex(SystemExit, 'unmeasured'): f28.verify_results()
-                owner.assert_not_called(); receipt.assert_not_called()
-        with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'REPORTS', MEASURED_XML), \
-                patch.object(f28, 'COUNTERS', ()), patch.object(f28, 'EXPECTED_JAR_COUNTS', None):
+    def test_given_unmeasured_or_non_jar_gate__when_requiring_measurements__then_refuse_before_journey(self):
+        with patch.dict(os.environ, HOSTED, clear=True):
+            f28.require_measurements('jar')
+            with self.assertRaises(ValueError): f28.require_measurements('results')
+        with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'COUNTERS', ()), \
+                patch.object(f28, 'EXPECTED_JAR_COUNTS', None):
             with self.assertRaisesRegex(SystemExit, 'journey counts remain unmeasured'): f28.require_measurements('jar')
-
-    def test_given_exact_source_shared_and_controlled_output_receipt__when_validating_xml__then_only_the_two_exact_utc_classes_pass(self):
-        sources = pinned_sources()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve() / 'backend-app'; xml_inputs(root); oracle_evidence(root, sources)
-            with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'ROOT', root), patch.object(f28, 'EVIDENCE', root / 'build/ci'), \
-                    patch.object(f28, 'REPORTS', MEASURED_XML), patch.object(f28, 'require_owner', return_value=OWNER):
-                f28.verify_results()
-            value = json.loads((root / 'build/ci/f28-results.json').read_text())
-            self.assertEqual({f28.TASK}, set(value)); self.assertEqual({f28.PG_CLASS, f28.MVC_CLASS}, set(value[f28.TASK])); self.assertEqual(2, value[f28.TASK][f28.PG_CLASS]['tests'])
-
-    def test_given_tampered_source_shared_adapted_generated_or_redirected_receipt__when_checking_oracle_identity__then_refuse(self):
-        sources = pinned_sources()
-        for phase in ('source', 'duplicate', 'shared', 'adapted', 'generated', 'redirected'):
-            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve() / 'backend-app'; receipt = oracle_evidence(root, sources)
-                if phase == 'source': receipt.write_text(receipt.read_text().replace(oracle.EXPECTED[f28.STREAM_SOURCE], '0' * 64, 1))
-                elif phase == 'duplicate': receipt.write_text(receipt.read_text() + next(line for line in receipt.read_text().splitlines() if '  source ' in line) + '\n')
-                elif phase == 'shared': (root.parent / next(iter(oracle.SHARED.values()))).write_bytes(b'changed')
-                elif phase == 'adapted': (root.parent / oracle.F18_ADAPTED_PATH).write_bytes(b'changed')
-                elif phase == 'generated': (root.parent / oracle.OUTPUT_ROOT / oracle.OUTPUTS[0]).write_bytes(b'changed')
-                else:
-                    value = receipt.read_bytes(); receipt.unlink(); alias = receipt.with_name('alias'); alias.write_bytes(value); receipt.symlink_to(alias)
-                with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'ROOT', root):
-                    with self.assertRaises(SystemExit): f28.require_oracle_receipt()
-
-    def test_given_wrong_xml_shape_fqn_count_or_hidden_unsuccessful_child__when_validating__then_no_success_receipt(self):
-        defects = ('extra', 'missing', 'malformed', 'tag', 'suite', 'count', 'children', 'nested-case', 'child-fqn',
-                   'failure', 'error', 'skipped', 'disabled', 'attribute-failure')
-        for defect in defects:
-            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve() / 'backend-app'; xml_inputs(root)
-                task = f28.TASK
-                parent = root / 'boot/build/test-results' / task; target = parent / ('TEST-' + f28.PG_CLASS + '.xml')
-                tree = ET.parse(target); suite = tree.getroot()
-                if defect == 'extra': (parent / 'TEST-extra.xml').write_bytes(target.read_bytes())
-                elif defect == 'missing': target.unlink()
-                elif defect == 'malformed': target.write_text('<invalid')
-                else:
-                    if defect == 'tag': suite.tag = 'testsuites'
-                    elif defect == 'suite': suite.set('name', 'foreign')
-                    elif defect == 'count': suite.set('tests', '0')
-                    elif defect == 'children': suite.remove(suite[0])
-                    elif defect == 'nested-case': ET.SubElement(ET.SubElement(suite, 'nested'), 'testcase', classname=f28.PG_CLASS)
-                    elif defect == 'child-fqn': suite[0].set('classname', 'foreign')
-                    elif defect == 'disabled': suite.set('disabled', '1')
-                    elif defect == 'attribute-failure': suite.set('failures', '1')
-                    else: ET.SubElement(suite[0], defect)
-                    tree.write(target)
-                with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'ROOT', root), patch.object(f28, 'EVIDENCE', root / 'build/ci'), \
-                        patch.object(f28, 'REPORTS', MEASURED_XML), \
-                        patch.object(f28, 'require_owner', return_value=OWNER), patch.object(f28, 'require_oracle_receipt'):
-                    with self.assertRaises(SystemExit): f28.verify_results()
-                self.assertFalse((root / 'build/ci/f28-results.json').exists())
+        bad = dict(f28.EXPECTED_JAR_COUNTS); bad[next(iter(bad))] = -1
+        with patch.dict(os.environ, HOSTED, clear=True), patch.object(f28, 'EXPECTED_JAR_COUNTS', bad):
+            with self.assertRaisesRegex(SystemExit, 'journey counts remain unmeasured'): f28.require_measurements('jar')
 
 
 if __name__ == '__main__':
-    print('F28 fixture/XML guards: mocked resources; immutable inputs use read-only Git objects. No actual PG/JAR/SSE evidence.', flush=True)
+    print('F28 fixture guards: mocked resources; immutable inputs use read-only Git objects. No actual PG/JAR/SSE evidence.', flush=True)
     unittest.main()

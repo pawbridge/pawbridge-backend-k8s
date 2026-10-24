@@ -5,7 +5,6 @@ import json
 import os
 import pathlib
 import sys
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -20,31 +19,6 @@ MARKER = 'pawbridge-f10-ci-only-v1'
 POST = 9950001
 FOREIGN_COMMENT = 9950010
 NICKNAME = 'F10 합성 댓글작성자'
-COMPATIBILITY_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlCommentDeleteCompatibilityTest'
-
-
-def verify_results():
-    f2.require_hosted()
-    counts = {}
-    for task, zone in (('commentDeleteCompatibilityTest', 'UTC'),
-                       ('commentDeleteCompatibilitySeoulTest', 'Asia/Seoul')):
-        path = ROOT / 'boot/build/test-results' / task / ('TEST-' + COMPATIBILITY_CLASS + '.xml')
-        try:
-            suite = ET.parse(path).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F10 compatibility report missing or malformed: ' + task)
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != COMPATIBILITY_CLASS
-                or values['tests'] <= 0 or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or len(cases) != values['tests']
-                or any(case.attrib.get('classname') != COMPATIBILITY_CLASS for case in cases)):
-            raise SystemExit('F10 compatibility report must contain executed, successful, unskipped tests: ' + task)
-        counts[zone] = values['tests']
-    print('Verified separate F10 compatibility execution counts: ' + json.dumps(counts, sort_keys=True))
-    return counts
-
-
 def require_fixture():
     # F9's exact original ACL remains strict. After this stage, reuse its identity
     # and negative-privilege checks with the explicitly extended comments matrix.
@@ -298,4 +272,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

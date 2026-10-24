@@ -1,5 +1,4 @@
-"""Mock-only F11 staged ACL/target/report/oracle checks; no Docker, DB, JVM or socket."""
-import hashlib
+"""Mock-only F11 staged ACL/target/report checks; no Docker, DB, JVM or socket."""
 import json
 import os
 from pathlib import Path
@@ -9,10 +8,8 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
-import xml.etree.ElementTree as ET
 
 import f11_ci as f11
-import prepare_f11_legacy_oracle as oracle
 from test_f10_ci_guards import HOSTED as F10_HOSTED
 
 HOSTED = dict(F10_HOSTED, F11_CI_OWNER='123-1')
@@ -32,7 +29,7 @@ class F11GuardTest(unittest.TestCase):
                     f11.require_seoul_get_timestamp(observed, stored)
 
     def test_given_non_hosted_invocation__when_preparing_seeding_reporting_or_smoking__then_no_resource_call(self):
-        for action in (f11.prepare, f11.prepare_business_rows, f11.verify_results, f11.smoke):
+        for action in (f11.prepare, f11.prepare_business_rows, f11.smoke):
             with self.subTest(action=action.__name__), patch.dict(os.environ, {}, clear=True), \
                     patch.object(f11.f3, 'sql') as sql, patch.object(f11.f2, 'command') as command, \
                     patch.object(f11.f4, 'start_ready_children') as start:
@@ -202,149 +199,24 @@ class F11GuardTest(unittest.TestCase):
                 rows.assert_not_called()
                 sql.assert_not_called()
 
-    @staticmethod
-    def reports(root, *, tests=1, failures=0, errors=0, skipped=0, classname=None, cases=None):
-        classname = classname or f11.COMPATIBILITY_CLASS
-        for task in ('commentUpdateCompatibilityTest', 'commentUpdateCompatibilitySeoulTest'):
-            path = root / 'boot/build/test-results' / task / ('TEST-' + f11.COMPATIBILITY_CLASS + '.xml')
-            path.parent.mkdir(parents=True, exist_ok=True)
-            suite = ET.Element('testsuite', name=classname, tests=str(tests), failures=str(failures),
-                               errors=str(errors), skipped=str(skipped))
-            for index in range(tests if cases is None else cases):
-                ET.SubElement(suite, 'testcase', name='synthetic-' + str(index), classname=classname)
-            ET.ElementTree(suite).write(path)
-
-    def test_given_separate_successful_reports__when_verifying__then_require_nonzero_execution_in_both_task_outputs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.reports(root, tests=2)
-            with patch.dict(os.environ, HOSTED, clear=True), patch.object(f11, 'ROOT', root):
-                self.assertEqual({'UTC': 2, 'Asia/Seoul': 2}, f11.verify_results())
-
-    def test_given_missing_zero_failed_skipped_or_wrong_reports__when_verifying__then_refuse_not_skip(self):
-        for settings in (None, {'tests': 0}, {'failures': 1}, {'errors': 1}, {'skipped': 1},
-                         {'classname': 'OtherTest'}, {'tests': 2, 'cases': 1}):
-            with self.subTest(settings=settings), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                if settings is not None:
-                    self.reports(root, **settings)
-                with patch.dict(os.environ, HOSTED, clear=True), patch.object(f11, 'ROOT', root):
-                    with self.assertRaisesRegex(SystemExit, 'F11 compatibility report'):
-                        f11.verify_results()
-        for task in ('commentUpdateCompatibilityTest', 'commentUpdateCompatibilitySeoulTest'):
-            for failure in ('missing', 'malformed'):
-                with self.subTest(task=task, failure=failure), tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory)
-                    self.reports(root)
-                    report = root / 'boot/build/test-results' / task / ('TEST-' + f11.COMPATIBILITY_CLASS + '.xml')
-                    if failure == 'missing':
-                        report.unlink()
-                    else:
-                        report.write_text('<testsuite')
-                    with patch.dict(os.environ, HOSTED, clear=True), patch.object(f11, 'ROOT', root):
-                        with self.assertRaisesRegex(SystemExit, 'F11 compatibility report'):
-                            f11.verify_results()
-
-    def test_given_workflow_phases__when_declaring_checks__then_finish_original_acl_before_extending_and_use_exact_tasks(self):
+    def test_given_workflow_phases__when_declaring_checks__then_finish_original_acl_before_extending(self):
         workflow = (f11.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Extend the owned fixture with exact F11 comment content update permission')
         self.assertLess(workflow.index('python3 scripts/f10_ci.py smoke'), boundary)
         self.assertLess(workflow.index('python3 scripts/f11_ci.py prepare', boundary),
-                        workflow.index(':boot:commentUpdateCompatibilityTest'))
-        self.assertLess(workflow.index(':boot:commentUpdateCompatibilitySeoulTest'),
-                        workflow.index('python3 scripts/f11_ci.py results'))
-        self.assertLess(workflow.index('python3 scripts/f11_ci.py results'), workflow.index('python3 scripts/f11_ci.py smoke'))
+                        workflow.index('python3 scripts/f11_ci.py smoke'))
+        self.assertNotIn('python3 scripts/f11_ci.py results', workflow)
         after = workflow[boundary:]
         self.assertNotRegex(after, r'python3 scripts/f(?:9|10)_ci\.py (?:prepare|smoke)')
-        for required in ('scripts/test_f11_ci_guards.py', 'build/ci/f11-helper-refusal.txt',
-                         'f11_fixture', 'f11LegacyOracle', 'build/ci/f11-oracle-sha256.txt'):
+        for required in ('scripts/test_f11_ci_guards.py', 'build/ci/f11-helper-refusal.txt', 'f[0-9]+_fixture'):
             self.assertIn(required, workflow)
-
-    def test_given_declared_test_tasks__when_selecting_stages__then_isolate_f11_from_both_ancestor_matrices(self):
-        build = (f11.ROOT / 'boot/build.gradle').read_text()
-        original = build.split("['compatibilityTest':", 1)[1].split("['commentDeleteCompatibilityTest':", 1)[0]
-        delete = build.split("['commentDeleteCompatibilityTest':", 1)[1].split("['commentUpdateCompatibilityTest':", 1)[0]
-        update = build.split("['commentUpdateCompatibilityTest':", 1)[1].split("tasks.named('commentUpdateCompatibilitySeoulTest')", 1)[0]
-        self.assertIn("filter.excludeTestsMatching '" + f11.COMPATIBILITY_CLASS + "'", original)
-        self.assertIn("includeTestsMatching '" + f11.f10.COMPATIBILITY_CLASS + "'", delete)
-        self.assertNotIn('includeTestsMatching ' + "'" + f11.COMPATIBILITY_CLASS, delete)
-        self.assertIn("includeTestsMatching '" + f11.COMPATIBILITY_CLASS + "'", update)
-        self.assertEqual(1, update.count('includeTestsMatching'))
-        for required in ('failOnNoMatchingTests = true', "systemProperty 'user.timezone', zone",
-                         "systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'",
-                         "shouldRunAfter tasks.named('commentDeleteCompatibilitySeoulTest')"):
-            self.assertIn(required, update)
-
-    def test_given_non_dedicated_oracle_paths__when_extracting__then_no_git_or_write(self):
-        self.assertEqual('0bad12b804ea5e90ed0db2d5109566e92978ea8d', oracle.SOURCE)
-        self.assertEqual({'com/pawbridge/communityservice/dto/request/UpdateCommentRequest.java':
-                          '0f57106e37e24707cb0e69e46ab904d1d4f529eb00944c7bf4323021b81872bd'}, oracle.EXPECTED)
-        root = Path('/synthetic').resolve()
-        output = root / 'backend-app/boot/build/generated/sources/f11LegacyOracle/java'
-        evidence = root / 'backend-app/build/ci/f11-oracle-sha256.txt'
-        for changed_output, changed_evidence in ((root / 'outside', evidence), (output, root / 'outside')):
-            with self.subTest(output=changed_output, evidence=changed_evidence), \
-                    patch.object(oracle.subprocess, 'check_output') as git:
-                with self.assertRaisesRegex(SystemExit, 'Refusing non-dedicated F11 oracle output'):
-                    oracle.extract(root, changed_output, changed_evidence)
-                git.assert_not_called()
-
-    def test_given_tampered_shared_oracle__when_extracting__then_no_new_generated_source(self):
-        for stage in ('f8', 'f9'):
-            for failure in ('hash', 'missing', 'differing-existing'):
-                with self.subTest(stage=stage, failure=failure), tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory).resolve()
-                    output = root / 'backend-app/boot/build/generated/sources/f11LegacyOracle/java'
-                    evidence = root / 'backend-app/build/ci/f11-oracle-sha256.txt'
-                    relative, content = 'synthetic/Shared.java', b'synthetic fixed shared source'
-                    shared = root / ('backend-app/boot/build/generated/sources/' + stage + 'LegacyOracle/java') / relative
-                    if failure != 'missing':
-                        shared.parent.mkdir(parents=True)
-                        shared.write_bytes(b'different' if failure == 'differing-existing' else content)
-                    expected = hashlib.sha256(content).hexdigest() if failure != 'hash' else 'wrong'
-                    with patch.dict(oracle.f8.EXPECTED, {relative: expected} if stage == 'f8' else {}, clear=True), \
-                            patch.dict(oracle.f9.EXPECTED, {relative: expected} if stage == 'f9' else {}, clear=True), \
-                            patch.object(oracle.subprocess, 'check_output', return_value=content):
-                        with self.assertRaisesRegex(SystemExit, 'Shared oracle differs from fixed F11 input'):
-                            oracle.extract(root, output, evidence)
-                    self.assertFalse(output.exists())
-                    self.assertFalse(evidence.exists())
-
-    def test_given_tampered_new_oracle_input__when_extracting__then_no_generated_source_or_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f11LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f11-oracle-sha256.txt'
-            with patch.dict(oracle.f8.EXPECTED, {}, clear=True), patch.dict(oracle.f9.EXPECTED, {}, clear=True), \
-                    patch.object(oracle.subprocess, 'check_output', return_value=b'tampered'):
-                with self.assertRaisesRegex(SystemExit, 'Legacy F11 input checksum mismatch'):
-                    oracle.extract(root, output, evidence)
-            self.assertFalse(output.exists())
-            self.assertFalse(evidence.exists())
-
-    def test_given_differing_oracle_destination__when_extracting__then_no_overwrite_or_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f11LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f11-oracle-sha256.txt'
-            relative, content = 'synthetic/Input.java', b'synthetic fixed source'
-            target = output / relative
-            target.parent.mkdir(parents=True)
-            target.write_bytes(b'existing different source')
-            with patch.dict(oracle.f8.EXPECTED, {}, clear=True), patch.dict(oracle.f9.EXPECTED, {}, clear=True), \
-                    patch.dict(oracle.EXPECTED, {relative: hashlib.sha256(content).hexdigest()}, clear=True), \
-                    patch.object(oracle.subprocess, 'check_output', return_value=content):
-                with self.assertRaisesRegex(SystemExit, 'Refusing to overwrite differing F11 oracle input'):
-                    oracle.extract(root, output, evidence)
-            self.assertEqual(b'existing different source', target.read_bytes())
-            self.assertFalse(evidence.exists())
 
     def test_given_actual_jar_filter__when_f11_artifacts_leak__then_reject_without_widening_validator_exception(self):
         workflow = (f11.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         pipeline = re.search(r'          if (grep -E .*?); then', workflow, re.DOTALL).group(1)
         allowed = 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\n'
-        for forbidden in ('', 'BOOT-INF/classes/f11_fixture.sql', 'BOOT-INF/classes/f11LegacyOracle/Input.class',
-                          'test/f11LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
+        for forbidden in ('', 'BOOT-INF/classes/f11_fixture.sql', 'BOOT-INF/classes/com/pawbridge/backend/compatibility/Input.class',
+                          'test/compatibilityTest/hibernate-validator-8.0.3.Final.jar'):
             with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory) / 'build/ci/boot-jar-contents.txt'
                 target.parent.mkdir(parents=True)

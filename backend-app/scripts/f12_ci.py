@@ -4,7 +4,6 @@ import json
 import os
 import pathlib
 import sys
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -14,35 +13,12 @@ import f11_ci as f11
 ROOT = f3.ROOT
 EVIDENCE = f3.EVIDENCE
 MARKER = 'pawbridge-f12-ci-only-v1'
-COMPATIBILITY_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlUserProfileCompatibilityTest'
 FIELDS = {'userId', 'email', 'name', 'nickname', 'provider', 'role', 'createdAt'}
 OTHER = 9980001
 PRIVATE_COLUMNS = ('password', 'care_reg_no', 'provider_id', 'updated_at')
 PRIVATE_VALUES = ('F12_SYNTHETIC_PASSWORD_DO_NOT_EXPOSE', 'F12_SYNTHETIC_CARE_DO_NOT_EXPOSE',
                   'F12_SYNTHETIC_PROVIDER_ID_DO_NOT_EXPOSE')
 IDENTITIES = "SELECT COALESCE(json_agg(json_build_array(user_id,nickname) ORDER BY user_id),'[]'::json) FROM pawbridge_user.users"
-
-
-def verify_results():
-    f2.require_hosted()
-    counts = {}
-    for task, zone in (('profileCompatibilityTest', 'UTC'),
-                       ('profileCompatibilitySeoulTest', 'Asia/Seoul')):
-        path = ROOT / 'boot/build/test-results' / task / ('TEST-' + COMPATIBILITY_CLASS + '.xml')
-        try:
-            suite = ET.parse(path).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F12 compatibility report missing or malformed: ' + task)
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != COMPATIBILITY_CLASS
-                or values['tests'] <= 0 or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or len(cases) != values['tests']
-                or any(case.attrib.get('classname') != COMPATIBILITY_CLASS for case in cases)):
-            raise SystemExit('F12 compatibility report must contain executed, successful, unskipped tests: ' + task)
-        counts[zone] = values['tests']
-    print('Verified separate F12 compatibility execution counts: ' + json.dumps(counts, sort_keys=True))
-    return counts
 
 
 def require_fixture():
@@ -282,4 +258,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

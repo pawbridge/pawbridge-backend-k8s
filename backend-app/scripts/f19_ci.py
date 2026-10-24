@@ -10,7 +10,6 @@ import stat
 import subprocess
 import sys
 import time
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -18,10 +17,6 @@ import f4_ci as f4
 import f18_ci as f18
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
-TASK = 'totalUserCountCompatibilityTest'
-CLASSES = ('com.pawbridge.backend.compatibility.PostgresqlTotalUserCountCompatibilityTest',
-           'com.pawbridge.backend.compatibility.F19LegacyTotalUserCountMvcTest')
-EXPECTED_TESTS = dict(zip(CLASSES, (3, 4)))
 ADMIN, USER = 9973001, 9973002
 OWNED = (USER,)
 EMAIL = 'f19-role@fixture.invalid'
@@ -73,30 +68,6 @@ def denied_user_id_select():
         require_identity(owner)
         owned_sql('GRANT SELECT(user_id) ON pawbridge_user.users TO pawbridge_f2_reader')
         require_fixture()
-
-
-def verify_results():
-    f2.require_hosted()
-    directory = ROOT / 'boot/build/test-results' / TASK
-    if {p.name for p in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in CLASSES}:
-        raise SystemExit('F19 compatibility requires its exact two-class XML set')
-    counts = {}
-    for name in CLASSES:
-        try:
-            suite = ET.parse(directory / ('TEST-' + name + '.xml')).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F19 compatibility report missing or malformed') from None
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != name
-                or values['tests'] != EXPECTED_TESTS[name] or len(cases) != values['tests']
-                or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or any(c.attrib.get('classname') != name for c in cases)
-                or any(c.find(tag) is not None for c in cases for tag in ('failure', 'error', 'skipped'))):
-            raise SystemExit('F19 compatibility requires executed successful unskipped cases')
-        counts[name] = values['tests']
-    print('Verified F19 single UTC PG and original MVC reports')
-    return counts
 
 
 def prepare():
@@ -271,4 +242,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

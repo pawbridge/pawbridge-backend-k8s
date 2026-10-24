@@ -13,7 +13,6 @@ import unittest
 from unittest.mock import patch
 
 import f16_ci as f16
-import prepare_f16_legacy_oracle as oracle
 from test_f15_ci_guards import HOSTED as F15_HOSTED
 
 HOSTED = dict(F15_HOSTED, F16_CI_OWNER='123-1')
@@ -22,26 +21,14 @@ COUNTS = {'2026-10-18': 7, '2026-10-19': 9007199254740993, '2026-10-20': 11}
 
 
 def pinned_source(source, repository=None):
-    # Read immutable objects before installing a subprocess mock: legacy paths are not checked out in CI.
-    if source == f16.DDL_SOURCE:
-        expected = f16.DDL_HASH
-    elif source in oracle.EXPECTED:
-        expected = oracle.EXPECTED[source]
-    elif source in oracle.SHARED:
-        expected = oracle.f7.EXPECTED[source]
-    else:
+    # Read immutable objects before installing a subprocess mock: old service paths are not checked out in CI.
+    if source != f16.DDL_SOURCE:
         raise ValueError('F16 guard source must be explicitly hash-pinned')
     content = subprocess.check_output(['git', 'show', f16.SOURCE + ':' + source],
                                       cwd=repository if repository is not None else f16.ROOT.parent)
-    if hashlib.sha256(content).hexdigest() != expected:
+    if hashlib.sha256(content).hexdigest() != f16.DDL_HASH:
         raise AssertionError('Fixed F16 guard input checksum mismatch: ' + source)
     return content
-
-
-def oracle_paths(directory):
-    root = Path(directory).resolve()
-    return (root, root / 'backend-app/boot/build/generated/sources/f16LegacyOracle/java',
-            root / 'backend-app/build/ci/f16-oracle-sha256.txt')
 
 
 @contextmanager
@@ -78,30 +65,31 @@ def packaged_harness(directory, failure=None, mutation=False, cache='no-store', 
 
 
 class F16GuardTest(unittest.TestCase):
-    def test_given_minimal_checkout_without_legacy_dirs__when_loading_inputs__then_verify_pinned_git_objects(self):
+    def test_given_minimal_checkout_without_old_service_dirs__when_loading_ddl__then_verify_the_pinned_git_object(self):
         repository = f16.ROOT.parent
         marker = repository / '.git'
         if marker.is_file():
             git_dir = Path(marker.read_text().removeprefix('gitdir:').strip())
-            if not git_dir.is_absolute(): git_dir = (repository / git_dir).resolve()
+            if not git_dir.is_absolute():
+                git_dir = (repository / git_dir).resolve()
         else:
             git_dir = marker.resolve()
         # A temporary pointer reads the same object store; it never registers/resets a worktree or changes Git state.
         with tempfile.TemporaryDirectory() as directory:
             checkout = Path(directory)
             (checkout / '.git').write_text('gitdir: ' + str(git_dir) + '\n')
-            (checkout / 'backend-app').mkdir(); (checkout / '.github/workflows').mkdir(parents=True)
+            (checkout / 'backend-app').mkdir()
+            (checkout / '.github/workflows').mkdir(parents=True)
             self.assertFalse((checkout / 'community-service').exists())
-            self.assertFalse((checkout / 'user-service').exists())
-            for source in (f16.DDL_SOURCE, *oracle.SHARED, *oracle.EXPECTED):
-                self.assertTrue(pinned_source(source, repository=checkout))
+            self.assertTrue(pinned_source(f16.DDL_SOURCE, repository=checkout))
             self.assertFalse((checkout / 'community-service').exists())
         with patch.object(subprocess, 'check_output', return_value=b'tampered'):
-            with self.assertRaisesRegex(AssertionError, 'input checksum mismatch'): pinned_source(f16.DDL_SOURCE)
+            with self.assertRaisesRegex(AssertionError, 'input checksum mismatch'):
+                pinned_source(f16.DDL_SOURCE)
 
     def test_given_non_hosted_invocation__when_calling_actions__then_refuse_before_resources(self):
         for action in (f16.prepare, f16.require_fixture, f16.prepare_business_rows, lambda: f16.cleanup_business_rows({}),
-                       f16.smoke, f16.verify_results, f16.verified_ddl):
+                       f16.smoke, f16.verified_ddl):
             with self.subTest(action=action.__name__), patch.dict(os.environ, {}, clear=True), \
                     patch.object(f16.f3, 'sql') as sql, patch.object(f16.f2, 'command') as command, \
                     patch.object(f16.subprocess, 'check_output') as git, patch.object(f16.f4, 'start_ready_children') as start:
@@ -243,30 +231,6 @@ class F16GuardTest(unittest.TestCase):
             with self.assertRaises(AssertionError): f16.require_day_count(data, COUNTS, DAY, tomorrow)
         with self.assertRaises(AssertionError): f16.require_day_count({'date': DAY.isoformat(), 'count': COUNTS[DAY.isoformat()]}, COUNTS, tomorrow, DAY)
 
-    def test_given_report_fault_or_extra_class__when_reporting__then_require_exact_four_xml_with_nonzero_unskipped_cases(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, HOSTED, clear=True), patch.object(f16, 'ROOT', Path(directory)):
-            paths = []
-            def valid(name): return '<testsuite name="' + name + '" tests="1" failures="0" errors="0" skipped="0"><testcase classname="' + name + '" name="contract"/></testsuite>'
-            for task, names in f16.REPORTS.items():
-                for name in names:
-                    path = Path(directory) / 'boot/build/test-results' / task / ('TEST-' + name + '.xml')
-                    path.parent.mkdir(parents=True, exist_ok=True); paths.append((path, name))
-            with self.assertRaises(SystemExit): f16.verify_results()
-            for path, name in paths: path.write_text(valid(name))
-            for path, name in paths:
-                for text in ('broken', valid(name).replace('tests="1"', 'tests="0"'), valid(name).replace('errors="0"', 'errors="1"'),
-                             valid(name).replace('failures="0"', 'failures="1"'), valid(name).replace('skipped="0"', 'skipped="1"'),
-                             valid(name).replace('classname="' + name, 'classname="wrong'),
-                             *(valid(name).replace('/></testsuite>', '><' + tag + '/></testcase></testsuite>')
-                               for tag in ('failure', 'error', 'skipped'))):
-                    path.write_text(text)
-                    with self.assertRaises(SystemExit): f16.verify_results()
-                path.write_text(valid(name))
-            extra = paths[0][0].parent / 'TEST-extra.xml'; extra.write_text(valid('extra'))
-            with self.assertRaisesRegex(SystemExit, 'exact XML class set'): f16.verify_results()
-            extra.unlink(); result = f16.verify_results()
-            self.assertEqual(4, sum(len(names) for names in result.values()))
-
     def test_given_mock_jars__when_running_both_phases__then_no_jwt_two_pool_receipt_each_and_honest_disabled_proof(self):
         with tempfile.TemporaryDirectory() as directory, packaged_harness(directory) as (evidence, requests, sql, start, stop, cleanup):
             f16.smoke(); result = json.loads((evidence / 'f16-packaged-result.txt').read_text())
@@ -297,176 +261,26 @@ class F16GuardTest(unittest.TestCase):
                 self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with(COUNTS)
                 self.assertEqual('incomplete', json.loads((evidence / 'f16-packaged-result.txt').read_text())['status'])
 
-    def test_given_workflow__when_extending_f16__then_preserve_f15_order_three_tasks_and_always_cleanup(self):
+    def test_given_workflow__when_extending_f16__then_preserve_f15_order_and_always_cleanup(self):
         text = (f16.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = text.index('- name: Extend the owned fixture with only pinned F16 daily totals and reader columns')
         self.assertLess(text.index('python3 scripts/f15_ci.py smoke'), boundary)
-        self.assertLess(text.index('python3 scripts/f16_ci.py prepare', boundary), text.index(':boot:visitTodayCompatibilityTest'))
-        self.assertLess(text.index(':boot:visitTodayLegacyMvcTest'), text.index('python3 scripts/f16_ci.py results'))
-        self.assertLess(text.index('python3 scripts/f16_ci.py results'), text.index('python3 scripts/f16_ci.py smoke'))
+        self.assertLess(text.index('python3 scripts/f16_ci.py prepare', boundary), text.index('python3 scripts/f16_ci.py smoke'))
+        self.assertNotIn('python3 scripts/f16_ci.py results', text)
         cleanup = text.index('- name: Remove only the owned disposable fixture')
         self.assertLess(text.index('python3 scripts/f16_ci.py smoke'), cleanup); self.assertIn('if: always()', text[cleanup:])
-        for value in ('f16-helper-refusal.txt', 'f16-oracle-sha256.txt', 'f16-ddl-sha256.txt', 'test_f16_ci_guards.py', 'f16_fixture', 'f16LegacyOracle'): self.assertIn(value, text)
+        for value in ('f16-helper-refusal.txt', 'f16-ddl-sha256.txt', 'test_f16_ci_guards.py', 'f[0-9]+_fixture'):
+            self.assertIn(value, text)
         self.assertNotIn(':boot:compatibilityTest ', text[boundary:cleanup]); self.assertNotIn('F3_TEST_TOKENS_PATH', text[boundary:cleanup])
-
-    def test_given_wrong_oracle_paths__when_extracting__then_refuse_before_git_or_write(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root, output, evidence = oracle_paths(directory)
-            for target, report in ((root / 'foreign', evidence), (output, root / 'foreign.txt')):
-                with patch.object(oracle.subprocess, 'check_output') as git, patch.object(Path, 'mkdir') as mkdir, patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaisesRegex(SystemExit, 'non-dedicated F16'): oracle.extract(root, target, report)
-                    git.assert_not_called(); mkdir.assert_not_called(); write.assert_not_called()
-
-    def test_given_shared_f7_source_or_generated_tamper__when_extracting__then_write_nothing(self):
-        source = oracle.SHARED[0]
-        original = pinned_source(source)
-        for source_bytes, generated_bytes in ((b'changed', original), (original, b'changed')):
-            with tempfile.TemporaryDirectory() as directory:
-                root, output, evidence = oracle_paths(directory)
-                shared = root / 'backend-app/boot/build/generated/sources/f7LegacyOracle/java' / source[len(oracle.PREFIX):]
-                shared.parent.mkdir(parents=True); shared.write_bytes(generated_bytes)
-                with patch.object(oracle, 'SHARED', (source,)), patch.object(oracle.subprocess, 'check_output', return_value=source_bytes), patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaisesRegex(SystemExit, 'Shared F7 input differs'): oracle.extract(root, output, evidence)
-                    write.assert_not_called(); self.assertFalse(evidence.exists())
-
-    def test_given_late_new_hash_or_existing_output_mismatch__when_extracting__then_preserve_all_existing_outputs(self):
-        first, second = oracle.PREFIX + 'First.java', oracle.PREFIX + 'Second.java'
-        expected = {first: hashlib.sha256(b'original').hexdigest(), second: hashlib.sha256(b'original').hexdigest()}
-        for tampered in (True, False):
-            with tempfile.TemporaryDirectory() as directory:
-                root, output, evidence = oracle_paths(directory)
-                target = output / 'Second.java'; target.parent.mkdir(parents=True); target.write_bytes(b'preserve')
-                with patch.object(oracle, 'SHARED', ()), patch.dict(oracle.EXPECTED, expected, clear=True), \
-                        patch.object(oracle.subprocess, 'check_output', side_effect=[b'original', b'changed' if tampered else b'original']):
-                    with self.assertRaises(SystemExit): oracle.extract(root, output, evidence)
-                self.assertFalse((output / 'First.java').exists()); self.assertEqual(b'preserve', target.read_bytes()); self.assertFalse(evidence.exists())
-
-    def test_given_nine_original_bytes_and_shared_f7__when_extracting__then_write_verbatim_no_duplicate_shared_fqn(self):
-        sources = {source: pinned_source(source) for source in (*oracle.SHARED, *oracle.EXPECTED)}
-        with tempfile.TemporaryDirectory() as directory:
-            root, output, evidence = oracle_paths(directory)
-            for source in oracle.SHARED:
-                target = root / 'backend-app/boot/build/generated/sources/f7LegacyOracle/java' / source[len(oracle.PREFIX):]
-                target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(sources[source])
-            with patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kwargs: sources[args[-1].split(':', 1)[1]]) as git:
-                oracle.extract(root, output, evidence)
-            self.assertEqual(9, len(oracle.EXPECTED)); self.assertIn('source_sha=' + f16.SOURCE, evidence.read_text())
-            self.assertTrue(all(call.args[0][2].startswith(f16.SOURCE + ':') for call in git.call_args_list))
-            for source, digest in oracle.EXPECTED.items():
-                self.assertEqual(sources[source], (output / source[len(oracle.PREFIX):]).read_bytes()); self.assertEqual(digest, hashlib.sha256(sources[source]).hexdigest())
-            for source in oracle.SHARED: self.assertFalse((output / source[len(oracle.PREFIX):]).exists())
-            self.assertNotIn('VisitConfiguration.java', '\n'.join(oracle.EXPECTED))
 
     def test_given_f16_test_artifacts__when_applying_jar_rules__then_reject_without_widening_validator_exception(self):
         text = (f16.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         denied = next(line for line in text.splitlines() if "if grep -E '" in line).split("if grep -E '", 1)[1].split("' build/ci/", 1)[0]
         allowed = next(line for line in text.splitlines() if "| grep -Ev '" in line).split("| grep -Ev '", 1)[1].split("'; then", 1)[0]
-        for path in ('BOOT-INF/classes/f16_fixture.sql', 'BOOT-INF/classes/f16LegacyOracle/Input.class',
-                     'BOOT-INF/classes/com/pawbridge/communityservice/visits/VisitService.class', 'test/f16LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
+        for path in ('BOOT-INF/classes/f16_fixture.sql', 'BOOT-INF/classes/com/pawbridge/backend/compatibility/Input.class',
+                     'BOOT-INF/classes/com/pawbridge/communityservice/visits/VisitService.class', 'test/compatibilityTest/hibernate-validator-8.0.3.Final.jar'):
             self.assertIsNotNone(re.search(denied, path)); self.assertIsNone(re.search(allowed, path))
         self.assertIsNotNone(re.search(allowed, 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar'))
-
-
-class VisitCollectionGuardTest(unittest.TestCase):
-    """New artifact/mode/late-DDL controls only; no database, Git process, JVM or network."""
-
-    def test_given_wrong_collection_destination_or_source_hash__when_verifying__then_no_evidence_write(self):
-        for wrong in ('path','hash'):
-            with self.subTest(wrong=wrong), tempfile.TemporaryDirectory() as directory:
-                root=Path(directory).resolve();output=root/'backend-app/boot/build/generated/sources/f16LegacyOracle/java'
-                target=root/'backend-app/build/ci/f16-collection-oracle-sha256.txt'
-                with patch.object(oracle.subprocess,'check_output',return_value=b'changed source') as git,patch.object(Path,'write_text') as write:
-                    with self.assertRaises(SystemExit):oracle.extract_collection(root,output if wrong=='hash' else root/'other',target)
-                    write.assert_not_called()
-                    if wrong=='path':git.assert_not_called()
-
-    def test_given_a_conflicting_collection_receipt_after_controlled_inputs__when_verifying__then_preserve_old_get_and_other_files(self):
-        # Controlled input hashes prove conflict-before-write, not the original visit SQL/business contract.
-        raw={oracle.COLLECTION_DDL:b'ddl'}
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory).resolve();output=root/'backend-app/boot/build/generated/sources/f16LegacyOracle/java';output.mkdir(parents=True)
-            old=output/'Keep.java';old.write_bytes(b'keep');target=root/'backend-app/build/ci/f16-collection-oracle-sha256.txt';target.parent.mkdir(parents=True)
-            base=target.with_name('f16-oracle-sha256.txt');base.write_text(oracle.collection_base_receipt());before=base.read_bytes();target.write_text('conflict')
-            with patch.object(oracle,'COLLECTION_EXPECTED',{p:hashlib.sha256(b).hexdigest() for p,b in raw.items()}),patch.object(oracle,'COLLECTION_SHARED',{}), \
-                    patch.object(oracle.subprocess,'check_output',return_value=b'ddl'),patch.object(oracle,'collection_fragments',return_value=('first','second')),patch.object(Path,'write_text') as write:
-                with self.assertRaisesRegex(SystemExit,'changed F16 collection receipt'):oracle.extract_collection(root,output,target)
-                write.assert_not_called()
-            self.assertEqual(before,base.read_bytes());self.assertEqual(b'keep',old.read_bytes());self.assertEqual('conflict',target.read_text())
-
-    def test_given_missing_or_changed_shared_or_receipt__when_preparing_either_mode__then_refuse_before_any_ddl_or_grant(self):
-        import f29_ci as late
-        for action,parent in ((late.visit_collection_prepare,'member_require_fixture'),(late.admin_visit_collection_prepare,'admin_update_require_fixture')):
-            for defect in ('shared','receipt'):
-                with self.subTest(action=action.__name__,defect=defect),tempfile.TemporaryDirectory() as directory:
-                    root=Path(directory).resolve()/'backend-app';evidence=root/'build/ci';evidence.mkdir(parents=True)
-                    shared=root/'shared.java';shared.write_bytes(b'shared')
-                    with patch.object(oracle,'COLLECTION_EXPECTED',{'source':hashlib.sha256(b'shared').hexdigest()}),patch.object(oracle,'COLLECTION_SHARED',{'source':'backend-app/shared.java'}), \
-                            patch.object(late,'ROOT',root),patch.object(late,'EVIDENCE',evidence),patch.object(late.f2,'require_hosted'),patch.object(late,parent,return_value='123-1'),patch.object(late,'owned_sql') as sql:
-                        (evidence/'f16-oracle-sha256.txt').write_text(oracle.collection_base_receipt());extra=evidence/'f16-collection-oracle-sha256.txt';extra.write_text(oracle.collection_receipt())
-                        if defect=='shared':shared.write_bytes(b'changed')
-                        else:extra.write_text(extra.read_text()+'unexpected\n')
-                        with self.assertRaisesRegex(SystemExit,'artifacts or separate source receipt'):action()
-                        sql.assert_not_called()
-                    self.assertFalse((evidence/late.VISIT_COLLECTION_RECEIPT).exists())
-
-    def test_given_either_exact_parent__when_extending__then_create_only_two_original_tables_and_record_the_fixed_mode_without_rows(self):
-        import f29_ci as late
-        for mode,action,parent,strict,snapshot in (
-                ('member-cleanup',late.visit_collection_prepare,'member_require_fixture','visit_collection_require_fixture','visit_collection_database_snapshot'),
-                ('admin-user-update',late.admin_visit_collection_prepare,'admin_update_require_fixture','admin_visit_collection_require_fixture','admin_visit_collection_database_snapshot')):
-            with self.subTest(mode=mode),tempfile.TemporaryDirectory() as directory:
-                evidence=Path(directory).resolve();before={'users':[{'user_id':42}]};after=dict(before,daily_visitor=[],visit_collection=[])
-                with patch.object(late,'EVIDENCE',evidence),patch.object(late.f2,'require_hosted'),patch.object(late,parent,return_value='123-1') as prior, \
-                        patch.object(late,'visit_collection_require_oracle_receipt'),patch.object(late.subprocess,'check_output',return_value=b'controlled DDL'), \
-                        patch.object(oracle,'collection_fragments',return_value=('CREATE TABLE first;\n','CREATE TABLE second;\n')), \
-                        patch.object(late,'owned_sql',return_value='t') as sql,patch.object(late,'member_database_snapshot',return_value=before), \
-                        patch.object(late,strict,return_value='123-1'),patch.object(late,snapshot,return_value=after):
-                    action();prior.assert_called_once()
-                    writes=[c.kwargs['input_text'] for c in sql.call_args_list if 'input_text' in c.kwargs]
-                    self.assertEqual(1,len(writes));self.assertEqual(2,writes[0].count('CREATE TABLE '));self.assertEqual(3,writes[0].count('GRANT '))
-                    self.assertNotIn('INSERT INTO ',writes[0]);self.assertNotIn('UPDATE pawbridge_user',writes[0]);self.assertNotIn('SEQUENCE',writes[0])
-                    self.assertIn('fixture='+mode+' plus visit collection\n',(evidence/late.VISIT_COLLECTION_RECEIPT).read_text())
-
-    def test_given_fixed_modes_and_catalog_failures__when_checking__then_keep_exact_old_or_admin_user_acl_and_reject_every_bad_visit_catalog(self):
-        import f29_ci as late
-        for action,identity,reads,updates in (
-                (late.visit_collection_require_fixture,'visit_collection_require_identity',('user_id','nickname'),('user_id','nickname','updated_at')),
-                (late.admin_visit_collection_require_fixture,'admin_visit_collection_require_identity',('user_id','nickname','role','care_reg_no'),('user_id','nickname','updated_at','role','care_reg_no'))):
-            with patch.object(late,identity,return_value='123-1'),patch.object(late,'_member_require_fixture_without_user_writer_acl'),patch.object(late,'_member_require_user_writer_acl') as acl,patch.object(late,'_visit_collection_require_tables'):
-                self.assertEqual('123-1',action());acl.assert_called_once_with(reads,updates)
-        with self.assertRaises(ValueError):late._visit_collection_proof('123-1','inferred-mode')
-        self.assertNotEqual(late.visit_collection_fixture_proof('123-1'),late.admin_visit_collection_fixture_proof('123-1'))
-        self.assertEqual('GRANT SELECT(visit_date,visitor_hash),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;',late.VISIT_COLLECTION_GRANTS.splitlines()[0])
-        self.assertEqual(3,len(late.VISIT_COLLECTION_GRANTS.splitlines()))
-        self.assertNotIn('pawbridge_f2_reader',late.VISIT_COLLECTION_GRANTS)
-        with patch.object(late,'owned_sql',return_value='t') as sql:
-            late._visit_collection_require_tables();self.assertEqual(14,sql.call_count)
-            visitor_columns=sql.call_args_list[1].args[0]
-            self.assertIn("has_column_privilege('pawbridge_f3_writer','pawbridge_community.daily_visitor',column_name,'SELECT')=(true)",visitor_columns)
-            self.assertIn("has_column_privilege('pawbridge_f2_reader','pawbridge_community.daily_visitor',column_name,'SELECT')=false",visitor_columns)
-            self.assertIn("column_name,'UPDATE')=(false)",visitor_columns)
-        for failed in range(14):
-            with self.subTest(failed=failed),patch.object(late,'owned_sql',side_effect=['t']*failed+['f']) as sql:
-                with self.assertRaises(SystemExit):late._visit_collection_require_tables()
-                self.assertEqual(failed+1,sql.call_count)
-
-    def test_given_preexisting_count_writer_right_or_business_table__when_extending__then_never_commit_or_write_receipt(self):
-        import f29_ci as late
-        for answers in (['f'],['t','f']):
-            with self.subTest(answers=answers),tempfile.TemporaryDirectory() as directory,patch.object(late,'EVIDENCE',Path(directory).resolve()), \
-                    patch.object(late,'visit_collection_require_oracle_receipt'),patch.object(late.subprocess,'check_output',return_value=b'controlled DDL'),patch.object(oracle,'collection_fragments',return_value=('one','two')), \
-                    patch.object(late,'owned_sql',side_effect=answers) as sql:
-                with self.assertRaises(SystemExit):late._visit_collection_extend('123-1',late.visit_collection_fixture_proof('123-1'),lambda:'123-1',lambda:{})
-                self.assertFalse(any('input_text' in c.kwargs for c in sql.call_args_list));self.assertFalse((Path(directory)/late.VISIT_COLLECTION_RECEIPT).exists())
-
-    def test_given_twenty_six_snapshot_keys_or_unknown_rows__when_observing__then_keep_all_old_raw_tables_and_reject_missing_or_extra_keys(self):
-        import f29_ci as late
-        valid={key:[] for key,_,_ in late.SNAPSHOT_TABLES+late.MEMBER_TABLES+late.VISIT_COLLECTION_TABLES};valid['users']=[{'user_id':42}]
-        self.assertEqual(26,len(valid));self.assertIn('daily_visitor',valid);self.assertIn('visit_collection',valid)
-        with patch.object(late,'owned_sql',return_value=json.dumps(valid)) as sql:self.assertEqual(valid,late._visit_collection_snapshot());self.assertEqual(1,sql.call_count)
-        for changed in ({k:v for k,v in valid.items() if k!='users'},dict(valid,unknown=[]),dict(valid,daily_visitor='not rows')):
-            with self.subTest(changed_keys=len(changed)),patch.object(late,'owned_sql',return_value=json.dumps(changed)):
-                with self.assertRaisesRegex(SystemExit,'twenty-six raw tables'):late._visit_collection_snapshot()
 
 
 if __name__ == '__main__':

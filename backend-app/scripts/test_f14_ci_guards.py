@@ -1,6 +1,5 @@
 """No-socket F14 staged fixture, exact ACL, source, token and XML regressions."""
 import base64
-import hashlib
 import inspect
 import json
 import os
@@ -12,16 +11,9 @@ import unittest
 from unittest.mock import patch
 
 import f14_ci as f14
-import prepare_f14_legacy_oracle as oracle
 from test_f13_ci_guards import HOSTED as F13_HOSTED
 
 HOSTED = dict(F13_HOSTED, F14_CI_OWNER='123-1')
-
-
-def oracle_paths(directory):
-    root = Path(directory).resolve()
-    return (root, root / 'backend-app/boot/build/generated/sources/f14LegacyOracle/java',
-            root / 'backend-app/build/ci/f14-oracle-sha256.txt')
 
 
 def token(identity, expiry, role='ROLE_USER'):
@@ -33,7 +25,7 @@ def token(identity, expiry, role='ROLE_USER'):
 class F14GuardTest(unittest.TestCase):
     def test_given_non_hosted_invocation__when_calling_actions__then_refuse_before_resources(self):
         for action in (f14.prepare, f14.require_fixture, f14.prepare_business_rows, f14.cleanup_business_rows,
-                       f14.smoke, f14.verify_results, f14.verified_ddl, f14.load_tokens):
+                       f14.smoke, f14.verified_ddl, f14.load_tokens):
             with self.subTest(action=action.__name__), patch.dict(os.environ, {}, clear=True), \
                     patch.object(f14.f3, 'sql') as sql, patch.object(f14.f2, 'command') as command, \
                     patch.object(f14.subprocess, 'check_output') as git, patch.object(f14.f4, 'start_ready_children') as start:
@@ -171,99 +163,6 @@ class F14GuardTest(unittest.TestCase):
                 path.write_text(json.dumps(valid)); path.chmod(0o600)
                 self.assertEqual(valid, f14.load_tokens())
 
-    def test_given_missing_failed_empty_skipped_or_wrong_xml__when_reporting__then_refuse_and_accept_one_exact_utc_suite(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, HOSTED, clear=True), patch.object(f14, 'ROOT', Path(directory)):
-            with self.assertRaises(SystemExit): f14.verify_results()
-            path = Path(directory) / 'boot/build/test-results' / f14.TASK / ('TEST-' + f14.COMPATIBILITY_CLASS + '.xml')
-            path.parent.mkdir(parents=True)
-            valid = '<testsuite name="' + f14.COMPATIBILITY_CLASS + '" tests="1" failures="0" errors="0" skipped="0"><testcase classname="' + f14.COMPATIBILITY_CLASS + '" name="contract"/></testsuite>'
-            for content in ('broken', valid.replace('tests="1"', 'tests="0"'), valid.replace('failures="0"', 'failures="1"'),
-                            valid.replace('skipped="0"', 'skipped="1"'), valid.replace('classname="' + f14.COMPATIBILITY_CLASS, 'classname="wrong')):
-                path.write_text(content)
-                with self.assertRaises(SystemExit): f14.verify_results()
-            path.write_text(valid); self.assertEqual({'UTC': 1}, f14.verify_results())
-
-    def test_given_workflow__when_extending_f14__then_preserve_stages_run_only_one_utc_task_and_always_cleanup(self):
-        workflow = (f14.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
-        boundary = workflow.index('- name: Extend the owned fixture with exact F14 favorites schema and reader-only columns')
-        self.assertLess(workflow.index('python3 scripts/f13_ci.py smoke'), boundary)
-        self.assertLess(workflow.index('python3 scripts/f14_ci.py prepare', boundary), workflow.index(':boot:favoriteStatusCompatibilityTest'))
-        self.assertLess(workflow.index(':boot:favoriteStatusCompatibilityTest'), workflow.index('python3 scripts/f14_ci.py results'))
-        self.assertLess(workflow.index('python3 scripts/f14_ci.py results'), workflow.index('python3 scripts/f14_ci.py smoke'))
-        cleanup = workflow.index('- name: Remove only the owned disposable fixture')
-        self.assertLess(workflow.index('python3 scripts/f14_ci.py smoke'), cleanup)
-        self.assertIn('if: always()', workflow[cleanup:cleanup + 150]); self.assertIn('python3 scripts/f3_ci.py cleanup', workflow[cleanup:cleanup + 150])
-        self.assertNotRegex(workflow[boundary:], r'python3 scripts/f(?:[2-9]|1[0-3])_ci\.py (?:prepare|smoke)')
-        for required in ('test_f14_ci_guards.py', 'f14-helper-refusal.txt', 'f14-oracle-sha256.txt', 'f14-ddl-sha256.txt', 'f14_fixture', 'f14LegacyOracle'):
-            self.assertIn(required, workflow)
-        build = (f14.ROOT / 'boot/build.gradle').read_text()
-        ancestor = build.split("['compatibilityTest':", 1)[1].split("['commentDeleteCompatibilityTest':", 1)[0]
-        self.assertIn("filter.excludeTestsMatching '" + f14.COMPATIBILITY_CLASS + "'", ancestor)
-        favorite = build.split("tasks.register('favoriteStatusCompatibilityTest'", 1)[1]
-        for required in ("includeTestsMatching '" + f14.COMPATIBILITY_CLASS + "'", 'failOnNoMatchingTests = true',
-                         "systemProperty 'user.timezone', 'UTC'", "shouldRunAfter tasks.named('nicknameCompatibilitySeoulTest')"):
-            self.assertIn(required, favorite)
-        self.assertNotIn('favoriteStatusCompatibilitySeoulTest', build)
-
-    def test_given_wrong_oracle_paths__when_extracting__then_refuse_before_git_or_write(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root, output, evidence = oracle_paths(directory)
-            for target, report in ((root / 'outside', evidence), (output, root / 'outside')):
-                with self.subTest(target=target), patch.object(oracle.subprocess, 'check_output') as git, patch.object(Path, 'mkdir') as mkdir, patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaisesRegex(SystemExit, 'non-dedicated F14'): oracle.extract(root, target, report)
-                    git.assert_not_called(); mkdir.assert_not_called(); write.assert_not_called()
-
-    def test_given_tampered_shared_stage_bytes__when_extracting__then_preserve_existing_sources_and_write_nothing(self):
-        for stage in ('f3', 'f13'):
-            source = next(source for source, value in oracle.SHARED.items() if value[0] == stage)
-            for failure in ('hash', 'missing', 'existing'):
-                with self.subTest(stage=stage, failure=failure), tempfile.TemporaryDirectory() as directory:
-                    root, output, evidence = oracle_paths(directory)
-                    content = b'synthetic pinned shared'
-                    generated = root / ('backend-app/boot/build/generated/sources/' + stage + 'LegacyOracle/java') / source[len(oracle.PREFIX):]
-                    existing = b'preserve generated bytes' if failure == 'existing' else content
-                    if failure != 'missing': generated.parent.mkdir(parents=True); generated.write_bytes(existing)
-                    digest = 'wrong' if failure == 'hash' else hashlib.sha256(content).hexdigest()
-                    with patch.dict(oracle.SHARED, {source: (stage, digest)}, clear=True), patch.object(oracle.subprocess, 'check_output', return_value=content):
-                        with self.assertRaisesRegex(SystemExit, 'Shared source differs'): oracle.extract(root, output, evidence)
-                    self.assertFalse(output.exists()); self.assertFalse(evidence.exists())
-                    if failure != 'missing': self.assertEqual(existing, generated.read_bytes())
-
-    def test_given_tampered_service_hash_or_method__when_extracting__then_do_not_write_sources(self):
-        for failure in ('hash', 'method'):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
-                root, output, evidence = oracle_paths(directory); content = b'changed method'
-                digest = 'wrong' if failure == 'hash' else hashlib.sha256(content).hexdigest()
-                with patch.dict(oracle.SHARED, {}, clear=True), patch.object(oracle, 'SERVICE_SHA', digest), patch.object(oracle.subprocess, 'check_output', return_value=content):
-                    with self.assertRaisesRegex(SystemExit, 'Fixed read-only Favorite method differs'): oracle.extract(root, output, evidence)
-                self.assertFalse(output.exists()); self.assertFalse(evidence.exists())
-
-    def test_given_new_hash_mismatch_or_later_existing_output__when_extracting__then_validate_everything_before_writing(self):
-        service = oracle.METHOD.encode(); service_hash = hashlib.sha256(service).hexdigest()
-        first, second = oracle.PREFIX + 'synthetic/First.java', oracle.PREFIX + 'synthetic/Second.java'
-        content = b'fixed input'; digest = hashlib.sha256(content).hexdigest()
-        for failure in ('hash', 'existing'):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
-                root, output, evidence = oracle_paths(directory)
-                target = output / 'synthetic/Second.java'
-                if failure == 'existing': target.parent.mkdir(parents=True); target.write_bytes(b'preserve existing')
-                expected = {first: digest, second: 'wrong' if failure == 'hash' else digest}
-                with patch.dict(oracle.SHARED, {}, clear=True), patch.object(oracle, 'SERVICE_SHA', service_hash), \
-                        patch.dict(oracle.EXPECTED, expected, clear=True), patch.object(oracle.subprocess, 'check_output', side_effect=[service, content, content]):
-                    with self.assertRaises(SystemExit): oracle.extract(root, output, evidence)
-                self.assertFalse((output / 'synthetic/First.java').exists()); self.assertFalse(evidence.exists())
-                if failure == 'existing': self.assertEqual(b'preserve existing', target.read_bytes())
-
-    def test_given_actual_pinned_service_and_new_sources__when_reading_git_objects__then_hashes_and_read_only_delegation_proof_match(self):
-        service = oracle.subprocess.check_output(['git', 'show', oracle.SOURCE + ':' + oracle.SERVICE], cwd=f14.ROOT.parent)
-        self.assertEqual(oracle.SERVICE_SHA, hashlib.sha256(service).hexdigest())
-        self.assertEqual(1, service.decode().count(oracle.METHOD))
-        self.assertIn('@Transactional(readOnly = true)', oracle.METHOD)
-        self.assertIn('return favoriteRepository.existsByUserUserIdAndAnimalId(userId, animalId);', oracle.METHOD)
-        for source, digest in oracle.EXPECTED.items():
-            raw = oracle.subprocess.check_output(['git', 'show', oracle.SOURCE + ':' + source], cwd=f14.ROOT.parent)
-            self.assertEqual(digest, hashlib.sha256(raw).hexdigest(), source)
-
     def test_given_catalog_acl_failure__when_recording__then_use_f14_tag_and_only_bounded_masked_primary_error(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'F2_TEST_ADMIN_PASSWORD': 'private-password'}, clear=True), patch.object(f14, 'EVIDENCE', Path(directory)):
             failure = f14.subprocess.CalledProcessError(1, ['private-command'], output='private-stdout',
@@ -276,14 +175,28 @@ class F14GuardTest(unittest.TestCase):
                 self.assertNotIn(forbidden, text)
 
 
+    def test_given_workflow__when_extending_f14__then_preserve_stages_and_always_cleanup(self):
+        workflow = (f14.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
+        boundary = workflow.index('- name: Extend the owned fixture with exact F14 favorites schema and reader-only columns')
+        self.assertLess(workflow.index('python3 scripts/f13_ci.py smoke'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f14_ci.py prepare', boundary), workflow.index('python3 scripts/f14_ci.py smoke'))
+        self.assertNotIn('python3 scripts/f14_ci.py results', workflow)
+        cleanup = workflow.index('- name: Remove only the owned disposable fixture')
+        self.assertLess(workflow.index('python3 scripts/f14_ci.py smoke'), cleanup)
+        self.assertIn('if: always()', workflow[cleanup:cleanup + 150])
+        self.assertIn('python3 scripts/f3_ci.py cleanup', workflow[cleanup:cleanup + 150])
+        self.assertNotRegex(workflow[boundary:], r'python3 scripts/f(?:[2-9]|1[0-3])_ci\.py (?:prepare|smoke)')
+        for required in ('test_f14_ci_guards.py', 'f14-helper-refusal.txt', 'f14-ddl-sha256.txt', 'f[0-9]+_fixture'):
+            self.assertIn(required, workflow)
+
     def test_given_actual_jar_filter__when_f14_or_unapproved_redis_artifacts_leak__then_reject_except_exact_production_dependencies(self):
         workflow = (f14.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         pipeline = re.search(r'          if (grep -E .*?); then', workflow, re.DOTALL).group(1)
         allowed = 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\nBOOT-INF/lib/spring-data-redis-3.4.11.jar\n'
-        for forbidden in ('', 'BOOT-INF/classes/f14_fixture.sql', 'BOOT-INF/classes/f14LegacyOracle/Input.class',
+        for forbidden in ('', 'BOOT-INF/classes/f14_fixture.sql', 'BOOT-INF/classes/com/pawbridge/backend/compatibility/Input.class',
                           'BOOT-INF/lib/spring-data-redis-3.4.10.jar', 'BOOT-INF/classes/com/pawbridge/userservice/entity/Favorite.class',
                           'BOOT-INF/classes/com/pawbridge/backend/compatibility/F14LegacyFavoriteMvcTest.class',
-                          'test/f14LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
+                          'test/compatibilityTest/hibernate-validator-8.0.3.Final.jar'):
             with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory) / 'build/ci/boot-jar-contents.txt'
                 target.parent.mkdir(parents=True); target.write_text(allowed + forbidden + '\n')

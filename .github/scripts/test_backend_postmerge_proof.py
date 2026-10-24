@@ -119,7 +119,7 @@ class Inputs:
             run_id=str(RUN), run_attempt=str(ATTEMPT))
         self.plan = proof.profile.make_plan(context, PATHS, proof.profile.FULL, JAR)
         steps = {name: {'outcome': 'success', 'conclusion': 'success'}
-                 for name in proof.profile.ALL_SMOKES + proof.profile.POST_READS_FULL_CONTRACTS + proof.profile.POST_STATISTICS_FULL_CONTRACTS + proof.profile.AUTH_FULL_CONTRACTS + proof.profile.VISIT_FULL_CONTRACTS + ('owned_cleanup',)}
+                 for name in proof.profile.ALL_SMOKES + proof.profile.FULL_CONTRACTS + ('owned_cleanup',)}
         self.execution = proof.profile.audit_execution(self.plan, context, PATHS, proof.profile.FULL, JAR, steps)
         metadata = ''.join(k + '=' + self.source_identity[k] + '\n' for k in
                            ('source_sha', 'workflow_sha', 'workflow_ref')).encode()
@@ -214,93 +214,13 @@ class PostmergeProofTest(unittest.TestCase):
                 self.assertEqual([10, 11, 12], data.archive_calls)
                 self.assertFalse(any('ls-remote' in args or 'fetch' in args for args in data.git_calls))
 
-    @contextlib.contextmanager
-    def cohort(self):
-        paths = ['backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java']
-        blobs = {path: ('bounded cohort blob ' + str(index)).encode()
-                 for index, path in enumerate(proof.profile.POST_READS_APP_HASHES)}
-        hashes = {path: hashlib.sha256(raw).hexdigest() for path, raw in blobs.items()}
-        with patch.dict(globals(), PATHS=paths), patch.dict(proof.profile.POST_READS_APP_HASHES, hashes, clear=True):
-            data = self.fixture()
-            name = 'Scoped User Community cohort with administrator page PostgreSQL contracts'
-            data.workflow = data.workflow.replace(b"|| 'Pilot' }}", ("|| matrix.profile == 'user-community-integration' && '" + name + "' || 'Pilot' }}").encode())
-            for step in ('Existing original and PG contracts', 'New F30 expiry PG gate'):
-                data.workflow = data.workflow.replace(('      - name: ' + step + '\n').encode(),
-                    ('      - name: ' + step + "\n        if: ${{ matrix.profile == 'full' }}\n").encode())
-            extra = ''.join('      - name: ' + step + "\n        if: ${{ matrix.profile == 'full' || matrix.profile == 'user-community-integration' }}\n        run: bounded-cohort\n"
-                            for step in ('Scoped shape', 'Scoped compiler', 'Scoped PostgreSQL'))
-            data.workflow = data.workflow.replace(b'      - name: Owned cleanup', extra.encode() + b'      - name: Owned cleanup')
-            data.jobs[1]['name'] = name
-            for step in data.jobs[1]['steps']:
-                if step['name'] != 'Owned cleanup': step['conclusion'] = 'skipped'
-            data.jobs[1]['steps'].extend({'name': step, 'status': 'completed', 'conclusion': 'success'}
-                for step in ('Scoped shape', 'Scoped compiler', 'Scoped PostgreSQL'))
-            ctx = dict(data.plan['identity'], post_reads_scope_verified=True)
-            data.plan = proof.profile.make_plan(ctx, paths, proof.profile.POST_READS, JAR)
-            required = {*data.plan['required_contracts'], 'owned_cleanup'}
-            steps = {key: dict(outcome='success' if key in required else 'skipped', conclusion='success' if key in required else 'skipped')
-                     for key in (*proof.profile.ALL_SMOKES, *data.plan['required_contracts'], *data.plan['skipped_contracts'], 'owned_cleanup')}
-            data.execution = proof.profile.audit_execution(data.plan, ctx, paths, proof.profile.POST_READS, JAR, steps)
-            data.members['full']['build/ci/contract-plan.txt'] = encoded(data.plan)
-            data.members['full']['build/ci/contract-execution.txt'] = encoded(data.execution)
-            data.artifacts[1]['name'] = 'backend-app-check-123-2-user-community-integration'
-            saved = json.loads(data.members['proof']['postmerge-proof.txt'])
-            saved.update(mode='execute', reason='pull-request-validation')
-            data.members['proof']['postmerge-proof.txt'] = encoded(saved)
-            original_git = data.git
-            def git(*args):
-                if args == ('diff', '--name-only', '--no-renames', '-z', proof.profile.POST_READS_BASE, 'HEAD', '--', 'backend-app'):
-                    return b'\0'.join(path.encode() for path in blobs) + b'\0'
-                if args == ('show', 'HEAD:' + proof.WORKFLOW):
-                    data.git_calls.append(args)
-                    return data.workflow
-                if len(args) == 2 and args[0] == 'show' and args[1].startswith('HEAD:'):
-                    return blobs.get(args[1][5:], b'tampered')
-                return original_git(*args)
-            data.git = git
-            data.cohort_blobs = blobs
-            with patch.object(proof.profile, 'POST_READS_WORKFLOW_SHA256', hashlib.sha256(data.workflow).hexdigest()):
-                yield data
-
-    def test_given_same_tree_cohort_success__when_deciding__then_reuse_original_scoped_coverage_without_full_promotion(self):
-        with self.cohort() as data:
-            result = data.decide()
-            self.assertEqual('reused-scoped', result['mode'])
-            self.assertEqual('identical-tree-merged-pr-scoped', result['reason'])
-            self.assertEqual(proof.profile.POST_READS, result['source_proof']['profile'])
-            self.assertIn('scoped', result['source_proof']['artifact_ids'])
-            self.assertNotIn('full', result['source_proof']['artifact_ids'])
-            self.assertEqual(JAR, result['source_proof']['jar_sha256'])
-            self.assertIn(('show', 'HEAD:' + proof.WORKFLOW), data.git_calls)
-
-    def test_given_incomplete_or_forged_cohort_proof__when_deciding__then_execute_instead_of_reusing(self):
-        defects = ('head-tree', 'source-tree', 'scope-bytes', 'scope-boolean', 'job-failure', 'required-skip',
-                   'cleanup', 'invalid-skip', 'wrong-profile', 'plan-digest', 'jar', 'missing-artifact', 'reuse-chain')
-        for defect in defects:
-            with self.subTest(defect=defect), self.cohort() as data:
-                if defect == 'head-tree': data.head_commit['tree']['sha'] = '9' * 40
-                elif defect == 'source-tree': data.commit['tree']['sha'] = '9' * 40
-                elif defect == 'scope-bytes': data.cohort_blobs[next(iter(data.cohort_blobs))] += b'changed'
-                elif defect == 'job-failure': data.jobs[1]['conclusion'] = 'failure'
-                elif defect == 'required-skip': data.jobs[1]['steps'][-1]['conclusion'] = 'skipped'
-                elif defect in ('cleanup', 'invalid-skip'):
-                    key = 'owned_cleanup' if defect == 'cleanup' else data.plan['skipped_smokes'][0]
-                    data.execution['step_results'][key] = dict(outcome='skipped' if defect == 'cleanup' else 'success', conclusion='success')
-                    data.members['full']['build/ci/contract-execution.txt'] = encoded(data.execution)
-                elif defect == 'wrong-profile':
-                    data.plan['profile'] = proof.profile.FULL
-                    data.members['full']['build/ci/contract-plan.txt'] = encoded(data.plan)
-                elif defect == 'plan-digest':
-                    data.execution['plan_sha256'] = '0' * 64
-                    data.members['full']['build/ci/contract-execution.txt'] = encoded(data.execution)
-                elif defect == 'jar': data.members['full']['build/ci/boot-jar.sha256'] = b'0' * 64 + b'  boot/build/libs/pawbridge-backend-app.jar\n'
-                elif defect == 'missing-artifact': data.artifacts.pop(1)
-                elif defect == 'reuse-chain':
-                    saved = json.loads(data.members['proof']['postmerge-proof.txt']);saved.update(mode='reused-scoped', reason='identical-tree-merged-pr-scoped')
-                    data.members['proof']['postmerge-proof.txt'] = encoded(saved)
-                if defect == 'scope-boolean':
-                    with patch.object(proof.profile, 'verify_post_reads_inputs', return_value=1): self.execute(data)
-                else: self.execute(data)
+    def test_given_the_current_workflow__when_interpreting_the_full_recipe__then_accept_every_condition(self):
+        raw = (Path(__file__).resolve().parents[1] / 'workflows' / 'backend-app-check.yml').read_bytes()
+        contract = proof.workflow_contract(raw)
+        self.assertEqual('Java 21 build and isolated PostgreSQL/S3 HTTP contracts', contract['check'][0])
+        self.assertIn('Always restore only auth column rights and verify the prior administrator fixture',
+                      contract['check'][1])
+        self.assertEqual({'package', 'check', 'ci-result', 'proof'}, set(contract))
 
     def test_given_any_pr_including_fork__when_deciding__then_execute_validation_without_api_or_token(self):
         data = self.fixture();data.env.update(GITHUB_EVENT_NAME='pull_request', GITHUB_REF='refs/pull/7/merge')
@@ -396,101 +316,6 @@ class PostmergeProofTest(unittest.TestCase):
             data = self.fixture();data.workflow = WORKFLOW.replace(old, new)
             self.execute(data)
 
-    def test_given_known_scoped_recipes__when_reusing_full__then_omit_only_scope_shape_but_require_all_pg(self):
-        for member_arm, signup_arm, admin_arm, visit_arm, auth_arm, post_arm in ((False,False,False,False,False,False), (True,False,False,False,False,False), (True,True,False,False,False,False), (True,True,True,False,False,False), (True,True,True,True,False,False), (True,True,True,True,True,False), (True,True,True,True,True,True)):
-            with self.subTest(member_arm=member_arm, signup_arm=signup_arm, admin_arm=admin_arm, visit_arm=visit_arm, auth_arm=auth_arm, post_arm=post_arm):
-                data = self.fixture()
-                expression = b"|| matrix.profile == 'note-expiry' && 'Note expiry PostgreSQL' || "
-                if member_arm:
-                    expression += b"matrix.profile == 'member-management' && 'Member management' || "
-                if signup_arm:
-                    expression += b"matrix.profile == 'signup-statistics' && 'Signup statistics' || "
-                if admin_arm:
-                    expression += b"matrix.profile == 'admin-member-update' && 'Administrator update' || "
-                if visit_arm:
-                    expression += b"matrix.profile == 'visit-collection' && 'Visit collection' || "
-                if auth_arm:
-                    expression += b"matrix.profile == 'auth-sessions' && 'Auth sessions' || "
-                if post_arm:
-                    expression += b"matrix.profile == 'admin-post-statistics' && 'Post statistics' || "
-                expression += b"'Pilot' }}"
-                data.workflow = WORKFLOW.replace(b"|| 'Pilot' }}", expression).replace(
-                    b"        if: ${{ matrix.profile == 'full' }}",
-                    b"        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}").replace(
-                    b'      - name: Packaged contracts',
-                    b"      - name: Scoped shape only\n        if: ${{ matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}\n        run: scoped-shape\n"
-                    b"      - name: Late member PG\n        if: ${{ matrix.profile != 'note-expiry' }}\n        run: member-pg\n"
-                    b'      - name: Packaged contracts')
-                if signup_arm:
-                    data.workflow = data.workflow.replace(
-                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}",
-                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}").replace(
-                        b"matrix.profile == 'note-expiry' || matrix.profile == 'member-management' }}",
-                        b"matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}").replace(
-                        b"matrix.profile != 'note-expiry' }}", b"matrix.profile != 'note-expiry' && matrix.profile != 'signup-statistics' }}").replace(
-                        b'      - name: Packaged contracts',
-                        b"      - name: Signup statistics PG\n        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' }}\n        run: signup-pg\n"
-                        b'      - name: Packaged contracts')
-                if admin_arm:
-                    data.workflow = data.workflow.replace(
-                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}",
-                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' }}").replace(
-                        b"matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' }}",
-                        b"matrix.profile == 'note-expiry' || matrix.profile == 'member-management' || matrix.profile == 'signup-statistics' || matrix.profile == 'admin-member-update' }}").replace(
-                        b'      - name: Packaged contracts',
-                        b"      - name: Administrator compile only\n        if: ${{ matrix.profile == 'admin-member-update' }}\n        run: compile-only\n"
-                        b"      - name: Administrator fixture\n        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}\n        run: admin-fixture\n"
-                        b"      - name: Administrator PG\n        if: ${{ matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' }}\n        run: admin-pg\n"
-                        b'      - name: Packaged contracts')
-                if visit_arm:
-                    data.workflow = data.workflow.replace(
-                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' }}",
-                        b"matrix.profile != 'note-expiry' && matrix.profile != 'member-management' && matrix.profile != 'signup-statistics' && matrix.profile != 'admin-member-update' && matrix.profile != 'visit-collection' }}").replace(
-                        b'      - name: Packaged contracts',
-                        b"      - name: Visit compile only\n        if: ${{ matrix.profile == 'visit-collection' }}\n        run: compile-only\n"
-                        b"      - name: Visit PG\n        if: ${{ matrix.profile == 'full' || matrix.profile == 'visit-collection' }}\n        run: visit-pg\n"
-                        b'      - name: Packaged contracts')
-                if auth_arm:
-                    data.workflow = data.workflow.replace(
-                        b'      - name: Packaged contracts',
-                        b"      - name: Auth compile and PG\n        if: ${{ matrix.profile == 'full' || matrix.profile == 'auth-sessions' }}\n        run: auth-pg\n"
-                        b"      - name: Auth exact restore\n        if: ${{ always() && (matrix.profile == 'full' || matrix.profile == 'auth-sessions') && (steps.fixture_auth_sessions.outcome == 'success' || steps.fixture_auth_sessions.outcome == 'failure') }}\n        run: auth-restore\n"
-                        b'      - name: Packaged contracts')
-                contract = proof.workflow_contract(data.workflow)
-                self.assertNotIn('Scoped shape only', contract['check'][1])
-                self.assertIn('New F30 expiry PG gate', contract['check'][1])
-                self.assertIn('Late member PG', contract['check'][1])
-                data.jobs[1]['steps'].extend([
-                    {'name': 'Scoped shape only', 'status': 'completed', 'conclusion': 'skipped'},
-                    {'name': 'Late member PG', 'status': 'completed', 'conclusion': 'success'}])
-                if signup_arm:
-                    self.assertIn('Signup statistics PG', contract['check'][1])
-                    data.jobs[1]['steps'].append({'name': 'Signup statistics PG', 'status': 'completed', 'conclusion': 'success'})
-                if admin_arm:
-                    self.assertNotIn('Administrator compile only', contract['check'][1])
-                    for name in ('Administrator fixture', 'Administrator PG'):
-                        self.assertIn(name, contract['check'][1])
-                        data.jobs[1]['steps'].append({'name': name, 'status': 'completed', 'conclusion': 'success'})
-                    data.jobs[1]['steps'].append({'name': 'Administrator compile only', 'status': 'completed', 'conclusion': 'skipped'})
-                if visit_arm:
-                    self.assertNotIn('Visit compile only', contract['check'][1])
-                    self.assertIn('Visit PG', contract['check'][1])
-                    data.jobs[1]['steps'].append({'name':'Visit compile only','status':'completed','conclusion':'skipped'})
-                    data.jobs[1]['steps'].append({'name':'Visit PG','status':'completed','conclusion':'success'})
-                if auth_arm:
-                    for name in ('Auth compile and PG','Auth exact restore'):
-                        self.assertIn(name,contract['check'][1])
-                        data.jobs[1]['steps'].append({'name':name,'status':'completed','conclusion':'success'})
-                self.assertEqual('reused-full', data.decide()['mode'])
-                successful = copy.deepcopy(data.jobs)
-                for name in ('New F30 expiry PG gate', 'Late member PG', *(['Signup statistics PG'] if signup_arm else []), *(['Administrator fixture', 'Administrator PG'] if admin_arm else []), *(['Visit PG'] if visit_arm else []), *(['Auth compile and PG','Auth exact restore'] if auth_arm else [])):
-                    data.jobs = copy.deepcopy(successful)
-                    for step in data.jobs[1]['steps']:
-                        if step['name'] == name:
-                            step['conclusion'] = 'skipped'
-                    self.execute(data, 'missing-or-skipped-validation-step')
-
-
     def test_given_expired_future_or_out_of_order_success__when_deciding__then_fallback(self):
         for instant in ('2026-10-19T02:59:59Z', '2026-10-20T03:00:01Z', None):
             data = self.fixture();data.jobs[2]['completed_at'] = instant
@@ -556,40 +381,6 @@ class PostmergeProofTest(unittest.TestCase):
             data.members['full']['build/ci/contract-plan.txt'] = encoded(plan)
             data.members['full']['build/ci/contract-execution.txt'] = encoded(execution)
             self.execute(data)
-
-    def test_given_execute_receipt_with_either_scoped_plan_or_execution__when_deciding__then_never_promote_it_to_full(self):
-        paths = ['backend-app/boot/src/main/java/com/pawbridge/backend/PawBridgeApplication.java']
-        with patch.dict(globals(), PATHS=paths):
-            for mode in (proof.profile.NOTE_EXPIRY, proof.profile.MEMBER_MANAGEMENT, proof.profile.SIGNUP_STATISTICS, proof.profile.ADMIN_MEMBER_UPDATE, proof.profile.VISIT_COLLECTION, proof.profile.AUTH_SESSIONS, proof.profile.POST_STATISTICS, proof.profile.POST_READS):
-                for defect in ('plan', 'execution', 'both'):
-                    with self.subTest(mode=mode, defect=defect):
-                        data = self.fixture()
-                        flag = ('note_expiry_scope_verified' if mode == proof.profile.NOTE_EXPIRY
-                                else 'member_management_scope_verified' if mode == proof.profile.MEMBER_MANAGEMENT
-                                else 'signup_statistics_scope_verified' if mode == proof.profile.SIGNUP_STATISTICS
-                                else 'admin_member_update_scope_verified' if mode == proof.profile.ADMIN_MEMBER_UPDATE
-                                else 'visit_collection_scope_verified' if mode == proof.profile.VISIT_COLLECTION
-                                else 'post_reads_scope_verified' if mode == proof.profile.POST_READS
-                                else 'post_statistics_scope_verified' if mode == proof.profile.POST_STATISTICS
-                                else 'auth_sessions_scope_verified')
-                        context = dict(data.plan['identity'], **{flag: True})
-                        plan = proof.profile.make_plan(context, paths, mode, JAR)
-                        required = {*plan['required_smokes'], *plan['required_contracts'], 'owned_cleanup'}
-                        steps = {name: {'outcome': 'success' if name in required else 'skipped',
-                                        'conclusion': 'success' if name in required else 'skipped'}
-                                 for name in (*proof.profile.ALL_SMOKES, *plan['required_contracts'],
-                                              *plan.get('skipped_contracts', ()), 'owned_cleanup')}
-                        execution = proof.profile.audit_execution(plan, context, paths, mode, JAR, steps)
-                        saved = json.loads(data.members['proof']['postmerge-proof.txt'])
-                        saved.update(mode='execute', reason='pull-request-validation')
-                        data.members['proof']['postmerge-proof.txt'] = encoded(saved)
-                        if defect in ('plan', 'both'):
-                            data.members['full']['build/ci/contract-plan.txt'] = encoded(plan)
-                        if defect in ('execution', 'both'):
-                            data.members['full']['build/ci/contract-execution.txt'] = encoded(execution)
-                        self.execute(data, 'source-full-execution-differs' if defect == 'execution'
-                                     else 'source-full-plan-differs')
-
 
     def test_given_api_unavailability_or_malformed_document__when_deciding__then_execute_without_private_error_content(self):
         data = self.fixture()

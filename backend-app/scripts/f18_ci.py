@@ -8,7 +8,6 @@ import stat
 import sys
 import time
 import urllib.parse
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -16,10 +15,6 @@ import f4_ci as f4
 import f17_ci as f17
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
-TASK = 'blockedAuthorsCompatibilityTest'
-CLASSES = ('com.pawbridge.backend.compatibility.PostgresqlBlockedAuthorsCompatibilityTest',
-           'com.pawbridge.backend.compatibility.F18LegacyBlockedAuthorsMvcTest')
-EXPECTED_TESTS = dict(zip(CLASSES, (7, 14)))
 CALLER, FIRST, SECOND, REVERSE = 9972001, 9972002, 9972003, 9972004
 IDS = (CALLER, FIRST, SECOND, REVERSE)
 BLOCKS = ((CALLER, FIRST), (CALLER, SECOND), (REVERSE, CALLER))
@@ -33,30 +28,6 @@ STORAGE_UNAVAILABLE = '쪽지 저장소를 사용할 수 없습니다. 잠시 �
 require_fixture = f17.require_fixture
 require_owner = f17.require_owner
 database_snapshot = f17.database_snapshot
-
-
-def verify_results():
-    f2.require_hosted()
-    directory = ROOT / 'boot/build/test-results' / TASK
-    if {p.name for p in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in CLASSES}:
-        raise SystemExit('F18 compatibility requires its exact two-class XML set')
-    counts = {}
-    for name in CLASSES:
-        try:
-            suite = ET.parse(directory / ('TEST-' + name + '.xml')).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F18 compatibility report missing or malformed') from None
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != name or values['tests'] <= 0
-                or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or values['tests'] != EXPECTED_TESTS[name] or len(cases) != values['tests']
-                or any(c.attrib.get('classname') != name for c in cases)
-                or any(c.find(tag) is not None for c in cases for tag in ('failure', 'error', 'skipped'))):
-            raise SystemExit('F18 compatibility requires executed successful unskipped cases')
-        counts[name] = values['tests']
-    print('Verified F18 single UTC PG and original MVC reports: ' + json.dumps(counts, sort_keys=True))
-    return counts
 
 
 def prepare():
@@ -252,4 +223,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

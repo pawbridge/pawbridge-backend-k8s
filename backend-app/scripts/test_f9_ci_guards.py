@@ -1,5 +1,4 @@
-"""Mock-only F9 fixture/oracle/CI checks; never start a DB, Docker, JVM or socket."""
-import hashlib
+"""Mock-only F9 fixture/CI checks; never start a DB, Docker, JVM or socket."""
 import json
 import os
 from pathlib import Path
@@ -11,7 +10,6 @@ import unittest
 from unittest.mock import patch
 
 import f9_ci as f9
-import prepare_f9_legacy_oracle as oracle
 from test_f8_ci_guards import HOSTED as F8_HOSTED
 
 HOSTED = dict(F8_HOSTED, F9_CI_OWNER='123-1')
@@ -174,67 +172,17 @@ class F9GuardTest(unittest.TestCase):
                 rows.assert_not_called()
                 sql.assert_not_called()
 
-    def test_given_non_dedicated_oracle_output__when_extracting__then_no_git_or_write(self):
-        with patch.object(oracle.subprocess, 'check_output') as git:
-            with self.assertRaisesRegex(SystemExit, 'Refusing non-dedicated F9 oracle output'):
-                oracle.extract('/synthetic', '/outside', '/outside')
-            git.assert_not_called()
-
-    def test_given_tampered_shared_oracle__when_extracting__then_no_new_generated_source(self):
-        for failure in ('hash', 'missing-existing-bytes'):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve()
-                output = root / 'backend-app/boot/build/generated/sources/f9LegacyOracle/java'
-                evidence = root / 'backend-app/build/ci/f9-oracle-sha256.txt'
-                content = b'synthetic shared source'
-                expected = hashlib.sha256(content).hexdigest() if failure != 'hash' else 'wrong'
-                with patch.dict(oracle.f8.EXPECTED, {'synthetic/Shared.java': expected}, clear=True), \
-                        patch.object(oracle.subprocess, 'check_output', return_value=content):
-                    with self.assertRaisesRegex(SystemExit, 'Shared F8 oracle differs from fixed F9 input'):
-                        oracle.extract(root, output, evidence)
-                self.assertFalse(output.exists())
-                self.assertFalse(evidence.exists())
-
-    def test_given_tampered_new_oracle_input__when_extracting__then_no_generated_source(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f9LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f9-oracle-sha256.txt'
-            with patch.dict(oracle.f8.EXPECTED, {}, clear=True), \
-                    patch.object(oracle.subprocess, 'check_output', return_value=b'tampered'):
-                with self.assertRaisesRegex(SystemExit, 'Legacy F9 input checksum mismatch'):
-                    oracle.extract(root, output, evidence)
-            self.assertFalse(output.exists())
-            self.assertFalse(evidence.exists())
-
-    def test_given_differing_oracle_destination__when_extracting__then_no_overwrite_or_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output = root / 'backend-app/boot/build/generated/sources/f9LegacyOracle/java'
-            evidence = root / 'backend-app/build/ci/f9-oracle-sha256.txt'
-            content, relative = b'synthetic fixed source', 'synthetic/Input.java'
-            target = output / relative
-            target.parent.mkdir(parents=True)
-            target.write_bytes(b'existing different source')
-            with patch.dict(oracle.f8.EXPECTED, {}, clear=True), \
-                    patch.dict(oracle.EXPECTED, {relative: hashlib.sha256(content).hexdigest()}, clear=True), \
-                    patch.object(oracle.subprocess, 'check_output', return_value=content):
-                with self.assertRaisesRegex(SystemExit, 'Refusing to overwrite differing F9 oracle input'):
-                    oracle.extract(root, output, evidence)
-            self.assertEqual(b'existing different source', target.read_bytes())
-            self.assertFalse(evidence.exists())
-
-    def test_given_f9_workflow__when_declaring_checks__then_prepare_before_compatibility_and_smoke_after_f8(self):
+    def test_given_f9_workflow__when_declaring_checks__then_prepare_before_packaged_checks_and_smoke_after_f8(self):
         workflow = (f9.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         self.assertLess(workflow.index('- name: Extend the owned fixture with minimal F9 comment INSERT permissions'),
-                        workflow.index('- name: Compare legacy reads/writes'))
+                        workflow.index('- name: Verify production JAR isolation\n'))
         self.assertLess(workflow.index('python3 scripts/f8_ci.py smoke'), workflow.index('python3 scripts/f9_ci.py smoke'))
         for required in ('scripts/test_f9_ci_guards.py', 'build/ci/f9-helper-refusal.txt',
-                         'build/ci/f9-oracle-sha256.txt', 'f[23456789]_fixture', 'f[23456789]LegacyOracle',
+                         'f[0-9]+_fixture', 'com/pawbridge/backend/compatibility/',
                          "grep -Ev '^BOOT-INF/lib/(hibernate-validator-[0-9][^/]*|spring-data-redis-3[.]4[.]11|feign-(core|form)-13[.]5|hibernate-core-6[.]6[.]33[.]Final|hibernate-commons-annotations-7[.]0[.]3[.]Final|spring-data-jpa-3[.]4[.]11)\\.jar$'"):
             self.assertIn(required, workflow)
 
-    def test_given_actual_jar_filter__when_allowing_validator__then_orm_legacy_and_test_artifacts_still_fail(self):
+    def test_given_actual_jar_filter__when_allowing_validator__then_orm_compatibility_and_test_artifacts_still_fail(self):
         workflow = (f9.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         pipeline = re.search(r'          if (grep -E .*?); then', workflow, re.DOTALL).group(1)
         allowed = ('BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\n'
@@ -265,8 +213,9 @@ class F9GuardTest(unittest.TestCase):
                           'BOOT-INF/lib/feign-form-13.5-extra.jar', 'BOOT-INF/classes/feign-form-13.5.jar',
                           'test/feign-form-13.5.jar',
                           'BOOT-INF/lib/junit-jupiter-5.11.4.jar', 'BOOT-INF/classes/f9_fixture.sql',
-                          'BOOT-INF/classes/f9LegacyOracle/Input.class',
-                          'test/f9LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
+                          'BOOT-INF/classes/com/pawbridge/backend/compatibility/Input.class',
+                          'BOOT-INF/classes/com/pawbridge/communityservice/Input.class',
+                          'test/compatibilityTest/hibernate-validator-8.0.3.Final.jar'):
             with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory) / 'build/ci/boot-jar-contents.txt'
                 target.parent.mkdir(parents=True)

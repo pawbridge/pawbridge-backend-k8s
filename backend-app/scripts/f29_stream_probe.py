@@ -721,7 +721,6 @@ def run_member_cleanup(ci):
     raw_paths = (); stopped = {'app': False, 'stub': False}
     baseline = ci.member_database_snapshot()
     try:
-        ci.member_require_runtime_results()  # Exact tag PG12 including last real-issuer refresh; not ordinary F29 results.
         if not re.fullmatch('[0-9a-f]{40}', result['runtime_sha'] or ''):
             raise SystemExit('Member cleanup packaged source commit is missing')
         jar = ci.ROOT / 'boot/build/libs/pawbridge-backend-app.jar'

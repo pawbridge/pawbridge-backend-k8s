@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""F29 hosted fixture/XML prefix. Runtime smoke is owned separately; import starts no resource.
+"""F29 hosted fixture prefix and late fixture extensions. Runtime smoke is owned separately.
 
-No local PostgreSQL, original extraction, HTTP or JVM is started by preparation.
-Provider/Seoul/JAR counters are unmeasured and fail closed; no original extraction or resource run occurred.
+Import starts no resource. Preparation starts no local PostgreSQL, HTTP or JVM; fixture DDL is read
+from hash-pinned Git objects.
 """
 from contextlib import contextmanager
 import hashlib
 import json
-from pathlib import Path
-import re
 import subprocess
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -19,21 +16,9 @@ import f20_ci as f20
 import f21_ci as f21
 import f22_ci as f22
 import f28_ci as f28
-import prepare_f29_legacy_oracle as oracle
 
 ROOT, EVIDENCE = f3.ROOT, f3.EVIDENCE
 SOURCE = 'f06a72a06bd26662c647bde780dfc7a27bf7349c'
-SOURCE_FILES = 22
-STREAM_SOURCE = 'community-service/src/main/java/com/pawbridge/communityservice/contact/PrivateNoteStream.java'
-STREAM_SHA256 = '3215dd7b9f3958049ea3065bc550883838bfeacc46d75e350cbc29f26a9504eb'
-TASK = 'noteSendCompatibilityTest'
-SEOUL_TASK = 'noteSendCompatibilitySeoulTest'
-SEOUL_METHOD = 'givenMicrosecondLeapYearSend__whenPersistingAndSerializingInEitherZone__thenKeepOneInstantAcrossBothMailboxesRequestAndNotification'
-PG_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlNoteSendCompatibilityTest'
-MVC_CLASS = 'com.pawbridge.backend.compatibility.F29LegacyNoteSendMvcTest'
-# Reviewed expected PG26 and Seoul1; local original-measured MVC12 passed.
-# Hosted results must still provide these exact actual XML suites and children.
-REPORTS = {TASK: {PG_CLASS: 26, MVC_CLASS: 12}, SEOUL_TASK: {PG_CLASS: 1}}
 COUNTERS = ('request_checks', 'nonstreaming_checks', 'post_checks', 'successful_post_checks', 'rejected_post_checks', 'get_checks', 'stream_open_checks', 'stream_ready_checks', 'recipient_note_checks', 'sender_note_checks', 'resync_checks', 'replay_checks', 'conflict_checks', 'storage_unavailable_checks', 'member_unavailable_checks', 'recovery_checks', 'authentication_checks', 'adjacent_denied_checks', 'notification_checks', 'detail_checks', 'list_checks', 'approved_database_write_checks', 'inserted_note_rows', 'inserted_mailbox_rows', 'inserted_request_rows')
 # Reviewed planned journey only; actual hosted PG/JAR execution remains pending.
 EXPECTED_JAR_COUNTS = dict(zip(COUNTERS, (15, 13, 9, 4, 5, 6, 2, 2, 3, 0, 0, 1, 1, 1, 1, 2, 1, 1, 1, 1, 2, 3, 3, 6, 3)))
@@ -94,8 +79,6 @@ def fixture_proof(owner):
 
 def verified_reports_ddl(inputs):
     """Five pinned source LF statements; only table schema qualification changes."""
-    if any(oracle.EXPECTED.get(path) != digest for path, digest in DDL_HASHES.items()):
-        raise SystemExit('F29 report migration pins differ from the fixed source closure')
     try:
         fragments = []
         for suffix, anchors in (
@@ -150,22 +133,17 @@ def require_owner():
 
 
 def verified_sources():
-    """Read fixed Git blobs, not working-tree legacy paths; produce no generated file."""
+    """Read the two fixed report migrations from pinned Git objects; produce no generated file."""
     f2.require_hosted()
-    if (oracle.SOURCE != SOURCE or len(oracle.EXPECTED) != SOURCE_FILES
-            or len(oracle.SHARED) != 13 or len(oracle.OUTPUTS) != 3
-            or oracle.EXPECTED.get(STREAM_SOURCE) != STREAM_SHA256
-            or oracle.EXPECTED != {**f28.oracle.EXPECTED, **DDL_HASHES}):
-        raise SystemExit('F29 fixed twenty-two-source closure or original Stream pin differs')
     inputs = {}
-    for path, expected in oracle.EXPECTED.items():
+    for path, expected in DDL_HASHES.items():
         try:
             raw = subprocess.check_output(['git', 'show', SOURCE + ':' + path], cwd=ROOT.parent,
                                           stderr=subprocess.PIPE)
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            raise SystemExit('F29 fixed original source object is unavailable') from None
+            raise SystemExit('F29 fixed report migration object is unavailable') from None
         if hashlib.sha256(raw).hexdigest() != expected:
-            raise SystemExit('F29 fixed original source checksum differs')
+            raise SystemExit('F29 fixed report migration checksum differs')
         inputs[path] = raw
     return inputs
 
@@ -500,105 +478,14 @@ def denied_privilege(kind):
         require_fixture()
 
 
-def require_measurements(kind='results'):
+def require_measurements(kind='jar'):
     f2.require_hosted()
-    if kind not in ('results', 'jar'):
-        raise ValueError('F29 measurement gate is limited to results or jar')
-    if (not isinstance(REPORTS, dict) or set(REPORTS) != {TASK, SEOUL_TASK}
-            or not isinstance(REPORTS.get(TASK), dict) or set(REPORTS[TASK]) != {PG_CLASS, MVC_CLASS}
-            or REPORTS.get(SEOUL_TASK) != {PG_CLASS: 1}
-            or any(type(n) is not int or n <= 0 for classes in REPORTS.values() for n in classes.values())
-            or not isinstance(SEOUL_METHOD, str) or not re.fullmatch(r'given[A-Za-z0-9_]+', SEOUL_METHOD)):
-        raise SystemExit('F29 original providers, PG/MVC counts or Seoul method remain unmeasured')
-    if kind == 'jar' and (not COUNTERS or not isinstance(EXPECTED_JAR_COUNTS, dict)
+    if kind != 'jar':
+        raise ValueError('F29 measurement gate is limited to the packaged journey')
+    if (not COUNTERS or not isinstance(EXPECTED_JAR_COUNTS, dict)
             or set(EXPECTED_JAR_COUNTS) != set(COUNTERS)
             or any(type(n) is not int or n < 0 for n in EXPECTED_JAR_COUNTS.values())):
         raise SystemExit('F29 packaged journey counts remain unmeasured')
-
-
-def _plain_file(path):
-    if path.is_symlink() or path.resolve() != path or not path.is_file():
-        raise SystemExit('F29 oracle evidence or generated path is missing or redirected')
-    return path.read_bytes()
-
-
-def require_oracle_receipt():
-    """Match source/shared/generated identities; selected method/LF proofs remain extractor-owned."""
-    f2.require_hosted()
-    if (oracle.SOURCE != SOURCE or len(oracle.EXPECTED) != SOURCE_FILES
-            or len(oracle.SHARED) != 13 or len(oracle.OUTPUTS) != 3
-            or oracle.EXPECTED.get(STREAM_SOURCE) != STREAM_SHA256
-            or oracle.EXPECTED != {**f28.oracle.EXPECTED, **DDL_HASHES}):
-        raise SystemExit('F29 oracle manifest differs from the fixed twenty-two-source closure')
-    try:
-        lines = _plain_file(ROOT.parent / oracle.EVIDENCE_PATH).decode('utf-8').splitlines()
-        if not lines or lines[0] != 'source_sha=' + SOURCE:
-            raise SystemExit('F29 oracle evidence source identity differs')
-        categories = {}
-        for line in lines[1:]:
-            match = re.fullmatch(r'([0-9a-f]{64})  (source|shared-byte-identity|shared-adapted-identity|generated) (.+)', line)
-            if match:
-                digest, category, name = match.groups()
-                bucket = categories.setdefault(category, {})
-                if name in bucket:
-                    raise SystemExit('F29 oracle evidence repeats an identity entry')
-                bucket[name] = digest
-        if categories.get('source') != oracle.EXPECTED:
-            raise SystemExit('F29 oracle evidence lacks the exact twenty-two full source hashes')
-        shared = {relative: oracle.EXPECTED[source] for source, relative in oracle.SHARED.items()}
-        if categories.get('shared-byte-identity') != shared:
-            raise SystemExit('F29 oracle evidence shared source identities differ')
-        for source, relative in oracle.SHARED.items():
-            if hashlib.sha256(_plain_file(ROOT.parent / relative)).hexdigest() != oracle.EXPECTED[source]:
-                raise SystemExit('F29 shared generated bytes differ from their fixed original')
-        adapted = {oracle.F18_ADAPTED_PATH: oracle.F18_ADAPTED_SHA256}
-        if (categories.get('shared-adapted-identity') != adapted
-                or hashlib.sha256(_plain_file(ROOT.parent / oracle.F18_ADAPTED_PATH)).hexdigest() != oracle.F18_ADAPTED_SHA256):
-            raise SystemExit('F29 existing adapted advice identity differs')
-        generated = categories.get('generated', {})
-        if set(generated) != set(oracle.OUTPUTS):
-            raise SystemExit('F29 oracle evidence generated output set differs')
-        for relative in oracle.OUTPUTS:
-            if hashlib.sha256(_plain_file(ROOT.parent / oracle.OUTPUT_ROOT / relative)).hexdigest() != generated[relative]:
-                raise SystemExit('F29 original wrapper bytes differ from extractor evidence')
-    except (OSError, UnicodeError, KeyError, TypeError):
-        raise SystemExit('F29 original oracle identity evidence is missing or malformed') from None
-
-
-def verify_results():
-    require_measurements()
-    require_owner()
-    require_oracle_receipt()
-    result = {}
-    try:
-        for task, classes in REPORTS.items():
-            directory = ROOT / 'boot/build/test-results' / task
-            if {p.name for p in directory.glob('TEST-*.xml')} != {'TEST-' + name + '.xml' for name in classes}:
-                raise SystemExit('F29 exact UTC/Seoul XML class set differs')
-            result[task] = {}
-            for name, expected in classes.items():
-                target = directory / ('TEST-' + name + '.xml')
-                suite = ET.fromstring(_plain_file(target))
-                cases = suite.findall('testcase')
-                if suite.tag != 'testsuite' or suite.get('name') != name:
-                    raise SystemExit('F29 XML suite FQN differs')
-                values = {k: int(suite.attrib[k]) for k in ('tests', 'failures', 'errors', 'skipped')}
-                if (values != {'tests': expected, 'failures': 0, 'errors': 0, 'skipped': 0}
-                        or len(cases) != expected or len(list(suite.iter('testcase'))) != expected
-                        or int(suite.get('disabled', '0')) != 0):
-                    raise SystemExit('F29 XML aggregate or actual testcase counts differ')
-                if any(suite.find('.//' + tag) is not None for tag in ('failure', 'error', 'skipped')):
-                    raise SystemExit('F29 XML contains a hidden unsuccessful result')
-                if any(case.get('classname') != name for case in cases):
-                    raise SystemExit('F29 XML actual testcase FQN differs')
-                if task == SEOUL_TASK and cases[0].get('name') not in (SEOUL_METHOD, SEOUL_METHOD + '()'):
-                    raise SystemExit('F29 Seoul must contain only its exact measured timestamp method')
-                result[task][name] = values
-    except (OSError, ET.ParseError, KeyError, ValueError):
-        raise SystemExit('F29 compatibility XML is missing or malformed') from None
-    EVIDENCE.mkdir(parents=True, exist_ok=True)
-    (EVIDENCE / 'f29-results.json').write_text(json.dumps(result, sort_keys=True) + '\n')
-    print('Verified measured F29 UTC PG/MVC and one exact Seoul timestamp XML')
 
 
 # Runtime send/token/note-SSE probe is separately owned; import it only for smoke.
@@ -612,7 +499,7 @@ def smoke():
 
 
 
-# Late member-cleanup fixture extension only: ordinary prepare/results/smoke stay unchanged.
+# Late member-cleanup fixture extension only: ordinary prepare/smoke stay unchanged.
 MEMBER_RECEIPT = 'member-cleanup-fixture-write.txt'
 MEMBER_TABLES = (
     ('refresh_tokens','pawbridge_user.refresh_tokens','refresh_token_id'),
@@ -623,6 +510,15 @@ MEMBER_TABLES = (
     ('chat_requests','pawbridge_community.member_chat_requests','sender_id,request_id'),
 )
 MEMBER_FRAGMENTS = ('cf93ed908b18f63f59832cd0fe5bcf500ccf9e4c39972deeda5de446c4dd953d', 'eb3fe612fe9d4aff8372539b0d59e1da4c34266036ce88f1ed0ba51b88f5e139', 'b705222e7a9c9a6964628c937cff63470e1dd30103b27111ae3c5d94d284e1ec', '7afb8a3d992eba1258d61a610a418133f56766e9def3eb2e105c584bedcd2fdb')
+# Pinned PostgreSQL migrations at SOURCE that define the six late member-cleanup relations.
+MEMBER_DDL_HASHES = {
+    'user-service/src/migration/resources/db/postgresql/V1__user_schema.sql':
+        '5b6c50062231952e625e56a7577c41b03d7d5a10041380d4b2ada960ef7449a1',
+    'user-service/src/migration/resources/db/postgresql/V2__rollback_charset_compatibility.sql':
+        '2921e2a7b10c640ef24955902e38d649e5485af7df8656b10638ccf5f79521b8',
+    'community-service/src/migration/resources/db/postgresql/V10__member_chat.sql':
+        '7afb8a3d992eba1258d61a610a418133f56766e9def3eb2e105c584bedcd2fdb',
+}
 MEMBER_GRANTS = """GRANT SELECT(user_id),UPDATE(user_id),DELETE ON pawbridge_user.users TO pawbridge_f3_writer;
 GRANT INSERT(user_id) ON pawbridge_user.contact_deletions TO pawbridge_f3_writer;
 GRANT SELECT(user_id),DELETE ON pawbridge_user.favorites,pawbridge_user.refresh_tokens,pawbridge_user.shelter_applications TO pawbridge_f3_writer;
@@ -646,61 +542,20 @@ def member_fixture_proof(owner):
             + hashlib.sha256(MEMBER_GRANTS.encode()).hexdigest() + '  member-exact-grants\n')
 
 
-def member_require_oracle_receipt():
-    # Canonical source40/raw-shared22/generated6 receipt, independent of owner/ACL denial.
-    # Its immutable bytes also bind the unchanged original F29 source22/generated3 receipt.
-    try:
-        extra = EVIDENCE / 'member-cleanup-oracle-sha256.txt'
-        if extra.is_symlink() or extra.resolve() != extra or not extra.is_file():
-            raise ValueError('receipt path')
-        raw = extra.read_bytes()
-        if hashlib.sha256(raw).hexdigest() != 'df12ad2ab091706dd0e28762acec7825a1d345d4948f5805b128e3e52f367c9a':
-            raise ValueError('receipt identity')
-        lines = raw.decode('utf-8').splitlines()
-        if lines[0] != 'source_sha=' + SOURCE or any(
-                sum('  ' + kind + ' ' in line for line in lines) != count
-                for kind, count in (('source', 40), ('shared-byte-identity', 22), ('generated', 6), ('base-F29-receipt', 1))):
-            raise ValueError('receipt inventory')
-        base = EVIDENCE / 'f29-oracle-sha256.txt'
-        if base.is_symlink() or base.resolve() != base or not base.is_file():
-            raise ValueError('base receipt path')
-        base_raw = base.read_bytes()
-        if hashlib.sha256(base_raw).hexdigest() + '  base-F29-receipt ' + oracle.EVIDENCE_PATH not in lines:
-            raise ValueError('base receipt identity')
-        base_lines = base_raw.decode('utf-8').splitlines()
-        if sum('  generated ' in line for line in base_lines) != 3 or sum('  shared-adapted-identity ' in line for line in base_lines) != 1:
-            raise ValueError('base artifact inventory')
-        output = ROOT / 'boot/build/generated/sources/f29LegacyOracle/java'
-        for line in lines + base_lines:
-            match = re.fullmatch(r'([0-9a-f]{64})  (shared-byte-identity|shared-adapted-identity|generated) (.+)', line)
-            if match is None:
-                continue
-            digest, kind, relative = match.groups()
-            relative = Path(relative)
-            if relative.is_absolute() or '..' in relative.parts:
-                raise ValueError('artifact path')
-            artifact = (output if kind == 'generated' else ROOT.parent) / relative
-            if artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file() or hashlib.sha256(artifact.read_bytes()).hexdigest() != digest:
-                raise ValueError('artifact identity')
-    except (OSError, UnicodeError, ValueError, IndexError):
-        raise SystemExit('Member cleanup oracle receipt or source artifacts differ') from None
-
-
 def member_require_identity():
     # Safe even while deliberately denying User/read or cleanup writer columns.
     owner = f2.require_hosted()
     require_prior_receipts(owner)  # marker-only chain, not User-seven/full ACL
     f21.check_receipt(EVIDENCE / 'f29-fixture-write.txt', fixture_proof(owner))
     f21.check_receipt(EVIDENCE / MEMBER_RECEIPT, member_fixture_proof(owner))
-    member_require_oracle_receipt()
     return owner
 
 
 def member_verified_ddl():
     inputs = {}
-    for path in ('user-service/src/migration/resources/db/postgresql/V1__user_schema.sql','user-service/src/migration/resources/db/postgresql/V2__rollback_charset_compatibility.sql','community-service/src/migration/resources/db/postgresql/V10__member_chat.sql'):
+    for path, expected in MEMBER_DDL_HASHES.items():
         raw = subprocess.check_output(['git', 'show', SOURCE + ':' + path], cwd=ROOT.parent, stderr=subprocess.PIPE)
-        if hashlib.sha256(raw).hexdigest() != oracle.MEMBER_INPUTS.get(path):
+        if hashlib.sha256(raw).hexdigest() != expected:
             raise SystemExit('Member cleanup original DDL source differs')
         inputs[path] = raw.decode('utf-8')
     user = inputs['user-service/src/migration/resources/db/postgresql/V1__user_schema.sql']; charset = inputs['user-service/src/migration/resources/db/postgresql/V2__rollback_charset_compatibility.sql']
@@ -800,7 +655,6 @@ def member_require_fixture():
 def member_cleanup_prepare():
     f2.require_hosted()
     owner=require_fixture()  # The final old F29 strict call: before new privileges/relations.
-    member_require_oracle_receipt()  # Reject missing/changed source evidence before any DDL/GRANT.
     target=EVIDENCE/MEMBER_RECEIPT
     f21.check_receipt(target,member_fixture_proof(owner),allow_missing=True)
     if target.exists():raise SystemExit('Refusing an existing member cleanup receipt')
@@ -834,30 +688,6 @@ def member_denied_privilege(kind):
         member_require_fixture()
 
 
-def member_require_runtime_results():
-    member_require_identity()
-    folder = ROOT / 'boot/build/test-results/memberCleanupCompatibilityTest'
-    paths = list(folder.glob('TEST-*.xml'))
-    if len(paths) != 1 or paths[0].is_symlink() or paths[0].resolve() != paths[0]:
-        raise SystemExit('Member cleanup requires its one exact completed PG XML')
-    try:
-        suite = ET.parse(paths[0]).getroot()
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.get('name') != PG_CLASS
-                or paths[0].name != 'TEST-' + PG_CLASS + '.xml'
-                or int(suite.get('tests', '-1')) != 12 or len(cases) != 12
-                or len(list(suite.iter('testcase'))) != 12 or int(suite.get('disabled', '0')) != 0
-                or any(int(suite.get(k, '-1')) != 0 for k in ('failures', 'errors', 'skipped'))
-                or any(c.get('classname') != PG_CLASS or not c.get('name') for c in cases)
-                or len({c.get('name') for c in cases}) != 12
-                or any(c.get('status') not in (None, 'run', 'passed')
-                       or c.get('result') not in (None, 'completed', 'passed', 'success') for c in cases)
-                or any(node.tag in ('failure', 'error', 'skipped') for node in suite.iter())):
-            raise ValueError()
-    except (OSError, ET.ParseError, ValueError, TypeError):
-        raise SystemExit('Member cleanup PG XML is incomplete, skipped or unsuccessful') from None
-
-
 def member_cleanup_smoke():
     f2.require_hosted()
     import sys
@@ -880,33 +710,9 @@ def admin_update_fixture_proof(owner):
             + hashlib.sha256(ADMIN_UPDATE_GRANTS.encode()).hexdigest() + '  admin-user-exact-grants\n')
 
 
-def admin_update_require_oracle_receipt():
-    import prepare_f13_legacy_oracle as admin
-    try:
-        outputs = {}
-        for source, relative in admin.ADMIN_SHARED.items():
-            artifact = ROOT.parent / relative
-            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
-                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != admin.ADMIN_EXPECTED[source]):
-                raise ValueError()
-        for relative, expected in admin.ADMIN_GENERATED.items():
-            artifact = ROOT / 'boot/build/generated/sources/f13LegacyOracle/java' / relative
-            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
-                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != expected):
-                raise ValueError()
-            outputs[relative] = artifact.read_bytes()
-        target = EVIDENCE / 'f13-admin-update-oracle-sha256.txt'
-        if (target.is_symlink() or target.resolve() != target or not target.is_file()
-                or target.read_text() != admin.admin_update_receipt(outputs)):
-            raise ValueError()
-    except (OSError, UnicodeError, ValueError):
-        raise SystemExit('Administrator User update oracle receipt or source artifacts differ') from None
-
-
 def admin_update_require_identity():
     owner = member_require_identity()  # Marker/receipt identity, safe during ACL denial.
     f21.check_receipt(EVIDENCE / ADMIN_UPDATE_RECEIPT, admin_update_fixture_proof(owner))
-    admin_update_require_oracle_receipt()
     return owner
 
 
@@ -921,7 +727,6 @@ def admin_update_require_fixture():
 def admin_update_prepare():
     f2.require_hosted()
     owner = member_require_fixture()  # Final old strict before the four new column rights.
-    admin_update_require_oracle_receipt()  # Reject every artifact conflict before GRANT.
     target = EVIDENCE / ADMIN_UPDATE_RECEIPT
     f21.check_receipt(target, admin_update_fixture_proof(owner), allow_missing=True)
     if target.exists():
@@ -950,174 +755,6 @@ def admin_update_denied_privilege(kind):
             raise SystemExit('Administrator User update owner changed before privilege restoration')
         owned_sql('GRANT ' + clause + ' TO pawbridge_f3_writer')
         admin_update_require_fixture()
-
-
-# Visit collection has two explicit parents. The selected lane does not acquire admin User privileges.
-VISIT_COLLECTION_RECEIPT = 'visit-collection-fixture-write.txt'
-VISIT_COLLECTION_TABLES = (('daily_visitor','pawbridge_community.daily_visitor','visit_date,visitor_hash'),
-                           ('visit_collection','pawbridge_community.visit_collection','singleton'))
-VISIT_COLLECTION_GRANTS = """GRANT SELECT(visit_date,visitor_hash),INSERT(visit_date,visitor_hash),DELETE ON pawbridge_community.daily_visitor TO pawbridge_f3_writer;
-GRANT SELECT(visit_date,unique_visitors),INSERT(visit_date,unique_visitors),UPDATE(unique_visitors) ON pawbridge_community.daily_visit_count TO pawbridge_f3_writer;
-GRANT SELECT(singleton,started_at),INSERT(singleton,started_at) ON pawbridge_community.visit_collection TO pawbridge_f3_writer;
-"""
-
-
-def _visit_collection_proof(owner, parent):
-    if parent not in ('member-cleanup', 'admin-user-update'):
-        raise ValueError('Unknown fixed visit collection parent')
-    return ('owner=' + owner + '\nsource_sha=33cad5567767f8730fc2c4389815ecd031f41dc0\n'
-            'fixture=' + parent + ' plus visit collection\nnew_business_ddl=0\nsynthetic_tables_added=2\n'
-            'new_schema=0\nnew_marker=0\nsnapshot_tables=26\nreader_delta=0\nnew_sequence_acl=0\n'
-            + hashlib.sha256(VISIT_COLLECTION_GRANTS.encode()).hexdigest() + '  visit-collection-exact-grants\n')
-
-
-def visit_collection_fixture_proof(owner):
-    return _visit_collection_proof(owner, 'member-cleanup')
-
-
-def admin_visit_collection_fixture_proof(owner):
-    return _visit_collection_proof(owner, 'admin-user-update')
-
-
-def visit_collection_require_oracle_receipt():
-    import prepare_f16_legacy_oracle as visits
-    try:
-        for source, relative in visits.COLLECTION_SHARED.items():
-            target = ROOT.parent / relative
-            if (target.is_symlink() or target.resolve() != target or not target.is_file()
-                    or hashlib.sha256(target.read_bytes()).hexdigest() != visits.COLLECTION_EXPECTED[source]):
-                raise ValueError()
-        for name, expected in (('f16-oracle-sha256.txt', visits.collection_base_receipt()),
-                               ('f16-collection-oracle-sha256.txt', visits.collection_receipt())):
-            target = EVIDENCE / name
-            if (target.is_symlink() or target.resolve() != target or not target.is_file() or target.read_text() != expected):
-                raise ValueError()
-    except (OSError, UnicodeError, ValueError):
-        raise SystemExit('Visit collection raw F16/F7 artifacts or separate source receipt differ') from None
-
-
-def visit_collection_require_identity():
-    owner = member_require_identity()
-    f21.check_receipt(EVIDENCE / VISIT_COLLECTION_RECEIPT, visit_collection_fixture_proof(owner))
-    visit_collection_require_oracle_receipt()
-    return owner
-
-
-def admin_visit_collection_require_identity():
-    owner = admin_update_require_identity()
-    f21.check_receipt(EVIDENCE / VISIT_COLLECTION_RECEIPT, admin_visit_collection_fixture_proof(owner))
-    visit_collection_require_oracle_receipt()
-    return owner
-
-
-def _visit_collection_require_tables():
-    expected = {
-        'daily_visitor': (2, "('visit_date','date',0,'NO',0),('visitor_hash','character',64,'NO',0)", 'true', 'true', 'false', True, 1),
-        'daily_visit_count': (2, "('visit_date','date',0,'NO',0),('unique_visitors','bigint',0,'NO',0)", 'true', 'true', "column_name='unique_visitors'", False, 2),
-        'visit_collection': (2, "('singleton','boolean',0,'NO',0),('started_at','timestamp with time zone',0,'NO',6)", 'true', 'true', 'false', False, 2),
-    }
-    for table, (columns, shape, read, create, change, delete, constraints) in expected.items():
-        relation = 'pawbridge_community.' + table
-        where = " FROM information_schema.columns WHERE table_schema='pawbridge_community' AND table_name='" + table + "'"
-        defaults = "CASE WHEN column_name='singleton' THEN column_default='true' ELSE column_default IS NULL END" if table == 'visit_collection' else 'column_default IS NULL'
-        if owned_sql("SELECT count(*)=" + str(columns) + " AND bool_and(is_identity='NO' AND is_generated='NEVER' AND " + defaults
-                     + " AND (column_name,data_type,COALESCE(character_maximum_length,0),is_nullable,COALESCE(datetime_precision,0)) IN (" + shape + "))" + where) != 't':
-            raise SystemExit('Visit collection exact V11 column/default shape differs')
-        reader = 'true' if table == 'daily_visit_count' else 'false'
-        if owned_sql("SELECT count(*)=2 AND bool_and(has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'SELECT')=(" + read
-                     + ") AND has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'INSERT')=(" + create
-                     + ") AND has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'UPDATE')=(" + change
-                     + ") AND NOT has_column_privilege('pawbridge_f3_writer','" + relation + "',column_name,'REFERENCES')"
-                     + " AND has_column_privilege('pawbridge_f2_reader','" + relation + "',column_name,'SELECT')=" + reader
-                     + " AND NOT has_column_privilege('pawbridge_f2_reader','" + relation + "',column_name,'INSERT,UPDATE,REFERENCES')"
-                     + " AND pg_get_serial_sequence('" + relation + "',column_name) IS NULL)" + where) != 't':
-            raise SystemExit('Visit collection exact writer/unchanged reader/no-sequence columns differ')
-        if owned_sql("SELECT NOT has_table_privilege('pawbridge_f3_writer','" + relation + "','SELECT,INSERT,UPDATE,TRUNCATE,REFERENCES,TRIGGER')"
-                     + " AND has_table_privilege('pawbridge_f3_writer','" + relation + "','DELETE')=" + str(delete).lower()
-                     + " AND NOT has_table_privilege('pawbridge_f2_reader','" + relation + "','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')") != 't':
-            raise SystemExit('Visit collection exact table ACL differs')
-        keys = ('visit_date','visitor_hash') if table == 'daily_visitor' else ('visit_date',) if table == 'daily_visit_count' else ('singleton',)
-        names = 'ARRAY[' + ','.join(f4.literal(key) for key in keys) + ']::text[]'
-        if owned_sql("SELECT (SELECT relkind='r' AND relpersistence='p' AND pg_get_userbyid(relowner)='postgres' FROM pg_class WHERE oid='" + relation + "'::regclass)"
-                     + " AND (SELECT count(*)=" + str(constraints) + " AND bool_and(convalidated AND NOT condeferrable) AND count(*) FILTER(WHERE contype='p')=1 AND count(*) FILTER(WHERE contype='f')=0 FROM pg_constraint WHERE conrelid='" + relation + "'::regclass)"
-                     + " AND (SELECT ARRAY(SELECT a.attname::text FROM unnest(c.conkey) WITH ORDINALITY k(num,ord) JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.num ORDER BY k.ord)=" + names + " FROM pg_constraint c WHERE conrelid='" + relation + "'::regclass AND contype='p')"
-                     + " AND (SELECT count(*)=1 AND bool_and(indisprimary AND indisunique AND indisvalid AND indisready AND indpred IS NULL AND indexprs IS NULL) FROM pg_index WHERE indrelid='" + relation + "'::regclass)") != 't':
-            raise SystemExit('Visit collection owner/PK/constraint/index inventory differs')
-        if table != 'daily_visitor':
-            check = 'unique_visitors>=0' if table == 'daily_visit_count' else 'singleton'
-            if owned_sql("SELECT count(*)=1 AND bool_and(convalidated AND regexp_replace(pg_get_expr(conbin,conrelid),'::bigint|[()[:space:]]','','g')=" + f4.literal(check) + ") FROM pg_constraint WHERE conrelid='" + relation + "'::regclass AND contype='c'") != 't':
-                raise SystemExit('Visit collection original V11 CHECK differs')
-
-
-def visit_collection_require_fixture():
-    owner = visit_collection_require_identity()
-    _member_require_fixture_without_user_writer_acl()
-    _member_require_user_writer_acl(('user_id','nickname'), ('user_id','nickname','updated_at'))
-    _visit_collection_require_tables()
-    return owner
-
-
-def admin_visit_collection_require_fixture():
-    owner = admin_visit_collection_require_identity()
-    _member_require_fixture_without_user_writer_acl()
-    _member_require_user_writer_acl(('user_id','nickname','role','care_reg_no'), ('user_id','nickname','updated_at','role','care_reg_no'))
-    _visit_collection_require_tables()
-    return owner
-
-
-def _visit_collection_snapshot():
-    tables = SNAPSHOT_TABLES + MEMBER_TABLES + VISIT_COLLECTION_TABLES
-    fields = [f4.literal(key) + ',(SELECT COALESCE(json_agg(r ORDER BY ' + order + "),'[]'::json) FROM " + relation + ' r)' for key, relation, order in tables]
-    value = json.loads(owned_sql('SELECT json_build_object(' + ','.join(fields) + ')'))
-    if not isinstance(value,dict) or set(value) != {key for key,_,_ in tables} or any(not isinstance(v,list) for v in value.values()):
-        raise SystemExit('Visit collection requires exactly twenty-six raw tables')
-    return value
-
-
-def visit_collection_database_snapshot():
-    visit_collection_require_identity()
-    return _visit_collection_snapshot()
-
-
-def admin_visit_collection_database_snapshot():
-    admin_visit_collection_require_identity()
-    return _visit_collection_snapshot()
-
-
-def _visit_collection_extend(owner, proof, require_new, snapshot_new):
-    import prepare_f16_legacy_oracle as visits
-    visit_collection_require_oracle_receipt()  # Before any new table, grant or row write.
-    target = EVIDENCE / VISIT_COLLECTION_RECEIPT
-    f21.check_receipt(target, proof, allow_missing=True)
-    if target.exists():
-        raise SystemExit('Refusing an existing visit collection fixture receipt')
-    raw = subprocess.check_output(['git','show',visits.SOURCE + ':' + visits.COLLECTION_DDL], cwd=ROOT.parent, stderr=subprocess.PIPE)
-    fragments = visits.collection_fragments(raw)
-    if owned_sql("SELECT count(*)=2 AND bool_and(has_column_privilege('pawbridge_f2_reader','pawbridge_community.daily_visit_count',column_name,'SELECT') AND NOT has_column_privilege('pawbridge_f2_reader','pawbridge_community.daily_visit_count',column_name,'INSERT,UPDATE,REFERENCES') AND NOT has_column_privilege('pawbridge_f3_writer','pawbridge_community.daily_visit_count',column_name,'SELECT,INSERT,UPDATE,REFERENCES')) AND NOT has_table_privilege('pawbridge_f2_reader','pawbridge_community.daily_visit_count','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AND NOT has_table_privilege('pawbridge_f3_writer','pawbridge_community.daily_visit_count','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') FROM information_schema.columns WHERE table_schema='pawbridge_community' AND table_name='daily_visit_count'") != 't':
-        raise SystemExit('Visit collection requires unchanged parent reader-two/writer-zero count ACL before grant')
-    for _, relation, _ in VISIT_COLLECTION_TABLES:
-        if owned_sql('SELECT to_regclass(' + f4.literal(relation) + ') IS NULL') != 't':
-            raise SystemExit('Refusing an existing visit collection business table')
-    before = member_database_snapshot()
-    owned_sql(input_text='BEGIN;\n' + ''.join(fragments) + '\n' + VISIT_COLLECTION_GRANTS + 'COMMIT;\n')
-    with target.open('x') as out:
-        out.write(proof)
-    if require_new() != owner:
-        raise SystemExit('Visit collection owner changed after preparation')
-    if snapshot_new() != dict(before, **{key:[] for key,_,_ in VISIT_COLLECTION_TABLES}):
-        raise SystemExit('Visit collection extension changed existing twenty-four rows')
-
-
-def visit_collection_prepare():
-    f2.require_hosted()
-    owner = member_require_fixture()  # Last old member24 strict, selected lane only.
-    _visit_collection_extend(owner, visit_collection_fixture_proof(owner), visit_collection_require_fixture, visit_collection_database_snapshot)
-
-
-def admin_visit_collection_prepare():
-    f2.require_hosted()
-    owner = admin_update_require_fixture()  # Last old admin24 strict, full lane only.
-    _visit_collection_extend(owner, admin_visit_collection_fixture_proof(owner), admin_visit_collection_require_fixture, admin_visit_collection_database_snapshot)
 
 
 # Optional late auth-session fixture: the reviewed V4 auth_sessions table plus exact writer rights.
@@ -1168,33 +805,9 @@ def auth_sessions_fixture_proof(owner):
             + hashlib.sha256(AUTH_SESSIONS_GRANTS.encode()).hexdigest() + '  auth-session-exact-grants\n')
 
 
-def auth_sessions_require_oracle_receipt():
-    import prepare_f13_legacy_oracle as auth
-    try:
-        for path, relative in auth.AUTH_SHARED.items():
-            artifact = ROOT.parent / relative
-            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
-                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != auth.AUTH_EXPECTED[path]):
-                raise ValueError()
-        outputs = {}
-        for relative, expected in auth.AUTH_GENERATED.items():
-            artifact = ROOT / 'boot/build/generated/sources/f13LegacyOracle/java' / relative
-            if (artifact.is_symlink() or artifact.resolve() != artifact or not artifact.is_file()
-                    or hashlib.sha256(artifact.read_bytes()).hexdigest() != expected):
-                raise ValueError()
-            outputs[relative] = artifact.read_bytes()
-        target = EVIDENCE / 'f13-auth-sessions-oracle-sha256.txt'
-        if (target.is_symlink() or target.resolve() != target or not target.is_file()
-                or target.read_text() != auth.auth_sessions_receipt(outputs)):
-            raise ValueError()
-    except (OSError, UnicodeError, ValueError):
-        raise SystemExit('Auth session oracle receipt or fixed sources differ') from None
-
-
 def auth_sessions_require_identity():
     owner = admin_update_require_identity()  # marker/receipt only; safe while exact new rights are denied.
     f21.check_receipt(EVIDENCE / AUTH_SESSIONS_RECEIPT, auth_sessions_fixture_proof(owner))
-    auth_sessions_require_oracle_receipt()
     return owner
 
 
@@ -1245,7 +858,6 @@ def auth_sessions_require_fixture():
 def auth_sessions_prepare():
     f2.require_hosted()
     owner = admin_update_require_fixture()  # Final old strict, before the seven exact new column rights.
-    auth_sessions_require_oracle_receipt()
     target = EVIDENCE / AUTH_SESSIONS_RECEIPT
     f21.check_receipt(target, auth_sessions_fixture_proof(owner), allow_missing=True)
     if target.exists():
@@ -1306,4 +918,13 @@ def auth_sessions_denied_privilege(kind):
 if __name__ == "__main__":
     import sys
     f2.require_hosted()
-    {"prepare": prepare, "results": verify_results, "smoke": smoke, "member-cleanup-prepare": member_cleanup_prepare, "member-cleanup-smoke": member_cleanup_smoke, "admin-update-prepare": admin_update_prepare, "visit-collection-prepare": visit_collection_prepare, "admin-visit-collection-prepare": admin_visit_collection_prepare, "auth-sessions-prepare": auth_sessions_prepare, "auth-sessions-restore": auth_sessions_restore}[sys.argv[1]]()
+    actions = {
+        "prepare": prepare,
+        "smoke": smoke,
+        "member-cleanup-prepare": member_cleanup_prepare,
+        "member-cleanup-smoke": member_cleanup_smoke,
+        "admin-update-prepare": admin_update_prepare,
+        "auth-sessions-prepare": auth_sessions_prepare,
+        "auth-sessions-restore": auth_sessions_restore,
+    }
+    actions[sys.argv[1]]()

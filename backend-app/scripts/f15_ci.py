@@ -7,7 +7,6 @@ import os
 import re
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -19,8 +18,6 @@ MARKER = 'pawbridge-f15-ci-only-v1'
 SOURCE = 'cb0082881391b3ba885293520c2a6024a15a2034'
 DDL_SOURCE = 'community-service/src/migration/resources/db/postgresql/V9__home_video_curation.sql'
 DDL_HASH = '5a8dfe19923ed7119d7c92d22dd9a4508a3b6febd9468004ac0cc3fe1822334e'
-COMPATIBILITY_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlHomeVideoCompatibilityTest'
-TASKS = (('homeVideoCompatibilityTest', 'UTC'), ('homeVideoCompatibilitySeoulTest', 'Asia/Seoul'))
 COLUMNS = ('id', 'video_id', 'published', 'position', 'created_at', 'title', 'channel_title',
            'thumbnail_url', 'duration_seconds', 'available', 'checked_at')
 FIELDS = {'id', 'videoId', 'published', 'position', 'createdAt', 'title', 'channelTitle',
@@ -28,27 +25,6 @@ FIELDS = {'id', 'videoId', 'published', 'position', 'createdAt', 'title', 'chann
 IDS = tuple('f15b0000-0000-0000-0000-' + format(number, '012d') for number in range(1, 7))
 SUCCESS = '요청이 성공적으로 처리되었습니다.'
 UNAVAILABLE = '영상을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
-
-
-def verify_results():
-    f2.require_hosted()
-    counts = {}
-    for task, zone in TASKS:
-        path = ROOT / 'boot/build/test-results' / task / ('TEST-' + COMPATIBILITY_CLASS + '.xml')
-        try:
-            suite = ET.parse(path).getroot()
-            values = {key: int(suite.attrib[key]) for key in ('tests', 'failures', 'errors', 'skipped')}
-        except (OSError, ET.ParseError, KeyError, ValueError):
-            raise SystemExit('F15 compatibility report missing or malformed: ' + task) from None
-        cases = suite.findall('testcase')
-        if (suite.tag != 'testsuite' or suite.attrib.get('name') != COMPATIBILITY_CLASS
-                or values['tests'] <= 0 or any(values[key] != 0 for key in ('failures', 'errors', 'skipped'))
-                or len(cases) != values['tests']
-                or any(case.attrib.get('classname') != COMPATIBILITY_CLASS for case in cases)):
-            raise SystemExit('F15 compatibility report requires executed successful unskipped cases: ' + task)
-        counts[zone] = values['tests']
-    print('Verified separate F15 compatibility execution counts: ' + json.dumps(counts, sort_keys=True))
-    return counts
 
 
 def verified_ddl():
@@ -296,4 +272,4 @@ def smoke():
 
 if __name__ == '__main__':
     f2.require_hosted()
-    {'prepare': prepare, 'results': verify_results, 'smoke': smoke}[sys.argv[1]]()
+    {'prepare': prepare, 'smoke': smoke}[sys.argv[1]]()

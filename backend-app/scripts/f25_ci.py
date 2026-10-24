@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 
 import f2_ci as f2
 import f3_ci as f3
@@ -27,14 +26,6 @@ import f24_ci as f24
 
 ROOT,EVIDENCE=f3.ROOT,f3.EVIDENCE
 SOURCE='f06a72a06bd26662c647bde780dfc7a27bf7349c'
-TASK='noteBlockCreateCompatibilityTest'
-SEOUL_TASK='noteBlockCreateCompatibilitySeoulTest'
-PG_CLASS='com.pawbridge.backend.compatibility.PostgresqlNoteBlockCreateCompatibilityTest'
-MVC_CLASS='com.pawbridge.backend.compatibility.F25LegacyNoteBlockCreateMvcTest'
-SEOUL_METHOD='givenTstzMicrosecondsAndALaterDuplicateClock__whenBothCreateAndSerializeInEitherZone__thenStoreTheSameInstantAndKeepTheFirstTimestampWithoutLocalShift'
-# PG13 is the independently inspected provider contract, not an execution result; MVC17 passed actual local XML.
-# Hosted results must still match exact suites/counts and contain no failure/error/skip.
-REPORTS={TASK:{PG_CLASS:13,MVC_CLASS:17},SEOUL_TASK:{PG_CLASS:1}}
 WRITER_MEMBERS='pawbridge_community.private_note_members'
 WRITER_BLOCKS='pawbridge_community.private_note_blocks'
 
@@ -263,34 +254,8 @@ def denied_privilege(kind):
 
 def require_measurements():
     f2.require_hosted()
-    if (set(REPORTS)!={TASK,SEOUL_TASK} or set(REPORTS[TASK])!={PG_CLASS,MVC_CLASS}
-            or REPORTS[SEOUL_TASK]!={PG_CLASS:1}
-            or any(type(n) is not int or n<=0 for classes in REPORTS.values() for n in classes.values())):
-        raise SystemExit('F25 original MVC and PG execution counts remain unmeasured')
     if set(EXPECTED_JAR_COUNTS)!=set(COUNTERS) or any(type(n) is not int or n<0 for n in EXPECTED_JAR_COUNTS.values()):
         raise SystemExit('F25 packaged journey counts remain unmeasured')
-
-
-def verify_results():
-    require_measurements();result={}
-    for task,classes in REPORTS.items():
-        directory=ROOT/'boot/build/test-results'/task
-        if {p.name for p in directory.glob('TEST-*.xml')}!={'TEST-'+name+'.xml' for name in classes}:
-            raise SystemExit('F25 exact UTC/Seoul XML class set differs')
-        result[task]={}
-        for name,expected in classes.items():
-            suite=ET.parse(directory/('TEST-'+name+'.xml')).getroot();cases=suite.findall('testcase')
-            if suite.tag!='testsuite' or suite.get('name')!=name:raise SystemExit('F25 XML suite FQN differs')
-            values={k:int(suite.attrib[k]) for k in ('tests','failures','errors','skipped')}
-            if values!={'tests':expected,'failures':0,'errors':0,'skipped':0} or len(cases)!=expected:
-                raise SystemExit('F25 XML aggregate or actual case counts differ')
-            if any(c.get('classname')!=name or any(c.find(k) is not None for k in ('failure','error','skipped')) for c in cases):
-                raise SystemExit('F25 XML actual child results differ')
-            if task==SEOUL_TASK and cases[0].get('name') not in (SEOUL_METHOD,SEOUL_METHOD+'()'):
-                raise SystemExit('F25 Seoul must contain only its exact timestamp method')
-            result[task][name]=values
-    (EVIDENCE/'f25-results.json').write_text(json.dumps(result,sort_keys=True))
-    print('Verified exact measured F25 UTC PG/MVC and one Seoul timestamp XML')
 
 
 CALLER,OTHER=9979001,9979002
@@ -519,5 +484,5 @@ def smoke():
 
 if __name__=='__main__':
     f2.require_hosted()
-    {'prepare':prepare,'results':verify_results,'smoke':smoke}[sys.argv[1]]()
+    {'prepare':prepare,'smoke':smoke}[sys.argv[1]]()
 

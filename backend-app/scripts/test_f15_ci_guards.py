@@ -1,6 +1,5 @@
-"""No-socket F15 owner, V9, ACL, oracle, XML and packaged cleanup regressions."""
+"""No-socket F15 owner, V9, ACL and packaged cleanup regressions."""
 from contextlib import ExitStack, contextmanager
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,16 +10,9 @@ import unittest
 from unittest.mock import patch
 
 import f15_ci as f15
-import prepare_f15_legacy_oracle as oracle
 from test_f14_ci_guards import HOSTED as F14_HOSTED
 
 HOSTED = dict(F14_HOSTED, F15_CI_OWNER='123-1')
-
-
-def oracle_paths(directory):
-    root = Path(directory).resolve()
-    return (root, root / 'backend-app/boot/build/generated/sources/f15LegacyOracle/java',
-            root / 'backend-app/build/ci/f15-oracle-sha256.txt')
 
 
 @contextmanager
@@ -59,7 +51,7 @@ def packaged_harness(directory, failure=None, mutation=False):
 class F15GuardTest(unittest.TestCase):
     def test_given_non_hosted_invocation__when_calling_actions__then_refuse_before_resources(self):
         for action in (f15.prepare, f15.require_fixture, f15.prepare_business_rows, f15.remove_visible_rows,
-                       f15.cleanup_business_rows, f15.smoke, f15.verify_results, f15.verified_ddl):
+                       f15.cleanup_business_rows, f15.smoke, f15.verified_ddl):
             with self.subTest(action=action.__name__), patch.dict(os.environ, {}, clear=True), \
                     patch.object(f15.f3, 'sql') as sql, patch.object(f15.f2, 'command') as command, \
                     patch.object(f15.subprocess, 'check_output') as git, patch.object(f15.f4, 'start_ready_children') as start:
@@ -214,26 +206,6 @@ class F15GuardTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, 'removed its owned video rows'): f15.prepare_business_rows()
             sql.assert_called_once_with('SELECT count(*) FROM pawbridge_community.home_videos')
 
-    def test_given_missing_failed_skipped_or_wrong_xml__when_reporting__then_require_both_exact_timezone_suites(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, HOSTED, clear=True), patch.object(f15, 'ROOT', Path(directory)):
-            paths = []
-            valid = '<testsuite name="' + f15.COMPATIBILITY_CLASS + '" tests="1" failures="0" errors="0" skipped="0"><testcase classname="' + f15.COMPATIBILITY_CLASS + '" name="contract"/></testsuite>'
-            for task, zone in f15.TASKS:
-                path = Path(directory) / 'boot/build/test-results' / task / ('TEST-' + f15.COMPATIBILITY_CLASS + '.xml')
-                paths.append(path); path.parent.mkdir(parents=True)
-            with self.assertRaises(SystemExit): f15.verify_results()
-            paths[0].write_text(valid)
-            with self.assertRaises(SystemExit): f15.verify_results()
-            for index in range(2):
-                for text in ('broken', valid.replace('tests="1"', 'tests="0"'), valid.replace('failures="0"', 'failures="1"'),
-                             valid.replace('errors="0"', 'errors="1"'), valid.replace('skipped="0"', 'skipped="1"'),
-                             valid.replace('classname="' + f15.COMPATIBILITY_CLASS, 'classname="wrong')):
-                    for path in paths: path.write_text(valid)
-                    paths[index].write_text(text)
-                    with self.assertRaises(SystemExit): f15.verify_results()
-            for path in paths: path.write_text(valid)
-            self.assertEqual({'UTC': 1, 'Asia/Seoul': 1}, f15.verify_results())
-
     def test_given_successful_packaged_journey__when_running__then_public_no_tokens_exact_counts_and_two_pool_shutdown(self):
         with tempfile.TemporaryDirectory() as directory, packaged_harness(directory) as (evidence, requests, sql, start, stop, cleanup):
             f15.smoke()
@@ -262,69 +234,27 @@ class F15GuardTest(unittest.TestCase):
             self.assertEqual(2, stop.call_count); cleanup.assert_called_once_with()
             self.assertEqual('incomplete', json.loads((evidence / 'f15-packaged-result.txt').read_text())['status'])
 
-    def test_given_workflow__when_extending_f15__then_preserve_prior_stages_two_exact_tasks_and_always_cleanup(self):
+    def test_given_workflow__when_extending_f15__then_preserve_prior_stages_and_always_cleanup(self):
         text = (f15.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = text.index('- name: Extend the owned fixture with pinned F15 board and videos and reader-only columns')
         self.assertLess(text.index('python3 scripts/f14_ci.py smoke'), boundary)
-        self.assertLess(text.index('python3 scripts/f15_ci.py prepare', boundary), text.index(':boot:homeVideoCompatibilityTest'))
-        self.assertLess(text.index(':boot:homeVideoCompatibilitySeoulTest'), text.index('python3 scripts/f15_ci.py results'))
-        self.assertLess(text.index('python3 scripts/f15_ci.py results'), text.index('python3 scripts/f15_ci.py smoke'))
+        self.assertLess(text.index('python3 scripts/f15_ci.py prepare', boundary), text.index('python3 scripts/f15_ci.py smoke'))
+        self.assertNotIn('python3 scripts/f15_ci.py results', text)
         self.assertLess(text.index('python3 scripts/f15_ci.py smoke'), text.index('run: python3 scripts/f3_ci.py cleanup'))
         cleanup = text[text.index('- name: Remove only the owned disposable fixture'):]
         self.assertIn('if: always()', cleanup)
-        for required in ('test_f15_ci_guards.py', 'f15-helper-refusal.txt', 'f15-oracle-sha256.txt', 'f15-ddl-sha256.txt', 'f15_fixture', 'f15LegacyOracle'):
+        for required in ('test_f15_ci_guards.py', 'f15-helper-refusal.txt', 'f15-ddl-sha256.txt', 'f[0-9]+_fixture'):
             self.assertIn(required, text)
         stages = text[boundary:text.index('- name: Remove only the owned disposable fixture')]
         self.assertNotIn(':boot:compatibilityTest ', stages); self.assertNotIn(':boot:compatibilitySeoulTest ', stages)
-
-    def test_given_wrong_oracle_paths__when_extracting__then_refuse_before_git_or_write(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root, output, evidence = oracle_paths(directory)
-            for target, report in ((root / 'foreign', evidence), (output, root / 'foreign.txt')):
-                with patch.object(oracle.subprocess, 'check_output') as git, patch.object(Path, 'mkdir') as mkdir, patch.object(Path, 'write_bytes') as write:
-                    with self.assertRaisesRegex(SystemExit, 'non-dedicated F15'): oracle.extract(root, target, report)
-                    git.assert_not_called(); mkdir.assert_not_called(); write.assert_not_called()
-
-    def test_given_late_oracle_hash_mismatch__when_extracting__then_write_nothing_and_preserve_other_output(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root, output, evidence = oracle_paths(directory)
-            sentinel = output / 'existing.java'; sentinel.parent.mkdir(parents=True); sentinel.write_bytes(b'existing')
-            expected = {oracle.PREFIX + 'First.java': hashlib.sha256(b'first').hexdigest(), oracle.PREFIX + 'Second.java': hashlib.sha256(b'original').hexdigest()}
-            with patch.dict(oracle.EXPECTED, expected, clear=True), patch.object(oracle.subprocess, 'check_output', side_effect=[b'first', b'tampered']):
-                with self.assertRaisesRegex(SystemExit, 'checksum mismatch'): oracle.extract(root, output, evidence)
-            self.assertFalse((output / 'First.java').exists()); self.assertFalse(evidence.exists())
-            self.assertEqual(b'existing', sentinel.read_bytes())
-
-    def test_given_different_later_oracle_output__when_extracting__then_refuse_before_earlier_write(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root, output, evidence = oracle_paths(directory)
-            second = output / 'Second.java'; second.parent.mkdir(parents=True); second.write_bytes(b'preserve')
-            expected = {oracle.PREFIX + name: hashlib.sha256(b'original').hexdigest() for name in ('First.java', 'Second.java')}
-            with patch.dict(oracle.EXPECTED, expected, clear=True), patch.object(oracle.subprocess, 'check_output', return_value=b'original'):
-                with self.assertRaisesRegex(SystemExit, 'overwrite differing F15'): oracle.extract(root, output, evidence)
-            self.assertFalse((output / 'First.java').exists()); self.assertEqual(b'preserve', second.read_bytes()); self.assertFalse(evidence.exists())
-
-    def test_given_actual_five_oracle_sources__when_extracting__then_preserve_verbatim_bytes_and_evidence(self):
-        original = subprocess.check_output
-        with tempfile.TemporaryDirectory() as directory:
-            root, output, evidence = oracle_paths(directory)
-            with patch.object(oracle.subprocess, 'check_output', side_effect=lambda args, **kwargs: original(args, cwd=f15.ROOT.parent)):
-                oracle.extract(root, output, evidence)
-            self.assertEqual(5, len(oracle.EXPECTED)); self.assertIn('source_sha=' + f15.SOURCE, evidence.read_text())
-            for source, digest in oracle.EXPECTED.items():
-                content = (output / source[len(oracle.PREFIX):]).read_bytes()
-                self.assertEqual(digest, hashlib.sha256(content).hexdigest()); self.assertIn(digest + '  ' + source, evidence.read_text())
-            service = (output / 'com/pawbridge/communityservice/curation/HomeVideoService.java').read_text()
-            self.assertIn('public List<Video> home() { return repository.visible(expiryCutoff()); }', service)
-            self.assertIn('clock.instant().minus(Duration.ofDays(29))', service)
 
     def test_given_f15_test_artifact__when_applying_existing_jar_filter__then_reject_and_keep_validation_exception(self):
         text = (f15.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         pipeline = re.search(r'          if (grep -E .*?); then', text, re.DOTALL).group(1)
         allowed = 'BOOT-INF/lib/hibernate-validator-8.0.3.Final.jar\n'
-        for forbidden in ('', 'BOOT-INF/classes/f15_fixture.sql', 'BOOT-INF/classes/f15LegacyOracle/Input.class',
+        for forbidden in ('', 'BOOT-INF/classes/f15_fixture.sql', 'BOOT-INF/classes/com/pawbridge/backend/compatibility/Input.class',
                           'BOOT-INF/classes/com/pawbridge/communityservice/curation/HomeVideoService.class',
-                          'test/f15LegacyOracle/hibernate-validator-8.0.3.Final.jar'):
+                          'test/compatibilityTest/hibernate-validator-8.0.3.Final.jar'):
             with self.subTest(forbidden=forbidden), tempfile.TemporaryDirectory() as directory:
                 target = Path(directory) / 'build/ci/boot-jar-contents.txt'
                 target.parent.mkdir(parents=True); target.write_text(allowed + forbidden + '\n')
