@@ -4,7 +4,7 @@ import com.pawbridge.backend.user.internal.session.application.AuthSessionReject
 import com.pawbridge.backend.user.internal.session.application.AuthSessionRejectedException.Reason;
 import com.pawbridge.backend.user.internal.session.application.AuthSessions;
 import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken;
-import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.ReplacedToken;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.RetiredToken;
 import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.Rotation;
 import java.util.List;
 import java.util.Optional;
@@ -52,28 +52,45 @@ public final class JdbcAuthSessions implements AuthSessions {
         return outcome.result();
     }
 
+    /*
+     * A token that is no longer current is looked up in the token history:
+     * - retired more than the grace window ago, at any generation: reuse of a stolen token, revoke the session;
+     * - retired within the window: a concurrent tab or a retry. If it was retired by the latest rotation and the
+     *   successor was never used, the rotation response was probably lost, so rotate once more and set a cookie;
+     *   otherwise another response already carries the newer cookie, so return an access token only.
+     */
     private Outcome decide(String presentedHash, String nextToken) {
-        Optional<Rotation> rotation = store.rotate(presentedHash, RefreshTokens.hash(nextToken));
+        String nextHash = RefreshTokens.hash(nextToken);
+        Optional<Rotation> rotation = store.rotate(presentedHash, nextHash);
         if (rotation.isPresent()) {
-            String accessToken = accessTokenFor(rotation.get().userId());
-            var refreshToken = new IssuedRefreshToken(nextToken, rotation.get().maxAgeSeconds());
-            return Outcome.success(new Rotated(accessToken, refreshToken));
+            return rotated(rotation.get(), nextToken);
         }
-        Optional<ReplacedToken> replaced = store.findByPreviousHash(presentedHash);
-        if (replaced.isEmpty()) {
+        Optional<RetiredToken> retired = store.findRetired(presentedHash);
+        if (retired.isEmpty()) {
             return Outcome.rejected(Reason.INVALID);
         }
-        ReplacedToken session = replaced.get();
-        if (session.withinGrace() && session.active()) {
-            // Two tabs refreshed with the same cookie; the other request already set the new cookie.
-            return Outcome.success(new AccessOnly(accessTokenFor(session.userId())));
+        RetiredToken token = retired.get();
+        if (!token.withinGrace()) {
+            store.revoke(token.sessionId());
+            log.warn("Refresh token reuse detected; revoked sessionId={} userId={}", token.sessionId(), token.userId());
+            return Outcome.rejected(Reason.REUSED);
         }
-        if (session.withinGrace()) {
+        if (!token.active()) {
             return Outcome.rejected(Reason.INVALID);
         }
-        store.revoke(session.sessionId());
-        log.warn("Refresh token reuse detected; revoked sessionId={} userId={}", session.sessionId(), session.userId());
-        return Outcome.rejected(Reason.REUSED);
+        if (token.latestRetirement()) {
+            Optional<Rotation> recovered = store.rotateUnusedSuccessor(token.sessionId(), presentedHash, nextHash);
+            if (recovered.isPresent()) {
+                return rotated(recovered.get(), nextToken);
+            }
+        }
+        return Outcome.success(new AccessOnly(accessTokenFor(token.userId())));
+    }
+
+    private Outcome rotated(Rotation rotation, String nextToken) {
+        String accessToken = accessTokenFor(rotation.userId());
+        var refreshToken = new IssuedRefreshToken(nextToken, rotation.maxAgeSeconds());
+        return Outcome.success(new Rotated(accessToken, refreshToken));
     }
 
     private String accessTokenFor(long userId) {

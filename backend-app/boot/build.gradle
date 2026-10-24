@@ -1142,7 +1142,7 @@ tasks.register('authSessionCompatibilitySeoulTest', Test) {
     systemProperty 'auth.sessions.fixture.receipt', rootProject.file('build/ci/auth-sessions-fixture-write.txt').absolutePath
     systemProperty 'auth.sessions.oracle.receipt', rootProject.file('build/ci/f13-auth-sessions-oracle-sha256.txt').absolutePath
     filter {
-        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest.givenCurrentClaimsAndAnActiveSession__whenRotatingThenReplaying__thenRotateOnceAndAnswerOnlyTheConcurrentReplay'
+        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest.givenCurrentClaimsAndAnActiveSession__whenRotating__thenIssueCurrentClaimsAndRecordTheRetiredHash'
         failOnNoMatchingTests = true
     }
     outputs.upToDateWhen { false }

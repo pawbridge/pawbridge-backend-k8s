@@ -181,9 +181,9 @@ class AuthSessionsProfileTest(unittest.TestCase):
         return paths
 
     def test_given_all_auth_methods_and_only_one_seoul_case__when_verifying__then_require_the_exact_invocations(self):
-        self.assertEqual((1,4,1,1,1,3,3,1),tuple(count for _,count in profile.AUTH_METHOD_CASES))
-        self.assertEqual(8,len(profile.AUTH_METHOD_CASES))
-        self.assertEqual(15,len(set(profile.AUTH_REPORT_CASES)))
+        self.assertEqual((1,4,1,1,1,1,3,4,1),tuple(count for _,count in profile.AUTH_METHOD_CASES))
+        self.assertEqual(9,len(profile.AUTH_METHOD_CASES))
+        self.assertEqual(17,len(set(profile.AUTH_REPORT_CASES)))
         self.assertEqual(profile.AUTH_METHOD_CASES[0][0],profile.AUTH_SEOUL_METHOD)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp).resolve();self.reports(root)

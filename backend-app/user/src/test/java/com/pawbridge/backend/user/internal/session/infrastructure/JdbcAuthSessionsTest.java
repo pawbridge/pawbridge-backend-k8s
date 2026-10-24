@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -20,7 +21,7 @@ import static org.mockito.Mockito.when;
 import com.pawbridge.backend.user.internal.session.application.AuthSessionRejectedException;
 import com.pawbridge.backend.user.internal.session.application.AuthSessionRejectedException.Reason;
 import com.pawbridge.backend.user.internal.session.application.AuthSessions;
-import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.ReplacedToken;
+import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.RetiredToken;
 import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore.Rotation;
 import java.security.SecureRandom;
 import java.sql.ResultSet;
@@ -72,7 +73,7 @@ class JdbcAuthSessionsTest {
     @Test
     void given__an_active_session__when__refreshing__then__rotate_once_by_hash_and_return_current_claims_with_a_new_token() {
         var f = new Fixture();
-        when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.of(new Rotation(7, 1_209_600)));
+        when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.of(new Rotation(31, 7, 1_209_600)));
 
         var result = assertInstanceOf(AuthSessions.Rotated.class, f.sessions.refresh(PRESENTED));
 
@@ -82,30 +83,61 @@ class JdbcAuthSessionsTest {
         assertEquals(1_209_600, result.refreshToken().maxAgeSeconds());
         assertEquals("synthetic-access", result.accessToken());
         verify(f.store).rotate(PRESENTED_HASH, RefreshTokens.hash(next));
-        verify(f.store, never()).findByPreviousHash(anyString());
+        verify(f.store, never()).findRetired(anyString());
         verify(f.tokens).access(new JwtSessionTokens.UserClaims(7, "synthetic@fixture.invalid", "Synthetic", "ROLE_USER", "CARE"));
         assertEquals(List.of("begin", "commit"), f.tx.events);
         assertArrayEquals(new Object[] {7L}, f.jdbc.userArgs);
     }
 
     @Test
-    void given__a_token_rotated_moments_ago_by_a_concurrent_request__when__refreshing__then__return_access_only_without_a_new_token() {
+    void given__the_latest_retired_token_within_grace_whose_successor_was_never_used__when__refreshing__then__rotate_again_and_set_a_cookie() {
         var f = new Fixture();
         when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.empty());
-        when(f.store.findByPreviousHash(PRESENTED_HASH)).thenReturn(Optional.of(new ReplacedToken(31, 7, true, true)));
+        when(f.store.findRetired(PRESENTED_HASH)).thenReturn(Optional.of(new RetiredToken(31, 7, true, true, true)));
+        when(f.store.rotateUnusedSuccessor(eq(31L), eq(PRESENTED_HASH), anyString()))
+                .thenReturn(Optional.of(new Rotation(31, 7, 1_209_000)));
 
-        var result = assertInstanceOf(AuthSessions.AccessOnly.class, f.sessions.refresh(PRESENTED));
+        var result = assertInstanceOf(AuthSessions.Rotated.class, f.sessions.refresh(PRESENTED));
 
-        assertEquals("synthetic-access", result.accessToken());
+        assertEquals(1_209_000, result.refreshToken().maxAgeSeconds());
+        verify(f.store).rotateUnusedSuccessor(31, PRESENTED_HASH, RefreshTokens.hash(result.refreshToken().value()));
         verify(f.store, never()).revoke(anyLong());
         assertEquals(List.of("begin", "commit"), f.tx.events);
     }
 
     @Test
-    void given__a_replaced_token_presented_after_the_grace_window__when__refreshing__then__revoke_only_that_session_and_reject_after_commit() {
+    void given__a_concurrent_request_already_moved_the_session_on__when__refreshing_within_grace__then__return_access_only_without_a_new_token() {
         var f = new Fixture();
         when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.empty());
-        when(f.store.findByPreviousHash(PRESENTED_HASH)).thenReturn(Optional.of(new ReplacedToken(31, 7, false, true)));
+        when(f.store.findRetired(PRESENTED_HASH)).thenReturn(Optional.of(new RetiredToken(31, 7, true, true, true)));
+        when(f.store.rotateUnusedSuccessor(anyLong(), anyString(), anyString())).thenReturn(Optional.empty());
+
+        var result = assertInstanceOf(AuthSessions.AccessOnly.class, f.sessions.refresh(PRESENTED));
+
+        assertEquals("synthetic-access", result.accessToken());
+        verify(f.store, never()).revoke(anyLong());
+    }
+
+    @Test
+    void given__an_older_generation_retired_within_grace__when__refreshing__then__return_access_only_without_rotating_again() {
+        var f = new Fixture();
+        when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.empty());
+        when(f.store.findRetired(PRESENTED_HASH)).thenReturn(Optional.of(new RetiredToken(31, 7, true, false, true)));
+
+        assertInstanceOf(AuthSessions.AccessOnly.class, f.sessions.refresh(PRESENTED));
+
+        verify(f.store, never()).rotateUnusedSuccessor(anyLong(), anyString(), anyString());
+        verify(f.store, never()).revoke(anyLong());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void given__a_token_of_any_generation_retired_before_the_grace_window__when__refreshing__then__revoke_only_that_session_and_reject_after_commit(
+            boolean latestRetirement) {
+        var f = new Fixture();
+        when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.empty());
+        when(f.store.findRetired(PRESENTED_HASH))
+                .thenReturn(Optional.of(new RetiredToken(31, 7, false, latestRetirement, true)));
 
         var failure = assertThrows(AuthSessionRejectedException.class, () -> f.sessions.refresh(PRESENTED));
 
@@ -113,20 +145,22 @@ class JdbcAuthSessionsTest {
         assertEquals("유효하지 않은 토큰입니다.", failure.getMessage());
         verify(f.store).revoke(31);
         verify(f.store, never()).revokeAll(anyLong());
+        verify(f.store, never()).rotateUnusedSuccessor(anyLong(), anyString(), anyString());
         assertEquals(List.of("begin", "commit"), f.tx.events);
         verifyNoInteractions(f.tokens);
     }
 
     @Test
-    void given__a_token_replaced_moments_ago_on_a_session_that_is_no_longer_active__when__refreshing__then__reject_without_revoking() {
+    void given__a_token_retired_moments_ago_on_a_session_that_is_no_longer_active__when__refreshing__then__reject_without_revoking() {
         var f = new Fixture();
         when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.empty());
-        when(f.store.findByPreviousHash(PRESENTED_HASH)).thenReturn(Optional.of(new ReplacedToken(31, 7, true, false)));
+        when(f.store.findRetired(PRESENTED_HASH)).thenReturn(Optional.of(new RetiredToken(31, 7, true, true, false)));
 
         var failure = assertThrows(AuthSessionRejectedException.class, () -> f.sessions.refresh(PRESENTED));
 
         assertEquals(Reason.INVALID, failure.reason());
         verify(f.store, never()).revoke(anyLong());
+        verify(f.store, never()).rotateUnusedSuccessor(anyLong(), anyString(), anyString());
         verifyNoInteractions(f.tokens);
     }
 
@@ -135,7 +169,7 @@ class JdbcAuthSessionsTest {
     void given__an_expired_revoked_or_unknown_token__when__refreshing__then__reject_as_invalid_without_writes() {
         var f = new Fixture();
         when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.empty());
-        when(f.store.findByPreviousHash(PRESENTED_HASH)).thenReturn(Optional.empty());
+        when(f.store.findRetired(PRESENTED_HASH)).thenReturn(Optional.empty());
 
         var failure = assertThrows(AuthSessionRejectedException.class, () -> f.sessions.refresh(PRESENTED));
 
@@ -149,7 +183,7 @@ class JdbcAuthSessionsTest {
     void given__the_user_disappears_after_rotation__when__refreshing__then__roll_back_the_rotation_and_reject() {
         var f = new Fixture();
         f.jdbc.userPresent = false;
-        when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.of(new Rotation(7, 10)));
+        when(f.store.rotate(anyString(), anyString())).thenReturn(Optional.of(new Rotation(31, 7, 10)));
 
         var failure = assertThrows(AuthSessionRejectedException.class, () -> f.sessions.refresh(PRESENTED));
 

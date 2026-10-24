@@ -255,20 +255,20 @@ AUTH_SKIPPED_CONTRACTS = ('pg_note_expiry', 'pg_member_cleanup', 'pg_admin_updat
                           'compile_admin_update', 'compile_visit_collection', 'fixture_visit_collection',
                           'fixture_admin_visit_collection', 'pg_visit_collection')
 AUTH_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
-AUTH_METHOD_CASES = (('givenCurrentClaimsAndAnActiveSession__whenRotatingThenReplaying__thenRotateOnceAndAnswerOnlyTheConcurrentReplay',
-  1),
+AUTH_METHOD_CASES = (('givenCurrentClaimsAndAnActiveSession__whenRotating__thenIssueCurrentClaimsAndRecordTheRetiredHash', 1),
  ('givenInactiveOrUnknownTokens__whenRefreshing__thenRejectWithoutAnyMutation', 4),
- ('givenAReplacedTokenAfterTheGraceWindow__whenRefreshing__thenRevokeOnlyThatSessionAndKeepTheRevocation', 1),
- ('givenTwoRequestsWithTheSameToken__whenRotatingConcurrently__thenOneRotatesAndTheOtherReceivesAccessOnly', 1),
+ ('givenATwoGenerationsOldTokenAfterTheGraceWindow__whenRefreshing__thenRevokeOnlyThatSessionAndKeepTheRevocation', 1),
+ ('givenALostRotationResponse__whenTheRetiredTokenReturnsAfter59Seconds__thenRotateAgainOnceAndRecordTheUnusedSuccessor', 1),
+ ('givenTwoGraceRequestsWithTheSameRetiredToken__whenRefreshingConcurrently__thenOnlyOneRotatesAgain', 1),
  ('givenSixLoginsOfOneUser__whenCreatingSessions__thenKeepOnlyTheFiveMostRecentlyUsedActive', 1),
  ('givenLogoutRevokeAllOrCleanup__whenWriting__thenChangeOnlyTheTargetedSessions', 3),
- ('givenExactlyOneRequiredWriterPrivilegeIsRevoked__whenCalling__thenFailServerSideWithoutPartialMutationAndRecover', 3),
+ ('givenExactlyOneRequiredWriterPrivilegeIsRevoked__whenCalling__thenFailServerSideWithoutPartialMutationAndRecover', 4),
  ('givenADeletedUser__whenDeletingTheAccountRow__thenItsSessionsCascade', 1))
 # Single-case methods are reported as name(), parameterized ones as name[index].
 AUTH_REPORT_CASES = tuple(
     method + '()' if count == 1 else method + '[' + str(index) + ']'
     for method, count in AUTH_METHOD_CASES for index in range(1, count + 1))
-AUTH_SEOUL_METHOD = 'givenCurrentClaimsAndAnActiveSession__whenRotatingThenReplaying__thenRotateOnceAndAnswerOnlyTheConcurrentReplay'
+AUTH_SEOUL_METHOD = 'givenCurrentClaimsAndAnActiveSession__whenRotating__thenIssueCurrentClaimsAndRecordTheRetiredHash'
 
 POST_STATISTICS = 'admin-post-statistics'
 # Future Auth feature head is not fixed; root replaces this and the matching new test BASE before publication.
@@ -985,8 +985,6 @@ POST_READS_APP_HASHES = {'backend-app/boot/build.gradle': '6b74d6ef8e53cd7605e19
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/login/web/LocalLoginFilter.java': 'ece67854ca66cadccb528a4a7e18aa18d93797197ecce1309acf28edaeb6ead1',
  'backend-app/user/src/main/java/com/pawbridge/backend/user/internal/login/web/LocalLoginPrincipal.java': 'd4654490da6610beaaeff851c50a97bdb9c60d5f6740e9c6514a93862abe0e30',
  'backend-app/user/src/test/java/com/pawbridge/backend/user/internal/login/infrastructure/JdbcLocalLoginTest.java': '70730e495439917b826657c6b9f4659dd4b28d220295784138050ee8af1f652d',
- 'backend-app/boot/src/test/java/com/pawbridge/backend/OwnedPostgresqlLocalLoginWriterTest.java': 'e74579a0364eccf29350850ebcc0dfa7181fe808e532c107bf73550f94c0fc5d',
- 'backend-app/boot/src/test/resources/owned-postgresql/local-login-writer-grants.sql': '4fb2d62a1f8504ab0325f5aadf5c2c09c2890370bb9b2005e29d1a0d46af4f3a',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/infrastructure/JpaCatalogCategories.java': 'fd3410a929239bb29dcdb5bf4857a661e6a21aaf1a0dc573c4f5750271a72389',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/CategoryCreateRequest.java': 'b97368a60b943613f678457c06a2104db24f0470b6555c0e697434cac0fb5cde',
  'backend-app/store/src/main/java/com/pawbridge/backend/store/internal/catalogwrite/web/CategoryManagementController.java': '84cefb711e37c30729a85a1fcef4472e27e7b0c8f788b35c67ad0ccd05f1b5f5',
@@ -1536,7 +1534,7 @@ def verify_post_reads_inputs(git_reader=None):
     git = git_reader if git_reader is not None else read
     try:
         if (not re.fullmatch(r'[0-9a-f]{40}', POST_READS_BASE) or POST_READS_BASE == '0' * 40
-                or len(POST_READS_APP_HASHES) != 843
+                or len(POST_READS_APP_HASHES) != 841
                 or not re.fullmatch(r'[0-9a-f]{64}', POST_READS_WORKFLOW_SHA256)):
             return False
         workflow = git('show', 'HEAD:.github/workflows/backend-app-check.yml')

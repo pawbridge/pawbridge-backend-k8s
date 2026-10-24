@@ -28,6 +28,7 @@ class JdbcAuthSessionStoreTest {
             Duration.ofDays(30), 5, Duration.ofSeconds(60));
     private static final String PRESENTED_HASH = "a".repeat(64);
     private static final String NEXT_HASH = "b".repeat(64);
+    private static final String SUCCESSOR_HASH = "c".repeat(64);
 
     @Test
     void given__a_login__when__creating__then__lock_the_user_store_only_the_hash_and_keep_the_five_most_recent_sessions() {
@@ -78,46 +79,88 @@ class JdbcAuthSessionStoreTest {
     }
 
     @Test
-    void given__a_presented_hash__when__rotating__then__only_an_active_unexpired_session_moves_to_the_next_hash() {
+    void given__a_presented_hash__when__rotating__then__move_an_active_session_to_the_next_hash_and_record_the_retired_one() {
         var jdbc = new RecordingJdbc();
         jdbc.rotationRows = 1;
         var store = new JdbcAuthSessionStore(jdbc, POLICY, new RefreshTokens());
 
         var rotation = store.rotate(PRESENTED_HASH, NEXT_HASH).orElseThrow();
 
+        assertEquals(31, rotation.sessionId());
         assertEquals(7, rotation.userId());
         assertEquals(1_209_600L, rotation.maxAgeSeconds());
-        assertArrayEquals(new Object[] {NEXT_HASH, 1_209_600_000L, PRESENTED_HASH}, jdbc.arguments.getFirst());
+        assertEquals(List.of(JdbcAuthSessionStore.ROTATE, JdbcAuthSessionStore.RECORD_RETIRED), jdbc.statements);
+        assertArrayEquals(new Object[] {NEXT_HASH, 1_209_600_000L, PRESENTED_HASH}, jdbc.arguments.get(0));
+        assertArrayEquals(new Object[] {PRESENTED_HASH, 31L}, jdbc.arguments.get(1));
         String sql = JdbcAuthSessionStore.ROTATE;
-        assertTrue(sql.contains("previous_token_hash = token_hash"));
+        assertTrue(sql.contains("rotated_at = CURRENT_TIMESTAMP"));
+        assertTrue(sql.contains("last_used_at = CURRENT_TIMESTAMP"));
         assertTrue(sql.contains("expires_at = LEAST(CURRENT_TIMESTAMP + ? * INTERVAL '1 millisecond', absolute_expires_at)"));
         assertTrue(sql.contains("WHERE token_hash = ?"));
         assertTrue(sql.contains("AND revoked_at IS NULL"));
         assertTrue(sql.contains("AND expires_at > CURRENT_TIMESTAMP"));
         assertTrue(sql.contains("AND absolute_expires_at > CURRENT_TIMESTAMP"));
+        assertTrue(JdbcAuthSessionStore.RECORD_RETIRED.contains("VALUES (?, ?, CURRENT_TIMESTAMP)"));
     }
 
     @Test
-    void given__no_matching_active_session__when__rotating__then__return_empty() {
+    void given__no_matching_active_session__when__rotating__then__return_empty_without_recording_history() {
         var jdbc = new RecordingJdbc();
         var store = new JdbcAuthSessionStore(jdbc, POLICY, new RefreshTokens());
 
         assertTrue(store.rotate(PRESENTED_HASH, NEXT_HASH).isEmpty());
+
+        assertEquals(List.of(JdbcAuthSessionStore.ROTATE), jdbc.statements);
     }
 
     @Test
-    void given__a_replaced_hash__when__looking_it_up__then__bind_the_sixty_second_grace_window() {
+    void given__a_retired_hash__when__looking_it_up__then__bind_the_sixty_second_grace_window_and_map_the_flags() {
         var jdbc = new RecordingJdbc();
-        jdbc.replacedRows = 1;
+        jdbc.retiredRows = 1;
         var store = new JdbcAuthSessionStore(jdbc, POLICY, new RefreshTokens());
 
-        var replaced = store.findByPreviousHash(PRESENTED_HASH).orElseThrow();
+        var retired = store.findRetired(PRESENTED_HASH).orElseThrow();
 
-        assertEquals(31, replaced.sessionId());
-        assertTrue(replaced.withinGrace());
-        assertFalse(replaced.active());
+        assertEquals(31, retired.sessionId());
+        assertEquals(7, retired.userId());
+        assertTrue(retired.withinGrace());
+        assertTrue(retired.latestRetirement());
+        assertFalse(retired.active());
         assertArrayEquals(new Object[] {60L, PRESENTED_HASH}, jdbc.arguments.getFirst());
-        assertTrue(JdbcAuthSessionStore.FIND_BY_PREVIOUS_HASH.contains("rotated_at > CURRENT_TIMESTAMP - ? * INTERVAL '1 second'"));
+        String sql = JdbcAuthSessionStore.FIND_RETIRED;
+        assertTrue(sql.contains("history.rotated_at > CURRENT_TIMESTAMP - ? * INTERVAL '1 second' AS within_grace"));
+        assertTrue(sql.contains("session.rotated_at = history.rotated_at AS latest_retirement"));
+    }
+
+    @Test
+    void given__an_unused_successor__when__recovering_a_lost_response__then__lock_it_and_retire_it_through_a_normal_rotation() {
+        var jdbc = new RecordingJdbc();
+        jdbc.successorRows = 1;
+        jdbc.rotationRows = 1;
+        var store = new JdbcAuthSessionStore(jdbc, POLICY, new RefreshTokens());
+
+        var rotation = store.rotateUnusedSuccessor(31, PRESENTED_HASH, NEXT_HASH).orElseThrow();
+
+        assertEquals(31, rotation.sessionId());
+        assertEquals(List.of(JdbcAuthSessionStore.LOCK_UNUSED_SUCCESSOR, JdbcAuthSessionStore.ROTATE,
+                JdbcAuthSessionStore.RECORD_RETIRED), jdbc.statements);
+        assertArrayEquals(new Object[] {31L, PRESENTED_HASH}, jdbc.arguments.get(0));
+        assertArrayEquals(new Object[] {NEXT_HASH, 1_209_600_000L, SUCCESSOR_HASH}, jdbc.arguments.get(1));
+        assertArrayEquals(new Object[] {SUCCESSOR_HASH, 31L}, jdbc.arguments.get(2));
+        String lock = JdbcAuthSessionStore.LOCK_UNUSED_SUCCESSOR;
+        assertTrue(lock.contains("AND last_used_at = rotated_at"));
+        assertTrue(lock.contains("AND rotated_at = (SELECT rotated_at FROM pawbridge_user.auth_session_token_history WHERE token_hash = ?)"));
+        assertTrue(lock.contains("FOR UPDATE"));
+    }
+
+    @Test
+    void given__the_session_already_moved_on__when__recovering_a_lost_response__then__return_empty_without_writing() {
+        var jdbc = new RecordingJdbc();
+        var store = new JdbcAuthSessionStore(jdbc, POLICY, new RefreshTokens());
+
+        assertTrue(store.rotateUnusedSuccessor(31, PRESENTED_HASH, NEXT_HASH).isEmpty());
+
+        assertEquals(List.of(JdbcAuthSessionStore.LOCK_UNUSED_SUCCESSOR), jdbc.statements);
     }
 
     @Test
@@ -157,7 +200,8 @@ class JdbcAuthSessionStoreTest {
         boolean userPresent = true;
         long maxAge;
         int rotationRows;
-        int replacedRows;
+        int retiredRows;
+        int successorRows;
 
         @Override
         public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
@@ -174,15 +218,20 @@ class JdbcAuthSessionStoreTest {
                     when(row.getLong("max_age_seconds")).thenReturn(maxAge);
                     count = 1;
                 } else if (sql.equals(JdbcAuthSessionStore.ROTATE)) {
+                    when(row.getLong("session_id")).thenReturn(31L);
                     when(row.getLong("user_id")).thenReturn(7L);
                     when(row.getLong("max_age_seconds")).thenReturn(1_209_600L);
                     count = rotationRows;
-                } else if (sql.equals(JdbcAuthSessionStore.FIND_BY_PREVIOUS_HASH)) {
+                } else if (sql.equals(JdbcAuthSessionStore.FIND_RETIRED)) {
                     when(row.getLong("session_id")).thenReturn(31L);
                     when(row.getLong("user_id")).thenReturn(7L);
                     when(row.getBoolean("within_grace")).thenReturn(true);
+                    when(row.getBoolean("latest_retirement")).thenReturn(true);
                     when(row.getBoolean("active")).thenReturn(false);
-                    count = replacedRows;
+                    count = retiredRows;
+                } else if (sql.equals(JdbcAuthSessionStore.LOCK_UNUSED_SUCCESSOR)) {
+                    when(row.getString("token_hash")).thenReturn(SUCCESSOR_HASH);
+                    count = successorRows;
                 } else {
                     throw new AssertionError("Unexpected query");
                 }
