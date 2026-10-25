@@ -9,10 +9,11 @@ import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoAr
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveProperties
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveStore
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveWorker
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.anyValue
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
 import jakarta.persistence.EntityManagerFactory
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -28,11 +29,6 @@ import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.stubbing.Answer
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -163,74 +159,67 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
             manager.afterPropertiesSet()
             check(manager.dataSource === source && manager.defaultTimeout == 15, "Use the unchanged existing Animal writer definition")
             store = PhotoArchiveStore(jdbc, manager)
-            val client = mock(PhotoArchiveHttpClient::class.java)
+            val client = mockk<PhotoArchiveHttpClient>()
             http = client
-            whenever(client.download(anyString())).thenAnswer(
-                Answer<ByteArray> { call ->
-                    externalBoundary()
-                    downloads.incrementAndGet()
-                    if (blockOnce.compareAndSet(true, false)) {
-                        downloadEntered!!.countDown()
-                        downloadRelease!!.await()
-                        check(!Thread.currentThread().isInterrupted, "Normal cooperative stop must not interrupt the admitted photo")
-                    }
-                    if (source404.get()) {
-                        throw PhotoArchiveFailure("SOURCE_HTTP_404", true)
-                    }
-                    (call.getArgument<Any>(0) as String).toByteArray(StandardCharsets.UTF_8)
-                },
-            )
-            whenever(client.optimize(anyNonNull<ByteArray>())).thenAnswer(
-                Answer<ArchivedPhoto> { call ->
-                    externalBoundary()
-                    val bytes: ByteArray = call.getArgument(0)
-                    ArchivedPhoto(bytes, sha(bytes), sha(bytes), "image/png", 1, 1, if (badRecipe.get()) "x".repeat(65) else "original-v1")
-                },
-            )
-            s3 = mock(S3Client::class.java)
-            doAnswer(
-                Answer<Any?> { call ->
-                    externalBoundary()
-                    val request: GetObjectRequest = call.getArgument(0)
-                    check(BUCKET == request.bucket(), "GET must use the existing Gallery bucket")
-                    gets.incrementAndGet()
-                    val bytes = objects[request.key()]
-                    if (bytes == null) {
-                        throw S3Exception.builder().statusCode(404).message("SYNTHETIC_MISSING").build()
-                    }
-                    val transform: ResponseTransformer<GetObjectResponse, Any> = call.getArgument(1)
-                    AbortableInputStream.create(ByteArrayInputStream(bytes)).use { stream ->
-                        transform.transform(
-                            GetObjectResponse.builder().contentLength(bytes.size.toLong()).contentType("image/png").build(),
-                            stream,
-                        )
-                    }
-                },
-            ).`when`(s3).getObject(
-                anyNonNull<GetObjectRequest>(),
-                anyValue<ResponseTransformer<GetObjectResponse, Any>>(),
-            )
-            whenever(s3.putObject(anyNonNull<PutObjectRequest>(), anyNonNull<RequestBody>())).thenAnswer(
-                Answer<PutObjectResponse> { call ->
-                    externalBoundary()
-                    val request: PutObjectRequest = call.getArgument(0)
-                    val body: RequestBody = call.getArgument(1)
-                    check(BUCKET == request.bucket() && "image/png" == request.contentType(), "PUT must retain Gallery bucket and MIME")
-                    body.contentStreamProvider().newStream().use { input: InputStream ->
-                        val bytes = input.readAllBytes()
-                        check(request.key() == "apms/photos/" + sha(bytes) + ".png", "Stored key must identify actual stored bytes")
-                        check(objects.putIfAbsent(request.key(), bytes) == null, "Existing content objects must not be overwritten")
-                        puts.incrementAndGet()
-                    }
-                    PutObjectResponse.builder().build()
-                },
-            )
-            doAnswer(
-                Answer<Any?> {
-                    closedStorage.set(true)
-                    null
-                },
-            ).`when`(s3).close()
+            every { client.download(any()) } answers {
+                val url = firstArg<String>()
+                externalBoundary()
+                downloads.incrementAndGet()
+                if (blockOnce.compareAndSet(true, false)) {
+                    downloadEntered!!.countDown()
+                    downloadRelease!!.await()
+                    check(!Thread.currentThread().isInterrupted, "Normal cooperative stop must not interrupt the admitted photo")
+                }
+                if (source404.get()) {
+                    throw PhotoArchiveFailure("SOURCE_HTTP_404", true)
+                }
+                url.toByteArray(StandardCharsets.UTF_8)
+            }
+            every { client.optimize(any()) } answers {
+                externalBoundary()
+                val bytes = firstArg<ByteArray>()
+                ArchivedPhoto(bytes, sha(bytes), sha(bytes), "image/png", 1, 1, if (badRecipe.get()) "x".repeat(65) else "original-v1")
+            }
+            justRun { client.close() }
+            s3 = mockk<S3Client>()
+            every {
+                s3.getObject(
+                    any<GetObjectRequest>(),
+                    any<ResponseTransformer<GetObjectResponse, Any>>(),
+                )
+            } answers {
+                externalBoundary()
+                val request = firstArg<GetObjectRequest>()
+                check(BUCKET == request.bucket(), "GET must use the existing Gallery bucket")
+                gets.incrementAndGet()
+                val bytes = objects[request.key()]
+                if (bytes == null) {
+                    throw S3Exception.builder().statusCode(404).message("SYNTHETIC_MISSING").build()
+                }
+                val transform = secondArg<ResponseTransformer<GetObjectResponse, Any>>()
+                AbortableInputStream.create(ByteArrayInputStream(bytes)).use { stream ->
+                    transform.transform(
+                        GetObjectResponse.builder().contentLength(bytes.size.toLong()).contentType("image/png").build(),
+                        stream,
+                    )
+                }
+            }
+            every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } answers {
+                externalBoundary()
+                val request = firstArg<PutObjectRequest>()
+                val body = secondArg<RequestBody>()
+                check(BUCKET == request.bucket() && "image/png" == request.contentType(), "PUT must retain Gallery bucket and MIME")
+                body.contentStreamProvider().newStream().use { input: InputStream ->
+                    val bytes = input.readAllBytes()
+                    check(request.key() == "apms/photos/" + sha(bytes) + ".png", "Stored key must identify actual stored bytes")
+                    check(objects.putIfAbsent(request.key(), bytes) == null, "Existing content objects must not be overwritten")
+                    puts.incrementAndGet()
+                }
+                PutObjectResponse.builder().build()
+            }
+            every { s3.close() } answers {
+                closedStorage.set(true)
+            }
             storage = PhotoArchiveObjectStorage(s3, BUCKET)
             released()
             nextAllowed = true
@@ -309,7 +298,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
 
     @Test
     @Order(1)
-    fun givenTwoSlotsAndExcludedSources__whenDiscoveredRepeatedly__thenArchiveOnlyApmsSlotsWithoutChangingSource() {
+    fun `슬롯 둘과 제외된 출처가 주어졌을 때__반복 탐색하면__APMS 슬롯만 보관하고 출처를 바꾸지 않는다`() {
         contract("two-slot discovery") {
             seededStale = store.claim(300).orElseThrow()
             check(
@@ -355,7 +344,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
 
     @Test
     @Order(2)
-    fun givenRealWorkerAndInprocessObjects__whenTwoSlotsComplete__thenReadySlotOneFeedsExistingGalleryOutsideDatabaseWaits() {
+    fun `실제 워커와 인프로세스 객체가 주어졌을 때__슬롯 둘이 끝나면__준비된 슬롯 1이 기존 갤러리를 채운다`() {
         contract("READY to existing Gallery") {
             due(1, 1)
             due(1, 2)
@@ -398,7 +387,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
 
     @Test
     @Order(3)
-    fun givenStaleObservedSourceAndExpiredLease__whenClaimsAreReplaced__thenCurrentSourceGenerationAndTokenRejectStaleWork() {
+    fun `오래 관찰된 출처와 만료된 리스가 주어졌을 때__클레임을 교체하면__현재 세대와 토큰만 인정하고 오래된 작업을 거절한다`() {
         contract("source and lease fences") {
             // Case1 checked the seeded old observation against the unchanged current Animal.
             // This verifies current-URL mismatch defense, not a concurrent Animal UPDATE actor.
@@ -428,7 +417,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
 
     @Test
     @Order(4)
-    fun givenLockedPhotoAndTwoClaimers__whenClaimed__thenSkipLockedAndOnlyOneTokenOwnsThePhoto() {
+    fun `잠긴 사진과 클레이머 둘이 주어졌을 때__클레임하면__SKIP LOCKED로 토큰 하나만 사진을 소유한다`() {
         contract("physical claim ownership") {
             deferAll()
             due(8, 1)
@@ -486,7 +475,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
 
     @Test
     @Order(5)
-    fun givenDiscoveryRollbackAndObjectSavedBeforeCompletionFailure__whenRetried__thenCursorRollbackAndSameKeyRecoveryPreserveObjects() {
+    fun `탐색 롤백과 완료 전 객체 저장이 주어졌을 때__재시도하면__커서 롤백과 같은 키 복구로 객체를 보존한다`() {
         contract("rollback and archive retry") {
             jdbc.update("UPDATE pawbridge_animal.apms_photo_scan SET sweep_cursor=9 WHERE id=1")
             jdbc.update(
@@ -574,7 +563,7 @@ class OwnedPostgresqlApmsPhotoArchiveTest {
 
     @Test
     @Order(6)
-    fun givenInflightScheduledPhoto__whenCooperativeStopRequested__thenFinishCurrentPhotoWithoutClaimingTheSecondSlot() {
+    fun `처리 중 예약 사진이 주어졌을 때__협조적 중지를 요청하면__현재 사진을 끝내고 둘째 슬롯은 잡지 않는다`() {
         contract("actual cooperative schedule stop") {
             deferAll()
             due(9, 1)

@@ -151,7 +151,7 @@ class OwnedPostgresqlAnimalGalleryFeedTest {
     }
 
     @Test
-    fun givenSelectOnlyInputs__whenStreamFailsAndRecovers__thenUsePhysicalReadOnlyRepeatableReadAndReturnAllResources() {
+    fun `SELECT 전용 입력이 주어졌을 때__스트림이 실패 후 복구되면__읽기 전용 REPEATABLE READ로 모든 자원을 돌려준다`() {
         observed("P16 SQL and recovery") {
             val feed = feed(signer(AtomicInteger()))
             val ids = ArrayList<Long>()
@@ -213,7 +213,7 @@ class OwnedPostgresqlAnimalGalleryFeedTest {
     }
 
     @Test
-    fun givenActualReaderAndNewSnapshotDirectory__whenV1AndV2Run__thenSignOnlyAfterReadAndKeepPageLifecycleDatabaseFree(
+    fun `실제 리더와 새 스냅샷 디렉터리가 주어졌을 때__V1과 V2를 실행하면__읽기 뒤에만 서명하고 DB를 쓰지 않는다`(
         @TempDir directory: Path,
     ) {
         observed("P16 phase boundaries") {
@@ -300,7 +300,7 @@ class OwnedPostgresqlAnimalGalleryFeedTest {
     }
 
     @Test
-    fun givenProductionControllersAndNewDirectory__whenAllFiveWireRoutesRun__thenAuthenticateBeforeDatabaseSigningOrSourceWork(
+    fun `운영 컨트롤러와 새 디렉터리가 주어졌을 때__다섯 경로를 호출하면__DB·서명·원본 작업 전에 인증한다`(
         @TempDir directory: Path,
     ) {
         observed("P16 five controller routes") {

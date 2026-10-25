@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
+import com.pawbridge.backend.support.TestFaker
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.jsonwebtoken.security.Keys
@@ -62,7 +63,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.Properties
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Supplier
@@ -199,10 +199,10 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
             )
             check(shelterName != null, "Only the existing P10 shelter may be referenced")
             original = baseline(false)
-            val start = 8_000_000_000L + Math.floorMod(UUID.randomUUID().mostSignificantBits, 100_000_000L) * 10
+            val start = 8_000_000_000L + Math.floorMod(TestFaker.uuid().mostSignificantBits, 100_000_000L) * 10
             val selected = ArrayList<Seed>()
             for (index in 0 until 6) {
-                val nonce = UUID.randomUUID().toString().replace("-", "")
+                val nonce = TestFaker.uuid().toString().replace("-", "")
                 val id = start + (if (index == 0) 2 else if (index == 1) 1 else index + 1)
                 selected.add(Seed(id, "EXTRA-" + nonce, "OWNED-EXTRA-" + nonce, PREFIX + nonce, index))
             }
@@ -264,7 +264,7 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
     }
 
     @Test
-    fun givenOneFullyPopulatedOwnedAnimal__whenLookingUpItsApmsNumber__thenReturnAll28FieldsAndShelterJoinOr404UsingOnlyTheReader() {
+    fun `채워진 소유 동물 하나가 주어졌을 때__APMS 번호로 조회하면__28개 필드와 보호소 조인을 돌려준다`() {
         observed("APMS actual reader") {
             val own = seeds.first()
             insert(listOf(own))
@@ -278,7 +278,7 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
                 )
                 get(
                     mvc,
-                    "/api/v1/animals/apms/MISSING-" + UUID.randomUUID().toString().replace("-", ""),
+                    "/api/v1/animals/apms/MISSING-" + TestFaker.uuid().toString().replace("-", ""),
                     emptyMap(),
                     404,
                     1,
@@ -290,7 +290,7 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
     }
 
     @Test
-    fun givenSixRegisteredBoundaryRows__whenExpiringSoonIsPagedAndTheOwnedEligibleSubsetIsRemoved__thenKeepInclusiveFixedSortPage7AndTrueEmptyWithoutOriginalWrites() {
+    fun `경계 행 여섯이 주어졌을 때__곧 만료 목록을 페이지로 읽으면__고정 정렬과 포함 경계를 유지한다`() {
         observed("expiring actual reader") {
             insert(seeds)
             val withOwn = baseline(false)

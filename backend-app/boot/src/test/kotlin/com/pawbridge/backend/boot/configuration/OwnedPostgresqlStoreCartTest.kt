@@ -161,7 +161,7 @@ class OwnedPostgresqlStoreCartTest {
     }
 
     @Test
-    fun given__verified_buyer_and_forged_headers__when__managing_cart__then__preserve_original_wire_and_immediately_persist_only_own_rows() {
+    fun `검증된 구매자와 위조 헤더가 주어졌을 때__장바구니를 관리하면__원래 응답을 유지하고 자기 행만 즉시 저장한다`() {
         http { mvc, context ->
             val empty = send(mvc, "GET", ROOT, BUYER, null, 200)
             check(empty.isArray && empty.isEmpty, "New Cart GET must be an empty array")
@@ -226,7 +226,7 @@ class OwnedPostgresqlStoreCartTest {
     }
 
     @Test
-    fun given__invalid_or_unavailable_members_and_overflow__when__calling_cart__then__reject_without_partial_cart_or_cross_domain_writes() {
+    fun `무효·사용 불가 회원과 넘침이 주어졌을 때__장바구니를 호출하면__부분 장바구니와 도메인 간 쓰기 없이 거절한다`() {
         http { mvc, _ ->
             send(mvc, "GET", ROOT, null, null, 401)
             for (user in listOf(PENDING, 910099L)) {
@@ -252,7 +252,7 @@ class OwnedPostgresqlStoreCartTest {
     }
 
     @Test
-    fun given__two_real_sessions_waiting_on_one_member_lock__when__adding_same_sku__then__commit_one_cart_one_item_and_both_quantities() {
+    fun `한 회원 잠금을 기다리는 실제 세션 둘이 주어졌을 때__같은 SKU를 추가하면__장바구니·항목 하나에 두 수량을 커밋한다`() {
         http { mvc, _ ->
             val workers: ExecutorService = Executors.newFixedThreadPool(2)
             val futures = ArrayList<Future<Int>>()

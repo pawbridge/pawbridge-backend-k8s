@@ -136,7 +136,7 @@ class OwnedPostgresqlAnimalLostSearchTest {
     }
 
     @Test
-    fun givenCurrentDogsAndStaleRemoteCandidates_whenUploadingPublicly_thenKeepRemoteOrderFirstEvidenceAndCurrentShelterData() {
+    fun `현재 개와 오래된 원격 후보가 주어졌을 때__공개 업로드하면__원격 순서와 현재 보호소 정보를 유지한다`() {
         http { mvc, stub, begins ->
             stub.reply.set(
                 reply(
@@ -180,7 +180,7 @@ class OwnedPostgresqlAnimalLostSearchTest {
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun givenCurrentCatAndResolvedRows_whenSelectingTheResolvedOption_thenFilterUsingCurrentDatabaseState(
+    fun `현재 고양이와 해결된 행이 주어졌을 때__해결 옵션을 고르면__현재 DB 상태로 거른다`(
         includeResolved: Boolean,
     ) {
         http { mvc, stub, _ ->
@@ -194,7 +194,7 @@ class OwnedPostgresqlAnimalLostSearchTest {
     }
 
     @Test
-    fun givenRemote503_whenRetryingTheSameService_thenReturnRetryAfterWithoutDatabaseWorkAndRecoverThePermit() {
+    fun `원격이 503일 때__같은 서비스로 재시도하면__DB 작업 없이 Retry-After를 주고 허가를 복구한다`() {
         http { mvc, stub, begins ->
             stub.reply.set(Reply(503, "{}".toByteArray(StandardCharsets.UTF_8)))
             val before = begins.get()
@@ -214,7 +214,7 @@ class OwnedPostgresqlAnimalLostSearchTest {
     }
 
     @Test
-    fun givenMoreThanTwentyRemoteCandidates_whenUploading_thenRejectBeforeOpeningAnyReaderTransaction() {
+    fun `원격 후보가 스무 건을 넘을 때__업로드하면__리더 트랜잭션을 열기 전에 거절한다`() {
         http { mvc, stub, begins ->
             val candidates = ArrayList<Map<String, Any>>()
             for (i in 0 until 21) {
