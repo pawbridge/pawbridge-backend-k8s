@@ -7,88 +7,39 @@ import com.pawbridge.backend.community.internal.post.application.PostSnapshot
 import com.pawbridge.backend.community.internal.post.application.SearchPosts
 import com.pawbridge.backend.community.internal.post.infrastructure.search.KoreanSearchTerms
 import com.pawbridge.backend.community.support.userNicknameQuery
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.NullAndEmptySource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcOperations
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.transaction.CannotCreateTransactionException
 import org.springframework.transaction.TransactionSystemException
 import org.springframework.transaction.TransactionTimedOutException
-import org.springframework.transaction.support.SimpleTransactionStatus
-import org.springframework.transaction.support.TransactionCallback
-import org.springframework.transaction.support.TransactionOperations
-import java.sql.ResultSet
 import java.time.LocalDateTime
 import java.util.Optional
 import java.util.stream.Stream
 
 class JdbcPostSearchReaderTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val transactions = mock(TransactionOperations::class.java)
-    private val row = mock(ResultSet::class.java)
+    private val jdbc = mockk<JdbcOperations>()
+    private val transactions = FakeTransactions()
+    private val row = FakeRow()
     private val reader = JdbcPostSearchReader(jdbc, transactions, ObjectMapper())
     private val createdAt = LocalDateTime.of(2026, 10, 18, 23, 59, 59, 123456000)
     private val updatedAt = LocalDateTime.of(2026, 10, 19, 0, 0, 1, 654321000)
-    private var transactionActive = false
-
-    @BeforeEach
-    fun prepareTransactionAndRow() {
-        whenever(transactions.execute(any<TransactionCallback<Any>>())).thenAnswer { invocation ->
-            val callback = invocation.getArgument<TransactionCallback<Any>>(0)
-            transactionActive = true
-            try {
-                callback.doInTransaction(SimpleTransactionStatus())
-            } finally {
-                transactionActive = false
-            }
-        }
-        whenever(
-            jdbc.query(
-                anyString(),
-                any<RowMapper<PostSnapshot>>(),
-                eq(KoreanSearchTerms.VERSION),
-                anyString(),
-                anyString(),
-            ),
-        ).thenAnswer { invocation ->
-            assertTrue(transactionActive)
-            assertEquals("'alpha' | 'beta'", invocation.getArgument<Any>(3))
-            assertEquals(invocation.getArgument<String>(3), invocation.getArgument<String>(4))
-            val mapper = invocation.getArgument<RowMapper<PostSnapshot>>(1)
-            listOf(mapper.mapRow(row, 0))
-        }
-        whenever(row.getBoolean("ready")).thenReturn(true)
-        whenever(row.getObject("post_id")).thenReturn(42L)
-        whenever(row.getLong("post_id")).thenReturn(42L)
-        whenever(row.getLong("author_id")).thenReturn(7L)
-        whenever(row.getString("title")).thenReturn("검색 제목")
-        whenever(row.getString("content")).thenReturn("검색 본문")
-        whenever(row.getString("board_type")).thenReturn("REPORT")
-        whenever(row.getString("image_urls")).thenReturn("[]")
-        whenever(row.getObject("created_at", LocalDateTime::class.java)).thenReturn(createdAt)
-        whenever(row.getObject("updated_at", LocalDateTime::class.java)).thenReturn(updatedAt)
-    }
 
     @AfterEach
     fun closeReaderAnalyzer() {
@@ -98,128 +49,249 @@ class JdbcPostSearchReaderTest {
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = [" ", "!!!"])
-    fun given__empty_query__when__search__then__skip_transaction_and_database(keyword: String?) {
-        assertEquals(listOf<PostSnapshot>(), reader.search(keyword))
-        verifyNoInteractions(transactions, jdbc)
+    fun `질의가 비었을 때__검색하면__트랜잭션과 데이터베이스를 건너뛴다`(keyword: String?) {
+        // given
+        val input = keyword
+
+        // when
+        val result = reader.search(input)
+
+        // then
+        assertEquals(listOf<PostSnapshot>(), result)
+        assertEquals(0, transactions.executions)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__invalid_input__when__search__then__reject_before_transaction_or_database() {
-        assertThrows(InvalidPostSearchInputException::class.java) { reader.search("x".repeat(201)) }
-        verifyNoInteractions(transactions, jdbc)
+    fun `입력이 잘못됐을 때__검색하면__트랜잭션이나 데이터베이스 전에 거부한다`() {
+        // given
+        val tooLong = "x".repeat(201)
+
+        // when
+        val thrown = assertThrows(InvalidPostSearchInputException::class.java) { reader.search(tooLong) }
+
+        // then
+        assertEquals(InvalidPostSearchInputException::class.java, thrown.javaClass)
+        assertEquals(0, transactions.executions)
+        confirmVerified(jdbc)
     }
 
     @ParameterizedTest
     @MethodSource("imageUrls")
-    fun given__ready_row__when__search__then__map_legacy_search_fields_and_local_date_time(
+    fun `준비된 행이 있을 때__검색하면__기존 검색 필드와 LocalDateTime으로 매핑한다`(
         stored: String?,
         expected: List<String?>?,
     ) {
-        whenever(row.getString("image_urls")).thenReturn(stored)
+        // given
+        givenReadyRow(stored)
 
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            val bound = args[2] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            assertEquals("'alpha' | 'beta'", bound[1])
+            assertEquals(bound[1], bound[2])
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val posts = reader.search("alpha alpha beta")
+
+        // then
         assertEquals(
             listOf(PostSnapshot(42L, 7L, "검색 제목", "검색 본문", "REPORT", expected, createdAt, updatedAt)),
-            reader.search("alpha alpha beta"),
+            posts,
         )
-        assertFalse(transactionActive)
-        verify(jdbc).query(
-            anyString(),
-            any<RowMapper<PostSnapshot>>(),
-            eq(KoreanSearchTerms.VERSION),
-            anyString(),
-            anyString(),
-        )
+        assertFalse(transactions.active)
+        verify(exactly = 1) {
+            jdbc.query(
+                any<String>(),
+                any<RowMapper<PostSnapshot>>(),
+                KoreanSearchTerms.VERSION,
+                "'alpha' | 'beta'",
+                "'alpha' | 'beta'",
+            )
+        }
     }
 
     @Test
-    fun given__unready_projection__when__search__then__whole_result_is_unavailable() {
-        whenever(row.getBoolean("ready")).thenReturn(false)
+    fun `투영이 준비되지 않았을 때__검색하면__결과 전체를 사용할 수 없음으로 처리한다`() {
+        // given
+        givenReadyRow("[]")
+        row.booleans["ready"] = false
 
-        assertThrows(PostSearchUnavailableException::class.java) { reader.search("alpha beta") }
-        assertFalse(transactionActive)
-        verify(row, never()).getObject("post_id")
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            val bound = args[2] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            assertEquals("'alpha' | 'beta'", bound[1])
+            assertEquals(bound[1], bound[2])
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val thrown = assertThrows(PostSearchUnavailableException::class.java) { reader.search("alpha beta") }
+
+        // then
+        assertEquals(PostSearchUnavailableException::class.java, thrown.javaClass)
+        assertFalse(transactions.active)
+        assertFalse(row.reads.contains("post_id"))
     }
 
     @Test
-    fun given__ready_without_ranked_row__when__search__then__return_empty_after_transaction() {
-        whenever(row.getObject("post_id")).thenReturn(null)
+    fun `준비됐지만 순위에 든 행이 없을 때__검색하면__트랜잭션이 끝난 뒤 빈 목록을 돌려준다`() {
+        // given
+        givenReadyRow("[]")
+        row.objects["post_id"] = null
 
-        assertEquals(listOf<PostSnapshot>(), reader.search("alpha beta"))
-        assertFalse(transactionActive)
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            val bound = args[2] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            assertEquals("'alpha' | 'beta'", bound[1])
+            assertEquals(bound[1], bound[2])
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val posts = reader.search("alpha beta")
+
+        // then
+        assertEquals(listOf<PostSnapshot>(), posts)
+        assertFalse(transactions.active)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "{\"unexpected\":true}", "[{}]"])
-    fun given__invalid_image_mapping__when__search__then__do_not_convert_failure_to_unavailable(stored: String) {
-        whenever(row.getString("image_urls")).thenReturn(stored)
+    fun `이미지 매핑이 잘못됐을 때__검색하면__실패를 사용할 수 없음으로 바꾸지 않는다`(stored: String) {
+        // given
+        givenReadyRow(stored)
 
-        assertThrows(IllegalStateException::class.java) { reader.search("alpha beta") }
-        assertFalse(transactionActive)
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            val bound = args[2] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            assertEquals("'alpha' | 'beta'", bound[1])
+            assertEquals(bound[1], bound[2])
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { reader.search("alpha beta") }
+
+        // then
+        assertEquals(IllegalStateException::class.java, thrown.javaClass)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__invalid_board_type__when__search__then__do_not_return_unvalidated_board_or_503() {
-        whenever(row.getString("board_type")).thenReturn("UNKNOWN")
+    fun `게시판 유형이 잘못됐을 때__검색하면__검증되지 않은 게시판이나 503을 돌려주지 않는다`() {
+        // given
+        givenReadyRow("[]")
+        row.strings["board_type"] = "UNKNOWN"
 
-        assertThrows(IllegalArgumentException::class.java) { reader.search("alpha beta") }
-        assertFalse(transactionActive)
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            val bound = args[2] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            assertEquals("'alpha' | 'beta'", bound[1])
+            assertEquals(bound[1], bound[2])
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { reader.search("alpha beta") }
+
+        // then
+        assertEquals(IllegalArgumentException::class.java, thrown.javaClass)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__sql_failure__when__search__then__wrap_as_unavailable_after_transaction() {
+    fun `SQL이 실패할 때__검색하면__트랜잭션이 끝난 뒤 사용할 수 없음으로 감싼다`() {
+        // given
         val failure = DataAccessResourceFailureException("private SQL detail")
-        doThrow(failure).`when`(jdbc).query(
-            anyString(),
-            any<RowMapper<PostSnapshot>>(),
-            eq(KoreanSearchTerms.VERSION),
-            anyString(),
-            anyString(),
-        )
 
-        assertSame(
-            failure,
-            assertThrows(PostSearchUnavailableException::class.java) { reader.search("alpha beta") }.cause,
-        )
-        assertFalse(transactionActive)
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } throws failure
+
+        // when
+        val thrown = assertThrows(PostSearchUnavailableException::class.java) { reader.search("alpha beta") }
+
+        // then
+        assertSame(failure, thrown.cause)
+        assertFalse(transactions.active)
     }
 
     @ParameterizedTest
     @MethodSource("executionFailures")
-    fun given__transaction_execution_failure__when__search__then__only_confirmed_unavailability_is_wrapped(
+    fun `트랜잭션 실행이 실패할 때__검색하면__확인된 사용 불가만 감싼다`(
         failure: RuntimeException,
     ) {
-        doThrow(failure).`when`(transactions).execute(any<TransactionCallback<Any>>())
+        // given
+        transactions.failureBeforeCallback = failure
 
-        assertSame(
-            failure,
-            assertThrows(PostSearchUnavailableException::class.java) { reader.search("alpha beta") }.cause,
-        )
-        verifyNoInteractions(jdbc)
+        // when
+        val thrown = assertThrows(PostSearchUnavailableException::class.java) { reader.search("alpha beta") }
+
+        // then
+        assertSame(failure, thrown.cause)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__unexpected_transaction_failure__when__search__then__original_failure_propagates() {
+    fun `예상 밖의 트랜잭션 실패일 때__검색하면__원래 예외를 전파한다`() {
+        // given
         val failure = TransactionSystemException("unexpected transaction error")
-        doThrow(failure).`when`(transactions).execute(any<TransactionCallback<Any>>())
+        transactions.failureBeforeCallback = failure
 
-        assertSame(
-            failure,
-            assertThrows(TransactionSystemException::class.java) { reader.search("alpha beta") },
-        )
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { reader.search("alpha beta") }
+
+        // then
+        assertSame(failure, thrown)
     }
 
     @Test
-    fun given__mapped_search__when__nickname_lookup_starts__then__read_transaction_has_finished() {
+    fun `매핑된 검색일 때__닉네임 조회가 시작되면__읽기 트랜잭션은 이미 끝나 있다`() {
+        // given
+        givenReadyRow("[]")
+
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            val bound = args[2] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            assertEquals("'alpha' | 'beta'", bound[1])
+            assertEquals(bound[1], bound[2])
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
         val search = SearchPosts(
             reader,
             userNicknameQuery { authorId ->
-                assertFalse(transactionActive)
+                assertFalse(transactions.active)
                 assertEquals(7L, authorId)
                 Optional.of("작성자")
             },
         )
 
-        assertEquals("작성자", search.search("alpha beta").first().authorNickname)
+        // when
+        val details = search.search("alpha beta")
+
+        // then
+        assertEquals("작성자", details.first().authorNickname)
+    }
+
+    /** Data builder: the columns of the one ready, ranked search row these tests read. */
+    private fun givenReadyRow(imageUrls: String?) {
+        row.booleans["ready"] = true
+        row.objects["post_id"] = 42L
+        row.longs["post_id"] = 42L
+        row.longs["author_id"] = 7L
+        row.strings["title"] = "검색 제목"
+        row.strings["content"] = "검색 본문"
+        row.strings["board_type"] = "REPORT"
+        row.strings["image_urls"] = imageUrls
+        row.objects["created_at"] = createdAt
+        row.objects["updated_at"] = updatedAt
     }
 
     companion object {

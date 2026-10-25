@@ -14,11 +14,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
@@ -31,8 +26,6 @@ import org.springframework.transaction.TransactionSystemException
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
-import java.sql.PreparedStatement
-import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Timestamp
 import java.time.Clock
@@ -42,7 +35,6 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.ArrayDeque
-import java.util.Calendar
 import java.util.Deque
 import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicInteger
@@ -51,7 +43,8 @@ import java.util.stream.Stream
 class JdbcAdminPostStatisticsQueryTest {
 
     @Test
-    fun given__sparse_daily_rows_and_unordered_board_rows__when__reading_period__then__separate_previous_day_without_filling_or_sorting_inside_one_rr_transaction() {
+    fun `날짜가 듬성한 일별 행과 정렬되지 않은 게시판 행이 있을 때__기간을 읽으면__하나의 반복 읽기 트랜잭션 안에서 채우거나 정렬하지 않고 전날 개수를 분리한다`() {
+        // given
         val fixture = Fixture()
         fixture.jdbc.results.add(
             listOf(row(END.minusDays(3), 3), row(END.minusDays(2), Long.MAX_VALUE), row(END, 2)),
@@ -63,8 +56,10 @@ class JdbcAdminPostStatisticsQueryTest {
             ),
         )
 
+        // when
         val result = fixture.query.period(END.minusDays(2), END)
 
+        // then
         assertEquals(
             PostPeriodStatsResponse(
                 END.minusDays(2),
@@ -97,27 +92,33 @@ class JdbcAdminPostStatisticsQueryTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["UTC", "Asia/Seoul"])
-    fun given__a_seoul_midnight_and_jvm_zone__when__reading_today_and_period__then__use_the_original_distinct_day_definitions_and_utc_calendar_binding(
+    fun `서울 자정과 JVM 시간대가 주어질 때__오늘과 기간을 읽으면__기존의 서로 다른 하루 정의와 UTC 캘린더 바인딩을 쓴다`(
         zone: String,
     ) {
+        // given
         val old = TimeZone.getDefault()
         try {
             TimeZone.setDefault(TimeZone.getTimeZone(zone))
             val fixture = Fixture()
             fixture.jdbc.results.add(listOf(mapOf("post_count" to Long.MAX_VALUE)))
-            assertEquals(Long.MAX_VALUE, fixture.query.today())
+            fixture.jdbc.results.add(listOf())
+            fixture.jdbc.results.add(listOf())
+
+            // when
+            val todayCount = fixture.query.today()
+            val todayRanges = ArrayList(fixture.jdbc.ranges)
+            val todayIsolations = ArrayList(fixture.transactions.isolations)
+            val period = fixture.query.period(END, END)
+
+            // then
+            assertEquals(Long.MAX_VALUE, todayCount)
             val today = if (zone == "UTC") END.minusDays(1) else END
             assertEquals(
                 listOf(Range(today.atStartOfDay(), today.plusDays(1).atStartOfDay())),
-                fixture.jdbc.ranges,
+                todayRanges,
             )
-            assertEquals(listOf(TransactionDefinition.ISOLATION_DEFAULT), fixture.transactions.isolations)
-            fixture.jdbc.results.add(listOf())
-            fixture.jdbc.results.add(listOf())
-            assertEquals(
-                PostPeriodStatsResponse(END, END, listOf(), 0, listOf()),
-                fixture.query.period(END, END),
-            )
+            assertEquals(listOf(TransactionDefinition.ISOLATION_DEFAULT), todayIsolations)
+            assertEquals(PostPeriodStatsResponse(END, END, listOf(), 0, listOf()), period)
             assertEquals(2, fixture.samples.get())
             assertEquals(2, fixture.transactions.commits)
         } finally {
@@ -126,13 +127,16 @@ class JdbcAdminPostStatisticsQueryTest {
     }
 
     @Test
-    fun given__an_inclusive_366_day_range_without_posts__when__reading__then__allow_it_and_return_empty_lists() {
+    fun `게시글이 없는 366일 포함 범위일 때__읽으면__허용하고 빈 목록을 돌려준다`() {
+        // given
         val fixture = Fixture()
         fixture.jdbc.results.add(listOf())
         fixture.jdbc.results.add(listOf())
 
+        // when
         val result = fixture.query.period(END.minusDays(365), END)
 
+        // then
         assertEquals(listOf<DailyPostStats>(), result.daily)
         assertEquals(0, result.previousDayCount)
         assertEquals(listOf<BoardTypeStats>(), result.byBoardType)
@@ -142,14 +146,17 @@ class JdbcAdminPostStatisticsQueryTest {
 
     @ParameterizedTest
     @MethodSource("invalidRanges")
-    fun given__a_missing_reversed_future_or_367_day_range__when__reading__then__reject_before_sql(
+    fun `기간이 없거나 뒤집혔거나 미래이거나 367일일 때__읽으면__SQL 전에 거부한다`(
         start: LocalDate?,
         end: LocalDate?,
     ) {
+        // given
         val fixture = Fixture()
 
+        // when
         val failure = assertThrows(ResponseStatusException::class.java) { fixture.query.period(start, end) }
 
+        // then
         assertEquals(400, failure.statusCode.value())
         assertEquals("오늘까지 최대 366일의 올바른 조회 기간이 필요합니다.", failure.reason)
         assertTrue(fixture.jdbc.ranges.isEmpty())
@@ -159,9 +166,10 @@ class JdbcAdminPostStatisticsQueryTest {
 
     @ParameterizedTest
     @EnumSource(Failure::class)
-    fun given__begin_second_query_or_commit_failure__when__reading_period__then__propagate_without_partial_results_retry_or_clock_before_begin(
+    fun `시작이나 두 번째 조회나 커밋이 실패할 때__기간을 읽으면__부분 결과나 재시도나 시작 전 시계 조회 없이 전파한다`(
         phase: Failure,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             Failure.BEGIN -> CannotCreateTransactionException("private-begin")
@@ -178,8 +186,11 @@ class JdbcAdminPostStatisticsQueryTest {
             fixture.jdbc.failure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { fixture.query.period(END, END) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.query.period(END, END) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(if (phase == Failure.BEGIN) 0 else 2, fixture.jdbc.ranges.size)
         assertEquals(if (phase == Failure.BEGIN) 0 else 1, fixture.samples.get())
         assertEquals(if (phase == Failure.SECOND_QUERY) 1 else 0, fixture.transactions.rollbacks)
@@ -241,26 +252,25 @@ class JdbcAdminPostStatisticsQueryTest {
             assertTrue(transactions.active)
             sql.add(statement)
             try {
-                val prepared = mock(PreparedStatement::class.java)
-                val timestamps = HashMap<Int, Timestamp>()
-                doAnswer { call ->
-                    assertEquals("UTC", call.getArgument<Calendar>(2).timeZone.id)
-                    timestamps[call.getArgument(0)] = call.getArgument(1)
-                    null
-                }.`when`(prepared).setTimestamp(anyInt(), any(Timestamp::class.java), any(Calendar::class.java))
-                setter!!.setValues(prepared)
-                ranges.add(Range(timestamps[1]!!.toLocalDateTime(), timestamps[2]!!.toLocalDateTime()))
+                val call = StatementCall(statement)
+                setter!!.setValues(recordingStatement(call))
+                ranges.add(
+                    Range(
+                        (call.values[1] as Timestamp).toLocalDateTime(),
+                        (call.values[2] as Timestamp).toLocalDateTime(),
+                    ),
+                )
                 if (failure != null && ranges.size == 2) {
                     throw failure!!
                 }
                 val mapped = ArrayList<T>()
                 var index = 0
                 for (row in results.removeFirst()) {
-                    val values = mock(ResultSet::class.java)
-                    whenever(values.getLong("post_count")).thenReturn(row["post_count"] as Long?)
-                    whenever(values.getObject("post_date", LocalDate::class.java)).thenReturn(row["post_date"] as LocalDate?)
-                    whenever(values.getString("board_type")).thenReturn(row["board_type"] as String?)
-                    mapped.add(mapper.mapRow(values, index++) as T)
+                    val values = FakeRow()
+                    values.longs["post_count"] = row["post_count"] as Long
+                    values.objects["post_date"] = row["post_date"]
+                    values.strings["board_type"] = row["board_type"] as String?
+                    mapped.add(mapper.mapRow(values.resultSet, index++) as T)
                 }
                 return mapped
             } catch (exception: SQLException) {

@@ -2,103 +2,140 @@ package com.pawbridge.backend.community.internal.post.application
 
 import com.pawbridge.backend.user.api.UserNicknameQuery
 import com.pawbridge.backend.user.api.UserNicknameUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when` as whenever
 import java.time.LocalDateTime
 import java.util.Optional
 
 class SearchPostsTest {
-    private val postSearchReader = mock(PostSearchReader::class.java)
-    private val nicknameQuery = mock(UserNicknameQuery::class.java)
+    private val postSearchReader = mockk<PostSearchReader>()
+    private val nicknameQuery = mockk<UserNicknameQuery>()
     private val searchPosts = SearchPosts(postSearchReader, nicknameQuery)
 
     @Test
-    fun given__no_posts__when__search__then__empty_list_without_nickname_lookup() {
-        whenever(postSearchReader.search("지산이를")).thenReturn(listOf())
+    fun `게시글이 없을 때__검색하면__닉네임 조회 없이 빈 목록을 돌려준다`() {
+        // given
+        every { postSearchReader.search("지산이를") } returns listOf()
 
-        assertEquals(listOf<PostDetails>(), searchPosts.search("지산이를"))
-        verifyNoInteractions(nicknameQuery)
+        // when
+        val result = searchPosts.search("지산이를")
+
+        // then
+        assertEquals(listOf<PostDetails>(), result)
+        confirmVerified(nicknameQuery)
     }
 
     @Test
-    fun given__ordered_posts_with_repeated_author__when__search__then__each_row_is_enriched_in_order() {
+    fun `같은 작성자의 글이 섞여 정렬되어 있을 때__검색하면__각 행을 순서대로 닉네임으로 채운다`() {
+        // given
         val first = post(42L, 7L)
         val second = post(41L, 9L)
         val third = post(40L, 7L)
-        whenever(postSearchReader.search("지산이를")).thenReturn(listOf(first, second, third))
-        whenever(nicknameQuery.findNickname(7L))
-            .thenReturn(Optional.of("첫 닉네임"))
-            .thenReturn(Optional.of("다음 닉네임"))
-        whenever(nicknameQuery.findNickname(9L)).thenReturn(Optional.of("다른 작성자"))
 
+        every { postSearchReader.search("지산이를") } returns listOf(first, second, third)
+        every { nicknameQuery.findNickname(7L) } returnsMany listOf(
+            Optional.of("첫 닉네임"),
+            Optional.of("다음 닉네임"),
+        )
+        every { nicknameQuery.findNickname(9L) } returns Optional.of("다른 작성자")
+
+        // when
+        val result = searchPosts.search("지산이를")
+
+        // then
         assertEquals(
             listOf(details(first, "첫 닉네임"), details(second, "다른 작성자"), details(third, "다음 닉네임")),
-            searchPosts.search("지산이를"),
+            result,
         )
-        val order = inOrder(postSearchReader, nicknameQuery)
-        order.verify(postSearchReader).search("지산이를")
-        order.verify(nicknameQuery).findNickname(7L)
-        order.verify(nicknameQuery).findNickname(9L)
-        order.verify(nicknameQuery).findNickname(7L)
-        order.verifyNoMoreInteractions()
+        verifySequence {
+            postSearchReader.search("지산이를")
+            nicknameQuery.findNickname(7L)
+            nicknameQuery.findNickname(9L)
+            nicknameQuery.findNickname(7L)
+        }
     }
 
     @Test
-    fun given__missing_and_unavailable_nicknames__when__search__then__only_each_affected_row_uses_fallback() {
+    fun `닉네임이 없거나 조회할 수 없을 때__검색하면__영향받은 행만 대체 이름을 쓴다`() {
+        // given
         val missing = post(42L, 7L)
         val unavailable = post(41L, 8L)
         val available = post(40L, 7L)
-        whenever(postSearchReader.search("지산이를")).thenReturn(listOf(missing, unavailable, available))
-        whenever(nicknameQuery.findNickname(7L))
-            .thenReturn(Optional.empty())
-            .thenReturn(Optional.of("회복한 닉네임"))
-        whenever(nicknameQuery.findNickname(8L))
-            .thenThrow(UserNicknameUnavailableException(IllegalStateException("unavailable")))
 
+        every { postSearchReader.search("지산이를") } returns listOf(missing, unavailable, available)
+        every { nicknameQuery.findNickname(7L) } returnsMany listOf(
+            Optional.empty(),
+            Optional.of("회복한 닉네임"),
+        )
+        every { nicknameQuery.findNickname(8L) } throws
+            UserNicknameUnavailableException(IllegalStateException("unavailable"))
+
+        // when
+        val result = searchPosts.search("지산이를")
+
+        // then
         assertEquals(
             listOf(details(missing, "사용자7"), details(unavailable, "사용자8"), details(available, "회복한 닉네임")),
-            searchPosts.search("지산이를"),
+            result,
         )
     }
 
     @Test
-    fun given__empty_and_whitespace_nicknames__when__search__then__empty_is_null_and_whitespace_is_preserved() {
+    fun `닉네임이 빈 문자열이거나 공백일 때__검색하면__빈 문자열은 null로 공백은 그대로 둔다`() {
+        // given
         val empty = post(42L, 7L)
         val whitespace = post(41L, 8L)
-        whenever(postSearchReader.search("지산이를")).thenReturn(listOf(empty, whitespace))
-        whenever(nicknameQuery.findNickname(7L)).thenReturn(Optional.of(""))
-        whenever(nicknameQuery.findNickname(8L)).thenReturn(Optional.of("  \t "))
 
-        assertEquals(listOf(details(empty, null), details(whitespace, "  \t ")), searchPosts.search("지산이를"))
+        every { postSearchReader.search("지산이를") } returns listOf(empty, whitespace)
+        every { nicknameQuery.findNickname(7L) } returns Optional.of("")
+        every { nicknameQuery.findNickname(8L) } returns Optional.of("  \t ")
+
+        // when
+        val result = searchPosts.search("지산이를")
+
+        // then
+        assertEquals(listOf(details(empty, null), details(whitespace, "  \t ")), result)
     }
 
     @Test
-    fun given__post_read_failure__when__search__then__original_failure_prevents_nickname_lookup() {
+    fun `게시글 조회가 실패할 때__검색하면__원래 예외를 던지고 닉네임을 조회하지 않는다`() {
+        // given
         val failure = IllegalStateException("post mapping failed")
-        whenever(postSearchReader.search("지산이를")).thenThrow(failure)
 
-        assertSame(failure, assertThrows(IllegalStateException::class.java) { searchPosts.search("지산이를") })
-        verifyNoInteractions(nicknameQuery)
+        every { postSearchReader.search("지산이를") } throws failure
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { searchPosts.search("지산이를") }
+
+        // then
+        assertSame(failure, thrown)
+        confirmVerified(nicknameQuery)
     }
 
     @Test
-    fun given__unexpected_nickname_failure__when__search__then__whole_list_fails_and_later_rows_are_not_queried() {
-        whenever(postSearchReader.search("지산이를")).thenReturn(listOf(post(42L, 7L), post(41L, 8L), post(40L, 9L)))
-        whenever(nicknameQuery.findNickname(7L)).thenReturn(Optional.of("정상"))
+    fun `닉네임 조회가 예상 밖으로 실패할 때__검색하면__목록 전체가 실패하고 뒤 행은 조회하지 않는다`() {
+        // given
         val failure = IllegalArgumentException("programming failure")
-        whenever(nicknameQuery.findNickname(8L)).thenThrow(failure)
 
-        assertSame(failure, assertThrows(IllegalArgumentException::class.java) { searchPosts.search("지산이를") })
-        val order = inOrder(nicknameQuery)
-        order.verify(nicknameQuery).findNickname(7L)
-        order.verify(nicknameQuery).findNickname(8L)
-        order.verifyNoMoreInteractions()
+        every { postSearchReader.search("지산이를") } returns listOf(post(42L, 7L), post(41L, 8L), post(40L, 9L))
+        every { nicknameQuery.findNickname(7L) } returns Optional.of("정상")
+        every { nicknameQuery.findNickname(8L) } throws failure
+
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { searchPosts.search("지산이를") }
+
+        // then
+        assertSame(failure, thrown)
+        verifySequence {
+            nicknameQuery.findNickname(7L)
+            nicknameQuery.findNickname(8L)
+        }
     }
 
     private fun details(post: PostSnapshot, nickname: String?): PostDetails =
