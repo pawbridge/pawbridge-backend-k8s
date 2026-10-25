@@ -14,6 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -39,14 +40,14 @@ class MemberChatProtocolTest {
     @ParameterizedTest @ValueSource(strings={"SEND","SUBSCRIBE"})
     void given__anonymous_pending_socket__when__sending_or_subscribing_before_ticket_authentication__then__drop_and_close_without_business(String command){
         doThrow(new MemberChatRejectedException(401,"expired")).when(sessions).requireCurrent("owned");
-        assertThat(inbound().preSend(frame(StompCommand.valueOf(command),command.equals("SEND")?"/app/chat/send":"/user/queue/chat"),null)).isNull();
+        assertThat(inbound().preSend(frame(StompCommand.valueOf(command),command.equals("SEND")?"/app/chat/send":"/user/queue/chat"),mock(MessageChannel.class))).isNull();
         verify(sessions).close("owned");verifyNoInteractions(tickets,chat);
     }
     @Test void given__atomic_ticket_identity__when__connecting__then__check_active_and_bind_that_identity_once(){
         var identity=new MemberChatTickets.Identity(7,Long.MAX_VALUE);when(tickets.consume("synthetic")).thenReturn(identity);
         var headers=StompHeaderAccessor.create(StompCommand.CONNECT);headers.setSessionId("owned");headers.addNativeHeader("ticket","synthetic");headers.setLeaveMutable(true);
         var message=MessageBuilder.createMessage(new byte[0],headers.getMessageHeaders());
-        assertThat(inbound().preSend(message,null)).isSameAs(message);
+        assertThat(inbound().preSend(message,mock(MessageChannel.class))).isSameAs(message);
         var order=inOrder(tickets,chat,sessions);order.verify(tickets).consume("synthetic");order.verify(chat).active(7);order.verify(sessions).authenticate("owned",identity);
         assertThat(headers.getUser()).isSameAs(identity);
     }
@@ -57,6 +58,6 @@ class MemberChatProtocolTest {
         assertThat(error.getHeaders().toString()).doesNotContain("private-body-token");
     }
     @Test void given__authenticated_socket__when__subscribing_to_another_destination__then__drop_and_close(){
-        assertThat(inbound().preSend(frame(StompCommand.SUBSCRIBE,"/topic/other"),null)).isNull();verify(sessions).requireCurrent("owned");verify(sessions).close("owned");verifyNoInteractions(chat,tickets);
+        assertThat(inbound().preSend(frame(StompCommand.SUBSCRIBE,"/topic/other"),mock(MessageChannel.class))).isNull();verify(sessions).requireCurrent("owned");verify(sessions).close("owned");verifyNoInteractions(chat,tickets);
     }
 }
