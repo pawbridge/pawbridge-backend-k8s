@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.comment.application.CommentDeletion
 import com.pawbridge.backend.community.internal.comment.application.CommentDetails
@@ -31,20 +32,17 @@ import com.pawbridge.backend.user.api.UserNicknameQuery
 import com.pawbridge.backend.user.api.UserNicknameUnavailableException
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -52,7 +50,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -99,42 +96,42 @@ class CommentUpdateHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var comments: CommentReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var modification: CommentModification
 
-    @MockitoBean
+    @MockkBean
     lateinit var users: UserNicknameQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var createComment: CreateComment
 
-    @MockitoBean
+    @MockkBean
     lateinit var deletion: CommentDeletion
 
-    @MockitoBean
+    @MockkBean
     lateinit var listComments: ListComments
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
-
-    @BeforeEach
-    fun prepareActiveCommentAndNickname() {
-        whenever(comments.findById(12)).thenReturn(Optional.of(snapshot(7, "원본")))
-        whenever(users.findNickname(7)).thenReturn(Optional.of("작성자"))
-    }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__verified_owner_and_spoofed_identity__when__updating_comment__then__return_new_content_with_original_seven_fields_and_old_dates(
+    fun `검증된 소유자와 위조 신원일 때__댓글을 수정하면__새 내용에 원본 일곱 필드와 이전 날짜를 돌려준다`(
         role: String,
     ) {
-        mvc.perform(
+        // given
+        every { comments.findById(12) } returns Optional.of(snapshot(7, "원본"))
+        every { users.findNickname(7) } returns Optional.of("작성자")
+        justRun { modification.update(12, "  수정 본문  ") }
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/comments/12")
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
@@ -142,6 +139,9 @@ class CommentUpdateHttpTest {
                 .header("X-User-Role", "ROLE_ADMIN")
                 .content("{\"content\":\"  수정 본문  \",\"authorId\":999,\"postId\":999,\"commentId\":999}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.data.length()").value(7))
@@ -153,31 +153,47 @@ class CommentUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        val order = inOrder(comments, users, modification)
-        order.verify(comments).findById(12)
-        order.verify(users).findNickname(7)
-        order.verify(modification).update(12, "  수정 본문  ")
-        verifyNoMoreInteractions(comments, users, modification)
-        verifyNoInteractions(createComment, deletion, listComments, readPost, listPosts)
+        verifySequence {
+            comments.findById(12)
+            users.findNickname(7)
+            modification.update(12, "  수정 본문  ")
+        }
+        confirmVerified(createComment, deletion, listComments, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("acceptedContents")
-    fun given__legacy_nonblank_content__when__updating_comment__then__preserve_unicode_whitespace_raw_content_and_no_maximum(
+    fun `비공백 내용일 때__댓글을 수정하면__공백과 원문을 보존하고 최대 길이를 두지 않는다`(
         content: String,
     ) {
-        mvc.perform(authenticatedPut("12").content(mapper.writeValueAsString(mapOf("content" to content))))
+        // given
+        every { comments.findById(12) } returns Optional.of(snapshot(7, "원본"))
+        every { users.findNickname(7) } returns Optional.of("작성자")
+        justRun { modification.update(12, content) }
+
+        // when
+        val result = mvc.perform(authenticatedPut("12").content(mapper.writeValueAsString(mapOf("content" to content))))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.content").value(content))
             .andExpect(jsonPath("$.data.updatedAt").value(UPDATED.toString()))
-        verify(modification).update(12, content)
+        verify(exactly = 1) { modification.update(12, content) }
     }
 
     @Test
-    fun given__same_content__when__updating_comment__then__still_resolve_nickname_and_return_old_dates_without_modification() {
-        mvc.perform(authenticatedPut("12").content("{\"content\":\"원본\"}"))
+    fun `내용이 같을 때__댓글을 수정하면__닉네임을 조회하고 수정 없이 이전 날짜를 돌려준다`() {
+        // given
+        every { comments.findById(12) } returns Optional.of(snapshot(7, "원본"))
+        every { users.findNickname(7) } returns Optional.of("작성자")
+
+        // when
+        val result = mvc.perform(authenticatedPut("12").content("{\"content\":\"원본\"}"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(7))
             .andExpect(
@@ -188,40 +204,57 @@ class CommentUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(comments).findById(12)
-        verify(users).findNickname(7)
-        verifyNoInteractions(modification)
+        verify(exactly = 1) { comments.findById(12) }
+        verify(exactly = 1) { users.findNickname(7) }
+        confirmVerified(modification)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{}", "{\"content\":null}", "{\"content\":\"\"}", "{\"content\":\" \"}", "{\"content\":\" \\t\\r\\n \"}"])
-    fun given__missing_null_or_ascii_blank_content__when__updating_comment__then__validate_before_comment_ownership_or_nickname_lookup(
+    fun `내용이 없거나 null이거나 ASCII 공백일 때__댓글을 수정하면__소유권과 닉네임 조회 전에 검증한다`(
         body: String,
     ) {
-        mvc.perform(authenticatedPut("12").content(body))
+        // given
+
+        // when
+        val result = mvc.perform(authenticatedPut("12").content(body))
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"content: 내용은 필수입니다\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
+        confirmVerified(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
     }
 
     @Test
-    fun given__same_blank_stored_content__when__updating_with_blank_content__then__mvc_validation_is_not_bypassed_as_noop() {
-        whenever(comments.findById(12)).thenReturn(Optional.of(snapshot(7, " ")))
+    fun `저장된 내용이 공백일 때__공백으로 수정하면__MVC 검증이 변경 없음으로 우회되지 않는다`() {
+        // given
+        every { comments.findById(12) } returns Optional.of(snapshot(7, " "))
 
-        mvc.perform(authenticatedPut("12").content("{\"content\":\" \"}"))
+        // when
+        val result = mvc.perform(authenticatedPut("12").content("{\"content\":\" \"}"))
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("content: 내용은 필수입니다"))
-        verifyNoInteractions(comments, users, modification)
+        confirmVerified(comments, users, modification)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "null", "{", "[]"])
-    fun given__missing_or_malformed_json_body__when__updating_comment__then__safe_400_precedes_business_calls(
+    fun `본문이 없거나 JSON이 깨졌을 때__댓글을 수정하면__업무 호출 전에 안전한 400을 돌려준다`(
         body: String,
     ) {
-        mvc.perform(authenticatedPut("12").content(body))
+        // given
+
+        // when
+        val result = mvc.perform(authenticatedPut("12").content(body))
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -229,15 +262,16 @@ class CommentUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
+        confirmVerified(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_untrusted_token_and_bad_request__when__updating_comment__then__authenticate_before_id_and_json_binding(
+    fun `토큰이 없거나 믿을 수 없고 요청도 잘못됐을 때__댓글을 수정하면__ID와 JSON 바인딩 전에 인증부터 거부한다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = put("/api/v1/comments/not-a-number")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{")
@@ -247,7 +281,11 @@ class CommentUpdateHttpTest {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -255,87 +293,116 @@ class CommentUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
+        confirmVerified(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun given__signed_invalid_identity__when__updating_comment__then__reject_before_binding_or_business_calls(
+    fun `서명됐지만 잘못된 신원일 때__댓글을 수정하면__바인딩과 업무 호출 전에 거부한다`(
         claims: Map<String, Any>,
     ) {
+        // given
         val token = Jwts.builder()
             .claims(claims)
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             put("/api/v1/comments/not-a-number")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{")
                 .header("Authorization", "Bearer $token"),
         )
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"토큰 파싱에 실패했습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
+        confirmVerified(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
     }
 
     @Test
-    fun given__two_owners_then_anonymous_request__when__updating_comments__then__clear_previous_identity() {
-        whenever(comments.findById(12)).thenReturn(Optional.of(snapshot(7, "원본")), Optional.of(snapshot(8, "원본")))
-        whenever(users.findNickname(8)).thenReturn(Optional.of("다른 작성자"))
-        for (userId in longArrayOf(7, 8)) {
-            mvc.perform(
+    fun `소유자 둘에 이어 익명 요청이 올 때__댓글을 수정하면__이전 신원을 지운다`() {
+        // given
+        every { comments.findById(12) } returnsMany listOf(
+            Optional.of(snapshot(7, "원본")),
+            Optional.of(snapshot(8, "원본")),
+        )
+        every { users.findNickname(7) } returns Optional.of("작성자")
+        every { users.findNickname(8) } returns Optional.of("다른 작성자")
+
+        // when
+        val ownerResults = longArrayOf(7, 8).map { userId ->
+            userId to mvc.perform(
                 put("/api/v1/comments/12")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"content\":\"원본\"}")
                     .header("Authorization", "Bearer " + F3TestInputs.token(userId, "ROLE_USER")),
             )
+        }
+        val anonymousResult = mvc.perform(
+            put("/api/v1/comments/12").contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"원본\"}"),
+        )
+
+        // then
+        for ((userId, result) in ownerResults) {
+            result
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.authorId").value(userId.toInt()))
         }
-        mvc.perform(put("/api/v1/comments/12").contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"원본\"}"))
-            .andExpect(status().isUnauthorized())
-        verify(comments, times(2)).findById(12)
-        verify(users).findNickname(7)
-        verify(users).findNickname(8)
-        verifyNoMoreInteractions(users, comments)
-        verifyNoInteractions(modification)
+        anonymousResult.andExpect(status().isUnauthorized())
+        verify(exactly = 2) { comments.findById(12) }
+        verify(exactly = 1) { users.findNickname(7) }
+        verify(exactly = 1) { users.findNickname(8) }
+        confirmVerified(users, comments)
+        confirmVerified(modification)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(longs = [12, 0, -1])
-    fun given__no_active_comment__when__updating__then__return_404_before_nickname_and_writes_without_new_id_validation(
+    fun `활성 댓글이 없을 때__수정하면__새 ID 검증 없이 닉네임과 쓰기 전에 404를 돌려준다`(
         id: Long,
     ) {
-        whenever(comments.findById(id)).thenReturn(Optional.empty())
+        // given
+        every { comments.findById(id) } returns Optional.empty()
 
-        mvc.perform(authenticatedPut(id.toString()).content("{\"content\":\"수정\"}"))
+        // when
+        val result = mvc.perform(authenticatedPut(id.toString()).content("{\"content\":\"수정\"}"))
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"댓글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(comments).findById(id)
-        verifyNoInteractions(users, modification)
+        verify(exactly = 1) { comments.findById(id) }
+        confirmVerified(users, modification)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__another_authors_comment_for_any_role__when__updating__then__403_precedes_nickname_and_write_without_admin_override(
+    fun `다른 작성자의 댓글일 때__어떤 역할이든 수정하면__관리자 예외 없이 닉네임과 쓰기 전에 403을 돌려준다`(
         role: String,
     ) {
-        whenever(comments.findById(12)).thenReturn(Optional.of(snapshot(8, "원본")))
+        // given
+        every { comments.findById(12) } returns Optional.of(snapshot(8, "원본"))
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             put("/api/v1/comments/12")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"수정\"}")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role)),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json(
@@ -343,74 +410,93 @@ class CommentUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(comments).findById(12)
-        verifyNoInteractions(users, modification)
+        verify(exactly = 1) { comments.findById(12) }
+        confirmVerified(users, modification)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun given__unparseable_comment_id_with_valid_identity__when__updating__then__preserve_legacy_safe_500(id: String) {
-        mvc.perform(authenticatedPut(id).content("{\"content\":\"수정\"}"))
+    fun `파싱할 수 없는 댓글 ID와 유효한 신원일 때__수정하면__기존 안전한 500을 유지한다`(id: String) {
+        // given
+
+        // when
+        val result = mvc.perform(authenticatedPut(id).content("{\"content\":\"수정\"}"))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verifyNoInteractions(comments, users, modification)
+        confirmVerified(comments, users, modification)
     }
 
     @ParameterizedTest
     @MethodSource("updateFailures")
-    fun given__lookup_nickname_or_write_failure__when__updating__then__preserve_safe_error_contract_and_omit_sensitive_logs(
+    fun `조회나 닉네임이나 쓰기가 실패할 때__수정하면__안전한 오류 계약을 지키고 민감 로그를 남기지 않는다`(
         stage: Int,
         expectedStatus: Int,
         message: String,
     ) {
+        // given
         val cause = SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password")
         val failure = IllegalStateException("Bearer synthetic-private-token; synthetic-private-comment", cause)
         failure.addSuppressed(RuntimeException("https://fixture.invalid/synthetic-private-url"))
-        when (stage) {
-            0 -> whenever(comments.findById(12)).thenThrow(failure)
-            1 -> whenever(users.findNickname(7)).thenThrow(failure)
-            2 -> doThrow(UnsupportedCommentCharactersException(failure)).`when`(modification)
-                .update(12, "synthetic-private-comment")
-            3 -> doThrow(failure).`when`(modification).update(12, "synthetic-private-comment")
-            else -> throw AssertionError("Unknown synthetic failure stage")
-        }
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
-        try {
+
+        if (stage >= 1) {
+            every { comments.findById(12) } returns Optional.of(snapshot(7, "원본"))
+        }
+        if (stage >= 2) {
+            every { users.findNickname(7) } returns Optional.of("작성자")
+        }
+        when (stage) {
+            0 -> every { comments.findById(12) } throws failure
+            1 -> every { users.findNickname(7) } throws failure
+            2 -> every { modification.update(12, "synthetic-private-comment") } throws
+                UnsupportedCommentCharactersException(failure)
+            3 -> every { modification.update(12, "synthetic-private-comment") } throws failure
+            else -> throw AssertionError("Unknown synthetic failure stage")
+        }
+
+        // when
+        val result = try {
             mvc.perform(authenticatedPut("12").content("{\"content\":\"synthetic-private-comment\"}"))
-                .andExpect(status().`is`(expectedStatus))
-                .andExpect(
-                    content().json(
-                        mapper.writeValueAsString(CommentUpdateController.Response<Void?>(expectedStatus, message, null)),
-                        JsonCompareMode.STRICT,
-                    ),
-                )
-            assertThat(appender.list).allSatisfy { event ->
-                assertThat(event.throwableProxy).isNull()
-                assertThat(event.formattedMessage).doesNotContain(
-                    "synthetic-private-token",
-                    "synthetic-private-comment",
-                    "synthetic-private-password",
-                    "synthetic-private-url",
-                    "Bearer ",
-                    "jdbc:postgresql:",
-                )
-            }
         } finally {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(comments).findById(12)
+
+        // then
+        result
+            .andExpect(status().`is`(expectedStatus))
+            .andExpect(
+                content().json(
+                    mapper.writeValueAsString(CommentUpdateController.Response<Void?>(expectedStatus, message, null)),
+                    JsonCompareMode.STRICT,
+                ),
+            )
+        assertThat(appender.list).allSatisfy { event ->
+            assertThat(event.throwableProxy).isNull()
+            assertThat(event.formattedMessage).doesNotContain(
+                "synthetic-private-token",
+                "synthetic-private-comment",
+                "synthetic-private-password",
+                "synthetic-private-url",
+                "Bearer ",
+                "jdbc:postgresql:",
+            )
+        }
+        verify(exactly = 1) { comments.findById(12) }
         if (stage == 0) {
-            verifyNoInteractions(users, modification)
+            confirmVerified(users, modification)
         } else {
-            verify(users).findNickname(7)
+            verify(exactly = 1) { users.findNickname(7) }
             if (stage == 1) {
-                verifyNoInteractions(modification)
+                confirmVerified(modification)
             } else {
-                verify(modification).update(12, "synthetic-private-comment")
+                verify(exactly = 1) { modification.update(12, "synthetic-private-comment") }
             }
         }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
@@ -418,32 +504,38 @@ class CommentUpdateHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "unavailable", "empty", "space"])
-    fun given__legacy_nickname_result__when__updating_same_content__then__serialize_fallback_null_or_whitespace_without_extra_fields(
+    fun `닉네임 조회 결과가 다양할 때__같은 내용으로 수정하면__대체값과 null과 공백을 추가 필드 없이 직렬화한다`(
         kind: String,
     ) {
+        // given
         val nickname: String?
+        every { comments.findById(12) } returns Optional.of(snapshot(7, "원본"))
         when (kind) {
             "missing" -> {
-                whenever(users.findNickname(7)).thenReturn(Optional.empty())
+                every { users.findNickname(7) } returns Optional.empty()
                 nickname = "사용자7"
             }
             "unavailable" -> {
-                whenever(users.findNickname(7))
-                    .thenThrow(UserNicknameUnavailableException(IllegalStateException("synthetic unavailable")))
+                every { users.findNickname(7) } throws
+                    UserNicknameUnavailableException(IllegalStateException("synthetic unavailable"))
                 nickname = "사용자7"
             }
             "empty" -> {
-                whenever(users.findNickname(7)).thenReturn(Optional.of(""))
+                every { users.findNickname(7) } returns Optional.of("")
                 nickname = null
             }
             "space" -> {
-                whenever(users.findNickname(7)).thenReturn(Optional.of(" "))
+                every { users.findNickname(7) } returns Optional.of(" ")
                 nickname = " "
             }
             else -> throw AssertionError("Unknown synthetic nickname result")
         }
 
-        mvc.perform(authenticatedPut("12").content("{\"content\":\"원본\"}"))
+        // when
+        val result = mvc.perform(authenticatedPut("12").content("{\"content\":\"원본\"}"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(7))
             .andExpect(
@@ -454,38 +546,50 @@ class CommentUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(modification)
+        confirmVerified(modification)
     }
 
     @Test
-    fun given__existing_comment_read_create_delete_and_post_404__when__requesting__then__put_advice_and_authentication_remain_scoped() {
+    fun `기존 댓글 읽기와 작성과 삭제와 글 404가 있을 때__요청하면__수정의 오류 처리와 인증 범위가 유지된다`() {
+        // given
         val comment = details(7, "댓글", "작성자")
-        whenever(listComments.read(42)).thenReturn(listOf(comment))
-        whenever(createComment.create(42, 7, "댓글")).thenReturn(comment)
-        whenever(readPost.read(42)).thenThrow(PostNotFoundException())
 
-        mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].commentId").value(12))
-        mvc.perform(
+        every { listComments.read(42) } returns listOf(comment)
+        every { createComment.create(42, 7, "댓글") } returns comment
+        justRun { deletion.delete(12, 7) }
+        every { readPost.read(42) } throws PostNotFoundException()
+
+        // when
+        val readResult = mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
+        val createResult = mvc.perform(
             post("/api/v1/comments/posts/42")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"댓글\"}")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+        val deleteResult = mvc.perform(
+            delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
+        )
+        val postResult = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        readResult
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].commentId").value(12))
+        createResult
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value("댓글이 생성되었습니다."))
-        mvc.perform(delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+        deleteResult
             .andExpect(status().isOk())
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"댓글이 삭제되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        mvc.perform(get("/api/v1/posts/read/42"))
+        postResult
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(comments, users, modification, listPosts)
+        confirmVerified(comments, users, modification, listPosts)
     }
 
     @ParameterizedTest
@@ -497,15 +601,21 @@ class CommentUpdateHttpTest {
             "PUT /api/v1/comments/posts/read/42", "PUT /api/comments/12", "PUT /api/v1/admin/comments/12",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_business_calls(
+    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__업무 호출 없이 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
+        )
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
@@ -515,12 +625,18 @@ class CommentUpdateHttpTest {
             "POST /api/v1/comments/posts/42", "DELETE /api/v1/comments/12",
         ],
     )
-    fun given__existing_write_without_token__when__requesting__then__preserve_jwt_authentication(request: String) {
+    fun `토큰 없는 기존 쓰기일 때__요청하면__JWT 인증을 유지한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // when
+        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
+        confirmVerified(comments, users, modification, createComment, deletion, listComments, readPost, listPosts)
     }
 
     companion object {

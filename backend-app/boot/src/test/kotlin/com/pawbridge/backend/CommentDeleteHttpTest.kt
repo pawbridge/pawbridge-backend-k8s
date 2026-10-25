@@ -3,6 +3,7 @@ package com.pawbridge.backend
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.comment.application.CommentDeletion
 import com.pawbridge.backend.community.internal.comment.application.CommentDetails
@@ -24,17 +25,16 @@ import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -42,7 +42,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -81,63 +80,78 @@ class CommentDeleteHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var deletion: CommentDeletion
 
-    @MockitoBean
+    @MockkBean
     lateinit var createComment: CreateComment
 
-    @MockitoBean
+    @MockkBean
     lateinit var listComments: ListComments
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__verified_owner_with_spoofed_headers__when__deleting_comment__then__use_principal_and_original_null_envelope(
+    fun `검증된 소유자와 위조 헤더일 때__댓글을 지우면__주체를 쓰고 원본 null 봉투를 돌려준다`(
         role: String,
     ) {
-        mvc.perform(
+        // given
+        justRun { deletion.delete(12, 7) }
+
+        // when
+        val result = mvc.perform(
             delete("/api/v1/comments/12")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
                 .header("X-User-Id", "999")
                 .header("X-User-Role", "ROLE_ADMIN")
                 .param("authorId", "999"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"댓글이 삭제되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(deletion).delete(12, 7)
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        verify(exactly = 1) { deletion.delete(12, 7) }
+        confirmVerified(createComment, listComments, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "{", "null", "{\"content\":null,\"authorId\":999}"])
-    fun given__unneeded_or_broken_json_body__when__deleting_comment__then__ignore_body_without_new_validation(
+    fun `필요 없거나 깨진 JSON 본문일 때__댓글을 지우면__새 검증 없이 본문을 무시한다`(
         body: String,
     ) {
-        mvc.perform(authenticatedDelete("12").contentType(MediaType.APPLICATION_JSON).content(body))
+        // given
+        justRun { deletion.delete(12, 7) }
+
+        // when
+        val result = mvc.perform(authenticatedDelete("12").contentType(MediaType.APPLICATION_JSON).content(body))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"댓글이 삭제되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(deletion).delete(12, 7)
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        verify(exactly = 1) { deletion.delete(12, 7) }
+        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_untrusted_token_and_bad_id__when__deleting_comment__then__authenticate_before_binding_or_deletion(
+    fun `토큰이 없거나 믿을 수 없고 ID도 잘못됐을 때__댓글을 지우면__바인딩과 삭제 전에 인증부터 거부한다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = delete("/api/v1/comments/not-a-number")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{")
@@ -147,70 +161,100 @@ class CommentDeleteHttpTest {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
             .andExpect(jsonPath("$.message").value(message))
             .andExpect(jsonPath("$.data").isEmpty())
-        verifyNoInteractions(deletion, createComment, listComments, readPost, listPosts)
+        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun given__signed_invalid_identity__when__deleting_comment__then__reject_before_binding_or_deletion(
+    fun `서명됐지만 잘못된 신원일 때__댓글을 지우면__바인딩과 삭제 전에 거부한다`(
         claims: Map<String, Any>,
     ) {
+        // given
         val token = Jwts.builder()
             .claims(claims)
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
 
-        mvc.perform(delete("/api/v1/comments/not-a-number").header("Authorization", "Bearer $token"))
+        // when
+        val result = mvc.perform(delete("/api/v1/comments/not-a-number").header("Authorization", "Bearer $token"))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
             .andExpect(jsonPath("$.message").value("토큰 파싱에 실패했습니다."))
-        verifyNoInteractions(deletion, createComment, listComments, readPost, listPosts)
+        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 
     @Test
-    fun given__two_owners_then_anonymous_request__when__deleting_comments__then__clear_previous_identity() {
-        for (userId in longArrayOf(7, 8)) {
+    fun `소유자 둘에 이어 익명 요청이 올 때__댓글을 지우면__이전 신원을 지운다`() {
+        // given
+        justRun { deletion.delete(12, 7) }
+        justRun { deletion.delete(12, 8) }
+
+        // when
+        val ownerResults = longArrayOf(7, 8).map { userId ->
             mvc.perform(
                 delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(userId, "ROLE_USER")),
-            ).andExpect(status().isOk())
+            )
         }
-        mvc.perform(delete("/api/v1/comments/12")).andExpect(status().isUnauthorized())
-        verify(deletion).delete(12, 7)
-        verify(deletion).delete(12, 8)
-        verifyNoMoreInteractions(deletion)
+        val anonymousResult = mvc.perform(delete("/api/v1/comments/12"))
+
+        // then
+        for (result in ownerResults) {
+            result.andExpect(status().isOk())
+        }
+        anonymousResult.andExpect(status().isUnauthorized())
+        verify(exactly = 1) { deletion.delete(12, 7) }
+        verify(exactly = 1) { deletion.delete(12, 8) }
+        confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(longs = [12, 0, -1])
-    fun given__unavailable_comment_from_port__when__deleting__then__preserve_404_without_new_id_validation(
+    fun `포트가 댓글을 찾지 못할 때__댓글을 지우면__새 ID 검증 없이 404를 유지한다`(
         commentId: Long,
     ) {
-        doThrow(CommentNotFoundException()).`when`(deletion).delete(commentId, 7)
+        // given
+        every { deletion.delete(commentId, 7) } throws CommentNotFoundException()
 
-        mvc.perform(authenticatedDelete(commentId.toString()))
+        // when
+        val result = mvc.perform(authenticatedDelete(commentId.toString()))
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"댓글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(deletion).delete(commentId, 7)
+        verify(exactly = 1) { deletion.delete(commentId, 7) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__another_authors_comment_for_any_role__when__deleting__then__preserve_owner_403_without_admin_override(
+    fun `다른 작성자의 댓글일 때__어떤 역할이든 지우면__관리자 예외 없이 소유자 403을 유지한다`(
         role: String,
     ) {
-        doThrow(CommentNotOwnedException()).`when`(deletion).delete(12, 7)
+        // given
+        every { deletion.delete(12, 7) } throws CommentNotOwnedException()
 
-        mvc.perform(delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(7, role)))
+        // when
+        val result = mvc.perform(delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(7, role)))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json(
@@ -218,86 +262,107 @@ class CommentDeleteHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(deletion).delete(12, 7)
+        verify(exactly = 1) { deletion.delete(12, 7) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun given__unparseable_comment_id_with_valid_identity__when__deleting__then__preserve_legacy_safe_500(
+    fun `파싱할 수 없는 댓글 ID와 유효한 신원일 때__지우면__기존 안전한 500을 유지한다`(
         commentId: String,
     ) {
-        mvc.perform(authenticatedDelete(commentId))
+        // given
+
+        // when
+        val result = mvc.perform(authenticatedDelete(commentId))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verifyNoInteractions(deletion, createComment, listComments, readPost, listPosts)
+        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("deletionFailures")
-    fun given__failure_after_authentication__when__deleting__then__safe_error_is_not_401_and_sensitive_details_are_not_logged(
+    fun `인증 뒤 삭제가 실패할 때__댓글을 지우면__401이 아닌 안전한 오류를 주고 민감 정보를 남기지 않는다`(
         expectedStatus: Int,
         message: String,
         failure: RuntimeException,
     ) {
-        doThrow(failure).`when`(deletion).delete(12, 7)
+        // given
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
-        try {
+
+        every { deletion.delete(12, 7) } throws failure
+
+        // when
+        val result = try {
             mvc.perform(
                 authenticatedDelete("12")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"content\":\"synthetic-private-comment\"}"),
             )
-                .andExpect(status().`is`(expectedStatus))
-                .andExpect(jsonPath("$.code").value(expectedStatus))
-                .andExpect(jsonPath("$.message").value(message))
-                .andExpect(jsonPath("$.data").isEmpty())
-            assertThat(appender.list).allSatisfy { event ->
-                assertThat(event.throwableProxy).isNull()
-                assertThat(event.formattedMessage).doesNotContain(
-                    "synthetic-private-token",
-                    "synthetic-private-comment",
-                    "synthetic-private-password",
-                    "synthetic-private-url",
-                    "Bearer ",
-                    "jdbc:postgresql:",
-                )
-            }
         } finally {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(deletion).delete(12, 7)
+
+        // then
+        result
+            .andExpect(status().`is`(expectedStatus))
+            .andExpect(jsonPath("$.code").value(expectedStatus))
+            .andExpect(jsonPath("$.message").value(message))
+            .andExpect(jsonPath("$.data").isEmpty())
+        assertThat(appender.list).allSatisfy { event ->
+            assertThat(event.throwableProxy).isNull()
+            assertThat(event.formattedMessage).doesNotContain(
+                "synthetic-private-token",
+                "synthetic-private-comment",
+                "synthetic-private-password",
+                "synthetic-private-url",
+                "Bearer ",
+                "jdbc:postgresql:",
+            )
+        }
+        verify(exactly = 1) { deletion.delete(12, 7) }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__existing_comment_read_create_and_post_404__when__requesting__then__delete_authentication_and_advice_remain_scoped() {
+    fun `기존 댓글 읽기와 작성과 글 404가 있을 때__요청하면__삭제의 인증과 오류 처리 범위가 유지된다`() {
+        // given
         val time = LocalDateTime.of(2026, 10, 19, 12, 30)
         val comment = CommentDetails(12, 42, 7, "작성자", "댓글", time, time)
-        whenever(listComments.read(42)).thenReturn(listOf(comment))
-        whenever(createComment.create(42, 7, "댓글")).thenReturn(comment)
-        whenever(readPost.read(42)).thenThrow(PostNotFoundException())
 
-        mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].commentId").value(12))
-        mvc.perform(
+        every { listComments.read(42) } returns listOf(comment)
+        every { createComment.create(42, 7, "댓글") } returns comment
+        every { readPost.read(42) } throws PostNotFoundException()
+
+        // when
+        val readResult = mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
+        val createResult = mvc.perform(
             post("/api/v1/comments/posts/42")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"댓글\"}"),
         )
+        val postResult = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        readResult
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].commentId").value(12))
+        createResult
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value("댓글이 생성되었습니다."))
-        mvc.perform(get("/api/v1/posts/read/42"))
+        postResult
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(deletion, listPosts)
+        confirmVerified(deletion, listPosts)
     }
 
     @ParameterizedTest
@@ -310,27 +375,39 @@ class CommentDeleteHttpTest {
             "DELETE /api/v1/comments/posts/read/42", "DELETE /api/comments/12", "DELETE /api/v1/admin/comments/12",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_business_calls(
+    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__업무 호출 없이 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(deletion, createComment, listComments, readPost, listPosts)
+        )
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(
         strings = ["POST /api/v1/posts", "PUT /api/v1/posts/42", "DELETE /api/v1/posts/42", "POST /api/v1/comments/posts/42"],
     )
-    fun given__existing_write_without_token__when__requesting__then__preserve_jwt_authentication(request: String) {
+    fun `토큰 없는 기존 쓰기일 때__요청하면__JWT 인증을 유지한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // when
+        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(deletion, createComment, listComments, readPost, listPosts)
+        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 
     companion object {
