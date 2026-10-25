@@ -2,26 +2,23 @@ package com.pawbridge.backend.animal.internal.travel.infrastructure
 
 import com.pawbridge.backend.animal.internal.travel.application.PetTravelException
 import com.pawbridge.backend.animal.internal.travel.application.PetTravelResponse
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.NullAndEmptySource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.transaction.support.TransactionOperations
 import java.time.Instant
 import java.util.Optional
 
 class PetTravelServiceTest {
-    private val catalog: PostgresqlTravelCatalog = mock(PostgresqlTravelCatalog::class.java)
+    private val catalog: PostgresqlTravelCatalog = mockk<PostgresqlTravelCatalog>()
     private val service = PostgresqlPetTravel(
         catalog,
         TransactionOperations.withoutTransaction(),
@@ -33,135 +30,202 @@ class PetTravelServiceTest {
         return mapOf("contentid" to "123", "title" to "공원", "addr1" to "서울")
     }
 
-    private fun detail(common: Map<String, String>, pet: Map<String, String>) {
-        `when`(catalog.detail("123")).thenReturn(Optional.of(PostgresqlTravelCatalog.Place(common, pet, now)))
-    }
-
     @Test
-    fun givenSecondPage__whenRead__thenReturnStoredPageAndTotal() {
-        `when`(catalog.regions()).thenReturn(listOf(PostgresqlTravelCatalog.Region("11", "서울", now, now)))
-        `when`(catalog.collectionState()).thenReturn(PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, null, now))
-        `when`(catalog.countPlaces("11")).thenReturn(21L)
-        `when`(catalog.places("11", 1)).thenReturn(listOf(PostgresqlTravelCatalog.Place(row(), mapOf(), now)))
+    fun `두 번째 페이지를 읽을 때__조회하면__저장된 페이지와 전체 건수를 돌려준다`() {
+        // given
+        every { catalog.regions() } returns listOf(PostgresqlTravelCatalog.Region("11", "서울", now, now))
+        every { catalog.collectionState() } returns PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, null, now)
+        every { catalog.countPlaces(any()) } returns 21L
+        every { catalog.places(any(), any()) } returns listOf(PostgresqlTravelCatalog.Place(row(), mapOf(), now))
 
+        // when
         val response = service.places("11", 1)
 
+        // then
         assertThat(response.page).isEqualTo(1)
         assertThat(response.size).isEqualTo(10)
         assertThat(response.totalElements).isEqualTo(21)
         assertThat(response.totalPages).isEqualTo(3)
         assertThat(response.items.map { place -> place.contentId }).containsExactly("123")
+        verify(exactly = 1) { catalog.countPlaces("11") }
+        verify(exactly = 1) { catalog.places("11", 1) }
     }
 
     @ParameterizedTest
     @ValueSource(ints = [3, Int.MAX_VALUE])
-    fun givenPageBeyondInventory__whenRead__thenEmptyPageRetainsPartialState(page: Int) {
-        `when`(catalog.regions()).thenReturn(listOf(PostgresqlTravelCatalog.Region("11", "서울", now, null)))
-        `when`(catalog.collectionState()).thenReturn(PostgresqlTravelCatalog.CollectionState("SHOWN", 1, null, null))
-        `when`(catalog.countPlaces("11")).thenReturn(21L)
+    fun `재고 범위를 넘는 페이지일 때__조회하면__빈 페이지가 부분 수집 상태를 유지한다`(page: Int) {
+        // given
+        every { catalog.regions() } returns listOf(PostgresqlTravelCatalog.Region("11", "서울", now, null))
+        every { catalog.collectionState() } returns PostgresqlTravelCatalog.CollectionState("SHOWN", 1, null, null)
+        every { catalog.countPlaces(any()) } returns 21L
 
+        // when
         val response = service.places("11", page)
 
+        // then
         assertThat(response.items).isEmpty()
         assertThat(response.totalElements).isEqualTo(21)
         assertThat(response.availability).isEqualTo("PARTIAL")
-        verify(catalog, never()).places(anyString(), anyInt())
+        verify(exactly = 0) { catalog.places(any(), any()) }
     }
 
     @Test
-    fun givenNegativePage__whenRead__thenRejectBeforeDatabase() {
-        assertThatThrownBy { service.places("11", -1) }
+    fun `음수 페이지일 때__조회하면__데이터베이스 전에 거부한다`() {
+        // given
+
+        // when
+        val failure = catchThrowable { service.places("11", -1) }
+
+        // then
+        assertThat(failure)
             .isInstanceOf(PetTravelException::class.java)
             .extracting("code").isEqualTo(PetTravelException.Code.INVALID_REQUEST)
-        verifyNoInteractions(catalog)
+        confirmVerified(catalog)
     }
 
     @Test
-    fun givenStoredData__whenRead__thenNoKeyOrRedisDependencies() {
-        `when`(catalog.regions()).thenReturn(listOf(PostgresqlTravelCatalog.Region("11", "서울", now, now)))
-        `when`(catalog.collectionState()).thenReturn(PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, null, now))
-        `when`(catalog.countPlaces("11")).thenReturn(1L)
-        `when`(catalog.places("11", 0)).thenReturn(listOf(PostgresqlTravelCatalog.Place(row(), mapOf(), now)))
+    fun `저장된 데이터가 있을 때__조회하면__키나 Redis 의존 없이 목록과 상세를 돌려준다`() {
+        // given
+        every { catalog.regions() } returns listOf(PostgresqlTravelCatalog.Region("11", "서울", now, now))
+        every { catalog.collectionState() } returns PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, null, now)
+        every { catalog.countPlaces(any()) } returns 1L
+        every { catalog.places(any(), any()) } returns listOf(PostgresqlTravelCatalog.Place(row(), mapOf(), now))
+        every { catalog.detail(any()) } returns Optional.of(
+            PostgresqlTravelCatalog.Place(
+                row(),
+                mapOf("acmpyPsblCpam" to "시각 장애인 안내견", "acmpyNeedMtr" to "목줄"),
+                now,
+            ),
+        )
 
-        assertThat(service.places("11").items).containsExactly(PetTravelResponse.Place("123", "공원", "서울", null))
-        assertThat(service.places("11").availability).isEqualTo("READY")
-        detail(row(), mapOf("acmpyPsblCpam" to "시각 장애인 안내견", "acmpyNeedMtr" to "목줄"))
-        assertThat(service.detail("123").conditions!!.allowedAnimals).isEqualTo("시각 장애인 안내견")
-        assertThat(service.detail("123").petInformationAvailable).isTrue()
+        // when
+        val places = service.places("11")
+        val detail = service.detail("123")
+
+        // then
+        assertThat(places.items).containsExactly(PetTravelResponse.Place("123", "공원", "서울", null))
+        assertThat(places.availability).isEqualTo("READY")
+        assertThat(detail.conditions!!.allowedAnimals).isEqualTo("시각 장애인 안내견")
+        assertThat(detail.petInformationAvailable).isTrue()
+        verify(exactly = 1) { catalog.places("11", 0) }
+        verify(exactly = 1) { catalog.detail("123") }
     }
 
     @ParameterizedTest
     @CsvSource("false,false,PREPARING", "false,true,FAILED", "true,false,READY", "true,true,STALE")
-    fun givenCollectionState__whenRead__thenDistinguishAvailability(completed: Boolean, failed: Boolean, expected: String) {
-        `when`(catalog.regions())
-            .thenReturn(listOf(PostgresqlTravelCatalog.Region("11", "서울", now, if (completed) now else null)))
-        `when`(catalog.collectionState()).thenReturn(
-            PostgresqlTravelCatalog.CollectionState(
-                "DETAILS",
-                1,
-                if (failed) "COLLECTION_FAILED" else null,
-                if (completed) now else null,
-            ),
+    fun `수집 상태가 주어졌을 때__조회하면__가용성을 구분한다`(completed: Boolean, failed: Boolean, expected: String) {
+        // given
+        every { catalog.regions() } returns
+            listOf(PostgresqlTravelCatalog.Region("11", "서울", now, if (completed) now else null))
+        every { catalog.collectionState() } returns PostgresqlTravelCatalog.CollectionState(
+            "DETAILS",
+            1,
+            if (failed) "COLLECTION_FAILED" else null,
+            if (completed) now else null,
         )
+        every { catalog.countPlaces(any()) } returns 0L
 
-        assertThat(service.places("11").availability).isEqualTo(expected)
+        // when
+        val response = service.places("11")
+
+        // then
+        assertThat(response.availability).isEqualTo(expected)
     }
 
     @Test
-    fun givenNoRegions__whenRead__thenEmptyPreparationResponse() {
-        `when`(catalog.collectionState()).thenReturn(PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, null, null))
+    fun `지역이 없을 때__조회하면__빈 준비 중 응답을 돌려준다`() {
+        // given
+        every { catalog.regions() } returns listOf()
+        every { catalog.collectionState() } returns PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, null, null)
 
-        assertThat(service.regions().items).isEmpty()
-        assertThat(service.regions().fetchedAt).isNull()
+        // when
+        val response = service.regions()
+
+        // then
+        assertThat(response.items).isEmpty()
+        assertThat(response.fetchedAt).isNull()
     }
 
     @Test
-    fun givenInitialCollectionFailure__whenRead__thenFailedNotEmptyRegion() {
-        `when`(catalog.collectionState())
-            .thenReturn(PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, "COLLECTION_FAILED", null))
+    fun `최초 수집이 실패했을 때__조회하면__빈 지역이 아니라 실패로 알린다`() {
+        // given
+        every { catalog.regions() } returns listOf()
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCatalog.CollectionState("HIDDEN", 1, "COLLECTION_FAILED", null)
 
-        assertThat(service.regions().availability).isEqualTo("FAILED")
+        // when
+        val response = service.regions()
+
+        // then
+        assertThat(response.availability).isEqualTo("FAILED")
     }
 
     @Test
-    fun givenUnknownRegion__whenRead__thenBadRequest() {
-        assertThatThrownBy { service.places("99") }
+    fun `알 수 없는 지역일 때__조회하면__잘못된 요청으로 거부한다`() {
+        // given
+        every { catalog.regions() } returns listOf()
+
+        // when
+        val failure = catchThrowable { service.places("99") }
+
+        // then
+        assertThat(failure)
             .isInstanceOf(PetTravelException::class.java)
             .extracting("code").isEqualTo(PetTravelException.Code.INVALID_REQUEST)
-        verify(catalog, never()).places(anyString(), anyInt())
+        verify(exactly = 0) { catalog.places(any(), any()) }
     }
 
     @Test
-    fun givenMalformedId__whenRead__thenNoDatabaseWork() {
-        assertThatThrownBy { service.detail("../x") }.isInstanceOf(PetTravelException::class.java)
-        verifyNoInteractions(catalog)
+    fun `형식이 잘못된 ID일 때__조회하면__데이터베이스 작업을 하지 않는다`() {
+        // given
+
+        // when
+        val failure = catchThrowable { service.detail("../x") }
+
+        // then
+        assertThat(failure).isInstanceOf(PetTravelException::class.java)
+        confirmVerified(catalog)
     }
 
     @Test
-    fun givenHiddenOrMissingPlace__whenRead__thenNotFound() {
-        assertThatThrownBy { service.detail("123") }
+    fun `숨겨졌거나 없는 장소일 때__조회하면__찾을 수 없음으로 처리한다`() {
+        // given
+        every { catalog.detail(any()) } returns Optional.empty()
+
+        // when
+        val failure = catchThrowable { service.detail("123") }
+
+        // then
+        assertThat(failure)
             .isInstanceOf(PetTravelException::class.java)
             .extracting("code").isEqualTo(PetTravelException.Code.NOT_FOUND)
     }
 
     @Test
-    fun givenEmptyPetInformation__whenRead__thenUnknownNotAllowed() {
-        detail(row(), mapOf())
+    fun `반려동물 정보가 비어 있을 때__조회하면__허용이 아니라 알 수 없음으로 둔다`() {
+        // given
+        every { catalog.detail(any()) } returns Optional.of(PostgresqlTravelCatalog.Place(row(), mapOf(), now))
 
-        assertThat(service.detail("123").petInformationAvailable).isFalse()
-        assertThat(service.detail("123").conditions!!.allowedAnimals).isNull()
-        assertThat(service.detail("123").petInformationStatus).isEqualTo("READY")
-        assertThat(service.detail("123").petInformationFetchedAt).isEqualTo(now)
+        // when
+        val response = service.detail("123")
+
+        // then
+        assertThat(response.petInformationAvailable).isFalse()
+        assertThat(response.conditions!!.allowedAnimals).isNull()
+        assertThat(response.petInformationStatus).isEqualTo("READY")
+        assertThat(response.petInformationFetchedAt).isEqualTo(now)
     }
 
     @Test
-    fun givenBasicDataOnly__whenDetailRead__thenPendingWithoutInventedFetchTime() {
-        `when`(catalog.detail("123")).thenReturn(
-            Optional.of(PostgresqlTravelCatalog.Place(row(), mapOf(), null, now, "PREPARING")),
-        )
+    fun `기본 데이터만 있을 때__상세를 조회하면__가짜 조회 시각 없이 준비 중으로 둔다`() {
+        // given
+        every { catalog.detail(any()) } returns
+            Optional.of(PostgresqlTravelCatalog.Place(row(), mapOf(), null, now, "PREPARING"))
 
+        // when
         val response = service.detail("123")
 
+        // then
         assertThat(response.place!!.title).isEqualTo("공원")
         assertThat(response.petInformationStatus).isEqualTo("PREPARING")
         assertThat(response.petInformationFetchedAt).isNull()
@@ -171,28 +235,40 @@ class PetTravelServiceTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["Type1", "Type3"])
-    fun givenPermittedPhoto__whenRead__thenHttpsOriginal(type: String) {
+    fun `허용된 사진 유형일 때__조회하면__HTTPS 원본 주소를 돌려준다`(type: String) {
+        // given
         val data = HashMap(row())
         data["cpyrhtDivCd"] = type
         data["firstimage"] = "http://tong.visitkorea.or.kr/cms/resource/1/test.jpg"
-        detail(data, mapOf())
 
-        assertThat(service.detail("123").place!!.imageUrl)
+        every { catalog.detail(any()) } returns Optional.of(PostgresqlTravelCatalog.Place(data, mapOf(), now))
+
+        // when
+        val response = service.detail("123")
+
+        // then
+        assertThat(response.place!!.imageUrl)
             .isEqualTo("https://tong.visitkorea.or.kr/cms/resource/1/test.jpg")
     }
 
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = ["Type2", "Type4", "unknown"])
-    fun givenUnpermittedPhotoType__whenRead__thenOmitPhoto(type: String?) {
+    fun `허용되지 않은 사진 유형일 때__조회하면__사진을 생략한다`(type: String?) {
+        // given
         val data = HashMap(row())
         if (type != null) {
             data["cpyrhtDivCd"] = type
         }
         data["firstimage"] = "https://tong.visitkorea.or.kr/cms/resource/1/test.jpg"
-        detail(data, mapOf())
 
-        assertThat(service.detail("123").place!!.imageUrl).isNull()
+        every { catalog.detail(any()) } returns Optional.of(PostgresqlTravelCatalog.Place(data, mapOf(), now))
+
+        // when
+        val response = service.detail("123")
+
+        // then
+        assertThat(response.place!!.imageUrl).isNull()
     }
 
     @ParameterizedTest
@@ -209,19 +285,26 @@ class PetTravelServiceTest {
             "https://tong.visitkorea.or.kr/cms/resource/../a.jpg",
         ],
     )
-    fun givenUnsafePhoto__whenRead__thenOmitPhoto(image: String?) {
+    fun `안전하지 않은 사진 주소일 때__조회하면__사진을 생략한다`(image: String?) {
+        // given
         val data = HashMap(row())
         data["cpyrhtDivCd"] = "Type1"
         if (image != null) {
             data["firstimage"] = image
         }
-        detail(data, mapOf())
 
-        assertThat(service.detail("123").place!!.imageUrl).isNull()
+        every { catalog.detail(any()) } returns Optional.of(PostgresqlTravelCatalog.Place(data, mapOf(), now))
+
+        // when
+        val response = service.detail("123")
+
+        // then
+        assertThat(response.place!!.imageUrl).isNull()
     }
 
     @Test
-    fun givenVisitDetails__whenRead__thenNormalizeUsefulFieldsAndExposeOnlyPermittedPhotos() {
+    fun `방문 상세가 있을 때__조회하면__유용한 필드를 정규화하고 허용된 사진만 노출한다`() {
+        // given
         val common = HashMap(row())
         common["contenttypeid"] = "12"
         val intro = mapOf(
@@ -246,17 +329,18 @@ class PetTravelServiceTest {
                 "2", "제외", "https://tong.visitkorea.or.kr/cms/resource/1/b.jpg", null, "Type2", 1,
             ),
         )
-        `when`(catalog.detail("123")).thenReturn(
-            Optional.of(
-                PostgresqlTravelCatalog.Place(
-                    common, mapOf(), now, now, "READY",
-                    intro, information, images, now, now, now, "READY", "READY",
-                ),
+
+        every { catalog.detail(any()) } returns Optional.of(
+            PostgresqlTravelCatalog.Place(
+                common, mapOf(), now, now, "READY",
+                intro, information, images, now, now, now, "READY", "READY",
             ),
         )
 
+        // when
         val response = service.detail("123")
 
+        // then
         assertThat(response.visitInformation!!.informationCenter).isEqualTo("02-123-4567")
         assertThat(response.visitInformation!!.usageHours).isEqualTo("09:00~18:00")
         assertThat(response.visitInformation!!.experienceGuide).isEqualTo("해설 프로그램")
@@ -268,15 +352,19 @@ class PetTravelServiceTest {
     }
 
     @Test
-    fun givenMalformedDetail__whenRead__thenRejectBeforeEitherReaderTransactionStarts() {
-        val reads = mock(TransactionOperations::class.java)
-        val lists = mock(TransactionOperations::class.java)
+    fun `형식이 잘못된 상세 ID일 때__조회하면__어느 읽기 트랜잭션도 시작하기 전에 거부한다`() {
+        // given
+        val reads = mockk<TransactionOperations>()
+        val lists = mockk<TransactionOperations>()
         val guarded = PostgresqlPetTravel(catalog, reads, lists)
 
-        assertThatThrownBy { guarded.detail("../x") }
+        // when
+        val failure = catchThrowable { guarded.detail("../x") }
+
+        // then
+        assertThat(failure)
             .isInstanceOf(PetTravelException::class.java)
             .extracting("code").isEqualTo(PetTravelException.Code.INVALID_REQUEST)
-
-        verifyNoInteractions(catalog, reads, lists)
+        confirmVerified(catalog, reads, lists)
     }
 }
