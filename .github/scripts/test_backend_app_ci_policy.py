@@ -59,12 +59,14 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         return value if raw else value.splitlines()[0] + '\n'
 
     def gate(self, selection='success', selected='true', check='success', package=None,
-             proof=None, mode=None, event='push'):
+             proof=None, mode=None, event='push', architecture=None):
+        package_result = package if package is not None else ('skipped' if selected == 'false' else 'success')
         return subprocess.run(
             ['bash', '-euc', self.script('ci-result')],
             env={'PATH': os.environ.get('PATH', ''), 'EVENT_NAME': event, 'SELECTION_RESULT': selection,
                  'MODULE_SELECTED': selected, 'MODULE_RESULT': check,
-                 'PACKAGE_RESULT': package if package is not None else ('skipped' if selected == 'false' else 'success'),
+                 'PACKAGE_RESULT': package_result,
+                 'ARCHITECTURE_RESULT': architecture if architecture is not None else package_result,
                  'PROOF_RESULT': proof if proof is not None else ('skipped' if selected == 'false' else 'success'),
                  'PROOF_MODE': mode if mode is not None else ('' if selected == 'false' else 'execute')},
             capture_output=True, text=True, timeout=3,
@@ -204,7 +206,9 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('needs: [selection, proof, package]', check)
         self.assertIn("if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", check)
         gate = self.job('ci-result')
-        self.assertIn('needs: [selection, proof, package, check]', gate)
+        self.assertIn('needs: [selection, proof, package, architecture, check]', gate)
+        self.assertIn('ARCHITECTURE_RESULT: ${{ needs.architecture.result }}', gate)
+        self.assertIn('$PACKAGE_RESULT:$ARCHITECTURE_RESULT:$MODULE_RESULT', gate)
         self.assertIn('EVENT_NAME: ${{ github.event_name }}', gate)
         self.assertIn('SELECTION_RESULT: ${{ needs.selection.result }}', gate)
         self.assertIn('MODULE_SELECTED: ${{ needs.selection.outputs.selected }}', gate)
@@ -258,6 +262,36 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                         package.index('uses: gradle/actions/setup-gradle@'))
         self.assertIn('$RUNNER_TEMP/pawbridge-backend-app-gradle', package)
         self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', package)
+
+    def test_given_build_logic_architecture_tests__when_checking__then_run_them_in_their_own_parallel_job(self):
+        architecture = self.job('architecture')
+        self.assertIn('name: Gradle build-logic architecture tests', architecture)
+        self.assertIn('needs: [selection, proof]', architecture)
+        self.assertNotIn('needs: [selection, proof, package', architecture)
+        self.assertIn("needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute'", architecture)
+        self.assertIn('bash ./gradlew :boot:architectureTest', architecture)
+        self.assertNotRegex(architecture, r'(?:^|\s)-x(?:\s|$)|--exclude-task\b|--tests\b')
+        self.assertIn('validate-wrappers: true', architecture)
+        self.assertIn('$RUNNER_TEMP/pawbridge-backend-app-gradle', architecture)
+        self.assertIn("cache-read-only: ${{ github.event_name == 'pull_request' }}", architecture)
+        # Pushes always run; a pull request runs only for build-logic paths.
+        self.assertIn('if [ "$GITHUB_EVENT_NAME" != pull_request ]; then\n            printf \'run=true', architecture)
+        self.assertIn('git diff --name-only "$PULL_REQUEST_BASE_SHA"...HEAD', architecture)
+        for path in (r'^backend-app/(.*/)?[^/]*\.gradle$', r'^backend-app/gradle/', r'^backend-app/gradle\.properties$',
+                     r'^backend-app/gradlew', r'^backend-app/boot/src/architectureTest/',
+                     r'^\.github/workflows/backend-app-check\.yml$'):
+            with self.subTest(path=path):
+                self.assertIn(path, architecture)
+        evidence = architecture.split('name: Preserve architecture test evidence even on failure', 1)[1]
+        self.assertIn('always()', evidence)
+        self.assertIn('boot/build/test-results/architectureTest/TEST-*.xml', evidence)
+        self.assertNotIn('continue-on-error', architecture)
+
+    def test_given_architecture_job__when_checking__then_check_no_longer_depends_on_architecture_test(self):
+        boot = (ROOT / 'backend-app/boot/build.gradle').read_text()
+        self.assertNotRegex(boot, r"tasks\.named\('check'\)[^\n]*architectureTest")
+        self.assertIn("tasks.register('architectureTest', Test)", boot)
+        self.assertNotIn(':boot:architectureTest', self.job('package'))
 
     def test_given_removed_old_service_sources__when_packaging__then_compile_and_check_out_only_the_application(self):
         build = (ROOT / 'backend-app/boot/build.gradle').read_text()
@@ -319,7 +353,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn("name: backend-app-candidate-${{ github.run_id }}-${{ github.run_attempt }}", check)
         self.assertIn('name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}'
                       '-shard-${{ matrix.shard }}\n', check)
-        evidence = package.split('      - name: Preserve shared unit and architecture evidence even on failure', 1)[1]
+        evidence = package.split('      - name: Preserve shared unit evidence even on failure', 1)[1]
         self.assertIn('if: always()', evidence)
         self.assertIn('TEST-*.xml', evidence)
 
@@ -447,6 +481,14 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             for value in values:
                 with self.subTest(key=key, value=value):
                     self.assertNotEqual(0, self.gate(**dict(valid, **{key: value})).returncode)
+
+    def test_given_architecture_job_result__when_gating__then_require_success_or_a_skip_matching_the_package(self):
+        for event in ('push', 'pull_request'):
+            check = 'success' if event == 'push' else 'skipped'
+            self.assertEqual(0, self.gate(event=event, check=check, architecture='success').returncode)
+            for value in ('failure', 'cancelled', 'skipped', ''):
+                with self.subTest(event=event, architecture=value):
+                    self.assertNotEqual(0, self.gate(event=event, check=check, architecture=value).returncode)
 
     def test_given_late_member_and_auth_fixtures__when_wiring__then_keep_order_contracts_and_always_restore(self):
         check = self.job('check')
