@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.CreateNoteBlock
 import com.pawbridge.backend.community.internal.note.application.NoteBlockCreation
@@ -10,28 +11,22 @@ import com.pawbridge.backend.community.internal.note.web.NoteBlockCreateControll
 import com.pawbridge.backend.community.internal.note.web.NoteBlockCreateExceptionHandler
 import com.pawbridge.backend.community.internal.note.web.NoteBlockStatusController
 import com.pawbridge.backend.community.internal.note.web.NoteBlockStatusExceptionHandler
-import com.pawbridge.backend.support.anyNonNull
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
 import com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -40,7 +35,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -84,32 +78,37 @@ class NoteBlockCreateHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var creation: NoteBlockCreation
 
-    @MockitoBean
+    @MockkBean
     lateinit var clock: Clock
 
-    @MockitoBean
+    @MockkBean
     lateinit var statuses: NoteBlockStatusReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var counts: TotalUserCountQuery
 
     @ParameterizedTest
     @ValueSource(longs = [8, Long.MAX_VALUE])
-    fun given__verified_caller_full_long_target_and_forged_headers__when__creating__then__return_empty_200_after_current_target_and_clock_once(
+    fun `검증된 호출자와 위조 헤더가 주어졌을 때__차단하면__회원 조회 후 시계를 한 번 읽고 빈 200을 준다`(
         target: Long,
     ) {
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(members.get(target)).thenReturn(active(target))
-        whenever(clock.instant()).thenReturn(NOW)
-        invokeAfterMemberLocks()
+        // given
+        every { members.get(7) } returns active(7)
+        every { members.get(target) } returns active(target)
+        every { clock.instant() } returns NOW
+        every { creation.create(any(), any(), any()) } answers {
+            val afterActive = thirdArg<Supplier<Instant>>()
+            assertThat(afterActive.get()).isEqualTo(NOW)
+        }
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             authenticated(PATH + target)
                 .header("X-User-Id", "999")
                 .header("X-User-Role", "ROLE_ADMIN")
@@ -117,33 +116,40 @@ class NoteBlockCreateHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":999}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string(""))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-
-        val order = inOrder(creation, members, clock)
-        order.verify(creation).create(eq(7L), eq(target), anyNonNull<Supplier<Instant>>())
-        order.verify(members).get(7)
-        order.verify(members).get(target)
-        order.verify(clock).instant()
-        verifyNoMoreInteractions(creation, members, clock)
-        verifyNoInteractions(statuses, counts)
+        verifySequence {
+            creation.create(7L, target, any())
+            members.get(7)
+            members.get(target)
+            clock.instant()
+        }
+        confirmVerified(creation, members, clock, statuses, counts)
         contextCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID"])
-    fun given__missing_or_bad_jwt_and_malformed_target__when__creating__then__authenticate_before_binding_or_dependencies(
+    fun `토큰이 없거나 잘못되고 대상이 깨졌을 때__차단하면__바인딩 전에 인증 실패를 준다`(
         token: String,
     ) {
+        // given
         val request = put(PATH + "not-a-long").header("X-User-Id", "7")
         if (token == "INVALID") {
             request.header("Authorization", "Bearer invalid")
         }
         val message = if (token == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -155,10 +161,17 @@ class NoteBlockCreateHttpTest {
 
     @ParameterizedTest
     @ValueSource(longs = [0, -1])
-    fun given__nonpositive_target_with_valid_jwt__when__creating__then__return_business_login_401_before_port_members_or_clock(
+    fun `양수가 아닌 대상과 유효한 토큰이 주어졌을 때__차단하면__의존성 호출 전에 로그인 401을 준다`(
         target: Long,
     ) {
-        mvc.perform(authenticated(PATH + target))
+        // given
+        val request = authenticated(PATH + target)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -167,8 +180,15 @@ class NoteBlockCreateHttpTest {
     }
 
     @Test
-    fun given__positive_self_target__when__creating__then__reject_400_before_port_or_current_member_lookup() {
-        mvc.perform(authenticated(PATH + "7"))
+    fun `자기 자신이 대상일 때__차단하면__포트와 회원 조회 없이 400으로 거부한다`() {
+        // given
+        val request = authenticated(PATH + "7")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -178,10 +198,17 @@ class NoteBlockCreateHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["not-a-long", "9223372036854775808", "status"])
-    fun given__malformed_overflow_or_former_status_neighbor__when__authenticated_put_binds__then__return_message_only_400_before_business_work(
+    fun `깨지거나 넘치는 대상이 주어졌을 때__차단하면__업무 처리 전에 메시지만 담은 400을 준다`(
         target: String,
     ) {
-        mvc.perform(authenticated(PATH + target))
+        // given
+        val request = authenticated(PATH + target)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -191,115 +218,139 @@ class NoteBlockCreateHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["CURRENT", "TARGET"])
-    fun given__pending_current_or_target__when__creation_invokes_its_supplier__then__return_403_before_clock_with_original_lookup_order(
+    fun `탈퇴 대기 회원이 호출자나 대상일 때__차단하면__시계 전에 403을 주고 조회 순서를 지킨다`(
         phase: String,
     ) {
-        whenever(members.get(7)).thenReturn(if (phase == "CURRENT") pending(7) else active(7))
+        // given
+        every { members.get(7) } returns if (phase == "CURRENT") pending(7) else active(7)
         if (phase == "TARGET") {
-            whenever(members.get(8)).thenReturn(pending(8))
+            every { members.get(8) } returns pending(8)
         }
-        invokeAfterMemberLocks()
+        every { creation.create(any(), any(), any()) } answers {
+            val afterActive = thirdArg<Supplier<Instant>>()
+            afterActive.get()
+        }
 
-        mvc.perform(authenticated(PATH + "8"))
+        // when
+        val result = mvc.perform(authenticated(PATH + "8"))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"이용할 수 없는 회원입니다.\"}", JsonCompareMode.STRICT))
-        val order = inOrder(creation, members)
-        order.verify(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
-        order.verify(members).get(7)
-        if (phase == "TARGET") {
-            order.verify(members).get(8)
+        verifySequence {
+            creation.create(7L, 8L, any())
+            members.get(7)
+            if (phase == "TARGET") {
+                members.get(8)
+            }
         }
-        verifyNoMoreInteractions(creation, members)
-        verifyNoInteractions(clock, statuses, counts)
+        confirmVerified(creation, members, clock, statuses, counts)
         contextCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["CURRENT", "TARGET"])
-    fun given__typed_user_failure_at_current_or_late_target__when__creating__then__preserve_member_503_and_skip_clock(
+    fun `회원 조회가 타입 있는 오류로 실패했을 때__차단하면__회원 503을 주고 시계를 건너뛴다`(
         phase: String,
     ) {
+        // given
         val failure = ContactMemberUnavailableException(TransactionSystemException("synthetic-private-user-commit"))
         if (phase == "CURRENT") {
-            whenever(members.get(7)).thenThrow(failure)
+            every { members.get(7) } throws failure
         } else {
-            whenever(members.get(7)).thenReturn(active(7))
-            whenever(members.get(8)).thenThrow(failure)
+            every { members.get(7) } returns active(7)
+            every { members.get(8) } throws failure
         }
-        invokeAfterMemberLocks()
+        every { creation.create(any(), any(), any()) } answers {
+            val afterActive = thirdArg<Supplier<Instant>>()
+            afterActive.get()
+        }
 
-        mvc.perform(authenticated(PATH + "8"))
+        // when
+        val result = mvc.perform(authenticated(PATH + "8"))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to MEMBER)), JsonCompareMode.STRICT))
-        val order = inOrder(creation, members)
-        order.verify(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
-        order.verify(members).get(7)
-        if (phase == "TARGET") {
-            order.verify(members).get(8)
+        verifySequence {
+            creation.create(7L, 8L, any())
+            members.get(7)
+            if (phase == "TARGET") {
+                members.get(8)
+            }
         }
-        verifyNoMoreInteractions(creation, members)
-        verifyNoInteractions(clock, statuses, counts)
+        confirmVerified(creation, members, clock, statuses, counts)
         contextCleared()
     }
 
     @ParameterizedTest
     @MethodSource("dependencyFailures")
-    fun given__dao_concrete_tx_usage_or_runtime__when__creating__then__map_actual_failure_type_and_clear_security_context(
+    fun `저장소나 트랜잭션 오류가 났을 때__차단하면__실제 오류 유형대로 503을 주고 컨텍스트를 비운다`(
         phase: String,
         failure: RuntimeException,
         message: String,
     ) {
+        // given
         val beforeSupplier = listOf("BEGIN", "TIMEOUT", "USAGE").contains(phase)
         if (!beforeSupplier) {
-            whenever(members.get(7)).thenReturn(active(7))
-            whenever(members.get(8)).thenReturn(active(8))
-            whenever(clock.instant()).thenReturn(NOW)
+            every { members.get(7) } returns active(7)
+            every { members.get(8) } returns active(8)
+            every { clock.instant() } returns NOW
         }
-        // Types and callback order only: these mocks do not emulate begin/commit, SQL or rollback.
-        doAnswer(
-            Answer<Any?> { call ->
-                if (beforeSupplier) {
-                    throw failure
-                }
-                val afterActive = call.getArgument<Supplier<Instant>>(2)
-                afterActive.get()
-                throw failure
-            },
-        ).`when`(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
 
-        mvc.perform(authenticated(PATH + "8"))
+        // Types and callback order only: these mocks do not emulate begin/commit, SQL or rollback.
+        every { creation.create(any(), any(), any()) } answers {
+            if (beforeSupplier) {
+                throw failure
+            }
+            val afterActive = thirdArg<Supplier<Instant>>()
+            afterActive.get()
+            throw failure
+        }
+
+        // when
+        val result = mvc.perform(authenticated(PATH + "8"))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to message)), JsonCompareMode.STRICT))
-        verify(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
-        if (beforeSupplier) {
-            verifyNoInteractions(members, clock)
-        } else {
-            val order = inOrder(members, clock)
-            order.verify(members).get(7)
-            order.verify(members).get(8)
-            order.verify(clock).instant()
+        verify(exactly = 1) { creation.create(7L, 8L, any()) }
+        if (!beforeSupplier) {
+            verifySequence {
+                members.get(7)
+                members.get(8)
+                clock.instant()
+            }
         }
-        verifyNoMoreInteractions(creation, members, clock)
-        verifyNoInteractions(statuses, counts)
+        confirmVerified(creation, members, clock, statuses, counts)
         contextCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PUT /api/v1/notes/blocks/8/extra", "PUT /api/v1/notes/blocks/8/"])
-    fun given__deeper_or_trailing_put_path__when__requesting_with_valid_jwt__then__keep_default_403_before_creation(
+    fun `더 깊거나 끝에 슬래시가 붙은 경로일 때__유효한 토큰으로 요청하면__기본 403으로 거부한다`(
         wire: String,
     ) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -310,85 +361,93 @@ class NoteBlockCreateHttpTest {
     }
 
     @Test
-    fun given__existing_read_only_status_tx_failure__when__reading__then__keep_storage_503_outside_creation_advice() {
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(statuses.blockedAuthors(7, listOf(8L))).thenThrow(TransactionSystemException("synthetic-status-commit"))
-        mvc.perform(
+    fun `상태 조회가 트랜잭션 오류로 실패했을 때__차단 상태를 읽으면__생성 어드바이스 밖에서 저장소 503을 준다`() {
+        // given
+        every { members.get(any()) } returns active(7)
+        every { statuses.blockedAuthors(any(), any()) } throws TransactionSystemException("synthetic-status-commit")
+
+        // when
+        val result = mvc.perform(
             get("/api/v1/notes/blocks/status")
                 .param("memberIds", "8")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to STORAGE)), JsonCompareMode.STRICT))
-        verify(members).get(7)
-        verify(statuses).blockedAuthors(7, listOf(8L))
-        verifyNoMoreInteractions(members, statuses)
-        verifyNoInteractions(creation, clock, counts)
+        verify(exactly = 1) { members.get(7) }
+        verify(exactly = 1) { statuses.blockedAuthors(7, listOf(8L)) }
+        confirmVerified(members, statuses, creation, clock, counts)
         contextCleared()
     }
 
     @Test
-    fun given__existing_admin_permission_and_runtime_error__when__counting_users__then__keep_admin_403_and_common_500_outside_creation_advice() {
-        whenever(counts.count()).thenThrow(IllegalStateException("synthetic-admin-count"))
-        mvc.perform(
+    fun `관리자 통계 조회가 런타임 오류를 낼 때__사용자 수를 세면__일반 사용자는 403 관리자는 500을 받는다`() {
+        // given
+        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
+
+        // when
+        val forbidden = mvc.perform(
             get("/api/v1/admin/users/stats/total-users")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+        confirmVerified(counts)
+        val failed = mvc.perform(
+            get("/api/v1/admin/users/stats/total-users")
+                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
+        )
+
+        // then
+        forbidden
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(counts)
-        mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
+        failed
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(counts).count()
-        verifyNoMoreInteractions(counts)
-        verifyNoInteractions(creation, members, clock, statuses)
+        verify(exactly = 1) { counts.count() }
+        confirmVerified(counts, creation, members, clock, statuses)
         contextCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_ADMIN", "", "ROLE_UNRECOGNIZED"])
-    fun given__verified_existing_non_user_role_policy__when__creating__then__keep_authenticated_access_without_new_role_restrictions(
+    fun `사용자가 아닌 역할의 검증된 토큰일 때__차단하면__새 역할 제한 없이 접근을 유지한다`(
         role: String,
     ) {
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(members.get(8)).thenReturn(active(8))
-        whenever(clock.instant()).thenReturn(NOW)
-        invokeAfterMemberLocks()
-        mvc.perform(put(PATH + "8").header("Authorization", "Bearer " + F3TestInputs.token(7, role)))
+        // given
+        every { members.get(7) } returns active(7)
+        every { members.get(8) } returns active(8)
+        every { clock.instant() } returns NOW
+        every { creation.create(any(), any(), any()) } answers {
+            val afterActive = thirdArg<Supplier<Instant>>()
+            assertThat(afterActive.get()).isEqualTo(NOW)
+        }
+
+        // when
+        val result = mvc.perform(put(PATH + "8").header("Authorization", "Bearer " + F3TestInputs.token(7, role)))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string(""))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verify(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7)
-        verify(members).get(8)
-        verify(clock).instant()
-        verifyNoMoreInteractions(creation, members, clock)
-        verifyNoInteractions(statuses, counts)
+        verify(exactly = 1) { creation.create(7L, 8L, any()) }
+        verify(exactly = 1) { members.get(7) }
+        verify(exactly = 1) { members.get(8) }
+        verify(exactly = 1) { clock.instant() }
+        confirmVerified(creation, members, clock, statuses, counts)
         contextCleared()
-    }
-
-    private fun invokeAfterMemberLocks() {
-        // A port contract stub, not evidence that database locks or a writer transaction exist.
-        doAnswer(
-            Answer<Any?> { call ->
-                val afterActive = call.getArgument<Supplier<Instant>>(2)
-                assertThat(afterActive.get()).isEqualTo(NOW)
-                null
-            },
-        ).`when`(creation).create(anyLong(), anyLong(), anyNonNull<Supplier<Instant>>())
     }
 
     private fun authenticated(path: String): MockHttpServletRequestBuilder {
@@ -396,7 +455,7 @@ class NoteBlockCreateHttpTest {
     }
 
     private fun noDependencies() {
-        verifyNoInteractions(creation, members, clock, statuses, counts)
+        confirmVerified(creation, members, clock, statuses, counts)
         contextCleared()
     }
 

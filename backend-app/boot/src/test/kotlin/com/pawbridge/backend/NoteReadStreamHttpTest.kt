@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.MarkPrivateNoteRead
 import com.pawbridge.backend.community.internal.note.application.NoteReadMutation
@@ -9,11 +10,15 @@ import com.pawbridge.backend.community.internal.note.web.NoteReadMutationExcepti
 import com.pawbridge.backend.community.internal.note.web.NoteStreamController
 import com.pawbridge.backend.community.internal.note.web.NoteStreamExceptionHandler
 import com.pawbridge.backend.community.internal.note.web.PrivateNoteStreamRegistry
-import com.pawbridge.backend.support.anyNonNull
+import com.pawbridge.backend.support.TestFaker
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
 import io.jsonwebtoken.Jwts
+import io.mockk.clearMocks
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.BeforeEach
@@ -22,14 +27,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.clearInvocations
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -38,7 +35,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch
@@ -80,34 +76,39 @@ class NoteReadStreamHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var mutation: NoteReadMutation
 
-    @MockitoBean
+    // Relaxed only because Spring calls SmartLifecycle methods (isAutoStartup, getPhase) while building the context,
+    // before any test body can stub them. Test behavior is still checked with explicit stubs and confirmVerified.
+    @MockkBean(relaxed = true)
     lateinit var streams: PrivateNoteStreamRegistry
 
-    @MockitoBean
+    @MockkBean
     lateinit var clock: Clock
 
     @BeforeEach
     fun clearOnlyContainerLifecycleProbes() {
         // Spring may inspect this SmartLifecycle mock while creating the test context.
-        clearInvocations(streams)
+        clearMocks(streams, answers = false)
     }
 
     @Test
-    fun givenVerifiedExpiryAndSpoofedHeaders__whenOpeningAndCompletingAsync__thenKeepCallerExpiryReadyAndRequestOnlyAuthenticationWithoutSession() {
+    fun `검증된 만료와 위조 헤더가 주어졌을 때__스트림을 열고 완료하면__호출자 만료와 ready를 유지하고 세션이 없다`() {
+        // given
         val expiry = Instant.now().plusSeconds(120).truncatedTo(ChronoUnit.SECONDS)
-        val client = UUID.randomUUID()
+        val client = TestFaker.uuid()
         val emitter = SseEmitter(120_000L)
         emitter.send(SseEmitter.event().name("ready").data("{}"))
-        whenever(members.get(7)).thenReturn(active())
-        whenever(streams.open(7, expiry, client)).thenReturn(emitter)
 
-        val opened = mvc.perform(
+        every { members.get(any()) } returns active()
+        every { streams.open(any(), any(), any()) } returns emitter
+
+        // when
+        val result = mvc.perform(
             get(STREAM)
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .param("clientId", client.toString())
@@ -116,15 +117,17 @@ class NoteReadStreamHttpTest {
                 .header("X-Auth-Expires-At", Long.MAX_VALUE)
                 .header("X-User-Role", "ROLE_ADMIN"),
         )
+
+        // then
+        val opened = result
             .andExpect(status().isOk())
             .andExpect(request().asyncStarted())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().string("X-Accel-Buffering", "no"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andReturn()
-        verify(members).get(7)
-        verify(streams).open(7, expiry, client)
-        verifyNoInteractions(mutation, clock)
+        verify(exactly = 1) { members.get(7) }
+        verify(exactly = 1) { streams.open(7, expiry, client) }
         assertThat(opened.request.getSession(false)).isNull()
         cleared()
 
@@ -138,15 +141,16 @@ class NoteReadStreamHttpTest {
             .andExpect(content().string(Matchers.containsString("data:{}")))
         cleared()
         mvc.perform(get(STREAM)).andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"))
-        verifyNoMoreInteractions(members, streams)
+        confirmVerified(members, streams, mutation, clock)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID", "NO_EXP"])
-    fun givenMissingBadOrExpirylessTokenAndInvalidClient__whenOpening__thenAuthenticateBeforeBindingMemberOrRegistry(
+    fun `토큰이 없거나 잘못됐거나 만료가 없을 때__잘못된 클라이언트로 열면__바인딩 전에 인증 실패를 준다`(
         kind: String,
     ) {
+        // given
         val request = get(STREAM).param("clientId", "invalid").header("X-Auth-Expires-At", Long.MAX_VALUE)
         if (kind != "MISSING") {
             request.header("Authorization", "Bearer " + (if (kind == "INVALID") "invalid" else token(null)))
@@ -158,27 +162,37 @@ class NoteReadStreamHttpTest {
         } else {
             "토큰 파싱에 실패했습니다."
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(members, streams, mutation, clock)
+        confirmVerified(members, streams, mutation, clock)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["*/*", "text/event-stream"])
-    fun givenInvalidClientAndVerifiedToken__whenOpeningAcrossAcceptedMedia__thenReturnOriginal400NoStoreBeforeCurrentLookup(
+    fun `잘못된 클라이언트와 검증된 토큰이 주어졌을 때__허용 미디어별로 열면__현재 회원 조회 전에 원래 400을 준다`(
         accept: String,
     ) {
-        val result = mvc.perform(
-            get(STREAM)
-                .param("clientId", "invalid")
-                .accept(accept)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
+        // given
+        val request = get(STREAM)
+            .param("clientId", "invalid")
+            .accept(accept)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -189,23 +203,22 @@ class NoteReadStreamHttpTest {
                 content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT),
             )
         }
-        verifyNoInteractions(members, streams, mutation, clock)
+        confirmVerified(members, streams, mutation, clock)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["INACTIVE", "MEMBER", "RUNTIME"])
-    fun givenCurrentMemberFailure__whenOpening__thenReturnSourceSpecificErrorAndNeverRegister(kind: String) {
+    fun `현재 회원 조회가 실패했을 때__열면__원인별 오류를 주고 등록하지 않는다`(kind: String) {
+        // given
         if (kind == "INACTIVE") {
-            whenever(members.get(7)).thenReturn(ContactMember(7L, "", false, true))
+            every { members.get(any()) } returns ContactMember(7L, "", false, true)
         } else {
-            whenever(members.get(7)).thenThrow(
-                if (kind == "MEMBER") {
-                    ContactMemberUnavailableException(TransactionSystemException("synthetic-private"))
-                } else {
-                    IllegalStateException("synthetic-private")
-                },
-            )
+            every { members.get(any()) } throws if (kind == "MEMBER") {
+                ContactMemberUnavailableException(TransactionSystemException("synthetic-private"))
+            } else {
+                IllegalStateException("synthetic-private")
+            }
         }
         val message = if (kind == "INACTIVE") {
             "이용할 수 없는 회원입니다."
@@ -214,87 +227,104 @@ class NoteReadStreamHttpTest {
         } else {
             "쪽지를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."
         }
-        mvc.perform(get(STREAM).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+
+        // when
+        val result = mvc.perform(get(STREAM).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+
+        // then
+        result
             .andExpect(status().`is`(if (kind == "INACTIVE") 403 else 503))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"" + message + "\"}", JsonCompareMode.STRICT))
-        verify(members).get(7)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(streams, mutation, clock)
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(members, streams, mutation, clock)
         cleared()
     }
 
     @Test
-    fun givenSignedCallerAndSpoofedIdentity__whenMarkingRead__thenReturnEmpty200AndRunOnlyCallerGuardThroughMutationPort() {
-        whenever(members.get(7)).thenReturn(active())
+    fun `서명된 호출자와 위조 신원이 주어졌을 때__읽음 처리하면__빈 200을 주고 호출자 가드만 변경 포트로 실행한다`() {
+        // given
+        every { members.get(any()) } returns active()
+
         // This callback models entry order only. Real afterCommit/resync belongs to the JDBC/PG gate.
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument(2, Runnable::class.java).run()
-                null
-            },
-        ).`when`(mutation).read(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        mvc.perform(
+        every { mutation.read(any(), any(), any(), any()) } answers {
+            thirdArg<Runnable>().run()
+        }
+
+        // when
+        val result = mvc.perform(
             put(READ)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .header("X-User-Id", "999")
                 .param("userId", "999"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string(""))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verify(mutation).read(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7)
-        verifyNoMoreInteractions(mutation, members)
-        verifyNoInteractions(streams, clock)
+        verify(exactly = 1) { mutation.read(7L, NOTE, any(), any()) }
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(mutation, members, streams, clock)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun givenMalformedReadUuid__whenTokenIsAbsentOrValid__thenKeepAuthenticationBeforeBindingAndNoMutation(
+    fun `깨진 읽음 UUID가 주어졌을 때__토큰이 없거나 유효하면__바인딩 전 인증을 유지하고 변경하지 않는다`(
         authenticated: Boolean,
     ) {
+        // given
         val request = put("/api/v1/notes/not-a-uuid/read")
         if (authenticated) {
             request.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().`is`(if (authenticated) 400 else 401))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verifyNoInteractions(members, mutation, streams, clock)
+        confirmVerified(members, mutation, streams, clock)
         cleared()
     }
 
     @ParameterizedTest
     @MethodSource("readFailures")
-    fun givenMutationFailure__whenReading__thenKeepNotFoundMemberStorageAndWriterRuntimePolicies(
+    fun `변경 포트가 실패했을 때__읽음 처리하면__없음 회원 저장소 쓰기 런타임 정책을 유지한다`(
         failure: RuntimeException,
         status: Int,
         message: String,
     ) {
+        // given
         if (failure is ContactMemberUnavailableException) {
-            whenever(members.get(7)).thenThrow(failure)
+            every { members.get(any()) } throws failure
         } else {
-            whenever(members.get(7)).thenReturn(active())
+            every { members.get(any()) } returns active()
         }
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument(2, Runnable::class.java).run()
-                throw failure
-            },
-        ).`when`(mutation).read(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        mvc.perform(put(READ).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+
+        every { mutation.read(any(), any(), any(), any()) } answers {
+            thirdArg<Runnable>().run()
+            throw failure
+        }
+
+        // when
+        val result = mvc.perform(put(READ).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+
+        // then
+        result
             .andExpect(status().`is`(status))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"" + message + "\"}", JsonCompareMode.STRICT))
-        verify(mutation).read(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7)
-        verifyNoMoreInteractions(mutation, members)
-        verifyNoInteractions(streams, clock)
+        verify(exactly = 1) { mutation.read(7L, NOTE, any(), any()) }
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(mutation, members, streams, clock)
         cleared()
     }
 
@@ -306,15 +336,21 @@ class NoteReadStreamHttpTest {
             "PUT /api/v1/notes/f2600000-0000-0000-0000-000000000001/read/extra",
         ],
     )
-    fun givenUnexposedStreamOrReadNeighbor__whenRequesting__thenKeepDefault403WithoutDependencies(wire: String) {
+    fun `노출되지 않은 스트림이나 읽음 인접 경로일 때__요청하면__의존성 없이 기본 403을 유지한다`(wire: String) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verifyNoInteractions(members, mutation, streams, clock)
+        confirmVerified(members, mutation, streams, clock)
         cleared()
     }
 

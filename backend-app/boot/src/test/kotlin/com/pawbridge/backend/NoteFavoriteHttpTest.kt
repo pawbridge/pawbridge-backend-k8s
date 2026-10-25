@@ -1,11 +1,11 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.NoteFavoriteMutation
 import com.pawbridge.backend.community.internal.note.application.SetPrivateNoteFavorite
 import com.pawbridge.backend.community.internal.note.web.NoteFavoriteController
 import com.pawbridge.backend.community.internal.note.web.NoteFavoriteExceptionHandler
-import com.pawbridge.backend.support.anyNonNull
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
@@ -13,19 +13,15 @@ import com.pawbridge.backend.user.internal.statistics.application.TotalUserCount
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -33,7 +29,6 @@ import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -68,30 +63,24 @@ class NoteFavoriteHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var mutation: NoteFavoriteMutation
 
-    @MockitoBean(name = "readClock")
+    @MockkBean(name = "readClock")
     lateinit var clock: Clock
 
-    @MockitoBean
+    @MockkBean
     lateinit var counts: TotalUserCountQuery
 
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun givenExplicitBooleanAndSignedCallerIncludingExpirylessAdminRestToken__whenSettingFavoriteWithSpoofedHeaders__thenKeepCallerValueAndEmptyNoStore200(
+    fun `명시적 불리언과 서명된 호출자가 주어졌을 때__위조 헤더로 즐겨찾기를 지정하면__호출자 값을 유지하고 빈 200을 준다`(
         favorite: Boolean,
     ) {
-        whenever(members.get(7)).thenReturn(active())
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument(3, Runnable::class.java).run()
-                null
-            },
-        ).`when`(mutation).set(eq(7L), eq(NOTE), eq(favorite), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
+        // given
         // General REST accepts a verified expiryless token; only exact stream requires expiry.
         val token = if (favorite) {
             F3TestInputs.token(7, "ROLE_USER")
@@ -99,7 +88,13 @@ class NoteFavoriteHttpTest {
             Jwts.builder().claim("userId", 7L).claim("role", "ROLE_ADMIN").signWith(F3TestInputs.KEY).compact()
         }
 
-        mvc.perform(
+        every { members.get(any()) } returns active()
+        every { mutation.set(any(), any(), any(), any(), any()) } answers {
+            arg<Runnable>(3).run()
+        }
+
+        // when
+        val result = mvc.perform(
             put(PATH)
                 .header("Authorization", "Bearer $token")
                 .header("X-User-Id", "999")
@@ -108,29 +103,36 @@ class NoteFavoriteHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"favorite\":$favorite}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string(""))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-
-        verify(mutation).set(eq(7L), eq(NOTE), eq(favorite), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7)
-        verifyNoMoreInteractions(mutation, members)
-        verifyNoInteractions(clock, counts)
+        verify(exactly = 1) { mutation.set(7L, NOTE, favorite, any(), any()) }
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(mutation, members, clock, counts)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID"])
-    fun givenMissingOrBadTokenAndMalformedUuidAndJson__whenSettingFavorite__thenAuthenticateBeforeEitherBinderWithoutDependencies(
+    fun `토큰이 없거나 잘못되고 UUID와 JSON이 깨졌을 때__즐겨찾기를 지정하면__두 바인더 전에 인증 실패를 준다`(
         kind: String,
     ) {
+        // given
         val request = put("/api/v1/notes/not-a-uuid/favorite").contentType(MediaType.APPLICATION_JSON).content("{broken")
         if (kind == "INVALID") {
             request.header("Authorization", "Bearer invalid")
         }
         val message = if (kind == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
@@ -140,13 +142,18 @@ class NoteFavoriteHttpTest {
     }
 
     @Test
-    fun givenVerifiedCallerAndMalformedUuid__whenSettingCanonicalBoolean__thenReturnScoped400WithoutCurrentOrMutation() {
-        mvc.perform(
-            put("/api/v1/notes/not-a-uuid/favorite")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"favorite\":true}"),
-        )
+    fun `검증된 호출자와 깨진 UUID가 주어졌을 때__정식 불리언으로 지정하면__회원 확인과 변경 없이 범위 400을 준다`() {
+        // given
+        val request = put("/api/v1/notes/not-a-uuid/favorite")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"favorite\":true}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -156,11 +163,12 @@ class NoteFavoriteHttpTest {
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun givenCurrentOrMutationFailure__whenSettingFavorite__thenKeepInactiveNotFoundMemberStorageAndWriterRuntimePolicies(
+    fun `현재 회원이나 변경이 실패했을 때__즐겨찾기를 지정하면__비활성 없음 회원 저장소 쓰기 정책을 유지한다`(
         kind: String,
         status: Int,
         message: String,
     ) {
+        // given
         val failure: RuntimeException? = when (kind) {
             "inactive" -> null
             "missing" -> NoteFavoriteMutation.MissingOwnedNote()
@@ -169,42 +177,48 @@ class NoteFavoriteHttpTest {
             else -> TransactionSystemException("private-commit-detail")
         }
         if (kind == "member") {
-            whenever(members.get(7)).thenThrow(failure!!)
+            every { members.get(any()) } throws failure!!
         } else {
-            whenever(members.get(7))
-                .thenReturn(if (kind == "inactive") ContactMember(7L, "", false, true) else active())
+            every { members.get(any()) } returns if (kind == "inactive") ContactMember(7L, "", false, true) else active()
         }
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument(3, Runnable::class.java).run()
-                if (failure != null) {
-                    throw failure
-                }
-                null
-            },
-        ).`when`(mutation).set(eq(7L), eq(NOTE), eq(true), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
 
-        mvc.perform(
+        every { mutation.set(any(), any(), any(), any(), any()) } answers {
+            arg<Runnable>(3).run()
+            if (failure != null) {
+                throw failure
+            }
+        }
+
+        // when
+        val result = mvc.perform(
             put(PATH)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"favorite\":true}"),
         )
+
+        // then
+        result
             .andExpect(status().`is`(status))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"" + message + "\"}", JsonCompareMode.STRICT))
-
-        verify(mutation).set(eq(7L), eq(NOTE), eq(true), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7)
-        verifyNoMoreInteractions(mutation, members)
-        verifyNoInteractions(clock, counts)
+        verify(exactly = 1) { mutation.set(7L, NOTE, true, any(), any()) }
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(mutation, members, clock, counts)
         cleared()
     }
 
     @Test
-    fun givenUnexposedMethodOnTheFavoritePath__whenRequestingWithValidJwt__thenDenyBeforeFavoriteDependencies() {
-        mvc.perform(get(PATH).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+    fun `즐겨찾기 경로에 노출되지 않은 메서드일 때__유효한 토큰으로 요청하면__의존성 전에 거부한다`() {
+        // given
+        val request = get(PATH).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -212,32 +226,38 @@ class NoteFavoriteHttpTest {
     }
 
     @Test
-    fun givenAdminCountOutsideFavoriteAdvice__whenUserOrAdminRequestsWithSpoofedRole__thenKeepRole403AndCommon500() {
-        whenever(counts.count()).thenThrow(IllegalStateException("private-count"))
-        mvc.perform(
+    fun `즐겨찾기 어드바이스 밖의 관리자 집계일 때__사용자나 위조 역할 관리자가 요청하면__403과 공통 500을 유지한다`() {
+        // given
+        every { counts.count() } throws IllegalStateException("private-count")
+
+        // when
+        val forbidden = mvc.perform(
             get(ADMIN_COUNT)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .header("X-User-Role", "ROLE_ADMIN"),
         )
+        val failed = mvc.perform(get(ADMIN_COUNT).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+
+        // then
+        forbidden
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        mvc.perform(get(ADMIN_COUNT).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+        failed
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(counts).count()
-        verifyNoMoreInteractions(counts)
-        verifyNoInteractions(members, mutation, clock)
+        verify(exactly = 1) { counts.count() }
+        confirmVerified(counts, members, mutation, clock)
         cleared()
     }
 
     private fun noDependencies() {
-        verifyNoInteractions(members, mutation, clock, counts)
+        confirmVerified(members, mutation, clock, counts)
         cleared()
     }
 
