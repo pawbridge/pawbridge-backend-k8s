@@ -11,17 +11,16 @@ import feign.Client
 import feign.Request
 import feign.Response
 import feign.form.FormData
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.orm.jpa.JpaTransactionManager
@@ -30,7 +29,9 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 
 class PythonLostSearchClientTest {
-    private val transport: Client = mock(Client::class.java)
+    private val transport = mockk<Client>()
+    private val repository = mockk<AnimalRepository>()
+    private val manager = mockk<JpaTransactionManager>()
     private val mapper = ObjectMapper()
 
     private fun client(): PythonLostSearchClient {
@@ -59,69 +60,78 @@ class PythonLostSearchClientTest {
     }
 
     @Test
-    fun original_multipart_parts_key_and_timeouts_are_preserved_without_spring_cloud_or_network() {
-        `when`(transport.execute(any(), any())).thenAnswer { invocation ->
-            val request: Request = invocation.getArgument(0)
-            val options: Request.Options = invocation.getArgument(1)
-            assertThat(request.httpMethod()).isEqualTo(Request.HttpMethod.POST)
-            assertThat(request.url()).isEqualTo("http://synthetic.invalid/internal/animals/lost-candidates")
-            assertThat(request.headers()["X-Internal-Api-Key"]).containsExactly(KEY)
-            assertThat(request.headers()["Content-Type"]!!.iterator().next())
-                .startsWith("multipart/form-data; charset=UTF-8; boundary=")
-            val body = String(request.body(), StandardCharsets.UTF_8)
-            assertThat(body).contains(
-                "name=\"image\"; filename=\"photo\"", "Content-Type: application/octet-stream", "image-bytes",
-                "name=\"species\"", "DOG", "name=\"lostDate\"", "2026-10-20", "name=\"region\"", "서울",
-                "name=\"description\"", "귀가 접힌 강아지", "name=\"includeAdoptedOrReturned\"", "true",
-            ).doesNotContain(KEY)
-            assertThat(options.connectTimeoutMillis()).isEqualTo(3000)
-            assertThat(options.readTimeoutMillis()).isEqualTo(45000)
-            assertThat(options.isFollowRedirects).isFalse()
+    fun `모든 선택 값이 있을 때__검색하면__멀티파트 파트와 키와 타임아웃을 원래대로 보내고 후보를 읽는다`() {
+        // given
+        every { transport.execute(any(), any()) } answers {
             reply(
-                request,
+                firstArg(),
                 200,
                 "{\"candidates\":[{\"animalId\":7,\"imageScore\":0.9,\"matchedEvidence\":[\"FOUND_ON_OR_AFTER_LOST_DATE\"]}]}",
             )
         }
 
+        // when
         val result = search()!!
 
+        // then
+        val request = slot<Request>()
+        val options = slot<Request.Options>()
+        verify(exactly = 1) { transport.execute(capture(request), capture(options)) }
+        assertThat(request.captured.httpMethod()).isEqualTo(Request.HttpMethod.POST)
+        assertThat(request.captured.url()).isEqualTo("http://synthetic.invalid/internal/animals/lost-candidates")
+        assertThat(request.captured.headers()["X-Internal-Api-Key"]).containsExactly(KEY)
+        assertThat(request.captured.headers()["Content-Type"]!!.iterator().next())
+            .startsWith("multipart/form-data; charset=UTF-8; boundary=")
+        val body = String(request.captured.body(), StandardCharsets.UTF_8)
+        assertThat(body).contains(
+            "name=\"image\"; filename=\"photo\"", "Content-Type: application/octet-stream", "image-bytes",
+            "name=\"species\"", "DOG", "name=\"lostDate\"", "2026-10-20", "name=\"region\"", "서울",
+            "name=\"description\"", "귀가 접힌 강아지", "name=\"includeAdoptedOrReturned\"", "true",
+        ).doesNotContain(KEY)
+        assertThat(options.captured.connectTimeoutMillis()).isEqualTo(3000)
+        assertThat(options.captured.readTimeoutMillis()).isEqualTo(45000)
+        assertThat(options.captured.isFollowRedirects).isFalse()
         assertThat(result.candidates).hasSize(1)
         assertThat(result.candidates!!.first()!!.animalId).isEqualTo(7L)
-        verify(transport, times(1)).execute(any(), any())
     }
 
     @Test
-    fun null_optional_parts_are_omitted_and_false_remains_an_explicit_part() {
-        `when`(transport.execute(any(), any())).thenAnswer { invocation ->
-            val request: Request = invocation.getArgument(0)
-            val body = String(request.body(), StandardCharsets.UTF_8)
-            assertThat(body).doesNotContain("name=\"lostDate\"", "name=\"region\"", "name=\"description\"", "null")
-            assertThat(body).contains("name=\"includeAdoptedOrReturned\"", "false")
-            reply(request, 200, "{\"candidates\":[]}")
-        }
+    fun `선택 값이 없을 때__검색하면__널 선택 파트는 빼고 false는 명시적 파트로 남긴다`() {
+        // given
+        every { transport.execute(any(), any()) } answers { reply(firstArg(), 200, "{\"candidates\":[]}") }
 
-        assertThat(
-            client().search(
-                KEY,
-                FormData("application/octet-stream", "photo", byteArrayOf(1)),
-                "CAT",
-                null,
-                null,
-                null,
-                false,
-            )!!.candidates,
-        ).isEmpty()
+        // when
+        val result = client().search(
+            KEY,
+            FormData("application/octet-stream", "photo", byteArrayOf(1)),
+            "CAT",
+            null,
+            null,
+            null,
+            false,
+        )
+
+        // then
+        val request = slot<Request>()
+        verify(exactly = 1) { transport.execute(capture(request), any()) }
+        val body = String(request.captured.body(), StandardCharsets.UTF_8)
+        assertThat(body).doesNotContain("name=\"lostDate\"", "name=\"region\"", "name=\"description\"", "null")
+        assertThat(body).contains("name=\"includeAdoptedOrReturned\"", "false")
+        assertThat(result!!.candidates).isEmpty()
     }
 
     @ParameterizedTest
     @ValueSource(ints = [400, 422, 413, 503])
-    fun non_success_status_is_classified_by_service_without_logging_internal_key(status: Int) {
-        `when`(transport.execute(any(), any())).thenAnswer { invocation ->
-            reply(invocation.getArgument(0), status, KEY)
-        }
+    fun `성공이 아닌 상태 코드일 때__검색하면__서비스가 상태를 분류하고 내부 키를 로그에 남기지 않는다`(status: Int) {
+        // given
+        every { transport.execute(any(), any()) } answers { reply(firstArg(), status, KEY) }
 
+        // when
+        val outcome = searchThroughService()
+
+        // then
         assertSanitizedServiceFailure(
+            outcome,
             if (status == 413) {
                 413
             } else if (status == 400 || status == 422) {
@@ -130,56 +140,65 @@ class PythonLostSearchClientTest {
                 503
             },
         )
-
-        verify(transport, times(1)).execute(any(), any())
+        verify(exactly = 1) { transport.execute(any(), any()) }
     }
 
     @Test
-    fun malformed_json_is_503_and_never_exposes_decoder_body_or_key() {
-        `when`(transport.execute(any(), any())).thenAnswer { invocation ->
-            reply(invocation.getArgument(0), 200, KEY)
-        }
+    fun `깨진 JSON이 돌아올 때__검색하면__503이고 디코더 본문이나 키를 노출하지 않는다`() {
+        // given
+        every { transport.execute(any(), any()) } answers { reply(firstArg(), 200, KEY) }
 
-        assertSanitizedServiceFailure(503)
+        // when
+        val outcome = searchThroughService()
 
-        verify(transport, times(1)).execute(any(), any())
+        // then
+        assertSanitizedServiceFailure(outcome, 503)
+        verify(exactly = 1) { transport.execute(any(), any()) }
     }
 
     @Test
-    fun io_failure_is_not_retried_and_is_sanitized_as_503() {
-        `when`(transport.execute(any(), any())).thenThrow(IOException(KEY))
+    fun `전송이 IO 오류로 실패할 때__검색하면__재시도 없이 503으로 가려서 돌려준다`() {
+        // given
+        every { transport.execute(any(), any()) } throws IOException(KEY)
 
-        assertSanitizedServiceFailure(503)
+        // when
+        val outcome = searchThroughService()
 
-        verify(transport, times(1)).execute(any(), any())
+        // then
+        assertSanitizedServiceFailure(outcome, 503)
+        verify(exactly = 1) { transport.execute(any(), any()) }
     }
 
-    private fun assertSanitizedServiceFailure(status: Int) {
+    private class Outcome(val failure: Throwable?, val logged: List<String>)
+
+    private fun searchThroughService(): Outcome {
         val log = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val events = ListAppender<ILoggingEvent>()
         events.start()
         log.addAppender(events)
-        val repository = mock(AnimalRepository::class.java)
-        val manager = mock(JpaTransactionManager::class.java)
         try {
             val service = LostSearchService(client(), repository, AnimalMapper(), KEY, manager)
             val request = LostSearchRequest()
             request.species = Species.DOG
             request.image = MockMultipartFile("image", byteArrayOf(1))
 
-            assertThatThrownBy { service.search(request) }
-                .isInstanceOfSatisfying(ResponseStatusException::class.java) { error ->
-                    assertThat(error.statusCode.value()).isEqualTo(status)
-                    assertThat(error.cause).isNull()
-                    assertThat(error.toString()).doesNotContain(KEY)
-                }
+            val failure = catchThrowable { service.search(request) }
 
-            assertThat(events.list).noneMatch { event -> event.formattedMessage.contains(KEY) }
-            verifyNoInteractions(repository, manager)
+            return Outcome(failure, events.list.map { event -> event.formattedMessage })
         } finally {
             log.detachAppender(events)
             events.stop()
         }
+    }
+
+    private fun assertSanitizedServiceFailure(outcome: Outcome, status: Int) {
+        assertThat(outcome.failure).isInstanceOfSatisfying(ResponseStatusException::class.java) { error ->
+            assertThat(error.statusCode.value()).isEqualTo(status)
+            assertThat(error.cause).isNull()
+            assertThat(error.toString()).doesNotContain(KEY)
+        }
+        assertThat(outcome.logged).noneMatch { message -> message.contains(KEY) }
+        confirmVerified(repository, manager)
     }
 
     companion object {
