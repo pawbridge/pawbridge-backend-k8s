@@ -2,14 +2,14 @@ package com.pawbridge.backend.community.internal.report.infrastructure
 
 import com.pawbridge.backend.community.internal.post.application.PostMediaRemover
 import com.pawbridge.backend.community.internal.post.application.PostUpload
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when` as whenever
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
@@ -18,61 +18,79 @@ import java.io.ByteArrayInputStream
 
 class S3AnimalReportMediaUploaderTest {
     @Test
-    fun given__second_upload_failure__when__uploading_reports__then__delete_only_prior_report_urls_and_keep_report_folder() {
-        val s3 = mock(S3Client::class.java)
-        val remover = mock(PostMediaRemover::class.java)
+    fun `두 번째 업로드가 실패할 때__신고 사진을 올리면__앞서 올린 신고 URL만 지우고 신고 폴더는 남긴다`() {
+        // given
+        val s3 = mockk<S3Client>()
+        val remover = mockk<PostMediaRemover>()
         val keys = ArrayList<String>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { call ->
-            val request = call.getArgument<PutObjectRequest>(0)
+        val uploads = S3AnimalReportMediaUploader(s3, "fixture-bucket", "https://fixture.invalid/", "owned/", remover)
+        val photo = PostUpload("one.png", "image/png", 3, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1, 2, 3)) })
+
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } answers {
+            val request = firstArg<PutObjectRequest>()
             keys.add(request.key())
             if (keys.size == 2) {
                 throw IllegalStateException("private-storage")
             }
-            val body = call.getArgument<RequestBody>(1)
+            val body = secondArg<RequestBody>()
             assertThat(body.contentStreamProvider().newStream().readAllBytes()).containsExactly(1, 2, 3)
             assertThat(body.contentStreamProvider().newStream().readAllBytes()).containsExactly(1, 2, 3)
             PutObjectResponse.builder().build()
         }
-        val uploads = S3AnimalReportMediaUploader(s3, "fixture-bucket", "https://fixture.invalid/", "owned/", remover)
-        val photo = PostUpload("one.png", "image/png", 3, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1, 2, 3)) })
+        justRun { remover.remove(any()) }
 
-        assertThatThrownBy { uploads.upload(listOf(photo, photo)) }
+        // when
+        val thrown = assertThatThrownBy { uploads.upload(listOf(photo, photo)) }
+
+        // then
+        thrown
             .isInstanceOf(RuntimeException::class.java)
             .hasMessage("파일 업로드 중 오류가 발생했습니다")
         assertThat(keys).hasSize(2).allSatisfy({ key ->
             assertThat(key).startsWith("owned/reports/images/").endsWith(".png")
         })
-        verify(remover).remove(listOf("https://fixture.invalid/" + keys.first()))
+        verify(exactly = 1) { remover.remove(listOf("https://fixture.invalid/" + keys.first())) }
+        confirmVerified(remover)
     }
 
     @Test
-    fun given__no_photos__when__uploading__then__no_external_io() {
-        val s3 = mock(S3Client::class.java)
-        val remover = mock(PostMediaRemover::class.java)
+    fun `올릴 사진이 없을 때__업로드하면__외부 입출력을 하지 않는다`() {
+        // given
+        val s3 = mockk<S3Client>()
+        val remover = mockk<PostMediaRemover>()
         val uploads = S3AnimalReportMediaUploader(s3, "fixture", "https://fixture.invalid", "", remover)
 
-        assertThat(uploads.upload(null)).isEmpty()
-        assertThat(uploads.upload(listOf())).isEmpty()
-        verifyNoInteractions(s3, remover)
+        // when
+        val fromNull = uploads.upload(null)
+        val fromEmpty = uploads.upload(listOf())
+
+        // then
+        assertThat(fromNull).isEmpty()
+        assertThat(fromEmpty).isEmpty()
+        confirmVerified(s3, remover)
     }
 
     @Test
-    fun given__empty_prefix__when__uploading_report_photo__then__key_is_at_bucket_root_and_url_matches_legacy_format() {
-        val s3 = mock(S3Client::class.java)
-        val remover = mock(PostMediaRemover::class.java)
+    fun `접두사가 비어 있을 때__신고 사진을 올리면__키는 버킷 루트에 놓이고 URL은 기존 형식과 같다`() {
+        // given
+        val s3 = mockk<S3Client>()
+        val remover = mockk<PostMediaRemover>()
         val keys = ArrayList<String>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { call ->
-            val request = call.getArgument<PutObjectRequest>(0)
-            keys.add(request.key())
-            PutObjectResponse.builder().build()
-        }
         val uploads = S3AnimalReportMediaUploader(s3, "fixture-bucket", "https://fixture.invalid///", "", remover)
         val photo = PostUpload("one.png", "image/png", 3, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1, 2, 3)) })
 
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } answers {
+            val request = firstArg<PutObjectRequest>()
+            keys.add(request.key())
+            PutObjectResponse.builder().build()
+        }
+
+        // when
         val urls = uploads.upload(listOf(photo))
 
+        // then
         assertThat(keys).singleElement().asString().matches("reports/images/[0-9a-f-]{36}\\.png")
         assertThat(urls).containsExactly("https://fixture.invalid/" + keys.first())
-        verifyNoInteractions(remover)
+        confirmVerified(remover)
     }
 }

@@ -6,20 +6,14 @@ import com.pawbridge.backend.community.internal.post.application.PostSnapshot
 import com.pawbridge.backend.community.internal.post.application.UnsupportedPostCharactersException
 import com.pawbridge.backend.community.internal.post.domain.PostBoardType
 import com.pawbridge.backend.community.internal.post.domain.PostToCreate
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.dao.DataAccessResourceFailureException
@@ -27,85 +21,51 @@ import org.springframework.jdbc.core.JdbcOperations
 import org.springframework.jdbc.core.PreparedStatementCreator
 import org.springframework.jdbc.core.ResultSetExtractor
 import org.springframework.transaction.TransactionSystemException
-import org.springframework.transaction.support.SimpleTransactionStatus
-import org.springframework.transaction.support.TransactionCallback
-import org.springframework.transaction.support.TransactionOperations
-import java.sql.Connection
-import java.sql.PreparedStatement
-import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.util.Calendar
 
 class JdbcPostWriterTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val transactions = mock(TransactionOperations::class.java)
-    private val connection = mock(Connection::class.java)
-    private val result = mock(ResultSet::class.java)
+    private val jdbc = mockk<JdbcOperations>()
+    private val transactions = FakeTransactions()
+    private val calls = ArrayList<StatementCall>()
+    private val connection = recordingConnection(calls) { assertTrue(transactions.active) }
+    private val row = FakeRow()
     private val mapper = ObjectMapper()
     private val clock = Clock.fixed(Instant.parse("2026-10-18T03:30:10.123456789Z"), ZoneId.of("Asia/Seoul"))
-    private val calls = ArrayList<StatementCall>()
-    private var transactionActive = false
     private var failAtStatement = 0
     private val writeFailure: RuntimeException = DataAccessResourceFailureException("synthetic write failure")
 
-    @BeforeEach
-    fun prepareTransactionAndJdbc() {
-        whenever(transactions.execute(any<TransactionCallback<PostSnapshot>>())).thenAnswer { invocation ->
-            val callback = invocation.getArgument<TransactionCallback<PostSnapshot>>(0)
-            transactionActive = true
-            try {
-                callback.doInTransaction(SimpleTransactionStatus())
-            } finally {
-                transactionActive = false
+    @Test
+    fun `게시글과 미디어가 있을 때__저장하면__식별자와 JSON과 가중 검색 투영이 아웃박스 없이 한 트랜잭션을 공유한다`() {
+        // given
+        row.longs["post_id"] = 42L
+
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (failAtStatement == calls.size) {
+                throw writeFailure
             }
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
         }
-        whenever(connection.prepareStatement(anyString())).thenAnswer { invocation ->
-            assertTrue(transactionActive)
-            val call = StatementCall(invocation.getArgument(0))
-            calls.add(call)
-            val statement = mock(PreparedStatement::class.java)
-            doAnswer { binding ->
-                call.values[binding.getArgument(0)] = binding.getArgument(1)
-                null
-            }.`when`(statement).setObject(anyInt(), any())
-            doAnswer { binding ->
-                call.values[binding.getArgument(0)] = binding.getArgument(1)
-                call.calendars[binding.getArgument(0)] = binding.getArgument(2)
-                null
-            }.`when`(statement).setTimestamp(anyInt(), any(Timestamp::class.java), any(Calendar::class.java))
-            statement
-        }
-        whenever(result.next()).thenReturn(true)
-        whenever(result.getLong("post_id")).thenReturn(42L)
-        whenever(jdbc.query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>()))
-            .thenAnswer { invocation ->
-                invocation.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
-                if (failAtStatement == calls.size) {
-                    throw writeFailure
-                }
-                invocation.getArgument<ResultSetExtractor<*>>(1).extractData(result)
-            }
-        whenever(jdbc.update(any(PreparedStatementCreator::class.java))).thenAnswer { invocation ->
-            invocation.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
             if (failAtStatement == calls.size) {
                 throw writeFailure
             }
             1
         }
-    }
 
-    @Test
-    fun given__post_and_media__when__write__then__identity_json_and_weighted_projection_share_transaction_without_outbox() {
+        // when
         val post: PostSnapshot
         writer().use { writer ->
             post = writer.create(input())
         }
 
-        assertFalse(transactionActive)
+        // then
+        assertFalse(transactions.active)
         assertEquals(2, calls.size)
         assertTrue(calls.stream().noneMatch { call -> call.sql.contains("outbox_events") })
         val source = calls[0]
@@ -148,40 +108,73 @@ class JdbcPostWriterTest {
     }
 
     @Test
-    fun given__search_failure__when__write__then__failure_reaches_transaction_without_returning_success() {
+    fun `검색 문서 저장이 실패할 때__저장하면__성공을 돌려주지 않고 예외를 트랜잭션까지 전달한다`() {
+        // given
         failAtStatement = 2
+        row.longs["post_id"] = 42L
+
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (failAtStatement == calls.size) {
+                throw writeFailure
+            }
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (failAtStatement == calls.size) {
+                throw writeFailure
+            }
+            1
+        }
+
+        // when
         writer().use { writer ->
-            assertSame(writeFailure, assertThrows(RuntimeException::class.java) { writer.create(input()) })
+            val thrown = assertThrows(RuntimeException::class.java) { writer.create(input()) }
+
+            // then
+            assertSame(writeFailure, thrown)
         }
         assertEquals(2, calls.size)
-        assertFalse(transactionActive)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__commit_charset_failure__when__write__then__only_named_community_constraint_becomes_user_error() {
+    fun `커밋에서 문자셋 검사가 실패할 때__저장하면__이름이 맞는 커뮤니티 제약만 사용자 오류로 바꾼다`() {
+        // given
         val failure = TransactionSystemException(
             "commit",
             charset("23514", "pawbridge_community", "ck_rollback_charset_posts"),
         )
-        doThrow(failure).`when`(transactions).execute(any<TransactionCallback<PostSnapshot>>())
+        transactions.failureBeforeCallback = failure
+
+        // when
         writer().use { writer ->
             val translated = assertThrows(UnsupportedPostCharactersException::class.java) {
                 writer.create(input())
             }
+
+            // then
             assertSame(failure, translated.cause)
             assertEquals("일부 이모지 등 지원하지 않는 문자를 제외해 주세요.", translated.message)
         }
     }
 
     @Test
-    fun given__unrelated_check_failure_at_commit__when__write__then__original_failure_is_not_a_user_error() {
+    fun `커밋에서 관련 없는 검사 제약이 실패할 때__저장하면__원래 예외를 사용자 오류로 바꾸지 않는다`() {
+        // given
         val failure = TransactionSystemException(
             "commit",
             charset("23514", "pawbridge_community", "business_constraint"),
         )
-        doThrow(failure).`when`(transactions).execute(any<TransactionCallback<PostSnapshot>>())
+        transactions.failureBeforeCallback = failure
+
+        // when
         writer().use { writer ->
-            assertSame(failure, assertThrows(TransactionSystemException::class.java) { writer.create(input()) })
+            val thrown = assertThrows(TransactionSystemException::class.java) { writer.create(input()) }
+
+            // then
+            assertSame(failure, thrown)
         }
     }
 
@@ -202,9 +195,4 @@ class JdbcPostWriterTest {
                 "SERROR\u0000C" + state + "\u0000Msynthetic\u0000s" + schema + "\u0000n" + constraint + "\u0000",
             ),
         )
-
-    private class StatementCall(val sql: String) {
-        val values = LinkedHashMap<Int, Any?>()
-        val calendars = LinkedHashMap<Int, Calendar>()
-    }
 }

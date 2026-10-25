@@ -1,6 +1,8 @@
 package com.pawbridge.backend.community.internal.note.infrastructure
 
 import com.pawbridge.backend.community.internal.note.application.NoteNotificationReader.Row
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -11,8 +13,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -34,19 +34,25 @@ class JdbcNoteNotificationReaderTest {
 
     @ParameterizedTest
     @MethodSource("cursors")
-    fun given__optional_cursor_and_nullable_four_column_rows__when__listing_then_counting_unread__then__bind_owner_scoped_cursor_and_same_instant_in_separate_read_only_transactions(
+    fun `선택적 커서와 null 가능한 행이 있을 때__목록을 읽은 뒤 안 읽은 수를 세면__소유자 범위 커서와 같은 시각을 별도 읽기 전용 트랜잭션으로 바인딩한다`(
         cursor: UUID?,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows = listOf(
             Row(UUID(1L, 2L), Long.MAX_VALUE, NOW, NOW.minusSeconds(1)),
             Row(UUID(1L, 1L), null, Instant.parse("1969-12-31T23:59:59.000001Z"), null),
         )
 
-        assertEquals(fixture.jdbc.rows, fixture.reader.read(7L, cursor, NOW))
-        assertFalse(fixture.transactions.active)
-        assertEquals(5_000_000_000L, fixture.reader.unread(7L, NOW))
+        // when
+        val listed = fixture.reader.read(7L, cursor, NOW)
+        val activeAfterRead = fixture.transactions.active
+        val unread = fixture.reader.unread(7L, NOW)
 
+        // then
+        assertEquals(fixture.jdbc.rows, listed)
+        assertFalse(activeAfterRead)
+        assertEquals(5_000_000_000L, unread)
         assertEquals(listOf("begin", "list", "commit", "begin", "unread", "commit"), fixture.events)
         assertEquals(2, fixture.jdbc.calls.size)
         val page = fixture.jdbc.calls[0]
@@ -84,12 +90,15 @@ class JdbcNoteNotificationReaderTest {
     }
 
     @Test
-    fun given__null_unread_result__when__counting__then__fail_without_zero_fallback() {
+    fun `안 읽은 수 결과가 null일 때__개수를 세면__0으로 대체하지 않고 실패한다`() {
+        // given
         val fixture = Fixture()
         fixture.jdbc.count = null
 
+        // when
         assertThrows(NullPointerException::class.java) { fixture.reader.unread(7L, NOW) }
 
+        // then
         assertEquals(listOf("begin", "unread", "commit"), fixture.events)
         assertEquals(1, fixture.jdbc.calls.size)
         assertFalse(fixture.transactions.active)
@@ -97,10 +106,11 @@ class JdbcNoteNotificationReaderTest {
 
     @ParameterizedTest
     @MethodSource("representativeFailures")
-    fun given__begin_query_or_commit_failure_then_recovery__when__reading__then__propagate_same_failure_without_empty_zero_or_user_wrapping(
+    fun `시작 질의 또는 커밋 실패 뒤 복구될 때__알림을 읽으면__빈 값이나 0이나 사용자 예외 감싸기 없이 같은 예외를 전파한다`(
         operation: Operation,
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("private begin")
@@ -113,8 +123,11 @@ class JdbcNoteNotificationReaderTest {
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { invoke(fixture.reader, operation) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { invoke(fixture.reader, operation) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.calls.size)
         assertEquals(if (phase == FailurePhase.QUERY) 1 else 0, fixture.transactions.rollbacks)
         assertFalse(fixture.transactions.active)
@@ -122,9 +135,13 @@ class JdbcNoteNotificationReaderTest {
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
 
+        // when
+        val recovered = invoke(fixture.reader, operation)
+
+        // then
         assertEquals(
             if (operation == Operation.LIST) fixture.jdbc.rows else fixture.jdbc.count,
-            invoke(fixture.reader, operation),
+            recovered,
         )
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.calls.size)
         assertFalse(fixture.transactions.active)
@@ -165,13 +182,13 @@ class JdbcNoteNotificationReaderTest {
             val result = ArrayList<T>()
             for (index in rows.indices) {
                 val value = rows[index]
-                val row = mock(ResultSet::class.java)
+                val row = mockk<ResultSet>()
                 try {
-                    whenever(row.getObject("note_id", UUID::class.java)).thenReturn(value.noteId)
-                    whenever(row.getObject("sender_id")).thenReturn(value.senderId)
-                    whenever(row.getTimestamp("created_at")).thenReturn(Timestamp.from(value.createdAt))
-                    whenever(row.getTimestamp("read_at"))
-                        .thenReturn(if (value.readAt == null) null else Timestamp.from(value.readAt))
+                    every { row.getObject("note_id", UUID::class.java) } returns value.noteId
+                    every { row.getObject("sender_id") } returns value.senderId
+                    every { row.getTimestamp("created_at") } returns Timestamp.from(value.createdAt)
+                    every { row.getTimestamp("read_at") } returns
+                        (if (value.readAt == null) null else Timestamp.from(value.readAt))
                     result.add(rowMapper.mapRow(row, index) as T)
                 } catch (exception: SQLException) {
                     throw AssertionError(exception)

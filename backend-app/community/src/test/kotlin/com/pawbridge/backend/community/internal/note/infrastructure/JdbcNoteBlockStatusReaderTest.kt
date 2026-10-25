@@ -1,5 +1,7 @@
 package com.pawbridge.backend.community.internal.note.infrastructure
 
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -10,8 +12,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -28,15 +28,19 @@ import java.sql.SQLException
 class JdbcNoteBlockStatusReaderTest {
     @ParameterizedTest
     @ValueSource(ints = [1, 100])
-    fun given__bounded_author_ids__when__reading__then__bind_owner_and_each_id_and_map_raw_longs_inside_supplied_read_only_transaction(
+    fun `작성자 ID가 상한 안에 있을 때__차단된 작성자를 읽으면__소유자와 각 ID를 바인딩하고 읽기 전용 트랜잭션 안에서 원시 long으로 매핑한다`(
         size: Int,
     ) {
+        // given
         val fixture = Fixture()
         val ids = (0L until size.toLong()).map { index -> if (index == 0L) Long.MAX_VALUE else 1000 - index }
         fixture.jdbc.rows = listOf(Long.MAX_VALUE)
 
-        assertEquals(listOf(Long.MAX_VALUE), fixture.reader.blockedAuthors(7L, ids))
+        // when
+        val authors = fixture.reader.blockedAuthors(7L, ids)
 
+        // then
+        assertEquals(listOf(Long.MAX_VALUE), authors)
         val parameters = arrayOfNulls<Any?>(size + 1)
         parameters[0] = 7L
         for (index in 0 until size) {
@@ -50,12 +54,16 @@ class JdbcNoteBlockStatusReaderTest {
     }
 
     @Test
-    fun given__no_outgoing_matches__when__reading__then__return_empty_result_after_successful_query_and_commit() {
+    fun `나가는 차단과 일치하는 행이 없을 때__차단된 작성자를 읽으면__질의와 커밋이 성공한 뒤 빈 결과를 돌려준다`() {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows = listOf()
 
-        assertEquals(listOf<Long>(), fixture.reader.blockedAuthors(7L, listOf(8L)))
+        // when
+        val authors = fixture.reader.blockedAuthors(7L, listOf(8L))
 
+        // then
+        assertEquals(listOf<Long>(), authors)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
@@ -63,9 +71,10 @@ class JdbcNoteBlockStatusReaderTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__block_query_or_transaction_failure_then_recovery__when__reading__then__propagate_same_failure_without_empty_fallback_or_user_wrapping(
+    fun `차단 질의 또는 트랜잭션이 실패했다가 복구될 때__차단된 작성자를 읽으면__빈 결과로 대체하거나 감싸지 않고 같은 예외를 전파한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic-private-begin")
@@ -79,18 +88,22 @@ class JdbcNoteBlockStatusReaderTest {
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) { fixture.reader.blockedAuthors(7L, listOf(8L)) },
-        )
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.reader.blockedAuthors(7L, listOf(8L)) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.queries)
         assertFalse(fixture.transactions.active)
         fixture.transactions.startFailure = null
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
 
-        assertEquals(listOf(8L), fixture.reader.blockedAuthors(7L, listOf(8L)))
+        // when
+        val recovered = fixture.reader.blockedAuthors(7L, listOf(8L))
+
+        // then
+        assertEquals(listOf(8L), recovered)
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.queries)
         assertFalse(fixture.transactions.active)
     }
@@ -128,9 +141,9 @@ class JdbcNoteBlockStatusReaderTest {
             }
             val result = ArrayList<T>()
             for (index in rows.indices) {
-                val row = mock(ResultSet::class.java)
+                val row = mockk<ResultSet>()
                 try {
-                    whenever(row.getLong("blocked_id")).thenReturn(rows[index])
+                    every { row.getLong("blocked_id") } returns rows[index]
                     result.add(rowMapper.mapRow(row, index) as T)
                 } catch (exception: SQLException) {
                     throw AssertionError(exception)

@@ -2,7 +2,10 @@ package com.pawbridge.backend.community.internal.post.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.community.internal.post.infrastructure.search.KoreanSearchTerms
-import com.pawbridge.backend.community.support.anyVarargs
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -14,30 +17,20 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doReturn
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.jdbc.core.JdbcOperations
 import org.springframework.jdbc.core.PreparedStatementCreator
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionCallback
 import org.springframework.transaction.support.TransactionOperations
 import org.springframework.transaction.support.TransactionSynchronizationManager
-import java.sql.Connection
-import java.sql.PreparedStatement
 
 class JdbcPostSearchRebuildTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val connection = mock(Connection::class.java)
+    private val jdbc = mockk<JdbcOperations>()
     private val events = ArrayList<String>()
-    private val bindings = ArrayList<MutableList<Any?>>()
+    private val calls = ArrayList<StatementCall>()
+    private val connection = recordingConnection(calls) {
+        assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+    }
     private val failure: RuntimeException = IllegalStateException("synthetic recovery failure")
     private var failAt: String? = null
     private var markActual = true
@@ -68,41 +61,6 @@ class JdbcPostSearchRebuildTest {
         }
         writer = JdbcPostWriter(jdbc, transaction, ObjectMapper())
         rebuild = JdbcPostSearchRebuild(jdbc, transaction, writer)
-        whenever(jdbc.queryForList(anyString(), *anyVarargs())).thenAnswer { call ->
-            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
-            events.add("query")
-            assertEquals(KoreanSearchTerms.VERSION, call.getArgument<Any>(1))
-            val limit: Int = call.getArgument(2)
-            val sql: String = call.getArgument(0)
-            assertTrue(sql.contains("p.deleted_at IS NULL"))
-            assertTrue(sql.contains("d.post_id IS NULL OR d.title_hash<>md5(p.title)"))
-            assertTrue(sql.contains("d.content_hash<>md5(p.content) OR d.analyzer_version<>?"))
-            assertTrue(sql.contains("ORDER BY p.post_id LIMIT ? FOR UPDATE OF p SKIP LOCKED"))
-            if ("query" == failAt) {
-                throw failure
-            }
-            if (limit == 1) listOf(row(2)) else listOf(row(2), row(8))
-        }
-        whenever(connection.prepareStatement(anyString())).thenAnswer { call ->
-            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
-            assertTrue(call.getArgument<String>(0).contains("ON CONFLICT (post_id) DO UPDATE"))
-            val values: MutableList<Any?> = MutableList(6) { null }
-            bindings.add(values)
-            val statement = mock(PreparedStatement::class.java)
-            doAnswer { binding ->
-                values[binding.getArgument<Int>(0) - 1] = binding.getArgument(1)
-                null
-            }.`when`(statement).setObject(anyInt(), any())
-            statement
-        }
-        whenever(jdbc.update(any(PreparedStatementCreator::class.java))).thenAnswer { call ->
-            events.add("upsert")
-            call.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
-            if ("upsert" == failAt) {
-                throw failure
-            }
-            1
-        }
     }
 
     @AfterEach
@@ -112,20 +70,52 @@ class JdbcPostSearchRebuildTest {
 
     @ParameterizedTest
     @CsvSource("1,1", "100,2")
-    fun given__bounded_missing_or_stale_documents__when__recovering__then__use_one_transaction_and_the_existing_weighted_upsert_and_analyzer(
+    fun `범위가 제한된 누락 또는 오래된 문서일 때__복구하면__한 트랜잭션에서 기존 가중 업서트와 분석기를 쓴다`(
         limit: Int,
         count: Int,
     ) {
-        assertEquals(count, rebuild.rebuildPage(limit))
-        assertEquals(count, bindings.size)
+        // given
+        every { jdbc.queryForList(any<String>(), *anyVararg()) } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("query")
+            val bound = args[1] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            val limit = bound[1] as Int
+            val sql = firstArg<String>()
+            assertTrue(sql.contains("p.deleted_at IS NULL"))
+            assertTrue(sql.contains("d.post_id IS NULL OR d.title_hash<>md5(p.title)"))
+            assertTrue(sql.contains("d.content_hash<>md5(p.content) OR d.analyzer_version<>?"))
+            assertTrue(sql.contains("ORDER BY p.post_id LIMIT ? FOR UPDATE OF p SKIP LOCKED"))
+            if ("query" == failAt) {
+                throw failure
+            }
+            if (limit == 1) listOf(row(2)) else listOf(row(2), row(8))
+        }
+
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            events.add("upsert")
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if ("upsert" == failAt) {
+                throw failure
+            }
+            1
+        }
+
+        // when
+        val rebuilt = rebuild.rebuildPage(limit)
+
+        // then
+        assertEquals(count, rebuilt)
+        assertEquals(count, calls.size)
+        assertTrue(calls.all { it.sql.contains("ON CONFLICT (post_id) DO UPDATE") })
         for (index in 0 until count) {
-            val values = bindings[index]
-            assertEquals(if (index == 0) 2L else 8L, values[0])
-            assertEquals("유기 동물", values[1])
-            assertEquals("보호소 소식", values[2])
-            assertEquals(KoreanSearchTerms.VERSION, values[3])
-            assertFalse((values[4] as String).isBlank())
+            val values = calls[index].values
+            assertEquals(if (index == 0) 2L else 8L, values[1])
+            assertEquals("유기 동물", values[2])
+            assertEquals("보호소 소식", values[3])
+            assertEquals(KoreanSearchTerms.VERSION, values[4])
             assertFalse((values[5] as String).isBlank())
+            assertFalse((values[6] as String).isBlank())
         }
         assertEquals("begin", events.first())
         assertEquals("query", events[1])
@@ -135,38 +125,85 @@ class JdbcPostSearchRebuildTest {
 
     @ParameterizedTest
     @ValueSource(ints = [0, 101])
-    fun given__an_out_of_range_page__when__recovering__then__enter_the_transaction_but_execute_no_sql(limit: Int) {
-        assertThrows(IllegalArgumentException::class.java) { rebuild.rebuildPage(limit) }
+    fun `범위를 벗어난 페이지일 때__복구하면__트랜잭션에는 들어가지만 SQL은 실행하지 않는다`(limit: Int) {
+        // given
+        val outOfRange = limit
+
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { rebuild.rebuildPage(outOfRange) }
+
+        // then
+        assertEquals(IllegalArgumentException::class.java, thrown.javaClass)
         assertEquals(listOf("begin", "failure"), events)
-        verifyNoInteractions(jdbc)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__a_transaction_operation_without_an_actual_transaction__when__recovering_an_invalid_limit__then__reject_the_resource_boundary_first() {
+    fun `실제 트랜잭션이 없는 트랜잭션 연산일 때__잘못된 한계로 복구하면__자원 경계 검사를 먼저 거부한다`() {
+        // given
         markActual = false
 
-        assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(0) }
-        verifyNoInteractions(jdbc)
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(0) }
+
+        // then
+        assertEquals(IllegalStateException::class.java, thrown.javaClass)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__no_recovery_candidates__when__recovering__then__return_zero_and_issue_no_upsert() {
-        // doReturn avoids invoking the answer stubbed in prepare() while this stubbing is recorded.
-        doReturn(listOf<Map<String, Any>>()).`when`(jdbc).queryForList(anyString(), *anyVarargs())
+    fun `복구 후보가 없을 때__복구하면__0을 돌려주고 업서트를 내지 않는다`() {
+        // given
+        every { jdbc.queryForList(any<String>(), *anyVararg()) } returns listOf()
 
-        assertEquals(0, rebuild.rebuildPage(100))
-        verify(jdbc, never()).update(any(PreparedStatementCreator::class.java))
+        // when
+        val rebuilt = rebuild.rebuildPage(100)
+
+        // then
+        assertEquals(0, rebuilt)
+        verify(exactly = 0) { jdbc.update(any<PreparedStatementCreator>()) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["query", "upsert", "commit"])
-    fun given__query_projection_or_commit_failure__when__recovering__then__propagate_the_same_failure_and_stop_following_work(
+    fun `조회나 투영이나 커밋이 실패할 때__복구하면__같은 예외를 전파하고 이후 작업을 멈춘다`(
         stage: String,
     ) {
+        // given
         failAt = stage
 
-        assertSame(failure, assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(100) })
-        assertEquals(if (stage == "query") 0 else if (stage == "upsert") 1 else 2, bindings.size)
+        every { jdbc.queryForList(any<String>(), *anyVararg()) } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("query")
+            val bound = args[1] as Array<*>
+            assertEquals(KoreanSearchTerms.VERSION, bound[0])
+            val limit = bound[1] as Int
+            val sql = firstArg<String>()
+            assertTrue(sql.contains("p.deleted_at IS NULL"))
+            assertTrue(sql.contains("d.post_id IS NULL OR d.title_hash<>md5(p.title)"))
+            assertTrue(sql.contains("d.content_hash<>md5(p.content) OR d.analyzer_version<>?"))
+            assertTrue(sql.contains("ORDER BY p.post_id LIMIT ? FOR UPDATE OF p SKIP LOCKED"))
+            if ("query" == failAt) {
+                throw failure
+            }
+            if (limit == 1) listOf(row(2)) else listOf(row(2), row(8))
+        }
+
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            events.add("upsert")
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if ("upsert" == failAt) {
+                throw failure
+            }
+            1
+        }
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(100) }
+
+        // then
+        assertSame(failure, thrown)
+        assertEquals(if (stage == "query") 0 else if (stage == "upsert") 1 else 2, calls.size)
         assertEquals("failure", events.last())
         if (stage != "commit") {
             assertFalse(events.contains("commit"))

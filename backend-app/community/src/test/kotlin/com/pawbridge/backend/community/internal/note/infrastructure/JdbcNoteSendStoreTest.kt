@@ -8,6 +8,8 @@ import com.pawbridge.backend.community.internal.note.application.NoteNotificatio
 import com.pawbridge.backend.community.internal.note.application.NoteSendRejectedException
 import com.pawbridge.backend.community.internal.note.application.NoteSendStore
 import com.pawbridge.backend.community.internal.note.application.SendPrivateNote.Receipt
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -20,8 +22,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -45,20 +45,23 @@ class JdbcNoteSendStoreTest {
 
     @ParameterizedTest
     @CsvSource("9,3", "3,3")
-    fun given__reversed_or_same_member_pair__when__locking_in_the_callback__then__insert_and_lock_each_distinct_id_in_ascending_order(
+    fun `순서가 뒤집혔거나 같은 회원 쌍일 때__콜백에서 잠그면__서로 다른 ID마다 오름차순으로 삽입하고 잠근다`(
         first: Long,
         second: Long,
     ) {
+        // given
         val f = Fixture()
-        assertEquals(
-            Receipt(NOTE),
-            f.store.inTransaction(
-                Supplier {
-                    f.store.lockMembers(first, second)
-                    Receipt(NOTE)
-                },
-            ),
+
+        // when
+        val receipt = f.store.inTransaction(
+            Supplier {
+                f.store.lockMembers(first, second)
+                Receipt(NOTE)
+            },
         )
+
+        // then
+        assertEquals(Receipt(NOTE), receipt)
         val expected = if (first == second) listOf(3L) else listOf(3L, 9L)
         assertEquals(expected.size * 2, f.jdbc.calls.size)
         for (index in expected.indices) {
@@ -75,11 +78,14 @@ class JdbcNoteSendStoreTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["present", "null", "absent"])
-    fun given__normal_nullable_or_absent_rows__when__reading_send_facts__then__keep_raw_projection_boundaries_direction_and_inclusive_parameterized_sql(
+    fun `정상 행이거나 null 행이거나 행이 없을 때__발송 사실을 읽으면__원시 투영과 경계와 방향과 포함 비교 매개변수 SQL을 유지한다`(
         rows: String,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.rowKind = rows
+
+        // when
         f.store.inTransaction(
             Supplier {
                 assertEquals(
@@ -110,6 +116,8 @@ class JdbcNoteSendStoreTest {
                 Receipt(NOTE)
             },
         )
+
+        // then
         assertEquals(6, f.jdbc.calls.size)
         assertCall(
             f, 0,
@@ -146,9 +154,15 @@ class JdbcNoteSendStoreTest {
     }
 
     @Test
-    fun given__new_note_and_notification__when__the_callback_inserts__then__bind_three_statements_and_publish_only_recipient_after_commit() {
+    fun `새 쪽지와 알림이 있을 때__콜백이 삽입하면__문장 세 개를 바인딩하고 커밋 뒤에 수신자만 발행한다`() {
+        // given
         val f = Fixture()
-        assertEquals(Receipt(NOTE), f.insert())
+
+        // when
+        val receipt = f.insert()
+
+        // then
+        assertEquals(Receipt(NOTE), receipt)
         assertEquals(listOf("begin", "callback", "note", "mailboxes", "request", "commit", "publish:8", "cleanup"), f.events)
         assertEquals(3, f.jdbc.calls.size)
         assertCall(
@@ -169,9 +183,10 @@ class JdbcNoteSendStoreTest {
 
     @ParameterizedTest
     @EnumSource(Failure::class)
-    fun given__begin_callback_any_insert_or_commit_failure__when__running_send__then__propagate_without_retry_or_publication_and_release_synchronization(
+    fun `시작 콜백 삽입 또는 커밋이 실패할 때__발송을 실행하면__재시도나 발행 없이 전파하고 동기화를 해제한다`(
         phase: Failure,
     ) {
+        // given
         val f = Fixture()
         val failure: RuntimeException = when (phase) {
             Failure.BEGIN -> CannotCreateTransactionException("private begin")
@@ -194,8 +209,11 @@ class JdbcNoteSendStoreTest {
             }
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { f.insert() })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { f.insert() }
 
+        // then
+        assertSame(failure, thrown)
         val stages = listOf("begin", "callback", "note", "mailboxes", "request", "commit")
         val last = when (phase) {
             Failure.BEGIN -> 0
@@ -220,7 +238,8 @@ class JdbcNoteSendStoreTest {
     }
 
     @Test
-    fun given__private_publication_runtime_after_commit__when__sending_the_hint__then__keep_saved_success_and_log_only_the_type_without_throwable() {
+    fun `커밋 뒤 비공개 발행이 런타임 예외를 낼 때__힌트를 보내면__저장 성공을 유지하고 예외 객체 없이 타입만 기록한다`() {
+        // given
         val f = Fixture()
         f.hintFailure = IllegalStateException("Bearer private-token body hash", SQLException("private SQL"))
         val logger = LoggerFactory.getLogger(JdbcNoteSendStore::class.java) as Logger
@@ -228,7 +247,11 @@ class JdbcNoteSendStoreTest {
         appender.start()
         logger.addAppender(appender)
         try {
-            assertEquals(Receipt(NOTE), f.insert())
+            // when
+            val receipt = f.insert()
+
+            // then
+            assertEquals(Receipt(NOTE), receipt)
             assertEquals(listOf(8L), f.published)
             assertEquals(1, f.manager.commits)
             assertEquals(0, f.manager.rollbacks)
@@ -346,11 +369,11 @@ class JdbcNoteSendStoreTest {
                 return listOf()
             }
             try {
-                val row = mock(ResultSet::class.java)
-                whenever(row.getObject("note_id", UUID::class.java)).thenReturn(if (rowKind == "null") null else NOTE)
-                whenever(row.getString("request_hash")).thenReturn(if (rowKind == "null") null else "stored-hash")
-                whenever(row.getString("direction")).thenReturn("INBOX")
-                whenever(row.getObject("sender_id")).thenReturn(if (rowKind == "null") null else 8L)
+                val row = mockk<ResultSet>()
+                every { row.getObject("note_id", UUID::class.java) } returns (if (rowKind == "null") null else NOTE)
+                every { row.getString("request_hash") } returns (if (rowKind == "null") null else "stored-hash")
+                every { row.getString("direction") } returns "INBOX"
+                every { row.getObject("sender_id") } returns (if (rowKind == "null") null else 8L)
                 return listOf(mapper.mapRow(row, 0) as T)
             } catch (failure: SQLException) {
                 throw AssertionError("Recording mapper failed", failure)

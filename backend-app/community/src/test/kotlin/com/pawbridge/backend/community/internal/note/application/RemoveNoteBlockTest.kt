@@ -1,9 +1,12 @@
 package com.pawbridge.backend.community.internal.note.application
 
-import com.pawbridge.backend.community.support.anyNonNull
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -13,121 +16,123 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import java.util.stream.Stream
 
 class RemoveNoteBlockTest {
     @ParameterizedTest
     @MethodSource("invalidIds")
-    fun given__nonpositive_current_or_target_id__when__removing__then__reject_login_before_transaction_port_or_member_lookup(
+    fun `0 이하의 현재 회원 또는 대상 ID가 주어졌을 때__차단을 풀면__트랜잭션 포트와 회원 조회 전에 로그인 거절한다`(
         current: Long,
         target: Long,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val removal = mock(NoteBlockRemoval::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val removal = mockk<NoteBlockRemoval>()
         val service = RemoveNoteBlock(members, removal)
 
+        // when
         val failure = assertThrows(NoteBlockRemovalRejectedException::class.java) { service.remove(current, target) }
 
+        // then
         assertEquals(NoteBlockRemovalRejectedException.Reason.LOGIN, failure.reason())
-        verifyNoInteractions(members, removal)
+        confirmVerified(members, removal)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [7L, Long.MAX_VALUE])
-    fun given__valid_self_or_other_target__when__removing__then__defer_single_current_lookup_to_removal_guard_without_target_lookup(
+    fun `유효한 자기 자신 또는 다른 대상이 주어졌을 때__차단을 풀면__대상 조회 없이 현재 회원 조회를 제거 가드로 미뤄 한 번만 한다`(
         target: Long,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val removal = mock(NoteBlockRemoval::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val removal = mockk<NoteBlockRemoval>()
         val events = ArrayList<String>()
-        whenever(members.get(7L)).thenAnswer {
+
+        every { members.get(any()) } answers {
             events.add("current")
             ContactMember(7L, " 原文 ", true, false)
         }
-        doAnswer { invocation ->
+        every { removal.remove(any(), any(), any()) } answers {
             events.add("before-guard")
-            invocation.getArgument<Runnable>(2).run()
+            thirdArg<Runnable>().run()
             events.add("after-guard")
-            null
-        }.`when`(removal).remove(eq(7L), eq(target), anyNonNull<Runnable>())
+        }
 
+        // when
         RemoveNoteBlock(members, removal).remove(7L, target)
 
+        // then
         assertEquals(listOf("before-guard", "current", "after-guard"), events)
-        verify(removal).remove(eq(7L), eq(target), anyNonNull<Runnable>())
-        verify(members).get(7L)
-        verifyNoMoreInteractions(members, removal)
+        verify(exactly = 1) { removal.remove(7L, target, any()) }
+        verify(exactly = 1) { members.get(7L) }
+        confirmVerified(members, removal)
     }
 
     @Test
-    fun given__inactive_current_member__when__removal_runs_guard__then__reject_inactive_and_stop_the_removal_continuation() {
-        val members = mock(ContactMemberQuery::class.java)
-        val removal = mock(NoteBlockRemoval::class.java)
+    fun `비활성 현재 회원이 주어졌을 때__제거가 가드를 실행하면__비활성으로 거절하고 제거 이어가기를 멈춘다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val removal = mockk<NoteBlockRemoval>()
         val events = ArrayList<String>()
-        whenever(members.get(7L)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, true))
-        doAnswer { invocation ->
-            events.add("before-guard")
-            invocation.getArgument<Runnable>(2).run()
-            events.add("after-guard")
-            null
-        }.`when`(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
 
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, true)
+        every { removal.remove(any(), any(), any()) } answers {
+            events.add("before-guard")
+            thirdArg<Runnable>().run()
+            events.add("after-guard")
+        }
+
+        // when
         val failure = assertThrows(NoteBlockRemovalRejectedException::class.java) {
             RemoveNoteBlock(members, removal).remove(7L, 8L)
         }
 
+        // then
         assertEquals(NoteBlockRemovalRejectedException.Reason.INACTIVE, failure.reason())
         assertEquals(listOf("before-guard"), events)
-        verify(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
-        verify(members).get(7L)
-        verifyNoMoreInteractions(members, removal)
+        verify(exactly = 1) { removal.remove(7L, 8L, any()) }
+        verify(exactly = 1) { members.get(7L) }
+        confirmVerified(members, removal)
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__removal_or_current_lookup_failure__when__removing__then__propagate_same_failure_without_fallback_or_retry(
+    fun `제거 또는 현재 회원 조회가 실패할 때__차단을 풀면__대체 경로나 재시도 없이 같은 실패를 전파한다`(
         phase: FailurePhase,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val removal = mock(NoteBlockRemoval::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val removal = mockk<NoteBlockRemoval>()
         val failure: RuntimeException =
             if (phase == FailurePhase.GUARD) {
                 ContactMemberUnavailableException(IllegalStateException("private member failure"))
             } else {
                 IllegalStateException("private removal failure")
             }
+
         if (phase != FailurePhase.BEFORE_GUARD) {
             if (phase == FailurePhase.GUARD) {
-                whenever(members.get(7L)).thenThrow(failure)
+                every { members.get(any()) } throws failure
             } else {
-                whenever(members.get(7L)).thenReturn(ContactMember(7L, "", true, false))
+                every { members.get(any()) } returns ContactMember(7L, "", true, false)
             }
         }
-        doAnswer { invocation ->
+        every { removal.remove(any(), any(), any()) } answers {
             if (phase == FailurePhase.BEFORE_GUARD) throw failure
-            invocation.getArgument<Runnable>(2).run()
+            thirdArg<Runnable>().run()
             throw failure
-        }.`when`(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
-
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) { RemoveNoteBlock(members, removal).remove(7L, 8L) },
-        )
-
-        verify(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
-        if (phase == FailurePhase.BEFORE_GUARD) {
-            verifyNoInteractions(members)
-        } else {
-            verify(members).get(7L)
         }
-        verifyNoMoreInteractions(members, removal)
+
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { RemoveNoteBlock(members, removal).remove(7L, 8L) }
+
+        // then
+        assertSame(failure, thrown)
+        verify(exactly = 1) { removal.remove(7L, 8L, any()) }
+        if (phase != FailurePhase.BEFORE_GUARD) {
+            verify(exactly = 1) { members.get(7L) }
+        }
+        confirmVerified(members, removal)
     }
 
     enum class FailurePhase { BEFORE_GUARD, GUARD, AFTER_GUARD }

@@ -16,8 +16,15 @@ class YouTubeVideoUrlTest {
             "https://youtube.com/embed/AbCdEfGhI_1",
         ],
     )
-    fun givenAllowedVideoUrl_whenParse_thenReturnOnlyId(url: String) {
-        assertThat(YouTubeVideoUrl.id(url)).isEqualTo("AbCdEfGhI_1")
+    fun `허용된 영상 URL일 때__파싱하면__ID만 돌려준다`(url: String) {
+        // given
+        val expectedId = "AbCdEfGhI_1"
+
+        // when
+        val id = YouTubeVideoUrl.id(url)
+
+        // then
+        assertThat(id).isEqualTo(expectedId)
     }
 
     @ParameterizedTest
@@ -36,11 +43,18 @@ class YouTubeVideoUrlTest {
             "",
         ],
     )
-    fun givenUnsupportedOrSsrfUrl_whenParse_thenRejectWithoutFetching(url: String) {
-        assertThatThrownBy { YouTubeVideoUrl.id(url) }
+    fun `지원하지 않거나 SSRF 위험이 있는 URL일 때__파싱하면__가져오지 않고 거부한다`(url: String) {
+        // given
+        val expectedStatus = 400
+
+        // when
+        val thrown = assertThatThrownBy { YouTubeVideoUrl.id(url) }
+
+        // then
+        thrown
             .isInstanceOf(ResponseStatusException::class.java)
             .satisfies({ e ->
-                assertThat((e as ResponseStatusException).statusCode.value()).isEqualTo(400)
+                assertThat((e as ResponseStatusException).statusCode.value()).isEqualTo(expectedStatus)
             })
     }
 }
