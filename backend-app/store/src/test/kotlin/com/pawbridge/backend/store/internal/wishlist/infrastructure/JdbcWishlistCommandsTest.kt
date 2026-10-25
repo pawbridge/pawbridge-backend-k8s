@@ -1,6 +1,10 @@
 package com.pawbridge.backend.store.internal.wishlist.infrastructure
 
 import com.pawbridge.backend.store.internal.wishlist.application.WishlistCommands
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -8,23 +12,8 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.function.Executable
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyMap
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.RETURNS_DEFAULTS
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.ResultSetExtractor
 import org.springframework.jdbc.core.RowMapper
@@ -42,68 +31,22 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Consumer
 
 class JdbcWishlistCommandsTest {
-    private val jdbc: NamedParameterJdbcOperations = mock(NamedParameterJdbcOperations::class.java)
-    private val write: TransactionOperations = mock(TransactionOperations::class.java)
-    private val clock: Clock = mock(Clock::class.java)
+    private val jdbc: NamedParameterJdbcOperations = mockk<NamedParameterJdbcOperations>()
+    private val write: TransactionOperations = mockk<TransactionOperations>()
+    private val clock: Clock = mockk<Clock>()
     private val commands = JdbcWishlistCommands(jdbc, write, clock)
     private var active = false
-    private var duplicate = false
-    private var identity: Long? = 9007199254740993L
-    private var matches: List<Long> = listOf(33L)
-    private var deleted = 1
-    private var sku: ResultSet? = null
     private val events = ArrayList<String>()
     private val sql = ArrayList<String>()
     private val params = ArrayList<Map<String, *>>()
     private val instant: Instant = Instant.parse("2026-10-20T00:00:01.123456789Z")
     private val created: LocalDateTime = LocalDateTime.of(2026, 10, 20, 9, 0, 1, 123456789)
 
-    @BeforeEach
-    fun setup() {
-        `when`(clock.instant()).thenReturn(instant)
-        `when`(clock.zone).thenReturn(ZoneId.of("Asia/Seoul"))
-        `when`(write.execute(any<TransactionCallback<Any>>())).thenAnswer { call ->
-            active = true
-            try {
-                call.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-            } finally {
-                active = false
-            }
-        }
-        doAnswer { call ->
-            active = true
-            try {
-                call.getArgument<Consumer<TransactionStatus>>(0).accept(SimpleTransactionStatus())
-            } finally {
-                active = false
-            }
-            null
-        }.`when`(write).executeWithoutResult(any<Consumer<TransactionStatus>>())
-        `when`(jdbc.queryForObject(anyString(), anyMap<String, Any>(), eq(Boolean::class.javaObjectType))).thenAnswer { call ->
-            capture("exists", call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            duplicate
-        }
-        `when`(jdbc.queryForObject(anyString(), anyMap<String, Any>(), eq(Long::class.javaObjectType))).thenAnswer { call ->
-            capture("insert", call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            identity
-        }
-        `when`(jdbc.query(anyString(), anyMap<String, Any>(), any<ResultSetExtractor<Any>>())).thenAnswer { call ->
-            capture("sku", call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            call.getArgument<ResultSetExtractor<*>>(2).extractData(sku!!)
-        }
-        `when`(jdbc.query(anyString(), anyMap<String, Any>(), any<RowMapper<Any>>())).thenAnswer { call ->
-            capture("find", call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            matches
-        }
-        `when`(jdbc.update(anyString(), anyMap<String, Any>())).thenAnswer { call ->
-            capture("delete", call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            deleted
-        }
-    }
-
     @Test
-    fun given__existing_sku_and_options__when__adding__then__preserve_precedence_generated_identity_local_audit_and_response() {
-        sku = rows(
+    fun `기존 SKU와 옵션이 있을 때__찜을 추가하면__우선순위와 생성된 ID와 로컬 감사 시각과 응답을 보존한다`() {
+        // given
+        val identity = 9007199254740993L
+        val sku = rows(
             map(
                 "sku_id", 80L, "sku_code", "SKU", "product_id", 9L, "product_name", "상품", "image_url", null,
                 "price", 9007199254740993L, "option_value_id", 3L, "group_name", "색상", "value_name", "파랑",
@@ -111,14 +54,35 @@ class JdbcWishlistCommandsTest {
             map("option_value_id", 4L, "group_name", "크기", "value_name", "대"),
         )
 
+        every { clock.instant() } returns instant
+        every { clock.zone } returns ZoneId.of("Asia/Seoul")
+        every { write.execute(any<TransactionCallback<Any>>()) } answers {
+            inTransaction { firstArg<TransactionCallback<*>>().doInTransaction(SimpleTransactionStatus()) }
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Boolean::class.javaObjectType) } answers {
+            capture("exists", firstArg(), secondArg())
+            false
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            capture("sku", firstArg(), secondArg())
+            thirdArg<ResultSetExtractor<*>>().extractData(sku)
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Long::class.javaObjectType) } answers {
+            capture("insert", firstArg(), secondArg())
+            identity
+        }
+
+        // when
+        val added = commands.add(7, 80L)
+
+        // then
         assertEquals(
             WishlistCommands.Added(
                 identity, 7L, 80L, "SKU", 9L, "상품", null, 9007199254740993L,
                 mutableMapOf("색상" to "파랑", "크기" to "대"), created,
             ),
-            commands.add(7, 80L),
+            added,
         )
-
         assertEquals(listOf("exists", "sku", "insert"), events)
         assertTrue(sql[0].contains("user_id=:member AND sku_id=:sku"))
         assertTrue(sql[2].contains("RETURNING id"))
@@ -126,88 +90,193 @@ class JdbcWishlistCommandsTest {
         assertEquals(mapOf("member" to 7L, "sku" to 80L, "created" to created), params[2])
         assertFalse(sql[1].contains("status="))
         assertFalse(sql[1].contains("stock_quantity>"))
-        verify(write, times(1)).execute(any<TransactionCallback<Any>>())
-        verify(clock, times(1)).instant()
+        verify(exactly = 1) { write.execute(any<TransactionCallback<Any>>()) }
+        verify(exactly = 1) { clock.instant() }
         assertFalse(active)
     }
 
     @Test
-    fun given__sku_without_options__when__adding__then__return_empty_option_map() {
-        sku = rows(
+    fun `SKU에 옵션이 없을 때__찜을 추가하면__빈 옵션 맵을 돌려준다`() {
+        // given
+        val sku = rows(
             map(
                 "sku_id", 80L, "sku_code", "SKU", "product_id", 9L, "product_name", "상품", "image_url", "image",
                 "price", 0L, "option_value_id", null,
             ),
         )
 
+        every { clock.instant() } returns instant
+        every { clock.zone } returns ZoneId.of("Asia/Seoul")
+        every { write.execute(any<TransactionCallback<Any>>()) } answers {
+            inTransaction { firstArg<TransactionCallback<*>>().doInTransaction(SimpleTransactionStatus()) }
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Boolean::class.javaObjectType) } answers {
+            capture("exists", firstArg(), secondArg())
+            false
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            capture("sku", firstArg(), secondArg())
+            thirdArg<ResultSetExtractor<*>>().extractData(sku)
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Long::class.javaObjectType) } answers {
+            capture("insert", firstArg(), secondArg())
+            9007199254740993L
+        }
+
+        // when
         val added = commands.add(7, 80L)
 
+        // then
         assertEquals(mapOf<String, String>(), added.options)
         assertEquals(0L, added.price)
         assertEquals("image", added.productImageUrl)
     }
 
     @Test
-    fun given__duplicate_pair__when__adding__then__preserve_original_state_error_before_sku_or_insert() {
-        duplicate = true
+    fun `이미 찜한 쌍이 있을 때__찜을 추가하면__SKU 조회나 삽입 전에 원래의 상태 오류를 유지한다`() {
+        // given
+        every { write.execute(any<TransactionCallback<Any>>()) } answers {
+            inTransaction { firstArg<TransactionCallback<*>>().doInTransaction(SimpleTransactionStatus()) }
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Boolean::class.javaObjectType) } answers {
+            capture("exists", firstArg(), secondArg())
+            true
+        }
 
-        assertEquals(
-            "이미 찜한 상품입니다.",
-            assertThrows(IllegalStateException::class.java) { commands.add(7, 80L) }.message,
-        )
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { commands.add(7, 80L) }
 
+        // then
+        assertEquals("이미 찜한 상품입니다.", thrown.message)
         assertEquals(listOf("exists"), events)
-        verifyNoInteractions(clock)
+        confirmVerified(clock)
         assertFalse(active)
     }
 
     @Test
-    fun given__missing_sku__when__adding__then__preserve_bad_input_and_do_not_insert() {
-        sku = rows()
+    fun `SKU가 없을 때__찜을 추가하면__원래의 잘못된 입력 오류를 유지하고 삽입하지 않는다`() {
+        // given
+        val sku = rows()
 
-        assertEquals(
-            "SKU를 찾을 수 없습니다: 80",
-            assertThrows(IllegalArgumentException::class.java) { commands.add(7, 80L) }.message,
-        )
+        every { write.execute(any<TransactionCallback<Any>>()) } answers {
+            inTransaction { firstArg<TransactionCallback<*>>().doInTransaction(SimpleTransactionStatus()) }
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Boolean::class.javaObjectType) } answers {
+            capture("exists", firstArg(), secondArg())
+            false
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            capture("sku", firstArg(), secondArg())
+            thirdArg<ResultSetExtractor<*>>().extractData(sku)
+        }
 
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { commands.add(7, 80L) }
+
+        // then
+        assertEquals("SKU를 찾을 수 없습니다: 80", thrown.message)
         assertEquals(listOf("exists", "sku"), events)
-        verifyNoInteractions(clock)
+        confirmVerified(clock)
     }
 
     @Test
-    fun given__null_sku__when__adding__then__keep_duplicate_first_and_fail_as_bad_input_without_sku_query() {
+    fun `SKU가 null일 때__찜을 추가하면__중복 확인을 먼저 하고 SKU 조회 없이 잘못된 입력으로 실패한다`() {
+        // given
+        every { write.execute(any<TransactionCallback<Any>>()) } answers {
+            inTransaction { firstArg<TransactionCallback<*>>().doInTransaction(SimpleTransactionStatus()) }
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Boolean::class.javaObjectType) } answers {
+            capture("exists", firstArg(), secondArg())
+            false
+        }
+
+        // when
         assertThrows(IllegalArgumentException::class.java) { commands.add(7, null) }
 
+        // then
         assertEquals(listOf("exists"), events)
         assertNull(params.first()["sku"])
-        verifyNoInteractions(clock)
+        confirmVerified(clock)
     }
 
     @Test
-    fun given__insert_failure__when__adding__then__propagate_original_failure_without_success_result() {
-        sku = rows(map("sku_id", 80L, "product_id", 9L, "price", 1L))
+    fun `삽입이 실패할 때__찜을 추가하면__성공 결과 없이 원래의 실패를 전파한다`() {
+        // given
+        val sku = rows(map("sku_id", 80L, "product_id", 9L, "price", 1L))
         val failure = DataAccessResourceFailureException("synthetic SQL detail")
-        doThrow(failure).`when`(jdbc).queryForObject(anyString(), anyMap<String, Any>(), eq(Long::class.javaObjectType))
 
-        assertSame(failure, assertThrows(DataAccessResourceFailureException::class.java) { commands.add(7, 80L) })
+        every { clock.instant() } returns instant
+        every { clock.zone } returns ZoneId.of("Asia/Seoul")
+        every { write.execute(any<TransactionCallback<Any>>()) } answers {
+            inTransaction { firstArg<TransactionCallback<*>>().doInTransaction(SimpleTransactionStatus()) }
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Boolean::class.javaObjectType) } answers {
+            capture("exists", firstArg(), secondArg())
+            false
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            capture("sku", firstArg(), secondArg())
+            thirdArg<ResultSetExtractor<*>>().extractData(sku)
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Long::class.javaObjectType) } throws failure
 
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { commands.add(7, 80L) }
+
+        // then
+        assertSame(failure, thrown)
         assertFalse(active)
     }
 
     @Test
-    fun given__missing_generated_identity__when__adding__then__fail_instead_of_fabricating_an_id() {
-        identity = null
-        sku = rows(map("sku_id", 80L, "product_id", 9L, "price", 1L))
+    fun `생성된 ID가 없을 때__찜을 추가하면__ID를 꾸며 내지 않고 실패한다`() {
+        // given
+        val sku = rows(map("sku_id", 80L, "product_id", 9L, "price", 1L))
 
+        every { clock.instant() } returns instant
+        every { clock.zone } returns ZoneId.of("Asia/Seoul")
+        every { write.execute(any<TransactionCallback<Any>>()) } answers {
+            inTransaction { firstArg<TransactionCallback<*>>().doInTransaction(SimpleTransactionStatus()) }
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Boolean::class.javaObjectType) } answers {
+            capture("exists", firstArg(), secondArg())
+            false
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            capture("sku", firstArg(), secondArg())
+            thirdArg<ResultSetExtractor<*>>().extractData(sku)
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Long::class.javaObjectType) } answers {
+            capture("insert", firstArg(), secondArg())
+            null
+        }
+
+        // when
+        // then
         assertThrows(IllegalStateException::class.java) { commands.add(7, 80L) }
 
         assertFalse(active)
     }
 
     @Test
-    fun given__one_owned_pair__when__removing_by_sku__then__delete_only_selected_identity_member_and_sku() {
+    fun `소유한 쌍이 하나 있을 때__SKU로 찜을 삭제하면__선택한 ID와 회원과 SKU만 삭제한다`() {
+        // given
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+            capture("find", firstArg(), secondArg())
+            listOf(33L)
+        }
+        every { jdbc.update(any<String>(), any<Map<String, *>>()) } answers {
+            capture("delete", firstArg(), secondArg())
+            1
+        }
+
+        // when
         commands.removeByMemberAndSku(7, 80)
 
+        // then
         assertEquals(listOf("find", "delete"), events)
         assertTrue(sql.first().contains("user_id=:member AND sku_id=:sku"))
         assertEquals("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member AND sku_id=:sku", sql[1])
@@ -216,93 +285,172 @@ class JdbcWishlistCommandsTest {
     }
 
     @Test
-    fun given__pair_not_found__when__removing_by_sku__then__same_bad_input_and_no_delete() {
-        matches = listOf()
+    fun `쌍이 없을 때__SKU로 찜을 삭제하면__같은 잘못된 입력 오류를 내고 삭제하지 않는다`() {
+        // given
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+            capture("find", firstArg(), secondArg())
+            listOf<Long>()
+        }
 
-        assertEquals(
-            "찜을 찾을 수 없습니다.",
-            assertThrows(IllegalArgumentException::class.java) { commands.removeByMemberAndSku(7, 80) }.message,
-        )
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { commands.removeByMemberAndSku(7, 80) }
 
+        // then
+        assertEquals("찜을 찾을 수 없습니다.", thrown.message)
         assertEquals(listOf("find"), events)
     }
 
     @Test
-    fun given__preexisting_duplicate_pair__when__removing_by_sku__then__fail_without_deleting_one_or_all() {
-        matches = listOf(33L, 34L)
+    fun `이미 중복된 쌍이 있을 때__SKU로 찜을 삭제하면__하나도 전부도 삭제하지 않고 실패한다`() {
+        // given
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+            capture("find", firstArg(), secondArg())
+            listOf(33L, 34L)
+        }
 
+        // when
+        // then
         assertThrows(IllegalStateException::class.java) { commands.removeByMemberAndSku(7, 80) }
 
         assertEquals(listOf("find"), events)
     }
 
     @Test
-    fun given__owned_identity__when__removing_by_id__then__one_atomic_owner_scoped_delete_without_lookup() {
+    fun `소유한 ID일 때__ID로 찜을 삭제하면__조회 없이 소유자 범위의 원자적 삭제 한 번을 실행한다`() {
+        // given
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.update(any<String>(), any<Map<String, *>>()) } answers {
+            capture("delete", firstArg(), secondArg())
+            1
+        }
+
+        // when
         commands.removeById(7, 33)
 
+        // then
         assertEquals(listOf("delete"), events)
         assertEquals("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member", sql.first())
         assertEquals(mapOf("member" to 7L, "id" to 33L), params.first())
-        verify(write, times(1)).executeWithoutResult(any<Consumer<TransactionStatus>>())
-        verify(jdbc).update(sql.first(), params.first())
-        verifyNoMoreInteractions(jdbc)
-        verifyNoInteractions(clock)
+        verify(exactly = 1) { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) }
+        verify(exactly = 1) { jdbc.update(sql.first(), params.first()) }
+        confirmVerified(jdbc)
+        confirmVerified(clock)
         assertFalse(active)
     }
 
     @Test
-    fun given__wrong_owner_or_missing_identity__when__removing_by_id__then__zero_rows_is_the_same_noop_without_lookup() {
-        deleted = 0
+    fun `소유자가 다르거나 ID가 없을 때__ID로 찜을 삭제하면__조회 없이 0행이어도 같은 무동작이다`() {
+        // given
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.update(any<String>(), any<Map<String, *>>()) } answers {
+            capture("delete", firstArg(), secondArg())
+            0
+        }
 
+        // when
         assertDoesNotThrow(Executable { commands.removeById(8, 33) })
 
+        // then
         assertEquals(listOf("delete"), events)
         assertEquals(mapOf("member" to 8L, "id" to 33L), params.first())
         assertEquals("DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member", sql.first())
-        verify(jdbc).update(sql.first(), params.first())
-        verifyNoMoreInteractions(jdbc)
-        verifyNoInteractions(clock)
+        verify(exactly = 1) { jdbc.update(sql.first(), params.first()) }
+        confirmVerified(jdbc)
+        confirmVerified(clock)
         assertFalse(active)
     }
 
     @Test
-    fun given__identity_already_removed__when__retrying_or_losing_a_delete_race__then__zero_rows_stays_a_noop() {
-        commands.removeById(7, 33)
-        deleted = 0
+    fun `이미 삭제된 ID일 때__재시도하거나 삭제 경합에서 질 때 삭제하면__0행은 계속 무동작이다`() {
+        // given
+        val affectedRows = mutableListOf(1, 0)
 
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.update(any<String>(), any<Map<String, *>>()) } answers {
+            capture("delete", firstArg(), secondArg())
+            affectedRows.removeAt(0)
+        }
+
+        // when
+        commands.removeById(7, 33)
         assertDoesNotThrow(Executable { commands.removeById(7, 33) })
 
+        // then
         assertEquals(listOf("delete", "delete"), events)
         assertEquals(listOf(mapOf("member" to 7L, "id" to 33L), mapOf("member" to 7L, "id" to 33L)), params)
-        verify(write, times(2)).executeWithoutResult(any<Consumer<TransactionStatus>>())
-        verify(jdbc, times(2)).update(sql.first(), params.first())
-        verifyNoMoreInteractions(jdbc)
-        verifyNoInteractions(clock)
+        verify(exactly = 2) { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) }
+        verify(exactly = 2) { jdbc.update(sql.first(), params.first()) }
+        confirmVerified(jdbc)
+        confirmVerified(clock)
         assertFalse(active)
     }
 
     @Test
-    fun given__concurrent_disappearance__when__deleting_selected_pair__then__fail_instead_of_claiming_delete_success() {
-        deleted = 0
+    fun `선택한 쌍이 동시에 사라졌을 때__SKU로 찜을 삭제하면__삭제 성공을 주장하지 않고 실패한다`() {
+        // given
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+            capture("find", firstArg(), secondArg())
+            listOf(33L)
+        }
+        every { jdbc.update(any<String>(), any<Map<String, *>>()) } answers {
+            capture("delete", firstArg(), secondArg())
+            0
+        }
 
+        // when
+        // then
         assertThrows(IllegalStateException::class.java) { commands.removeByMemberAndSku(7, 80) }
 
         assertFalse(active)
     }
 
     @Test
-    fun given__database_failure__when__deleting_identity__then__propagate_without_lookup_or_retry() {
+    fun `데이터베이스 실패가 발생할 때__ID로 찜을 삭제하면__조회나 재시도 없이 그대로 전파한다`() {
+        // given
         val failure = DataAccessResourceFailureException("synthetic SQL")
-        doThrow(failure).`when`(jdbc).update(anyString(), anyMap<String, Any>())
 
-        assertSame(failure, assertThrows(DataAccessResourceFailureException::class.java) { commands.removeById(7, 33) })
+        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
+            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
+        }
+        every { jdbc.update(any<String>(), any<Map<String, *>>()) } throws failure
 
-        verify(jdbc).update(
-            "DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",
-            mapOf("member" to 7L, "id" to 33L),
-        )
-        verifyNoMoreInteractions(jdbc)
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { commands.removeById(7, 33) }
+
+        // then
+        assertSame(failure, thrown)
+        verify(exactly = 1) {
+            jdbc.update(
+                "DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",
+                mapOf("member" to 7L, "id" to 33L),
+            )
+        }
+        confirmVerified(jdbc)
         assertFalse(active)
+    }
+
+    private fun <T> inTransaction(body: () -> T): T {
+        active = true
+        try {
+            return body()
+        } finally {
+            active = false
+        }
     }
 
     private fun capture(event: String, query: String, values: Map<String, *>) {
@@ -325,25 +473,15 @@ class JdbcWishlistCommandsTest {
 
         private fun rows(vararg values: Map<String, Any?>): ResultSet {
             val i = AtomicInteger(-1)
-            return mock(
-                ResultSet::class.java,
-                Answer<Any?> { call ->
-                    val method = call.method.name
-                    if (method == "next") {
-                        return@Answer i.incrementAndGet() < values.size
-                    }
-                    if (method.startsWith("get") && call.getArgument<Any?>(0) is String) {
-                        val column = call.getArgument<String>(0)
-                        val value = values[i.get()][column]
-                        return@Answer if (method == "getLong") {
-                            if (value == null) 0L else (value as Number).toLong()
-                        } else {
-                            value
-                        }
-                    }
-                    RETURNS_DEFAULTS.answer(call)
-                },
-            )
+            val resultSet = mockk<ResultSet>()
+            every { resultSet.next() } answers { i.incrementAndGet() < values.size }
+            every { resultSet.getLong(any<String>()) } answers {
+                val value = values[i.get()][firstArg<String>()]
+                if (value == null) 0L else (value as Number).toLong()
+            }
+            every { resultSet.getString(any<String>()) } answers { values[i.get()][firstArg<String>()] as String? }
+            every { resultSet.getObject(any<String>()) } answers { values[i.get()][firstArg<String>()] }
+            return resultSet
         }
     }
 }

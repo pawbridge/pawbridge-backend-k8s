@@ -1,27 +1,31 @@
 package com.pawbridge.backend.store.internal
 
-import com.pawbridge.backend.store.anyNonNull
 import com.pawbridge.backend.store.api.StorePaymentEvents
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogCategories
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogOptions
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogProducts
 import com.pawbridge.backend.store.internal.catalogwrite.web.CatalogManagementExceptionHandler
 import com.pawbridge.backend.store.internal.catalogwrite.web.CategoryManagementController
+import com.pawbridge.backend.store.internal.catalogwrite.web.CategoryResponse
 import com.pawbridge.backend.store.internal.catalogwrite.web.CategoryUpdateRequest
 import com.pawbridge.backend.store.internal.catalogwrite.web.OptionGroupRequest
+import com.pawbridge.backend.store.internal.catalogwrite.web.OptionGroupResponse
 import com.pawbridge.backend.store.internal.catalogwrite.web.OptionManagementController
 import com.pawbridge.backend.store.internal.catalogwrite.web.OptionValueRequest
+import com.pawbridge.backend.store.internal.catalogwrite.web.OptionValueResponse
+import com.pawbridge.backend.store.internal.catalogwrite.web.ProductResponse
 import com.pawbridge.backend.store.internal.catalogwrite.web.ProductUpdateRequest
 import com.pawbridge.backend.store.internal.catalogwrite.web.ProductWriteController
 import com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentController
 import com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
@@ -46,10 +50,10 @@ import java.nio.charset.StandardCharsets
  * servlet container, the security filter chain or error dispatch.
  */
 class StorePathVariableRegressionTest {
-    private val categories: JpaCatalogCategories = mock(JpaCatalogCategories::class.java)
-    private val options: JpaCatalogOptions = mock(JpaCatalogOptions::class.java)
-    private val products: JpaCatalogProducts = mock(JpaCatalogProducts::class.java)
-    private val payments: StorePaymentEvents = mock(StorePaymentEvents::class.java)
+    private val categories: JpaCatalogCategories = mockk<JpaCatalogCategories>()
+    private val options: JpaCatalogOptions = mockk<JpaCatalogOptions>()
+    private val products: JpaCatalogProducts = mockk<JpaCatalogProducts>()
+    private val payments: StorePaymentEvents = mockk<StorePaymentEvents>()
 
     private lateinit var catalogMvc: MockMvc
     private lateinit var paymentMvc: MockMvc
@@ -73,162 +77,238 @@ class StorePathVariableRegressionTest {
     // CategoryManagementController
 
     @Test
-    fun givenBlankCategoryId__whenUpdatingCategory__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `카테고리 ID가 공백일 때__카테고리를 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = performJson(catalogMvc, put("/api/v1/categories/{categoryId}", BLANK_SEGMENT))
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(categories)
+        confirmVerified(categories)
     }
 
     @Test
-    fun givenNumericCategoryId__whenUpdatingCategory__thenPassTheIdToService() {
+    fun `카테고리 ID가 숫자일 때__카테고리를 수정하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        every { categories.updateCategory(any(), any()) } returns CategoryResponse(1L, null, null, null, null)
+
+        // when
         performJson(catalogMvc, put("/api/v1/categories/{categoryId}", ID))
 
-        verify(categories).updateCategory(eq(ID), anyNonNull<CategoryUpdateRequest>())
+        // then
+        verify(exactly = 1) { categories.updateCategory(ID, any<CategoryUpdateRequest>()) }
+        confirmVerified(categories)
     }
 
     @Test
-    fun givenBlankCategoryId__whenDeletingCategory__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `카테고리 ID가 공백일 때__카테고리를 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = catalogMvc.perform(delete("/api/v1/categories/{categoryId}", BLANK_SEGMENT)).andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(categories)
+        confirmVerified(categories)
     }
 
     @Test
-    fun givenNumericCategoryId__whenDeletingCategory__thenPassTheIdToService() {
+    fun `카테고리 ID가 숫자일 때__카테고리를 삭제하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        justRun { categories.deleteCategory(any()) }
+
+        // when
         catalogMvc.perform(delete("/api/v1/categories/{categoryId}", ID))
 
-        verify(categories).deleteCategory(ID)
+        // then
+        verify(exactly = 1) { categories.deleteCategory(ID) }
+        confirmVerified(categories)
     }
-
     // OptionManagementController: option groups
 
     @Test
-    fun givenBlankOptionGroupId__whenUpdatingOptionGroup__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `옵션 그룹 ID가 공백일 때__옵션 그룹을 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = performJson(catalogMvc, put("/api/v1/option-groups/{groupId}", BLANK_SEGMENT))
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(options)
+        confirmVerified(options)
     }
 
     @Test
-    fun givenNumericOptionGroupId__whenUpdatingOptionGroup__thenPassTheIdToService() {
+    fun `옵션 그룹 ID가 숫자일 때__옵션 그룹을 수정하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        every { options.updateOptionGroup(any(), any()) } returns OptionGroupResponse(1L, null, null)
+
+        // when
         performJson(catalogMvc, put("/api/v1/option-groups/{groupId}", ID))
 
-        verify(options).updateOptionGroup(eq(ID), anyNonNull<OptionGroupRequest>())
+        // then
+        verify(exactly = 1) { options.updateOptionGroup(ID, any<OptionGroupRequest>()) }
+        confirmVerified(options)
     }
 
     @Test
-    fun givenBlankOptionGroupId__whenDeletingOptionGroup__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `옵션 그룹 ID가 공백일 때__옵션 그룹을 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = catalogMvc.perform(delete("/api/v1/option-groups/{groupId}", BLANK_SEGMENT)).andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(options)
+        confirmVerified(options)
     }
 
     @Test
-    fun givenNumericOptionGroupId__whenDeletingOptionGroup__thenPassTheIdToService() {
+    fun `옵션 그룹 ID가 숫자일 때__옵션 그룹을 삭제하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        justRun { options.deleteOptionGroup(any()) }
+
+        // when
         catalogMvc.perform(delete("/api/v1/option-groups/{groupId}", ID))
 
-        verify(options).deleteOptionGroup(ID)
+        // then
+        verify(exactly = 1) { options.deleteOptionGroup(ID) }
+        confirmVerified(options)
     }
 
     @Test
-    fun givenBlankOptionGroupId__whenAddingOptionValue__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `옵션 그룹 ID가 공백일 때__옵션 값을 추가하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = performJson(catalogMvc, post("/api/v1/option-groups/{groupId}/values", BLANK_SEGMENT))
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(options)
+        confirmVerified(options)
     }
 
     @Test
-    fun givenNumericOptionGroupId__whenAddingOptionValue__thenPassTheIdToService() {
+    fun `옵션 그룹 ID가 숫자일 때__옵션 값을 추가하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        every { options.addOptionValue(any(), any()) } returns OptionValueResponse(1L, null, null, null)
+
+        // when
         performJson(catalogMvc, post("/api/v1/option-groups/{groupId}/values", ID))
 
-        verify(options).addOptionValue(eq(ID), anyNonNull<OptionValueRequest>())
+        // then
+        verify(exactly = 1) { options.addOptionValue(ID, any<OptionValueRequest>()) }
+        confirmVerified(options)
     }
-
     // OptionManagementController: option values
 
     @Test
-    fun givenBlankOptionValueId__whenUpdatingOptionValue__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `옵션 값 ID가 공백일 때__옵션 값을 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = performJson(catalogMvc, put("/api/v1/option-groups/values/{valueId}", BLANK_SEGMENT))
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(options)
+        confirmVerified(options)
     }
 
     @Test
-    fun givenNumericOptionValueId__whenUpdatingOptionValue__thenPassTheIdToService() {
+    fun `옵션 값 ID가 숫자일 때__옵션 값을 수정하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        every { options.updateOptionValue(any(), any()) } returns OptionValueResponse(1L, null, null, null)
+
+        // when
         performJson(catalogMvc, put("/api/v1/option-groups/values/{valueId}", ID))
 
-        verify(options).updateOptionValue(eq(ID), anyNonNull<OptionValueRequest>())
+        // then
+        verify(exactly = 1) { options.updateOptionValue(ID, any<OptionValueRequest>()) }
+        confirmVerified(options)
     }
 
     @Test
-    fun givenBlankOptionValueId__whenDeletingOptionValue__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `옵션 값 ID가 공백일 때__옵션 값을 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = catalogMvc.perform(delete("/api/v1/option-groups/values/{valueId}", BLANK_SEGMENT))
             .andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(options)
+        confirmVerified(options)
     }
 
     @Test
-    fun givenNumericOptionValueId__whenDeletingOptionValue__thenPassTheIdToService() {
+    fun `옵션 값 ID가 숫자일 때__옵션 값을 삭제하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        justRun { options.deleteOptionValue(any()) }
+
+        // when
         catalogMvc.perform(delete("/api/v1/option-groups/values/{valueId}", ID))
 
-        verify(options).deleteOptionValue(ID)
+        // then
+        verify(exactly = 1) { options.deleteOptionValue(ID) }
+        confirmVerified(options)
     }
-
     // ProductWriteController
 
     @Test
-    fun givenBlankProductId__whenUpdatingProduct__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `상품 ID가 공백일 때__상품을 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = performJson(catalogMvc, patch("/api/v1/products/{productId}", BLANK_SEGMENT))
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(products)
+        confirmVerified(products)
     }
 
     @Test
-    fun givenNumericProductId__whenUpdatingProduct__thenPassTheIdToService() {
+    fun `상품 ID가 숫자일 때__상품을 수정하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        every { products.updateProduct(any(), any()) } returns ProductResponse(1L, null, null, null, null, null, null, null)
+
+        // when
         performJson(catalogMvc, patch("/api/v1/products/{productId}", ID))
 
-        verify(products).updateProduct(eq(ID), anyNonNull<ProductUpdateRequest>())
+        // then
+        verify(exactly = 1) { products.updateProduct(ID, any<ProductUpdateRequest>()) }
+        confirmVerified(products)
     }
 
     @Test
-    fun givenBlankProductId__whenDeletingProduct__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `상품 ID가 공백일 때__상품을 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = catalogMvc.perform(delete("/api/v1/products/{productId}", BLANK_SEGMENT)).andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(products)
+        confirmVerified(products)
     }
 
     @Test
-    fun givenNumericProductId__whenDeletingProduct__thenPassTheIdToService() {
+    fun `상품 ID가 숫자일 때__상품을 삭제하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        justRun { products.deleteProduct(any()) }
+
+        // when
         catalogMvc.perform(delete("/api/v1/products/{productId}", ID))
 
-        verify(products).deleteProduct(ID)
+        // then
+        verify(exactly = 1) { products.deleteProduct(ID) }
+        confirmVerified(products)
     }
-
     // MockOrderPaymentController
 
     @Test
-    fun givenBlankOrderId__whenProcessingMockPayment__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `주문 ID가 공백일 때__모의 결제를 처리하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+        // when
         val result = paymentMvc.perform(post("/api/v1/orders/{orderId}/payment", BLANK_SEGMENT)).andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(payments)
+        confirmVerified(payments)
     }
 
     @Test
-    fun givenNumericOrderId__whenProcessingMockPayment__thenPassTheIdToService() {
+    fun `주문 ID가 숫자일 때__모의 결제를 처리하면__서비스에 그 ID를 넘긴다`() {
+        // given
+        justRun { payments.processPayment(any()) }
+
+        // when
         paymentMvc.perform(post("/api/v1/orders/{orderId}/payment", ID))
 
-        verify(payments).processPayment(ID)
+        // then
+        verify(exactly = 1) { payments.processPayment(ID) }
+        confirmVerified(payments)
     }
 
     companion object {

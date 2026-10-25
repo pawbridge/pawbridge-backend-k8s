@@ -9,14 +9,15 @@ import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.Product
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.ProductSKU
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.ProductStatus
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.TransactionDefinition
@@ -34,9 +35,12 @@ import java.util.Optional
 /** Direct payment calls with synthetic transactions; no JPA/database/Redis execution. */
 class JpaStorePaymentEventsTest {
     @Test
-    fun given__no_caller_transaction__when__completing_or_failing__then__reject_before_locking_the_order() {
+    fun `호출자 트랜잭션이 없을 때__완료하거나 실패 처리하면__주문을 잠그기 전에 거부한다`() {
+        // given
         val f = Fixture()
 
+        // when
+        // then
         assertThatThrownBy { f.service.completePayment("order-uuid", 900L) }
             .isInstanceOf(IllegalTransactionStateException::class.java)
         assertThatThrownBy { f.service.failPayment("order-uuid") }
@@ -47,11 +51,14 @@ class JpaStorePaymentEventsTest {
     }
 
     @Test
-    fun given__a_read_only_caller_transaction__when__completing__then__reject_before_locking() {
+    fun `읽기 전용 호출자 트랜잭션일 때__완료하면__잠그기 전에 거부한다`() {
+        // given
         val f = Fixture()
         val reads = TransactionTemplate(f.manager)
         reads.isReadOnly = true
 
+        // when
+        // then
         assertThatThrownBy { reads.execute { f.service.completePayment("order-uuid", 900L) } }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("An active Store writer transaction is required")
@@ -61,9 +68,11 @@ class JpaStorePaymentEventsTest {
     }
 
     @Test
-    fun given__a_locked_pending_order_with_the_same_amount__when__completing__then__mark_paid_and_defer_ranking_to_the_caller() {
+    fun `금액이 같은 잠긴 대기 주문일 때__완료하면__결제 완료로 표시하고 랭킹은 호출자에게 미룬다`() {
+        // given
         val f = Fixture()
 
+        // when
         val result: StorePaymentEvents.Completed = f.writes.execute {
             val completed = f.service.completePayment("order-uuid", 900L)
             assertThat(f.ranks).isEmpty()
@@ -71,6 +80,7 @@ class JpaStorePaymentEventsTest {
             completed
         }!!
 
+        // then
         assertThat(result.completion).isEqualTo(Completion.APPLIED)
         assertThat(f.order.status).isEqualTo(OrderStatus.PAID)
         assertThat(f.events).containsExactly("begin", "lock", "caller-work", "commit")
@@ -87,20 +97,24 @@ class JpaStorePaymentEventsTest {
     }
 
     @Test
-    fun given__the_caller_rolls_back__when__completion_was_applied__then__never_increment_ranking() {
+    fun `호출자가 롤백할 때__완료가 적용됐더라도__랭킹을 올리지 않는다`() {
+        // given
         val f = Fixture()
 
+        // when
         f.writes.executeWithoutResult { status ->
             f.service.completePayment("order-uuid", 900L)
             status.setRollbackOnly()
         }
 
+        // then
         assertThat(f.events).containsExactly("begin", "lock", "rollback")
         assertThat(f.ranks).isEmpty()
     }
 
     @Test
-    fun given__ranking_fails_after_commit__when__completing__then__swallow_the_failure_and_keep_the_commit() {
+    fun `커밋 뒤 랭킹이 실패할 때__완료하면__실패를 삼키고 커밋을 유지한다`() {
+        // given
         val f = Fixture()
         val attempts = ArrayList<String>()
         val service = f.service(
@@ -111,8 +125,10 @@ class JpaStorePaymentEventsTest {
             },
         )
 
+        // when
         val result: StorePaymentEvents.Completed = f.writes.execute { service.completePayment("order-uuid", 900L) }!!
 
+        // then
         assertThat(result.completion).isEqualTo(Completion.APPLIED)
         assertThat(f.events).containsExactly("begin", "lock", "commit")
         assertThatCode { result.afterCommit.run() }.doesNotThrowAnyException()
@@ -120,45 +136,62 @@ class JpaStorePaymentEventsTest {
     }
 
     @Test
-    fun given__an_already_paid_order__when__completing_again__then__report_already_paid_without_ranking() {
+    fun `이미 결제된 주문일 때__다시 완료하면__랭킹 없이 이미 결제됨을 알린다`() {
+        // given
         val f = Fixture()
         f.order.paid()
 
-        assertThat(f.complete("order-uuid", 900L)).isEqualTo(Completion.ALREADY_PAID)
+        // when
+        val completion = f.complete("order-uuid", 900L)
 
+        // then
+        assertThat(completion).isEqualTo(Completion.ALREADY_PAID)
         assertThat(f.ranks).isEmpty()
         assertThat(f.events).containsExactly("begin", "lock", "commit")
     }
 
     @ParameterizedTest
     @EnumSource(value = OrderStatus::class, names = ["CANCELLED", "FAILED", "COMPLETED"])
-    fun given__a_non_pending_order__when__completing__then__reject_without_changing_it(before: OrderStatus) {
+    fun `대기 상태가 아닌 주문일 때__완료하면__주문을 바꾸지 않고 거부한다`(before: OrderStatus) {
+        // given
         val f = Fixture()
         f.order.updateStatus(before)
 
-        assertThat(f.complete("order-uuid", 900L)).isEqualTo(Completion.REJECTED)
+        // when
+        val completion = f.complete("order-uuid", 900L)
 
+        // then
+        assertThat(completion).isEqualTo(Completion.REJECTED)
         assertThat(f.order.status).isEqualTo(before)
         assertThat(f.ranks).isEmpty()
     }
 
     @Test
-    fun given__a_different_amount_or_missing_order__when__completing__then__reject_without_changing_it() {
+    fun `금액이 다르거나 주문이 없을 때__완료하면__주문을 바꾸지 않고 거부한다`() {
+        // given
         val f = Fixture()
 
-        assertThat(f.complete("order-uuid", 901L)).isEqualTo(Completion.REJECTED)
-        assertThat(f.complete("missing", 900L)).isEqualTo(Completion.REJECTED)
+        // when
+        val differentAmount = f.complete("order-uuid", 901L)
+        val missingOrder = f.complete("missing", 900L)
 
+        // then
+        assertThat(differentAmount).isEqualTo(Completion.REJECTED)
+        assertThat(missingOrder).isEqualTo(Completion.REJECTED)
         assertThat(f.order.status).isEqualTo(OrderStatus.PENDING)
         assertThat(f.ranks).isEmpty()
     }
 
     @Test
-    fun given__a_locked_pending_order__when__failing__then__cancel_and_restore_aggregated_skus_in_the_caller_transaction() {
+    fun `잠긴 대기 주문일 때__실패 처리하면__취소하고 집계한 SKU 재고를 호출자 트랜잭션에서 복원한다`() {
+        // given
         val f = Fixture()
 
-        assertThat(f.fail()).isTrue()
+        // when
+        val cancelled = f.fail()
 
+        // then
+        assertThat(cancelled).isTrue()
         assertThat(f.order.status).isEqualTo(OrderStatus.CANCELLED)
         assertThat(f.restorations).containsExactly(LinkedHashMap<Long?, Int>(mapOf(11L to 5, 12L to 4)))
         assertThat(f.events).containsExactly("begin", "lock", "restore", "commit")
@@ -167,18 +200,23 @@ class JpaStorePaymentEventsTest {
 
     @ParameterizedTest
     @EnumSource(value = OrderStatus::class, names = ["PENDING"], mode = EnumSource.Mode.EXCLUDE)
-    fun given__a_non_pending_order__when__failing__then__neither_cancel_nor_restore(before: OrderStatus) {
+    fun `대기 상태가 아닌 주문일 때__실패 처리하면__취소도 복원도 하지 않는다`(before: OrderStatus) {
+        // given
         val f = Fixture()
         f.order.updateStatus(before)
 
-        assertThat(f.fail()).isFalse()
+        // when
+        val cancelled = f.fail()
 
+        // then
+        assertThat(cancelled).isFalse()
         assertThat(f.order.status).isEqualTo(before)
         assertThat(f.restorations).isEmpty()
     }
 
     @Test
-    fun given__a_stock_restore_failure__when__failing__then__propagate_and_roll_back_the_caller_transaction() {
+    fun `재고 복원이 실패할 때__실패 처리하면__전파하고 호출자 트랜잭션을 롤백한다`() {
+        // given
         val f = Fixture()
         val failure = IllegalStateException("synthetic stock failure")
         val service = f.service(
@@ -186,19 +224,24 @@ class JpaStorePaymentEventsTest {
             StorePaymentEvents.Ranking { key, product, quantity -> },
         )
 
+        // when
+        // then
         assertThatThrownBy { f.writes.execute { service.failPayment("order-uuid") } }.isSameAs(failure)
 
         assertThat(f.events.last()).isEqualTo("rollback")
     }
 
     @Test
-    fun given__a_swallowed_participant_failure__when__the_caller_commits__then__the_shared_transaction_still_rolls_back() {
+    fun `참여자 실패를 삼켰을 때__호출자가 커밋하면__공유 트랜잭션은 그래도 롤백된다`() {
+        // given
         val f = Fixture()
         val service = f.service(
             StorePaymentEvents.StockRestorer { quantities -> throw IllegalStateException("synthetic") },
             StorePaymentEvents.Ranking { key, product, quantity -> },
         )
 
+        // when
+        // then
         assertThatThrownBy {
             f.writes.executeWithoutResult {
                 try {
@@ -212,23 +255,40 @@ class JpaStorePaymentEventsTest {
     }
 
     @Test
-    fun given__a_pending_order__when__the_mock_payment_runs__then__mark_paid_in_its_own_transaction_without_ranking_or_events() {
+    fun `대기 주문일 때__모의 결제를 실행하면__랭킹이나 이벤트 없이 자체 트랜잭션에서 결제 완료로 표시한다`() {
+        // given
         val f = Fixture()
 
+        every { f.orders.findById(any()) } answers {
+            f.events.add("order-id")
+            Optional.of(f.order)
+        }
+
+        // when
         f.service.processPayment(33L)
 
+        // then
         assertThat(f.order.status).isEqualTo(OrderStatus.PAID)
         assertThat(f.ranks).isEmpty()
         assertThat(f.restorations).isEmpty()
         assertThat(f.events).containsExactly("begin", "order-id", "commit")
+        verify(exactly = 1) { f.orders.findById(33L) }
     }
 
     @ParameterizedTest
     @EnumSource(value = OrderStatus::class, names = ["PENDING"], mode = EnumSource.Mode.EXCLUDE)
-    fun given__a_non_pending_order__when__the_mock_payment_runs__then__preserve_the_original_state_guard(state: OrderStatus) {
+    fun `대기 상태가 아닌 주문일 때__모의 결제를 실행하면__원래의 상태 가드를 유지한다`(state: OrderStatus) {
+        // given
         val f = Fixture()
         f.order.updateStatus(state)
 
+        every { f.orders.findById(any()) } answers {
+            f.events.add("order-id")
+            Optional.of(f.order)
+        }
+
+        // when
+        // then
         assertThatThrownBy { f.service.processPayment(33L) }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("Order is not in PENDING state")
@@ -237,22 +297,27 @@ class JpaStorePaymentEventsTest {
     }
 
     @Test
-    fun given__a_missing_order__when__the_mock_payment_runs__then__fail_without_changes() {
+    fun `주문이 없을 때__모의 결제를 실행하면__변경 없이 실패한다`() {
+        // given
         val f = Fixture()
-        `when`(f.orders.findById(99L)).thenReturn(Optional.empty())
 
+        every { f.orders.findById(any()) } returns Optional.empty()
+
+        // when
+        // then
         assertThatThrownBy { f.service.processPayment(99L) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Order not found")
 
         assertThat(f.events.last()).isEqualTo("rollback")
+        verify(exactly = 1) { f.orders.findById(99L) }
     }
 
     private class Fixture {
         val events = ArrayList<String>()
         val ranks = ArrayList<String>()
         val restorations = ArrayList<Map<Long?, Int>>()
-        val orders: OrderRepository = mock(OrderRepository::class.java)
+        val orders: OrderRepository = mockk<OrderRepository>()
         val manager = RecordingManager(events)
         val writes = TransactionTemplate(manager)
         val mandatory = TransactionTemplate(manager)
@@ -273,10 +338,6 @@ class JpaStorePaymentEventsTest {
             addItem(11L, 100L, 2)
             addItem(11L, 100L, 3)
             addItem(12L, 200L, 4)
-            `when`(orders.findById(33L)).thenAnswer {
-                events.add("order-id")
-                Optional.of(order)
-            }
             service = service(
                 StorePaymentEvents.StockRestorer { quantities ->
                     assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()

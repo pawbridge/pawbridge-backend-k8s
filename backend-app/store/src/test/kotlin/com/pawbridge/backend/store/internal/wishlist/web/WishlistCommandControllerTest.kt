@@ -5,6 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.pawbridge.backend.store.internal.wishlist.application.WishlistCommands
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -15,12 +20,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
@@ -40,7 +39,7 @@ import java.time.LocalDateTime
 import java.util.stream.Stream
 
 class WishlistCommandControllerTest {
-    private val commands: WishlistCommands = mock(WishlistCommands::class.java)
+    private val commands: WishlistCommands = mockk<WishlistCommands>()
     private val json: ObjectMapper = ObjectMapper().registerModule(JavaTimeModule())
         .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -66,20 +65,22 @@ class WishlistCommandControllerTest {
     }
 
     @Test
-    fun given__authenticated_member_and_forged_body_or_header_user__when__adding__then__use_principal_and_keep_raw_created_response() {
+    fun `인증된 회원이고 본문과 헤더의 사용자가 위조됐을 때__찜을 추가하면__인증 주체를 쓰고 원래의 201 응답을 그대로 돌려준다`() {
+        // given
         current(7L)
-        `when`(commands.add(7, 80L)).thenReturn(
-            WishlistCommands.Added(
-                9007199254740993L, 7L, 80L, "SKU", 9L, "상품", null,
-                9007199254740993L, mutableMapOf("색상" to "파랑"), LocalDateTime.of(2026, 10, 20, 9, 0, 1, 123456789),
-            ),
+
+        every { commands.add(any(), any()) } returns WishlistCommands.Added(
+            9007199254740993L, 7L, 80L, "SKU", 9L, "상품", null,
+            9007199254740993L, mutableMapOf("색상" to "파랑"), LocalDateTime.of(2026, 10, 20, 9, 0, 1, 123456789),
         )
 
+        // when
         val body = mvc.perform(
             post("/api/v1/wishlists").header("X-User-Id", "99").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"skuId\":80,\"userId\":99}"),
         ).andExpect(status().isCreated()).andReturn().response.contentAsByteArray
 
+        // then
         val node = json.readTree(body)
         assertEquals(10, node.size())
         assertFalse(node.has("data"))
@@ -89,116 +90,146 @@ class WishlistCommandControllerTest {
         assertTrue(node.get("productImageUrl").isNull)
         assertEquals("파랑", node.get("options").get("색상").asText())
         assertEquals("2026-10-20T09:00:01.123456789", node.get("createdAt").asText())
-        verify(commands).add(7, 80L)
+        verify(exactly = 1) { commands.add(7L, 80L) }
     }
 
     @Test
-    fun given__authenticated_member_and_forged_query_user__when__removing_sku__then__use_principal_and_return_no_content() {
+    fun `인증된 회원이고 쿼리의 사용자가 위조됐을 때__SKU로 찜을 삭제하면__인증 주체를 쓰고 204를 돌려준다`() {
+        // given
         current(7L)
 
+        justRun { commands.removeByMemberAndSku(any(), any()) }
+
+        // when
         mvc.perform(delete("/api/v1/wishlists").param("userId", "99").param("skuId", "80").header("X-User-Id", "99"))
             .andExpect(status().isNoContent()).andExpect(content().string(""))
 
-        verify(commands).removeByMemberAndSku(7, 80)
+        // then
+        verify(exactly = 1) { commands.removeByMemberAndSku(7L, 80L) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["POST", "DELETE"])
-    fun given__no_principal_and_forged_user_header__when__commanding__then__unauthorized_without_application(method: String) {
+    fun `인증 주체가 없고 사용자 헤더가 위조됐을 때__찜 명령을 보내면__애플리케이션 호출 없이 401을 돌려준다`(method: String) {
+        // given
         val request = if (method == "POST") {
             post("/api/v1/wishlists").contentType(MediaType.APPLICATION_JSON).content("{\"skuId\":80,\"userId\":99}")
         } else {
             delete("/api/v1/wishlists").param("skuId", "80").param("userId", "99")
         }
 
+        // when
         mvc.perform(request.header("X-User-Id", "99")).andExpect(status().isUnauthorized())
 
-        verifyNoInteractions(commands)
+        // then
+        confirmVerified(commands)
     }
 
     @Test
-    fun given__non_long_principal__when__adding__then__reject_without_interpreting_user_text() {
+    fun `인증 주체가 Long이 아닐 때__찜을 추가하면__사용자 문자열을 해석하지 않고 401로 거부한다`() {
+        // given
         current("99")
 
+        // when
         mvc.perform(post("/api/v1/wishlists").contentType(MediaType.APPLICATION_JSON).content("{\"skuId\":80}"))
             .andExpect(status().isUnauthorized())
 
-        verifyNoInteractions(commands)
+        // then
+        confirmVerified(commands)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [33L, 9007199254740993L])
-    fun given__authenticated_member_and_forged_user_sources__when__removing_identity__then__use_only_principal_and_return_no_content(
+    fun `인증된 회원이고 사용자 출처가 위조됐을 때__ID로 찜을 삭제하면__인증 주체만 쓰고 204를 돌려준다`(
         wishlistId: Long,
     ) {
+        // given
         current(7L)
 
+        justRun { commands.removeById(any(), any()) }
+
+        // when
         mvc.perform(
             delete("/api/v1/wishlists/{wishlistId}", wishlistId).param("userId", "99").header("X-User-Id", "99")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"userId\":99}"),
         ).andExpect(status().isNoContent()).andExpect(content().string(""))
 
-        verify(commands).removeById(7, wishlistId)
-        verifyNoMoreInteractions(commands)
+        // then
+        verify(exactly = 1) { commands.removeById(7L, wishlistId) }
+        confirmVerified(commands)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "text"])
-    fun given__missing_or_non_long_principal__when__removing_identity_with_forged_user__then__unauthorized_without_command(
+    fun `인증 주체가 없거나 Long이 아니고 사용자가 위조됐을 때__ID로 찜을 삭제하면__명령 호출 없이 401을 돌려준다`(
         principal: String,
     ) {
+        // given
         if (principal == "text") {
             current("99")
         }
 
+        // when
         mvc.perform(delete("/api/v1/wishlists/33").param("userId", "99").header("X-User-Id", "99"))
             .andExpect(status().isUnauthorized()).andExpect(content().string(""))
 
-        verifyNoInteractions(commands)
+        // then
+        confirmVerified(commands)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["bad", "9223372036854775808", "33.0"])
-    fun given__unparseable_identity__when__removing_identity__then__bad_type_without_command(wishlistId: String) {
+    fun `해석할 수 없는 ID일 때__ID로 찜을 삭제하면__명령 호출 없이 타입 불일치 400을 돌려준다`(wishlistId: String) {
+        // given
         current(7L)
 
+        // when
         mvc.perform(delete("/api/v1/wishlists/{wishlistId}", wishlistId)).andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value("wishlistId"))
             .andExpect(jsonPath("\$.errors[0].value").value(wishlistId))
             .andExpect(jsonPath("\$.errors[0].reason").value("typeMismatch"))
 
-        verifyNoInteractions(commands)
+        // then
+        confirmVerified(commands)
     }
 
     @ParameterizedTest
     @MethodSource("identityFailures")
-    fun given__database_or_transaction_failure__when__removing_identity__then__return_server_error_without_private_details(
+    fun `데이터베이스나 트랜잭션 실패가 발생할 때__ID로 찜을 삭제하면__내부 정보 없이 500을 돌려준다`(
         failure: RuntimeException,
     ) {
+        // given
         current(7L)
-        doThrow(failure).`when`(commands).removeById(7, 33)
 
+        every { commands.removeById(any(), any()) } throws failure
+
+        // when
         val body = mvc.perform(delete("/api/v1/wishlists/33")).andExpect(status().isInternalServerError())
             .andExpect(jsonPath("\$.code").value("C004"))
             .andExpect(jsonPath("\$.message").value("Server Error"))
             .andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private delete"))
-        verify(commands).removeById(7, 33)
-        verifyNoMoreInteractions(commands)
+        verify(exactly = 1) { commands.removeById(7L, 33L) }
+        confirmVerified(commands)
     }
 
     @ParameterizedTest
     @MethodSource("addFailures")
-    fun given__source_command_failure__when__adding__then__preserve_status_code_and_hide_private_details(
+    fun `원본 명령이 실패할 때__찜을 추가하면__상태 코드를 유지하고 내부 정보를 가린다`(
         failure: RuntimeException,
         statusCode: Int,
         code: String,
     ) {
+        // given
         current(7L)
-        `when`(commands.add(7, 80L)).thenThrow(failure)
 
+        every { commands.add(any(), any()) } throws failure
+
+        // when
+        // then
         mvc.perform(post("/api/v1/wishlists").contentType(MediaType.APPLICATION_JSON).content("{\"skuId\":80}"))
             .andExpect(status().`is`(statusCode))
             .andExpect(jsonPath("\$.code").value(code))
@@ -207,25 +238,32 @@ class WishlistCommandControllerTest {
     }
 
     @Test
-    fun given__missing_pair__when__removing_sku__then__preserve_bad_input_error() {
+    fun `찜 쌍이 없을 때__SKU로 찜을 삭제하면__원래의 잘못된 입력 오류를 유지한다`() {
+        // given
         current(7L)
-        doThrow(IllegalArgumentException("찜을 찾을 수 없습니다.")).`when`(commands).removeByMemberAndSku(7, 80)
 
+        every { commands.removeByMemberAndSku(any(), any()) } throws IllegalArgumentException("찜을 찾을 수 없습니다.")
+
+        // when
+        // then
         mvc.perform(delete("/api/v1/wishlists").param("skuId", "80")).andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C001"))
     }
 
     @Test
-    fun given__wrong_sku_query_type__when__deleting__then__original_field_error_before_command() {
+    fun `SKU 쿼리 타입이 잘못됐을 때__삭제하면__명령 호출 전에 원래의 필드 오류를 돌려준다`() {
+        // given
         current(7L)
 
+        // when
         mvc.perform(delete("/api/v1/wishlists").param("skuId", "bad")).andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value("skuId"))
             .andExpect(jsonPath("\$.errors[0].value").value("bad"))
             .andExpect(jsonPath("\$.errors[0].reason").value("typeMismatch"))
 
-        verifyNoInteractions(commands)
+        // then
+        confirmVerified(commands)
     }
 
     companion object {
