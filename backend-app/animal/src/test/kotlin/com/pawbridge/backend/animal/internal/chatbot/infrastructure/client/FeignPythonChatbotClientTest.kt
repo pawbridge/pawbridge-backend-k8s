@@ -11,6 +11,7 @@ import feign.Response
 import feign.RetryableException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -31,7 +32,8 @@ class FeignPythonChatbotClientTest {
     )
 
     @Test
-    fun given__explicit_transport_options_key_and_original_dtos__when__calling__then__send_exact_path_header_and_body_and_decode_three_response_fields() {
+    fun `명시한 전송 옵션과 키와 원래 DTO가 있을 때__호출하면__정확한 경로와 헤더와 본문을 보내고 응답 필드 세 개를 해석한다`() {
+        // given
         val captured = AtomicReference<Request>()
         val observedOptions = AtomicReference<Request.Options>()
         val options = Request.Options()
@@ -40,10 +42,12 @@ class FeignPythonChatbotClientTest {
             observedOptions.set(current)
             response(request, 200, "{\"answer\":\"답변\",\"safetyNotice\":\"주의\",\"provider\":\"fixture\"}")
         }
+        val client = FeignPythonChatbotClient("http://python.example.invalid:8000", json, transport, options)
 
-        val result = FeignPythonChatbotClient("http://python.example.invalid:8000", json, transport, options)
-            .createChatbotMessage("synthetic-internal-key", input)!!
+        // when
+        val result = client.createChatbotMessage("synthetic-internal-key", input)!!
 
+        // then
         assertEquals("답변", result.answer)
         assertEquals("주의", result.safetyNotice)
         assertEquals("fixture", result.provider)
@@ -62,9 +66,10 @@ class FeignPythonChatbotClientTest {
 
     @ParameterizedTest
     @ValueSource(ints = [400, 429, 500])
-    fun given__upstream_http_failure__when__calling__then__propagate_feign_failure_without_translating_it_to_local_quota_or_retrying(
+    fun `상류가 HTTP 오류를 돌려줄 때__호출하면__로컬 한도로 바꾸거나 재시도하지 않고 Feign 실패를 그대로 전파한다`(
         status: Int,
     ) {
+        // given
         val calls = AtomicInteger()
         val transport = Client { request, _ ->
             calls.incrementAndGet()
@@ -72,15 +77,17 @@ class FeignPythonChatbotClientTest {
         }
         val client = FeignPythonChatbotClient("http://python.example.invalid", json, transport, Request.Options())
 
-        assertEquals(
-            status,
-            assertThrows(FeignException::class.java) { client.createChatbotMessage("synthetic-key", input) }.status(),
-        )
+        // when
+        val thrown = assertThrows(FeignException::class.java) { client.createChatbotMessage("synthetic-key", input) }
+
+        // then
+        assertEquals(status, thrown.status())
         assertEquals(1, calls.get())
     }
 
     @Test
-    fun given__transport_io_failure__when__calling__then__never_retry_or_fabricate_an_answer() {
+    fun `전송 계층이 입출력 오류를 낼 때__호출하면__재시도하거나 답변을 꾸며내지 않는다`() {
+        // given
         val calls = AtomicInteger()
         val transport = Client { _, _ ->
             calls.incrementAndGet()
@@ -88,27 +95,39 @@ class FeignPythonChatbotClientTest {
         }
         val client = FeignPythonChatbotClient("http://python.example.invalid", json, transport, Request.Options())
 
-        assertThrows(RetryableException::class.java) { client.createChatbotMessage("synthetic-key", input) }
+        // when
+        val thrown = assertThrows(RetryableException::class.java) { client.createChatbotMessage("synthetic-key", input) }
+
+        // then
+        assertNotNull(thrown)
         assertEquals(1, calls.get())
     }
 
     @Test
-    fun given__malformed_success_json__when__calling__then__propagate_decode_failure_without_an_answer() {
+    fun `성공 응답의 JSON이 깨졌을 때__호출하면__답변 없이 해석 실패를 전파한다`() {
+        // given
         val transport = Client { request, _ -> response(request, 200, "{broken") }
         val client = FeignPythonChatbotClient("http://python.example.invalid", json, transport, Request.Options())
 
-        assertThrows(FeignException::class.java) { client.createChatbotMessage("synthetic-key", input) }
+        // when
+        val thrown = assertThrows(FeignException::class.java) { client.createChatbotMessage("synthetic-key", input) }
+
+        // then
+        assertNotNull(thrown)
     }
 
     @Test
-    fun given__nullable_provider_response_fields__when__calling__then__preserve_original_unvalidated_values_for_persistence() {
+    fun `제공자 응답 필드가 널일 때__호출하면__저장을 위해 원래의 검증되지 않은 값을 그대로 둔다`() {
+        // given
         val transport = Client { request, _ ->
             response(request, 200, "{\"answer\":null,\"safetyNotice\":null,\"provider\":null}")
         }
+        val client = FeignPythonChatbotClient("http://python.example.invalid", json, transport, Request.Options())
 
-        val result = FeignPythonChatbotClient("http://python.example.invalid", json, transport, Request.Options())
-            .createChatbotMessage("synthetic-key", input)!!
+        // when
+        val result = client.createChatbotMessage("synthetic-key", input)!!
 
+        // then
         assertNull(result.answer)
         assertNull(result.safetyNotice)
         assertNull(result.provider)

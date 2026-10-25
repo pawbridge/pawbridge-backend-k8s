@@ -1,5 +1,7 @@
 package com.pawbridge.backend.animal.internal.chatbot.infrastructure.service
 
+import io.mockk.every
+import io.mockk.mockk
 import jakarta.servlet.http.Cookie
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
@@ -14,8 +16,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.NullSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import java.util.UUID
@@ -24,25 +24,31 @@ import java.util.stream.Stream
 class ChatbotAnonymousIdentityTest {
     @ParameterizedTest
     @ValueSource(strings = ["01234567-89ab-cdef-0123-456789abcdef", "1-1-1-1-1"])
-    fun given__uuid_parsable_cookie__when__resolving__then__reuse_original_value_without_reissuing_or_canonicalizing(
+    fun `UUID로 해석되는 쿠키가 있을 때__익명 세션을 해석하면__재발급이나 정규화 없이 원래 값을 재사용한다`(
         anonymous: String,
     ) {
+        // given
         val request = MockHttpServletRequest()
         request.setCookies(Cookie(ChatbotCookieService.COOKIE_NAME, anonymous))
         val response = MockHttpServletResponse()
 
-        assertEquals(anonymous, ChatbotCookieService().resolveAnonymousSessionId(request, response))
+        // when
+        val resolved = ChatbotCookieService().resolveAnonymousSessionId(request, response)
+
+        // then
+        assertEquals(anonymous, resolved)
         assertNull(response.getHeader("Set-Cookie"))
     }
 
     @ParameterizedTest
     @MethodSource("newCookies")
-    fun given__missing_or_invalid_cookie_and_transport__when__resolving__then__issue_uuid_http_only_lax_root_cookie_for_180_days(
+    fun `쿠키가 없거나 잘못됐고 전송 방식이 다양할 때__익명 세션을 해석하면__180일짜리 UUID HttpOnly Lax 루트 쿠키를 발급한다`(
         value: String?,
         secure: Boolean,
         proto: String?,
         expectedSecure: Boolean,
     ) {
+        // given
         val request = MockHttpServletRequest()
         if (value != null) {
             request.setCookies(Cookie(ChatbotCookieService.COOKIE_NAME, value))
@@ -53,9 +59,11 @@ class ChatbotAnonymousIdentityTest {
         }
         val response = MockHttpServletResponse()
 
+        // when
         val anonymous: String = ChatbotCookieService().resolveAnonymousSessionId(request, response)
-        UUID.fromString(anonymous)
 
+        // then
+        UUID.fromString(anonymous)
         val cookie: String? = response.getHeader("Set-Cookie")
         assertNotNull(cookie)
         assertTrue(cookie!!.startsWith("pawbridge_anon_id=" + anonymous))
@@ -68,40 +76,52 @@ class ChatbotAnonymousIdentityTest {
 
     @ParameterizedTest
     @MethodSource("ips")
-    fun given__original_proxy_headers_and_remote_address__when__resolving__then__preserve_cf_forwarded_real_remote_precedence(
+    fun `원래의 프록시 헤더와 원격 주소가 있을 때__IP를 해석하면__CF와 전달 헤더와 실제 IP와 원격 주소의 우선순위를 유지한다`(
         cf: String?,
         forwarded: String?,
         real: String?,
         remote: String?,
         expected: String,
     ) {
-        val request = mock(HttpServletRequest::class.java)
-        `when`(request.getHeader("CF-Connecting-IP")).thenReturn(cf)
-        `when`(request.getHeader("X-Forwarded-For")).thenReturn(forwarded)
-        `when`(request.getHeader("X-Real-IP")).thenReturn(real)
-        `when`(request.remoteAddr).thenReturn(remote)
+        // given
+        val request = mockk<HttpServletRequest>()
 
-        assertEquals(expected, ChatbotClientIpResolver().resolve(request))
+        every { request.getHeader("CF-Connecting-IP") } returns cf
+        every { request.getHeader("X-Forwarded-For") } returns forwarded
+        every { request.getHeader("X-Real-IP") } returns real
+        every { request.remoteAddr } returns remote
+
+        // when
+        val resolved = ChatbotClientIpResolver().resolve(request)
+
+        // then
+        assertEquals(expected, resolved)
     }
 
     @Test
-    fun given__known_hmac_sha256_vector__when__hashing__then__return_original_lowercase_hex() {
-        assertEquals(
-            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8",
-            ChatbotIpHashService("key").hash("The quick brown fox jumps over the lazy dog"),
-        )
+    fun `알려진 HMAC-SHA256 벡터가 있을 때__해시하면__원래의 소문자 16진수를 돌려준다`() {
+        // given
+        val hashes = ChatbotIpHashService("key")
+
+        // when
+        val hash = hashes.hash("The quick brown fox jumps over the lazy dog")
+
+        // then
+        assertEquals("f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8", hash)
     }
 
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = ["", " "])
-    fun given__blank_hash_secret__when__constructing_then_hashing__then__preserve_request_time_failure(secret: String?) {
+    fun `해시 비밀값이 비어 있을 때__생성한 뒤 해시하면__요청 시점의 실패를 유지한다`(secret: String?) {
+        // given
         val hashes = assertDoesNotThrow<ChatbotIpHashService> { ChatbotIpHashService(secret) }
 
-        assertEquals(
-            "chatbot.security.ip-hash-secret 설정이 필요합니다.",
-            assertThrows(IllegalStateException::class.java) { hashes.hash("192.0.2.1") }.message,
-        )
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { hashes.hash("192.0.2.1") }
+
+        // then
+        assertEquals("chatbot.security.ip-hash-secret 설정이 필요합니다.", thrown.message)
     }
 
     companion object {

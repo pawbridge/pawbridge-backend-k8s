@@ -1,15 +1,15 @@
 package com.pawbridge.backend.animal.internal.chatbot.web
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.pawbridge.backend.animal.anyNonNull
-import com.pawbridge.backend.animal.eqNonNull
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.dto.ChatbotMessageRequest
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.dto.ChatbotMessageResponse
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.exception.ChatbotAnimalNotFoundException
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.exception.ChatbotRateLimitExceededException
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.service.ChatbotService
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -20,12 +20,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
@@ -38,7 +32,7 @@ import java.nio.charset.StandardCharsets
 import java.util.stream.Stream
 
 class ChatbotControllerTest {
-    private val service: ChatbotService = mock(ChatbotService::class.java)
+    private val service = mockk<ChatbotService>()
     private val json = ObjectMapper()
     private val validator = LocalValidatorFactoryBean()
     private lateinit var mvc: MockMvc
@@ -59,18 +53,14 @@ class ChatbotControllerTest {
     }
 
     @Test
-    fun given__anonymous_valid_body_and_non_uuid_session_text__when__posting__then__pass_original_request_and_return_bare_four_field_success() {
+    fun `익명 요청에 유효한 본문과 UUID가 아닌 세션 문자열이 있을 때__전송하면__원래 요청을 넘기고 필드 네 개의 응답을 그대로 돌려준다`() {
+        // given
         val input = ChatbotMessageRequest("not-a-uuid", "입양 문의")
         val result = ChatbotMessageResponse("owned-session", "답변", "주의", "fixture")
-        `when`(
-            service.createMessage(
-                eq(41L),
-                eqNonNull(input),
-                anyNonNull<HttpServletRequest>(),
-                anyNonNull<HttpServletResponse>(),
-            ),
-        ).thenReturn(result)
 
+        every { service.createMessage(any(), any(), any(), any()) } returns result
+
+        // when
         val body = json.readTree(
             mvc.perform(
                 post("/api/v1/animals/41/chat/messages")
@@ -80,87 +70,80 @@ class ChatbotControllerTest {
             ).andExpect(status().isOk()).andReturn().response.contentAsByteArray,
         )
 
+        // then
         assertEquals(json.readTree(json.writeValueAsBytes(result)), body)
         assertEquals(4, body.size())
         assertFalse(body.has("data"))
         assertFalse(body.has("code"))
-        verify(service).createMessage(
-            eq(41L),
-            eqNonNull(input),
-            anyNonNull<HttpServletRequest>(),
-            anyNonNull<HttpServletResponse>(),
-        )
-        verifyNoMoreInteractions(service)
+        verify(exactly = 1) { service.createMessage(41L, input, any(), any()) }
+        confirmVerified(service)
     }
 
     @ParameterizedTest
     @MethodSource("invalid")
-    fun given__invalid_original_body_constraint__when__posting__then__validation_400_precedes_any_service_effect(
+    fun `원래 본문 제약을 어긴 요청일 때__전송하면__서비스 효과보다 먼저 검증 400을 낸다`(
         request: ChatbotMessageRequest,
         message: String,
     ) {
+        // given
+        // when
         val body = mvc.perform(
             post("/api/v1/animals/41/chat/messages")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsBytes(request)),
         ).andExpect(status().isBadRequest()).andReturn().response.contentAsByteArray
 
+        // then
         error(body, 400, message)
-        verifyNoInteractions(service)
+        confirmVerified(service)
     }
 
     @Test
-    fun given__malformed_json__when__posting__then__preserve_original_bad_body_message_without_service_call() {
-        error(
-            mvc.perform(
-                post("/api/v1/animals/41/chat/messages")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{broken"),
-            ).andExpect(status().isBadRequest()).andReturn().response.contentAsByteArray,
-            400,
-            "요청 본문 형식이 올바르지 않습니다.",
-        )
-        verifyNoInteractions(service)
+    fun `깨진 JSON일 때__전송하면__서비스 호출 없이 원래의 잘못된 본문 메시지를 유지한다`() {
+        // given
+        // when
+        val body = mvc.perform(
+            post("/api/v1/animals/41/chat/messages")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{broken"),
+        ).andExpect(status().isBadRequest()).andReturn().response.contentAsByteArray
+
+        // then
+        error(body, 400, "요청 본문 형식이 올바르지 않습니다.")
+        confirmVerified(service)
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__original_business_or_upstream_or_storage_failure__when__posting__then__preserve_status_envelope_and_sanitized_server_messages(
+    fun `업무 오류나 상류 오류나 저장소 오류가 날 때__전송하면__상태와 응답 형식과 정리된 서버 메시지를 유지한다`(
         failure: RuntimeException,
         statusCode: Int,
         message: String,
     ) {
-        `when`(
-            service.createMessage(
-                eq(41L),
-                anyNonNull<ChatbotMessageRequest>(),
-                anyNonNull<HttpServletRequest>(),
-                anyNonNull<HttpServletResponse>(),
-            ),
-        ).thenThrow(failure)
+        // given
+        every { service.createMessage(any(), any(), any(), any()) } throws failure
 
+        // when
         val body = mvc.perform(
             post("/api/v1/animals/41/chat/messages")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"question\":\"입양 문의\"}"),
         ).andExpect(status().`is`(statusCode)).andReturn().response.contentAsByteArray
 
+        // then
         error(body, statusCode, message)
         assertFalse(String(body, StandardCharsets.UTF_8).contains("private"))
+        verify(exactly = 1) { service.createMessage(41L, any(), any(), any()) }
     }
 
     @Test
-    fun given__local_guard_result__when__posting__then__return_bare_200_instead_of_quota_429() {
+    fun `로컬 가드 결과일 때__전송하면__한도 429 대신 응답 200을 그대로 돌려준다`() {
+        // given
         val result = ChatbotMessageResponse("owned-session", "보호동물 관련 질문을 입력해주세요.", "고정 주의문", "guard")
-        `when`(
-            service.createMessage(
-                eq(41L),
-                anyNonNull<ChatbotMessageRequest>(),
-                anyNonNull<HttpServletRequest>(),
-                anyNonNull<HttpServletResponse>(),
-            ),
-        ).thenReturn(result)
 
+        every { service.createMessage(any(), any(), any(), any()) } returns result
+
+        // when
         val body = json.readTree(
             mvc.perform(
                 post("/api/v1/animals/41/chat/messages")
@@ -169,8 +152,10 @@ class ChatbotControllerTest {
             ).andExpect(status().isOk()).andReturn().response.contentAsByteArray,
         )
 
+        // then
         assertEquals(json.readTree(json.writeValueAsBytes(result)), body)
         assertEquals(4, body.size())
+        verify(exactly = 1) { service.createMessage(41L, any(), any(), any()) }
     }
 
     @ParameterizedTest
@@ -181,11 +166,14 @@ class ChatbotControllerTest {
             "/api/v1/animals/41/chat/messages/admin",
         ],
     )
-    fun given__noncanonical_route__when__posting__then__no_chatbot_controller_handler(path: String) {
-        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"입양 문의\"}"))
-            .andExpect(status().isNotFound())
+    fun `정규 경로가 아닐 때__전송하면__챗봇 컨트롤러 핸들러가 없다`(path: String) {
+        // given
+        // when
+        val result = mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content("{\"question\":\"입양 문의\"}"))
 
-        verifyNoInteractions(service)
+        // then
+        result.andExpect(status().isNotFound())
+        confirmVerified(service)
     }
 
     private fun error(bytes: ByteArray, code: Int, message: String) {

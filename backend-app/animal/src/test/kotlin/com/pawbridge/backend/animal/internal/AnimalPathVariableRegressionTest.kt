@@ -9,12 +9,13 @@ import com.pawbridge.backend.animal.internal.recommendation.web.AnimalRecommenda
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
 import com.pawbridge.backend.animal.internal.shelter.web.ShelterReadController
 import com.pawbridge.backend.animal.internal.shelter.web.ShelterReadExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -30,16 +31,16 @@ import java.nio.charset.StandardCharsets
  * `Long`, which fails with [MissingPathVariableException] before the handler runs. Every path
  * variable of the controllers below must keep that behaviour.
  *
- * The services are bare mocks, so for a numeric id the handlers themselves may fail afterwards (for
- * example mapping a null result). Those tests therefore assert only the service call, not the response.
+ * The services are strict mocks. For a numeric id the stub only has to let the handler finish, so those tests
+ * assert only the service call, not the response.
  *
  * Standalone MockMvc with the module exception handlers and mocked services only. It does not cover the
  * servlet container, the security filter chain or error dispatch.
  */
 class AnimalPathVariableRegressionTest {
-    private val animals: AnimalDiscovery = mock(AnimalDiscovery::class.java)
-    private val recommendations: AnimalRecommendations = mock(AnimalRecommendations::class.java)
-    private val shelters: ShelterReads = mock(ShelterReads::class.java)
+    private val animals = mockk<AnimalDiscovery>()
+    private val recommendations = mockk<AnimalRecommendations>()
+    private val shelters = mockk<ShelterReads>()
 
     private lateinit var discoveryMvc: MockMvc
     private lateinit var recommendationMvc: MockMvc
@@ -64,55 +65,131 @@ class AnimalPathVariableRegressionTest {
     // AnimalDiscoveryController
 
     @Test
-    fun givenBlankAnimalId__whenGettingAnimalDetail__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `공백 동물 ID가 주어졌을 때__동물 상세를 조회하면__서비스 호출 없이 경로 변수 누락 오류로 실패한다`() {
+        // given
+        // when
         val result = discoveryMvc.perform(get("/api/v1/animals/{id}", BLANK_SEGMENT)).andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(animals)
+        confirmVerified(animals)
     }
 
     @Test
-    fun givenNumericAnimalId__whenGettingAnimalDetail__thenPassTheIdToService() {
+    fun `숫자 동물 ID가 주어졌을 때__동물 상세를 조회하면__그 ID를 서비스에 넘긴다`() {
+        // given
+        every { animals.findById(any()) } returns animalDetails()
+
+        // when
         discoveryMvc.perform(get("/api/v1/animals/{id}", ID))
 
-        verify(animals).findById(ID)
+        // then
+        verify(exactly = 1) { animals.findById(ID) }
     }
 
     // AnimalRecommendationController
 
     @Test
-    fun givenBlankAnimalId__whenGettingSimilarAnimals__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `공백 동물 ID가 주어졌을 때__유사 동물을 조회하면__서비스 호출 없이 경로 변수 누락 오류로 실패한다`() {
+        // given
+        // when
         val result = recommendationMvc.perform(get("/api/v1/animals/{id}/similar", BLANK_SEGMENT)).andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(recommendations)
+        confirmVerified(recommendations)
     }
 
     @Test
-    fun givenNumericAnimalId__whenGettingSimilarAnimals__thenPassTheIdToService() {
+    fun `숫자 동물 ID가 주어졌을 때__유사 동물을 조회하면__그 ID를 서비스에 넘긴다`() {
+        // given
+        every { recommendations.recommend(any()) } returns emptyList()
+
+        // when
         recommendationMvc.perform(get("/api/v1/animals/{id}/similar", ID))
 
-        verify(recommendations).recommend(ID)
+        // then
+        verify(exactly = 1) { recommendations.recommend(ID) }
     }
 
     // ShelterReadController
 
     @Test
-    fun givenBlankShelterId__whenGettingShelterDetail__thenFailAsMissingPathVariableWithoutCallingService() {
+    fun `공백 보호소 ID가 주어졌을 때__보호소 상세를 조회하면__서비스 호출 없이 경로 변수 누락 오류로 실패한다`() {
+        // given
+        // when
         val result = shelterMvc.perform(get("/api/v1/shelters/{id}", BLANK_SEGMENT)).andReturn()
 
+        // then
         assertJavaOriginalServerError(result)
-        verifyNoInteractions(shelters)
+        confirmVerified(shelters)
     }
 
     @Test
-    fun givenNumericShelterId__whenGettingShelterDetail__thenPassTheIdToService() {
+    fun `숫자 보호소 ID가 주어졌을 때__보호소 상세를 조회하면__그 ID를 서비스에 넘긴다`() {
+        // given
+        every { shelters.findById(any()) } returns shelterDetails()
+
+        // when
         shelterMvc.perform(get("/api/v1/shelters/{id}", ID))
 
-        verify(shelters).findById(ID)
+        // then
+        verify(exactly = 1) { shelters.findById(ID) }
     }
 
     // helpers
+
+    private fun animalDetails(): AnimalDiscovery.Details {
+        return AnimalDiscovery.Details(
+            id = ID,
+            apmsNoticeNo = null,
+            species = null,
+            breed = null,
+            gender = null,
+            neuterStatus = null,
+            birthYear = null,
+            age = null,
+            weight = null,
+            color = null,
+            specialMark = null,
+            status = null,
+            noticeStartDate = null,
+            noticeEndDate = null,
+            happenPlace = null,
+            happenDate = null,
+            imageUrl = null,
+            imageUrl2 = null,
+            description = null,
+            favoriteCount = null,
+            shelterId = null,
+            shelterName = null,
+            apmsDesertionNo = null,
+            apmsProcessState = null,
+            apmsUpdatedAt = null,
+            apiSource = null,
+            createdAt = null,
+            updatedAt = null,
+        )
+    }
+
+    private fun shelterDetails(): ShelterReads.Details {
+        return ShelterReads.Details(
+            id = ID,
+            careRegNo = null,
+            name = null,
+            phone = null,
+            address = null,
+            ownerName = null,
+            organizationName = null,
+            email = null,
+            introduction = null,
+            adoptionProcedure = null,
+            operatingHours = null,
+            createdAt = null,
+            updatedAt = null,
+            publicInformation = null,
+        )
+    }
 
     /** Java original: 500, the handler's generic error body, and MissingPathVariableException as the resolved exception. */
     private fun assertJavaOriginalServerError(result: MvcResult) {
