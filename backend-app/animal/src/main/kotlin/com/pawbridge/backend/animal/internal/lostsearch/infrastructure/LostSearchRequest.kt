@@ -39,23 +39,24 @@ class LostSearchRequest {
         if (other !is LostSearchRequest) {
             return false
         }
-        return image == other.image &&
+        // Lombok compares and hashes the primitive field first.
+        return includeAdoptedOrReturned == other.includeAdoptedOrReturned &&
+            image == other.image &&
             species == other.species &&
             lostDate == other.lostDate &&
             region == other.region &&
-            description == other.description &&
-            includeAdoptedOrReturned == other.includeAdoptedOrReturned
+            description == other.description
     }
 
     override fun hashCode(): Int {
         val prime = 59
         var result = 1
+        result = result * prime + (if (includeAdoptedOrReturned) 79 else 97)
         result = result * prime + (image?.hashCode() ?: 43)
         result = result * prime + (species?.hashCode() ?: 43)
         result = result * prime + (lostDate?.hashCode() ?: 43)
         result = result * prime + (region?.hashCode() ?: 43)
         result = result * prime + (description?.hashCode() ?: 43)
-        result = result * prime + (if (includeAdoptedOrReturned) 79 else 97)
         return result
     }
 
