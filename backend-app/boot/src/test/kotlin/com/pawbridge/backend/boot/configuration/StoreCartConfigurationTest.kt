@@ -11,13 +11,14 @@ import com.pawbridge.backend.store.internal.directorder.web.CartOrderController
 import com.pawbridge.backend.store.internal.directorder.web.DirectOrderController
 import com.pawbridge.backend.store.internal.directorder.web.DirectOrderExceptionHandler
 import com.pawbridge.backend.store.internal.directorder.web.OrderReadController
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -44,9 +45,10 @@ import javax.sql.DataSource
 class StoreCartConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on", "1", "unknown"])
-    fun given__neither_writer_feature_is_explicitly_true__when__assembling_without_database_inputs__then__register_no_writer_or_cart_beans(
+    fun `쓰기 기능이 둘 다 명시적 true가 아닐 때__DB 입력 없이 조립하면__쓰기·카트 빈을 등록하지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = runner()
         if (flag != "absent") {
             runner = runner.withPropertyValues(
@@ -54,7 +56,10 @@ class StoreCartConfigurationTest {
                 "pawbridge.store-direct-orders.enabled=$flag",
             )
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(StoreJpaWriterConfiguration::class.java)
                 .doesNotHaveBean(EntityManagerFactory::class.java)
@@ -78,15 +83,25 @@ class StoreCartConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["cart", "both", "direct-with-cart-on"])
-    fun given__selected_store_writer_features__when__assembling__then__share_one_writer_and_auditor_without_enabling_the_other_api(
+    fun `선택된 스토어 쓰기 기능이 주어졌을 때__조립하면__다른 API를 켜지 않고 쓰기 DB와 감사자 하나를 공유한다`(
         mode: String,
     ) {
         val carts = mode != "direct-with-cart-on"
         val orders = mode != "cart"
-        val writer: DataSource = mock(DataSource::class.java)
-        val reader: DataSource = mock(DataSource::class.java)
-        val readerManager: PlatformTransactionManager = mock(PlatformTransactionManager::class.java)
+        // given
+        val writer = mockk<DataSource>()
+        val reader = mockk<DataSource>()
+        val readerManager = mockk<PlatformTransactionManager>()
+
+        excludeRecords {
+            writer.hashCode()
+            reader.hashCode()
+            readerManager.hashCode()
+        }
+
         val unit = AtomicReference<EntityManagerFactory>()
+
+        // when
         runner().withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(writer) })
             .withBean("dataSource", DataSource::class.java, Supplier { reader })
@@ -97,6 +112,7 @@ class StoreCartConfigurationTest {
                 "pawbridge.store-direct-orders.enabled=$orders",
             )
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(StoreJpaWriterConfiguration::class.java)
                     .hasSingleBean(EntityManagerFactory::class.java)
@@ -190,18 +206,25 @@ class StoreCartConfigurationTest {
                 assertThat(context.getBeansOfType(DirectOrderController::class.java)).hasSize(if (orders) 1 else 0)
                 assertThat(context.getBeansOfType(KoreanSearchTerms::class.java)).hasSize(1)
                 assertThat(context.containsBean("storeDirectOrderSearchJdbc")).isTrue()
-                verifyNoInteractions(writer, reader, readerManager)
+                confirmVerified(writer, reader, readerManager)
             }
         assertThat(unit.get().isOpen).isFalse()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["reader-only", "mismatched-jdbc"])
-    fun given__no_consistent_writer_inputs__when__carts_are_enabled__then__reject_without_falling_back_to_reader_access(
+    fun `일관된 쓰기 입력이 없을 때__카트를 켜면__리더 접근으로 대체하지 않고 거절한다`(
         mode: String,
     ) {
-        val writer: DataSource = mock(DataSource::class.java)
-        val other: DataSource = mock(DataSource::class.java)
+        // given
+        val writer = mockk<DataSource>()
+        val other = mockk<DataSource>()
+
+        excludeRecords {
+            writer.hashCode()
+            other.hashCode()
+        }
+
         var runner = runner().withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .withPropertyValues("pawbridge.store-carts.enabled=true")
         runner = if (mode == "reader-only") {
@@ -210,24 +233,34 @@ class StoreCartConfigurationTest {
             runner.withBean("writeDataSource", DataSource::class.java, Supplier { writer })
                 .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(other) })
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasFailed()
             if (mode == "mismatched-jdbc") {
                 assertThat(context.startupFailure)
                     .hasRootCauseMessage("Store order actors must use the same writer DataSource")
             }
-            verifyNoInteractions(writer, other)
+            confirmVerified(writer, other)
         }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["cart", "direct", "both"])
-    fun given__enabled_order_features__when__mapping_http__then__expose_one_shared_read_controller_and_only_the_owned_posts(
+    fun `주문 기능이 켜졌을 때__HTTP를 매핑하면__공용 읽기 컨트롤러 하나와 소유한 POST만 노출한다`(
         mode: String,
     ) {
         val carts = mode != "direct"
         val direct = mode != "cart"
-        val writer: DataSource = mock(DataSource::class.java)
+        // given
+        val writer = mockk<DataSource>()
+
+        excludeRecords {
+            writer.hashCode()
+        }
+
+        // when
         runner().withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(writer) })
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
@@ -236,6 +269,7 @@ class StoreCartConfigurationTest {
                 "pawbridge.store-direct-orders.enabled=$direct",
             )
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed().hasSingleBean(OrderReadController::class.java)
                 val controllers = context.getBeansWithAnnotation(RestController::class.java).values.toTypedArray()
                 val advice = context.getBeansOfType(DirectOrderExceptionHandler::class.java).values.toTypedArray()
@@ -278,7 +312,7 @@ class StoreCartConfigurationTest {
                 } finally {
                     SecurityContextHolder.clearContext()
                 }
-                verifyNoInteractions(writer)
+                confirmVerified(writer)
             }
     }
 

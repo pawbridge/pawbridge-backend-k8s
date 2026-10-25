@@ -10,11 +10,14 @@ class SocialOAuthConfigurationTest {
     private val configuration = SocialOAuthConfiguration()
 
     @Test
-    fun given__only_naver_enabled__when__registering__then__expose_naver_endpoints_and_no_google_client() {
+    fun `네이버만 켜졌을 때__등록하면__네이버 엔드포인트만 노출하고 구글 클라이언트는 없다`() {
+        // given
+        // when
         val clients = configuration.socialClientRegistrationRepository(
             false, "", "", "", true, "naver-client", "naver-secret", NAVER_CALLBACK,
         )
 
+        // then
         assertThat(clients.findByRegistrationId("google")).isNull()
         val naver: ClientRegistration = clients.findByRegistrationId("naver")
         assertThat(naver.clientId).isEqualTo("naver-client")
@@ -27,33 +30,46 @@ class SocialOAuthConfigurationTest {
     }
 
     @Test
-    fun given__both_enabled__when__registering__then__keep_google_unchanged_beside_naver() {
+    fun `둘 다 켜졌을 때__등록하면__구글은 그대로 두고 네이버를 함께 등록한다`() {
+        // given
+        // when
         val clients = configuration.socialClientRegistrationRepository(
             true, "google-client", "google-secret", "https://fixture.invalid/login/oauth2/code/google",
             true, "naver-client", "naver-secret", NAVER_CALLBACK,
         )
 
+        // then
         assertThat(clients.findByRegistrationId("google").scopes).containsExactlyInAnyOrder("email", "profile")
         assertThat(clients.findByRegistrationId("naver")).isNotNull()
     }
 
     @Test
-    fun given__naver_enabled_without_credentials__when__registering__then__fail_fast() {
-        assertThatThrownBy {
+    fun `네이버가 인증 정보 없이 켜졌을 때__등록하면__즉시 실패한다`() {
+        // given
+        // when
+        val registering = {
             configuration.socialClientRegistrationRepository(
                 false, "", "", "", true, "", "naver-secret", NAVER_CALLBACK,
             )
-        }.hasMessage("Explicit Naver client credentials required")
+        }
+
+        // then
+        assertThatThrownBy { registering() }.hasMessage("Explicit Naver client credentials required")
     }
 
     @Test
-    fun given__naver_callback_on_another_provider_path__when__registering__then__fail_fast() {
-        assertThatThrownBy {
+    fun `네이버 콜백이 다른 제공자 경로일 때__등록하면__즉시 실패한다`() {
+        // given
+        // when
+        val registering = {
             configuration.socialClientRegistrationRepository(
                 false, "", "", "", true, "naver-client", "naver-secret",
                 "https://fixture.invalid/login/oauth2/code/google",
             )
-        }.hasMessage("Explicit OAuth callback and frontend addresses required")
+        }
+
+        // then
+        assertThatThrownBy { registering() }.hasMessage("Explicit OAuth callback and frontend addresses required")
     }
 
     companion object {

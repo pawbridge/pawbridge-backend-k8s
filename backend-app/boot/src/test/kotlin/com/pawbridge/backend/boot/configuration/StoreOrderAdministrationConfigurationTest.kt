@@ -9,13 +9,14 @@ import com.pawbridge.backend.store.internal.directorder.web.OrderReadController
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrders
 import com.pawbridge.backend.store.internal.orderadministration.web.AdminOrderController
 import com.pawbridge.backend.store.internal.orderadministration.web.AdminOrderExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -34,14 +35,18 @@ import javax.sql.DataSource
 class StoreOrderAdministrationConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on", "1", "unknown"])
-    fun given__administration_not_explicitly_enabled__when__assembling_without_database_inputs__then__register_no_admin_or_writer_beans(
+    fun `관리가 명시적으로 켜지지 않았을 때__DB 입력 없이 조립하면__관리·쓰기 빈을 등록하지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = runner()
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.store-order-administration.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(AdminOrders::class.java)
                 .doesNotHaveBean(StoreOrderAdministrators::class.java)
@@ -55,15 +60,25 @@ class StoreOrderAdministrationConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["admin", "admin-and-direct", "all"])
-    fun given__explicit_admin_and_optional_personal_features__when__assembling__then__share_one_writer_without_exposing_disabled_routes(
+    fun `관리와 선택 기능이 명시됐을 때__조립하면__쓰기 DB 하나를 공유하고 꺼진 라우트는 열지 않는다`(
         mode: String,
     ) {
         val direct = mode != "admin"
         val carts = mode == "all"
-        val writer: DataSource = mock(DataSource::class.java)
-        val reader: DataSource = mock(DataSource::class.java)
-        val readerManager: PlatformTransactionManager = mock(PlatformTransactionManager::class.java)
+        // given
+        val writer = mockk<DataSource>()
+        val reader = mockk<DataSource>()
+        val readerManager = mockk<PlatformTransactionManager>()
+
+        excludeRecords {
+            writer.hashCode()
+            reader.hashCode()
+            readerManager.hashCode()
+        }
+
         val unit = AtomicReference<EntityManagerFactory>()
+
+        // when
         runner().withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(writer) })
             .withBean("dataSource", DataSource::class.java, Supplier { reader })
@@ -75,6 +90,7 @@ class StoreOrderAdministrationConfigurationTest {
                 "pawbridge.store-carts.enabled=$carts",
             )
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(AdminOrders::class.java)
                     .hasSingleBean(AdminOrderController::class.java)
@@ -118,16 +134,23 @@ class StoreOrderAdministrationConfigurationTest {
                     .hasSize(if (direct || carts) 1 else 0)
                 val shared = context.getBean("storeDirectOrderEntityManager", EntityManager::class.java)
                 assertThat(shared.entityManagerFactory).isSameAs(unit.get())
-                verifyNoInteractions(writer, reader, readerManager)
+                confirmVerified(writer, reader, readerManager)
             }
         assertThat(unit.get().isOpen).isFalse()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["reader-only", "mismatched-jdbc"])
-    fun given__no_matching_writer__when__administration_is_enabled__then__fail_without_reader_fallback(mode: String) {
-        val writer: DataSource = mock(DataSource::class.java)
-        val reader: DataSource = mock(DataSource::class.java)
+    fun `맞는 쓰기 DB가 없을 때__관리를 켜면__리더로 대체하지 않고 실패한다`(mode: String) {
+        // given
+        val writer = mockk<DataSource>()
+        val reader = mockk<DataSource>()
+
+        excludeRecords {
+            writer.hashCode()
+            reader.hashCode()
+        }
+
         var runner = runner().withPropertyValues("pawbridge.store-order-administration.enabled=true")
         runner = if (mode == "reader-only") {
             runner.withBean("dataSource", DataSource::class.java, Supplier { reader })
@@ -135,9 +158,12 @@ class StoreOrderAdministrationConfigurationTest {
             runner.withBean("writeDataSource", DataSource::class.java, Supplier { writer })
                 .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(reader) })
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasFailed()
-            verifyNoInteractions(writer, reader)
+            confirmVerified(writer, reader)
         }
     }
 

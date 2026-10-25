@@ -14,17 +14,17 @@ import com.pawbridge.backend.store.internal.catalogwrite.web.ProductImageControl
 import com.pawbridge.backend.store.internal.catalogwrite.web.ProductWriteController
 import com.pawbridge.backend.store.internal.directorder.web.DirectOrderController
 import com.pawbridge.backend.store.internal.directorder.web.OrderReadController
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.NoSuchBeanDefinitionException
 import org.springframework.beans.factory.config.BeanDefinition
 import org.springframework.beans.factory.config.BeanDefinitionCustomizer
@@ -50,14 +50,18 @@ import javax.sql.DataSource
 class StoreCatalogManagementConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on", "1", "unknown"])
-    fun given__catalog_not_explicitly_true__when__assembling_without_inputs__then__create_no_catalog_writer_or_storage(
+    fun `카탈로그가 명시적 true가 아닐 때__입력 없이 조립하면__카탈로그 쓰기와 스토리지를 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = runner()
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.store-catalog-management.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(EntityManagerFactory::class.java)
                 .doesNotHaveBean(JpaCatalogProducts::class.java)
@@ -77,14 +81,25 @@ class StoreCatalogManagementConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["catalog", "catalog-direct", "catalog-cart", "catalog-both"])
-    fun given__enabled_catalog_and_existing_features__when__assembling__then__share_one_writer_and_borrow_storage_until_owner_closes(
+    fun `카탈로그가 켜졌을 때__조립하면__쓰기 DB를 공유하고 소유자가 닫을 때까지 스토리지를 빌린다`(
         mode: String,
     ) {
-        val writer: DataSource = mock(DataSource::class.java)
-        val storage: S3Client = mock(S3Client::class.java)
+        // given
+        val writer = mockk<DataSource>()
+        val storage = mockk<S3Client>()
+
+        excludeRecords {
+            writer.hashCode()
+            storage.hashCode()
+        }
+
         val settings: PostWriteSettings = settings()
         val unit = AtomicReference<EntityManagerFactory>()
         val terms = AtomicReference<KoreanSearchTerms>()
+
+        justRun { storage.close() }
+
+        // when
         writerInputs(writer)
             .withBean(
                 "postS3Client",
@@ -99,6 +114,7 @@ class StoreCatalogManagementConfigurationTest {
                 "pawbridge.store-carts.enabled=" + (mode == "catalog-cart" || mode == "catalog-both"),
             )
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(StoreJpaWriterConfiguration::class.java)
                     .hasSingleBean(EntityManagerFactory::class.java)
@@ -188,22 +204,29 @@ class StoreCatalogManagementConfigurationTest {
                         .doesNotHaveBean(OrderReadController::class.java)
                         .doesNotHaveBean(CartController::class.java)
                 }
-                verifyNoInteractions(writer, storage)
+                confirmVerified(writer, storage)
             }
         assertThat(unit.get().isOpen).isFalse()
         assertThatThrownBy { terms.get().document("말티즈") }.isInstanceOf(IllegalStateException::class.java)
-        verify(storage, times(1)).close()
-        verifyNoMoreInteractions(storage)
-        verifyNoInteractions(writer)
+        verify(exactly = 1) { storage.close() }
+        confirmVerified(storage)
+        confirmVerified(writer)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["reader-only", "missing-storage"])
-    fun given__missing_owned_writer_or_existing_storage__when__catalog_enabled__then__fail_without_fallback_or_external_access(
+    fun `소유 쓰기 DB나 기존 스토리지가 없을 때__카탈로그를 켜면__대체 경로나 외부 접근 없이 실패한다`(
         mode: String,
     ) {
-        val source: DataSource = mock(DataSource::class.java)
-        val storage: S3Client = mock(S3Client::class.java)
+        // given
+        val source = mockk<DataSource>()
+        val storage = mockk<S3Client>()
+
+        excludeRecords {
+            source.hashCode()
+            storage.hashCode()
+        }
+
         var runner = runner()
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .withBean(PostWriteSettings::class.java, Supplier { settings() })
@@ -220,11 +243,14 @@ class StoreCatalogManagementConfigurationTest {
             runner.withBean("writeDataSource", DataSource::class.java, Supplier { source })
                 .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(source) })
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasFailed()
             assertThat(context.startupFailure).hasRootCauseInstanceOf(NoSuchBeanDefinitionException::class.java)
                 .hasStackTraceContaining(if (mode == "reader-only") "writeDataSource" else "postS3Client")
-            verifyNoInteractions(source, storage)
+            confirmVerified(source, storage)
         }
     }
 

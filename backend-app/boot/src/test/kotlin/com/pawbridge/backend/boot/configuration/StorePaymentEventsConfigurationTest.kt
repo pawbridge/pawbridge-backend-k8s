@@ -2,17 +2,18 @@ package com.pawbridge.backend.boot.configuration
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.store.api.StorePaymentEvents
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.excludeRecords
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -36,14 +37,18 @@ import javax.sql.DataSource
 class StorePaymentEventsConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on"])
-    fun given__payment_events_not_explicitly_enabled__when__assembling__then__create_no_business_writer_or_redis_resources(
+    fun `결제 이벤트가 명시적으로 켜지지 않았을 때__조립하면__비즈니스·쓰기·레디스 자원을 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = runner()
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.store-payment-events.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(StorePaymentEvents::class.java)
                 .doesNotHaveBean(EntityManagerFactory::class.java)
@@ -54,9 +59,21 @@ class StorePaymentEventsConfigurationTest {
     }
 
     @Test
-    fun given__explicit_business_only__when__assembling__then__reuse_one_store_writer_and_actual_stock_projection_without_starting_clients() {
-        val writer: DataSource = mock(DataSource::class.java)
-        inputs(writer).run { context ->
+    fun `비즈니스만 명시됐을 때__조립하면__클라이언트 시작 없이 스토어 쓰기 DB와 재고 투영을 재사용한다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val lettuce = mockk<LettuceConnectionFactory>()
+
+        excludeRecords {
+            writer.hashCode()
+        }
+
+        justRun { lettuce.afterPropertiesSet() }
+        justRun { lettuce.destroy() }
+
+        // when
+        inputs(writer, lettuce).run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .hasSingleBean(StorePaymentEvents::class.java)
                 .hasSingleBean(EntityManagerFactory::class.java)
@@ -91,24 +108,38 @@ class StorePaymentEventsConfigurationTest {
             assertThat(context.getBean("storePaymentRankingRedis", StringRedisTemplate::class.java).connectionFactory)
                 .isInstanceOf(LettuceConnectionFactory::class.java)
         }
-        verifyNoInteractions(writer)
+        confirmVerified(writer)
     }
 
     @Test
-    fun given__an_explicit_existing_redis_template__when__ranking_is_invoked__then__delegate_original_sorted_set_increment_without_creating_another_client() {
-        val writer: DataSource = mock(DataSource::class.java)
-        val redis = mock(StringRedisTemplate::class.java)
-        @Suppress("UNCHECKED_CAST")
-        val sorted = mock(ZSetOperations::class.java) as ZSetOperations<String, String>
-        whenever(redis.opsForZSet()).thenReturn(sorted)
-        inputs(writer).withBean("memberChatRedis", StringRedisTemplate::class.java, Supplier { redis }).run { context ->
+    fun `기존 레디스 템플릿이 명시됐을 때__랭킹을 호출하면__다른 클라이언트 없이 원래 정렬 집합 증가를 위임한다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val lettuce = mockk<LettuceConnectionFactory>()
+        val redis = mockk<StringRedisTemplate>()
+        val sorted = mockk<ZSetOperations<String, String>>()
+
+        excludeRecords {
+            sorted.hashCode()
+            writer.hashCode()
+        }
+
+        justRun { redis.setBeanClassLoader(any()) }
+        justRun { redis.afterPropertiesSet() }
+        every { redis.opsForZSet() } returns sorted
+        every { sorted.incrementScore(any<String>(), any<String>(), any<Double>()) } returns 2.0
+
+        // when
+        inputs(writer, lettuce).withBean("memberChatRedis", StringRedisTemplate::class.java, Supplier { redis }).run { context ->
             assertThat(context).hasNotFailed().doesNotHaveBean(RedisConnectionFactory::class.java)
             assertThat(context.getBean("storePaymentRankingRedis")).isSameAs(redis)
             context.getBean(StorePaymentEvents.Ranking::class.java).increment("store:ranking:daily:20261021", "73", 2.0)
-            verify(sorted).incrementScore("store:ranking:daily:20261021", "73", 2.0)
-            verifyNoMoreInteractions(sorted)
+
+            // then
+            verify(exactly = 1) { sorted.incrementScore("store:ranking:daily:20261021", "73", 2.0) }
+            confirmVerified(sorted)
         }
-        verifyNoInteractions(writer)
+        confirmVerified(writer)
     }
 
     private fun runner(): ApplicationContextRunner {
@@ -117,7 +148,7 @@ class StorePaymentEventsConfigurationTest {
             .withUserConfiguration(StorePaymentEventsConfiguration::class.java)
     }
 
-    private fun inputs(writer: DataSource): ApplicationContextRunner {
+    private fun inputs(writer: DataSource, lettuce: LettuceConnectionFactory): ApplicationContextRunner {
         return runner()
             .withPropertyValues("pawbridge.store-payment-events.enabled=true", "spring.data.redis.host=127.0.0.1")
             .withBean(
@@ -125,7 +156,7 @@ class StorePaymentEventsConfigurationTest {
                 StorePaymentTransportConfiguration.OwnedRedisFactory::class.java,
                 Supplier {
                     StorePaymentTransportConfiguration.OwnedRedisFactory { settings ->
-                        mock(LettuceConnectionFactory::class.java)
+                        lettuce
                     }
                 },
             )
