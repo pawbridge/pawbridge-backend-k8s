@@ -1,31 +1,24 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.CreatePost
 import com.pawbridge.backend.community.internal.post.application.PostDetails
 import com.pawbridge.backend.community.internal.post.domain.PostBoardType
 import com.pawbridge.backend.community.internal.post.web.PostCreateController
 import com.pawbridge.backend.community.internal.post.web.PostCreateExceptionHandler
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.eqValue
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyList
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
@@ -50,24 +43,19 @@ class PostCreateHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var createPost: CreatePost
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__authenticated_writer_and_forged_headers__when__creating__then__use_verified_id_and_legacy_response(
+    fun `인증된 작성자와 위조 헤더가 주어졌을 때__등록하면__검증된 ID와 기존 응답 형식을 쓴다`(
         role: String,
     ) {
-        whenever(
-            createPost.create(
-                eq(7L),
-                eq("제목"),
-                eq("내용"),
-                eqValue(PostBoardType.COMMUNICATION),
-                anyList(),
-            ),
-        ).thenReturn(details(7))
-        mvc.perform(
+        // given
+        every { createPost.create(any(), any(), any(), any(), any()) } returns details(7)
+
+        // when
+        val result = mvc.perform(
             multipart("/api/v1/posts")
                 .param("title", "제목")
                 .param("content", "내용")
@@ -77,78 +65,104 @@ class PostCreateHttpTest {
                 .header("X-User-Role", "ROLE_ADMIN")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role)),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.code").value(200))
             .andExpect(jsonPath("$.message").value("게시글이 생성되었습니다."))
             .andExpect(jsonPath("$.data.length()").value(9))
             .andExpect(jsonPath("$.data.authorId").value(7))
-        verify(createPost).create(7L, "제목", "내용", PostBoardType.COMMUNICATION, listOf())
+        verify(exactly = 1) { createPost.create(7L, "제목", "내용", PostBoardType.COMMUNICATION, listOf()) }
+        confirmVerified(createPost)
     }
 
     @Test
-    fun given__missing_or_invalid_token__when__posting__then__do_not_invoke_writing_use_case() {
-        mvc.perform(multipart("/api/v1/posts").header("X-User-Id", "7"))
+    fun `토큰이 없거나 잘못되었을 때__등록하면__쓰기 유스케이스를 호출하지 않는다`() {
+        // given
+        val missing = multipart("/api/v1/posts").header("X-User-Id", "7")
+        val invalid = multipart("/api/v1/posts").header("Authorization", "Bearer invalid")
+
+        // when
+        val missingResult = mvc.perform(missing)
+        val invalidResult = mvc.perform(invalid)
+
+        // then
+        missingResult
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.message").value("인증 토큰이 필요합니다."))
-        mvc.perform(multipart("/api/v1/posts").header("Authorization", "Bearer invalid"))
+        invalidResult
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.message").value("유효하지 않거나 만료된 토큰입니다."))
-        verifyNoInteractions(createPost)
+        confirmVerified(createPost)
     }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun given__signed_invalid_identity__when__posting__then__reject_before_writing(claims: Map<String, Any>) {
+    fun `서명됐지만 잘못된 신원이 주어졌을 때__등록하면__쓰기 전에 거부한다`(claims: Map<String, Any>) {
+        // given
         val token = Jwts.builder()
             .claims(claims)
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
-        mvc.perform(multipart("/api/v1/posts").header("Authorization", "Bearer $token"))
+
+        // when
+        val result = mvc.perform(multipart("/api/v1/posts").header("Authorization", "Bearer $token"))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.message").value("토큰 파싱에 실패했습니다."))
-        verifyNoInteractions(createPost)
+        confirmVerified(createPost)
     }
 
     @Test
-    fun given__two_writers_and_anonymous_next_request__when__posting__then__do_not_retain_the_previous_identity() {
-        whenever(
-            createPost.create(anyLong(), anyString(), anyString(), anyNonNull<PostBoardType>(), anyList()),
-        ).thenAnswer { call -> details(call.getArgument<Long>(0)) }
-        for (id in longArrayOf(7, 8)) {
-            mvc.perform(
+    fun `작성자 둘과 익명 다음 요청이 주어졌을 때__등록하면__이전 신원을 유지하지 않는다`() {
+        // given
+        every { createPost.create(any(), any(), any(), any(), any()) } answers { details(firstArg()) }
+
+        // when
+        val results = longArrayOf(7, 8).map { id ->
+            id to mvc.perform(
                 multipart("/api/v1/posts")
                     .param("title", "제목")
                     .param("content", "내용")
                     .param("boardType", "COMMUNICATION")
                     .header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")),
             )
+        }
+        val anonymous = mvc.perform(multipart("/api/v1/posts"))
+
+        // then
+        for ((id, result) in results) {
+            result
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.authorId").value(id.toInt()))
         }
-        mvc.perform(multipart("/api/v1/posts")).andExpect(status().isUnauthorized())
-        verify(createPost, times(2)).create(
-            anyLong(),
-            anyString(),
-            anyString(),
-            anyNonNull<PostBoardType>(),
-            anyList(),
-        )
+        anonymous.andExpect(status().isUnauthorized())
+        verify(exactly = 2) { createPost.create(any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun given__business_failure_after_authentication__when__posting__then__do_not_relabel_it_as_401() {
-        whenever(
-            createPost.create(anyLong(), anyString(), anyString(), anyNonNull<PostBoardType>(), anyList()),
-        ).thenThrow(IllegalStateException("private-db-detail"))
-        mvc.perform(
+    fun `인증 뒤 업무 실패가 주어졌을 때__등록하면__401로 바꾸지 않고 500을 돌려준다`() {
+        // given
+        every {
+            createPost.create(any(), any(), any(), any(), any())
+        } throws IllegalStateException("private-db-detail")
+
+        // when
+        val result = mvc.perform(
             multipart("/api/v1/posts")
                 .param("title", "제목")
                 .param("content", "내용")
                 .param("boardType", "COMMUNICATION")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 에러!"))
     }

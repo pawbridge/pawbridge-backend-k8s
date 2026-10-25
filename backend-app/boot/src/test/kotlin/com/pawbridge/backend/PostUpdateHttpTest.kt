@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.PostMediaRemover
 import com.pawbridge.backend.community.internal.post.application.PostMediaUploader
@@ -10,22 +11,17 @@ import com.pawbridge.backend.community.internal.post.application.PostUpload
 import com.pawbridge.backend.community.internal.post.application.UpdatePost
 import com.pawbridge.backend.community.internal.post.web.PostUpdateController
 import com.pawbridge.backend.community.internal.post.web.PostUpdateExceptionHandler
-import com.pawbridge.backend.support.argThatValue
-import com.pawbridge.backend.support.eqValue
 import com.pawbridge.backend.user.api.UserNicknameQuery
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyList
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.nullable
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -35,7 +31,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -64,22 +59,21 @@ class PostUpdateHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var reader: PostReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var remover: PostMediaRemover
 
-    @MockitoBean
+    @MockkBean
     lateinit var uploader: PostMediaUploader
 
-    @MockitoBean
+    @MockkBean
     lateinit var users: UserNicknameQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var writer: PostModification
 
-    private lateinit var existing: PostSnapshot
     private val time = LocalDateTime.of(2026, 1, 1, 0, 0)
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -96,45 +90,22 @@ class PostUpdateHttpTest {
         }
     }
 
-    @BeforeEach
-    fun givenOwnerAndReturningWriter() {
-        existing = snapshot(7, "COMMUNICATION")
-        whenever(reader.findById(42)).thenReturn(Optional.of(existing))
-        whenever(users.findNickname(anyLong())).thenReturn(Optional.of("작성자"))
-        @Suppress("UNCHECKED_CAST")
-        val anyImageUrls = List::class.java as Class<List<String?>>
-        whenever(
-            writer.update(
-                anyLong(),
-                anyLong(),
-                nullable(String::class.java),
-                nullable(String::class.java),
-                nullable(anyImageUrls),
-            ),
-        ).thenAnswer { call ->
-            val old = existing
-            val title = call.getArgument<String?>(2)
-            val content = call.getArgument<String?>(3)
-            val images = call.getArgument<List<String?>?>(4)
-            PostSnapshot(
-                old.postId(),
-                old.authorId(),
-                title ?: old.title(),
-                content ?: old.content(),
-                old.boardType(),
-                images ?: old.imageUrls(),
-                time,
-                time,
-            )
-        }
-    }
-
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__verified_owner_with_forged_headers__when__multipart_put__then__return_nine_original_fields_and_verified_author(
+    fun `검증된 작성자와 위조 헤더가 주어졌을 때__멀티파트 PUT을 보내면__원래 아홉 필드와 검증된 작성자를 돌려준다`(
         role: String,
     ) {
-        mvc.perform(
+        // given
+        val existing = snapshot(7, "COMMUNICATION")
+
+        every { reader.findById(any()) } returns Optional.of(existing)
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } answers {
+            modified(existing, arg(2), arg(3), arg(4))
+        }
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "/api/v1/posts/42")
                 .param("title", "수정 제목")
                 .param("content", "")
@@ -143,6 +114,9 @@ class PostUpdateHttpTest {
                 .header("X-User-Role", "ROLE_ADMIN")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role)),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(200))
             .andExpect(jsonPath("$.message").value("게시글이 수정되었습니다."))
@@ -152,82 +126,135 @@ class PostUpdateHttpTest {
             .andExpect(jsonPath("$.data.title").value("수정 제목"))
             .andExpect(jsonPath("$.data.content").value(""))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verify(writer).update(42, 7, "수정 제목", "", null)
-        verifyNoInteractions(remover, uploader)
+        verify(exactly = 1) { writer.update(42, 7, "수정 제목", "", null) }
+        confirmVerified(remover, uploader)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "PROTECTION", "REPORT", "ADOPTION", "COMMUNICATION"])
-    fun given__existing_board__when__put_without_fields__then__do_not_apply_general_post_creation_restrictions(
+    fun `기존 게시판이 주어졌을 때__필드 없이 PUT하면__일반 등록 제한을 적용하지 않는다`(
         board: String,
     ) {
-        existing = snapshot(7, board)
-        whenever(reader.findById(42)).thenReturn(Optional.of(existing))
-        mvc.perform(
+        // given
+        val existing = snapshot(7, board)
+
+        every { reader.findById(any()) } returns Optional.of(existing)
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } answers {
+            modified(existing, arg(2), arg(3), arg(4))
+        }
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "/api/v1/posts/42")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.boardType").value(board))
             .andExpect(jsonPath("$.data.title").value("제목"))
-        verify(writer).update(42, 7, null, null, null)
-        verifyNoInteractions(remover, uploader)
+        verify(exactly = 1) { writer.update(42, 7, null, null, null) }
+        confirmVerified(remover, uploader)
     }
 
     @Test
-    fun given__one_empty_multipart_file__when__put__then__request_media_replacement_with_an_empty_result() {
-        whenever(uploader.upload(anyList())).thenReturn(listOf())
-        mvc.perform(
+    fun `빈 멀티파트 파일 하나가 주어졌을 때__PUT하면__빈 결과로 미디어 교체를 요청한다`() {
+        // given
+        val existing = snapshot(7, "COMMUNICATION")
+
+        every { reader.findById(any()) } returns Optional.of(existing)
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        justRun { remover.remove(any()) }
+        every { uploader.upload(any()) } returns listOf()
+        every { writer.update(any(), any(), any(), any(), any()) } answers {
+            modified(existing, arg(2), arg(3), arg(4))
+        }
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "/api/v1/posts/42")
                 .file(MockMultipartFile("files", "empty.png", "image/png", ByteArray(0)))
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.imageUrls").isEmpty())
-        verify(remover).remove(snapshot(7, "COMMUNICATION").imageUrls())
-        verify(uploader).upload(argThatValue<List<PostUpload>> { files -> files.size == 1 && files.first().size == 0L })
-        verify(writer).update(42, 7, null, null, listOf())
+        verify(exactly = 1) { remover.remove(snapshot(7, "COMMUNICATION").imageUrls()) }
+        verify(exactly = 1) {
+            uploader.upload(match<List<PostUpload>> { files -> files.size == 1 && files.first().size == 0L })
+        }
+        verify(exactly = 1) { writer.update(42, 7, null, null, listOf()) }
     }
 
     @Test
-    fun given__long_title_without_legacy_web_validation__when__put__then__pass_input_to_writer_instead_of_adding_400() {
+    fun `웹 검증 없는 긴 제목이 주어졌을 때__PUT하면__400을 더하지 않고 작성기에 전달한다`() {
+        // given
         val title = "x".repeat(201)
-        mvc.perform(
+        val existing = snapshot(7, "COMMUNICATION")
+
+        every { reader.findById(any()) } returns Optional.of(existing)
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } answers {
+            modified(existing, arg(2), arg(3), arg(4))
+        }
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "/api/v1/posts/42")
                 .param("title", title)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
-            .andExpect(status().isOk())
-        verify(writer).update(42, 7, title, null, null)
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { writer.update(42, 7, title, null, null) }
     }
 
     @Test
-    fun given__foreign_administrator__when__put__then__403_before_media_nickname_or_writer() {
-        mvc.perform(
+    fun `다른 사람의 글에 관리자가 주어졌을 때__PUT하면__미디어와 닉네임과 작성기 전에 403이다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(snapshot(7, "COMMUNICATION"))
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "/api/v1/posts/42")
                 .header("Authorization", "Bearer " + F3TestInputs.token(8, "ROLE_ADMIN")),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.message").value("게시글에 접근할 권한이 없습니다."))
-        verifyNoInteractions(remover, uploader, users, writer)
+        confirmVerified(remover, uploader, users, writer)
     }
 
     @Test
-    fun given__missing_post__when__put__then__404_before_media_nickname_or_writer() {
-        whenever(reader.findById(42)).thenReturn(Optional.empty())
-        mvc.perform(
+    fun `없는 게시글이 주어졌을 때__PUT하면__미디어와 닉네임과 작성기 전에 404이다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.empty()
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "/api/v1/posts/42")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.message").value("게시글을 찾을 수 없습니다."))
-        verifyNoInteractions(remover, uploader, users, writer)
+        confirmVerified(remover, uploader, users, writer)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "invalid", "refresh", "expired"])
-    fun given__unverified_token__when__put__then__401_before_all_business_ports(token: String) {
+    fun `검증되지 않은 토큰이 주어졌을 때__PUT하면__모든 업무 포트 전에 401이다`(token: String) {
+        // given
         val request = multipart(HttpMethod.PUT, "/api/v1/posts/42").header("X-User-Id", "7")
         val value: String? = when (token) {
             "invalid" -> "invalid"
@@ -247,20 +274,30 @@ class PostUpdateHttpTest {
         if (value != null) {
             request.header("Authorization", "Bearer $value")
         }
-        mvc.perform(request).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(reader, remover, uploader, users, writer)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
+        confirmVerified(reader, remover, uploader, users, writer)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun given__malformed_post_id__when__put__then__preserve_legacy_500(id: String) {
-        mvc.perform(
-            multipart(HttpMethod.PUT, "/api/v1/posts/$id")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
+    fun `잘못된 게시글 ID가 주어졌을 때__PUT하면__기존 500을 유지한다`(id: String) {
+        // given
+        val request = multipart(HttpMethod.PUT, "/api/v1/posts/$id")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 에러!"))
-        verifyNoInteractions(reader, remover, uploader, users, writer)
+        confirmVerified(reader, remover, uploader, users, writer)
     }
 
     @ParameterizedTest
@@ -271,23 +308,38 @@ class PostUpdateHttpTest {
             "GET /api/v1/posts/42",
         ],
     )
-    fun given__unexposed_path_or_method__when__requesting__then__deny_before_business(request: String) {
+    fun `노출되지 않은 경로나 메서드가 주어졌을 때__요청하면__업무 전에 거부한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(reader, remover, uploader, users, writer)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(reader, remover, uploader, users, writer)
     }
 
     @Test
-    fun given__writer_failure_after_authentication__when__put__then__safe_500_and_clear_principal() {
-        whenever(writer.update(42, 7, null, null, null)).thenThrow(IllegalStateException("synthetic-private-db-detail"))
-        mvc.perform(
+    fun `인증 뒤 작성기 실패가 주어졌을 때__PUT하면__안전한 500을 돌려주고 주체를 비운다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(snapshot(7, "COMMUNICATION"))
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every {
+            writer.update(any(), any(), any(), any(), any())
+        } throws IllegalStateException("synthetic-private-db-detail")
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "/api/v1/posts/42")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().string(Matchers.not(Matchers.containsString("synthetic-private-db-detail"))))
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
@@ -295,5 +347,23 @@ class PostUpdateHttpTest {
 
     private fun snapshot(author: Long, board: String): PostSnapshot {
         return PostSnapshot(42, author, "제목", "본문", board, listOf("https://fixture.invalid/old"), time, time)
+    }
+
+    private fun modified(
+        old: PostSnapshot,
+        title: String?,
+        content: String?,
+        images: List<String?>?,
+    ): PostSnapshot {
+        return PostSnapshot(
+            old.postId(),
+            old.authorId(),
+            title ?: old.title(),
+            content ?: old.content(),
+            old.boardType(),
+            images ?: old.imageUrls(),
+            time,
+            time,
+        )
     }
 }

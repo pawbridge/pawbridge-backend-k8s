@@ -3,27 +3,27 @@ package com.pawbridge.backend
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.PostDetails
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -51,17 +51,22 @@ class PostListHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @Test
-    fun given__public_posts__when__getting_list_without_token__then__return_array_with_original_nine_fields() {
-        whenever(listPosts.read()).thenReturn(listOf(post()))
+    fun `공개 게시글이 주어졌을 때__토큰 없이 목록을 조회하면__원래 아홉 필드의 배열을 돌려준다`() {
+        // given
+        every { listPosts.read() } returns listOf(post())
 
-        mvc.perform(get("/api/v1/posts/read"))
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.code").value(200))
@@ -81,30 +86,30 @@ class PostListHttpTest {
             .andExpect(jsonPath("$.data[0].imageUrls[2]").value("https://fixture.invalid/가.jpg"))
             .andExpect(jsonPath("$.data[0].createdAt").value("2026-10-18T00:01:02.123456"))
             .andExpect(jsonPath("$.data[0].updatedAt").value("2026-10-18T01:02:00"))
-        verify(listPosts).read()
-        verifyNoInteractions(readPost)
+        verify(exactly = 1) { listPosts.read() }
+        confirmVerified(listPosts, readPost)
     }
 
     @Test
-    fun given__unrelated_queries_and_forged_identity__when__getting_public_list__then__do_not_bind_or_filter_inputs() {
-        whenever(listPosts.read()).thenReturn(
-            listOf(
-                post(),
-                PostDetails(
-                    43,
-                    8,
-                    null,
-                    "다른 글",
-                    "내용",
-                    "MISSING",
-                    null,
-                    LocalDateTime.of(2026, 10, 17, 0, 1),
-                    LocalDateTime.of(2026, 10, 17, 0, 2),
-                ),
+    fun `무관한 쿼리와 위조 신원이 주어졌을 때__공개 목록을 조회하면__입력을 바인딩하거나 거르지 않는다`() {
+        // given
+        every { listPosts.read() } returns listOf(
+            post(),
+            PostDetails(
+                43,
+                8,
+                null,
+                "다른 글",
+                "내용",
+                "MISSING",
+                null,
+                LocalDateTime.of(2026, 10, 17, 0, 1),
+                LocalDateTime.of(2026, 10, 17, 0, 2),
             ),
         )
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             get("/api/v1/posts/read")
                 .param("page", "invalid")
                 .param("size", "0")
@@ -115,6 +120,9 @@ class PostListHttpTest {
                 .header("X-User-Role", "ROLE_ADMIN")
                 .header("Authorization", "Bearer invalid"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(2))
             .andExpect(jsonPath("$.data[0].authorId").value(7))
@@ -125,16 +133,21 @@ class PostListHttpTest {
             .andExpect(jsonPath("$.data[1].length()").value(9))
             .andExpect(content().string(Matchers.containsString("\"authorNickname\":null")))
             .andExpect(content().string(Matchers.containsString("\"imageUrls\":null")))
-        verify(listPosts).read()
-        verifyNoInteractions(readPost)
+        verify(exactly = 1) { listPosts.read() }
+        confirmVerified(listPosts, readPost)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__no_posts__when__getting_list__then__return_empty_array_without_page_envelope() {
-        whenever(listPosts.read()).thenReturn(listOf())
+    fun `게시글이 없을 때__목록을 조회하면__페이지 봉투 없이 빈 배열을 돌려준다`() {
+        // given
+        every { listPosts.read() } returns listOf()
 
-        mvc.perform(get("/api/v1/posts/read"))
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -142,12 +155,13 @@ class PostListHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(listPosts).read()
-        verifyNoInteractions(readPost)
+        verify(exactly = 1) { listPosts.read() }
+        confirmVerified(listPosts, readPost)
     }
 
     @Test
-    fun given__list_failure_with_sensitive_details__when__getting_list__then__reuse_safe_read_error_without_logging_secrets() {
+    fun `민감한 상세가 담긴 목록 실패가 주어졌을 때__목록을 조회하면__비밀을 기록하지 않고 안전한 읽기 오류를 쓴다`() {
+        // given
         val failure = IllegalStateException(
             "Bearer synthetic-private-token; synthetic-private-content",
             SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password"),
@@ -156,29 +170,35 @@ class PostListHttpTest {
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
-        whenever(listPosts.read()).thenThrow(failure)
-        try {
+
+        every { listPosts.read() } throws failure
+
+        // when
+        val result = try {
             mvc.perform(get("/api/v1/posts/read").header("Authorization", "Bearer synthetic-private-header"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(
-                    content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
-                )
-            assertThat(appender.list).allSatisfy { event ->
-                assertThat(event.throwableProxy).isNull()
-                assertThat(event.formattedMessage).doesNotContain(
-                    "synthetic-private-token",
-                    "synthetic-private-content",
-                    "synthetic-private-password",
-                    "synthetic-private-header",
-                    "jdbc:postgresql:",
-                )
-            }
         } finally {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(listPosts).read()
-        verifyNoInteractions(readPost)
+
+        // then
+        result
+            .andExpect(status().isInternalServerError())
+            .andExpect(
+                content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
+            )
+        assertThat(appender.list).allSatisfy { event ->
+            assertThat(event.throwableProxy).isNull()
+            assertThat(event.formattedMessage).doesNotContain(
+                "synthetic-private-token",
+                "synthetic-private-content",
+                "synthetic-private-password",
+                "synthetic-private-header",
+                "jdbc:postgresql:",
+            )
+        }
+        verify(exactly = 1) { listPosts.read() }
+        confirmVerified(listPosts, readPost)
     }
 
     @ParameterizedTest
@@ -189,11 +209,16 @@ class PostListHttpTest {
             "HEAD /api/v1/posts/read", "OPTIONS /api/v1/posts/read", "POST /api/v1/posts/read", "PATCH /api/v1/posts/read",
         ],
     )
-    fun given__unexposed_method_or_path__when__requesting__then__deny_without_list_or_single_lookup(request: String) {
+    fun `노출되지 않은 메서드나 경로가 주어졌을 때__요청하면__목록이나 단건 조회 없이 거부한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(listPosts, readPost)
+
+        // when
+        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(listPosts, readPost)
     }
 
     companion object {
