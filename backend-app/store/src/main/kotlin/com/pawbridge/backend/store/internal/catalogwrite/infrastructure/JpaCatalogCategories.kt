@@ -41,7 +41,9 @@ class JpaCatalogCategories internal constructor(
     fun deleteCategory(categoryId: Long?) {
         writes.executeWithoutResult {
             JpaCatalogProducts.requireWriter()
-            val category = categories.findById(categoryId!!)
+            val category = categories.findById(
+                categoryId ?: throw IllegalArgumentException("The given id must not be null"),
+            )
                 .orElseThrow { IllegalArgumentException("Category not found: $categoryId") }
             if (category.children.isNotEmpty()) {
                 throw IllegalStateException("하위 카테고리가 있어 삭제할 수 없습니다.")
@@ -53,7 +55,9 @@ class JpaCatalogCategories internal constructor(
     fun updateCategory(categoryId: Long?, request: CategoryUpdateRequest): CategoryResponse =
         writes.execute {
             JpaCatalogProducts.requireWriter()
-            val category = categories.findById(categoryId!!)
+            val category = categories.findById(
+                categoryId ?: throw IllegalArgumentException("The given id must not be null"),
+            )
                 .orElseThrow { IllegalArgumentException("Category not found: $categoryId") }
             var newParent: Category? = null
             val parentId = request.parentId

@@ -82,7 +82,9 @@ class JpaCatalogOptions internal constructor(
     fun deleteOptionGroup(id: Long?) {
         writes.executeWithoutResult {
             JpaCatalogProducts.requireWriter()
-            val group = groups.findById(id!!)
+            val group = groups.findById(
+                id ?: throw IllegalArgumentException("The given id must not be null"),
+            )
                 .orElseThrow { IllegalArgumentException("옵션 그룹을 찾을 수 없습니다: $id") }
             if (group.optionValues.stream().anyMatch { value -> values.isOptionValueInUse(value.id) }) {
                 throw IllegalStateException("사용 중인 옵션 그룹은 삭제할 수 없습니다.")
@@ -94,7 +96,9 @@ class JpaCatalogOptions internal constructor(
     fun addOptionValue(groupId: Long?, request: OptionValueRequest): OptionValueResponse =
         writes.execute {
             JpaCatalogProducts.requireWriter()
-            val group = groups.findById(groupId!!)
+            val group = groups.findById(
+                groupId ?: throw IllegalArgumentException("The given id must not be null"),
+            )
                 .orElseThrow { IllegalArgumentException("옵션 그룹을 찾을 수 없습니다: $groupId") }
             val value = OptionValue.builder().optionGroup(group).name(request.name).build()
             values.save(value)
@@ -116,7 +120,9 @@ class JpaCatalogOptions internal constructor(
     fun deleteOptionValue(id: Long?) {
         writes.executeWithoutResult {
             JpaCatalogProducts.requireWriter()
-            val value = values.findById(id!!)
+            val value = values.findById(
+                id ?: throw IllegalArgumentException("The given id must not be null"),
+            )
                 .orElseThrow { IllegalArgumentException("옵션 값을 찾을 수 없습니다: $id") }
             if (values.isOptionValueInUse(id)) {
                 throw IllegalStateException("사용 중인 옵션 값은 삭제할 수 없습니다.")

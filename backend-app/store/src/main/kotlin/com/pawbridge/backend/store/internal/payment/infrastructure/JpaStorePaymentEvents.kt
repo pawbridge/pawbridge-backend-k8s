@@ -57,7 +57,7 @@ class JpaStorePaymentEvents internal constructor(
         clock,
     )
 
-    override fun completePayment(orderUuid: String, amount: Long): StorePaymentEvents.Completed =
+    override fun completePayment(orderUuid: String?, amount: Long): StorePaymentEvents.Completed =
         mandatoryWrites.execute {
             requireWriter()
             val order = locks.lockByUuid(orderUuid).orElse(null)
@@ -80,7 +80,7 @@ class JpaStorePaymentEvents internal constructor(
             StorePaymentEvents.Completed(StorePaymentEvents.Completion.APPLIED, Runnable { incrementAfterCommit(key, ranks, orderId) })
         }!!
 
-    override fun failPayment(orderUuid: String): Boolean {
+    override fun failPayment(orderUuid: String?): Boolean {
         val cancelled = mandatoryWrites.execute {
             requireWriter()
             val order = locks.lockByUuid(orderUuid).orElse(null)
