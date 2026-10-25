@@ -10,27 +10,43 @@ class BcryptPasswordHashesTest {
     private val hashes = BcryptPasswordHashes()
 
     @Test
-    fun given__legacy_default_bcrypt_hash__when__matching__then__only_the_original_raw_password_matches() {
+    fun `예전 기본 bcrypt 해시일 때__일치를 확인하면__원래의 평문 비밀번호만 일치한다`() {
+        // given
         val legacy = BCryptPasswordEncoder().encode("Legacy12!")
 
-        assertTrue(hashes.matches("Legacy12!", legacy))
-        assertFalse(hashes.matches("legacy12!", legacy))
+        // when
+        val original = hashes.matches("Legacy12!", legacy)
+        val changedCase = hashes.matches("legacy12!", legacy)
+
+        // then
+        assertTrue(original)
+        assertFalse(changedCase)
     }
 
     @Test
-    fun given__new_password__when__encoding__then__default_strength_salted_bcrypt_is_verifiable_by_the_legacy_encoder() {
+    fun `새 비밀번호일 때__인코딩하면__기본 강도의 솔트 bcrypt를 예전 인코더로 검증할 수 있다`() {
+        // given
+        // when
         val first = hashes.encode("NewPass1!")!!
         val second = hashes.encode("NewPass1!")
 
+        // then
         assertTrue(first.startsWith("\$2a\$10\$"))
         assertNotEquals(first, second)
         assertTrue(BCryptPasswordEncoder().matches("NewPass1!", first))
     }
 
     @Test
-    fun given__missing_or_non_bcrypt_stored_value__when__matching__then__mismatch_is_reported_instead_of_failure() {
-        assertFalse(hashes.matches("NewPass1!", null))
-        assertFalse(hashes.matches("NewPass1!", ""))
-        assertFalse(hashes.matches("NewPass1!", "plain-text"))
+    fun `저장된 값이 없거나 bcrypt가 아닐 때__일치를 확인하면__실패 대신 불일치를 알린다`() {
+        // given
+        // when
+        val missing = hashes.matches("NewPass1!", null)
+        val empty = hashes.matches("NewPass1!", "")
+        val plainText = hashes.matches("NewPass1!", "plain-text")
+
+        // then
+        assertFalse(missing)
+        assertFalse(empty)
+        assertFalse(plainText)
     }
 }

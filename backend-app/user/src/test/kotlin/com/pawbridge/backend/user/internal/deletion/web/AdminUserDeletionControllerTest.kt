@@ -27,30 +27,41 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 /** Direct controller/handler unit contracts, not MVC binding or ROLE_ADMIN/filter-chain evidence. */
 class AdminUserDeletionControllerTest {
     @Test
-    fun givenAuthorizedControllerEntry__whenDeleting__thenInvokeOnceAndKeepTheOriginalSuccessEnvelope() {
+    fun `승인된 컨트롤러 진입일 때__삭제하면__한 번만 호출하고 원래의 성공 응답 형식을 유지한다`() {
+        // given
         val ids = ArrayList<Long>()
-        val response = AdminUserDeletionController(UserDeletion { id -> ids.add(id) }).delete(7L as java.lang.Long)
+        val controller = AdminUserDeletionController(UserDeletion { id -> ids.add(id) })
 
+        // when
+        val response = controller.delete(7L as java.lang.Long)
+
+        // then
         assertEquals(listOf(7L), ids)
         assertEquals(200, response.statusCode.value())
         assertEquals(AdminUserDeletionController.Response<Void>(200, "회원이 삭제되었습니다.", null), response.body)
     }
 
     @Test
-    fun givenOnlyTheExistingAdminDelete__whenInspectingEntryAndAdvice__thenKeepTheExactMappingAndScopedHandler() {
+    fun `기존 관리자 삭제 진입점만 있을 때__진입점과 어드바이스를 살펴보면__정확한 매핑과 한정된 핸들러를 유지한다`() {
+        // given
         val method = AdminUserDeletionController::class.java.getMethod("delete", java.lang.Long::class.java)
+
+        // when
         val mapping = method.getAnnotation(DeleteMapping::class.java)
+        val advice = AdminUserDeletionExceptionHandler::class.java.getAnnotation(RestControllerAdvice::class.java)
+
+        // then
         assertEquals("userId", method.parameters[0].getAnnotation(PathVariable::class.java).value)
         assertArrayEquals(arrayOf("/api/v1/admin/users/{userId}"), mapping.value)
-        val advice = AdminUserDeletionExceptionHandler::class.java.getAnnotation(RestControllerAdvice::class.java)
         assertArrayEquals(arrayOf<Class<*>>(AdminUserDeletionController::class.java), advice.assignableTypes.map { type -> type.java }.toTypedArray())
     }
 
     @ParameterizedTest
     @EnumSource(Failure::class)
-    fun givenMissingCommunityOrFinalAccountFailure__whenTheActualControllerPropagatesToItsHandler__thenKeepOriginalStatusEnvelopeWithoutPrivateDetails(
+    fun `회원 없음 또는 커뮤니티 정리나 최종 계정 실패일 때__실제 컨트롤러가 핸들러로 전파하면__비공개 상세 없이 원래의 상태 응답 형식을 유지한다`(
         kind: Failure,
     ) {
+        // given
         val failure: RuntimeException = when (kind) {
             Failure.MISSING -> UserNotFoundException()
             Failure.COMMUNITY -> MemberCleanupUnavailableException()
@@ -58,10 +69,12 @@ class AdminUserDeletionControllerTest {
             Failure.COMMIT -> TransactionSystemException("private-commit-body")
         }
         val controller = AdminUserDeletionController(UserDeletion { id -> throw failure })
-        assertSame(failure, assertThrows(RuntimeException::class.java) { controller.delete(7L as java.lang.Long) })
         val handler = AdminUserDeletionExceptionHandler()
         val logger = LoggerFactory.getLogger(AdminUserDeletionExceptionHandler::class.java) as Logger
         val logs = ListAppender<ILoggingEvent>()
+
+        // when
+        assertSame(failure, assertThrows(RuntimeException::class.java) { controller.delete(7L as java.lang.Long) })
         logs.start()
         logger.addAppender(logs)
         try {
@@ -70,6 +83,8 @@ class AdminUserDeletionControllerTest {
                 Failure.COMMUNITY -> handler.cleanupUnavailable(failure as MemberCleanupUnavailableException)
                 Failure.SQL, Failure.COMMIT -> handler.unexpected(failure)
             }
+
+            // then
             val status = if (kind == Failure.MISSING) 400 else if (kind == Failure.COMMUNITY) 503 else 500
             val message = if (kind == Failure.MISSING) {
                 "존재하지 않는 회원입니다."

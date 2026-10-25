@@ -31,10 +31,13 @@ import javax.sql.rowset.RowSetProvider
 
 class JdbcUserNicknameQueryTest {
     @Test
-    fun given__missing_user__when__nickname_is_queried__then__empty_is_returned_after_transaction_ends() {
+    fun `회원이 없을 때__닉네임을 조회하면__트랜잭션이 끝난 뒤 빈 값을 돌려준다`() {
+        // given
         Fixture().use { fixture ->
+            // when
             val nickname: Optional<String> = fixture.query.findNickname(41L)
 
+            // then
             assertEquals(Optional.empty<String>(), nickname)
             assertFalse(fixture.transactions.active)
             assertEquals(1, fixture.transactions.commits)
@@ -45,12 +48,15 @@ class JdbcUserNicknameQueryTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["산책하는강아지", "", " "])
-    fun given__stored_nickname__when__nickname_is_queried__then__value_is_preserved_after_transaction_ends(
+    fun `저장된 닉네임이 있을 때__닉네임을 조회하면__트랜잭션이 끝난 뒤에도 값을 보존한다`(
         storedNickname: String,
     ) {
+        // given
         Fixture(storedNickname).use { fixture ->
+            // when
             val nickname: Optional<String> = fixture.query.findNickname(52L)
 
+            // then
             assertEquals(Optional.of(storedNickname), nickname)
             assertFalse(fixture.transactions.active)
             assertEquals(1, fixture.transactions.commits)
@@ -58,13 +64,17 @@ class JdbcUserNicknameQueryTest {
     }
 
     @Test
-    fun given__jdbc_failure__when__nickname_is_queried__then__unavailable_is_thrown_after_rollback() {
+    fun `JDBC가 실패했을 때__닉네임을 조회하면__롤백 뒤 조회 불가 예외를 던진다`() {
+        // given
         Fixture().use { fixture ->
             val failure = DataAccessResourceFailureException("sensitive connection details")
             fixture.jdbc.failure = failure
 
+
+            // when
             val exception = assertThrows(UserNicknameUnavailableException::class.java) { fixture.query.findNickname(41L) }
 
+            // then
             assertSame(failure, exception.cause)
             assertEquals("User nickname lookup is unavailable.", exception.message)
             assertFalse(fixture.transactions.active)
@@ -73,13 +83,17 @@ class JdbcUserNicknameQueryTest {
     }
 
     @Test
-    fun given__transaction_start_failure__when__nickname_is_queried__then__unavailable_is_thrown_without_query() {
+    fun `트랜잭션 시작이 실패했을 때__닉네임을 조회하면__쿼리 없이 조회 불가 예외를 던진다`() {
+        // given
         Fixture().use { fixture ->
             val failure = CannotCreateTransactionException("sensitive transaction details")
             fixture.transactions.startFailure = failure
 
+
+            // when
             val exception = assertThrows(UserNicknameUnavailableException::class.java) { fixture.query.findNickname(41L) }
 
+            // then
             assertSame(failure, exception.cause)
             assertEquals("User nickname lookup is unavailable.", exception.message)
             assertEquals(0, fixture.jdbc.queryCount)
@@ -88,13 +102,17 @@ class JdbcUserNicknameQueryTest {
     }
 
     @Test
-    fun given__transaction_completion_failure__when__nickname_is_queried__then__unavailable_is_thrown() {
+    fun `트랜잭션 완료가 실패했을 때__닉네임을 조회하면__조회 불가 예외를 던진다`() {
+        // given
         Fixture("산책하는강아지").use { fixture ->
             val failure = TransactionSystemException("sensitive completion details")
             fixture.transactions.completionFailure = failure
 
+
+            // when
             val exception = assertThrows(UserNicknameUnavailableException::class.java) { fixture.query.findNickname(41L) }
 
+            // then
             assertSame(failure, exception.cause)
             assertEquals("User nickname lookup is unavailable.", exception.message)
             assertEquals(1, fixture.jdbc.queryCount)
