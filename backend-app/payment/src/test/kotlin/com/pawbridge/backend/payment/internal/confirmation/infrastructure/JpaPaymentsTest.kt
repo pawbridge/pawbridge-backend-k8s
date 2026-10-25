@@ -10,29 +10,20 @@ import com.pawbridge.backend.payment.internal.confirmation.infrastructure.jpa.mo
 import com.pawbridge.backend.payment.internal.confirmation.infrastructure.jpa.repository.PaymentCompensationRecordRepository
 import com.pawbridge.backend.payment.internal.confirmation.infrastructure.jpa.repository.PaymentRepository
 import com.pawbridge.backend.payment.internal.confirmation.infrastructure.toss.TossPaymentsClient
-import com.pawbridge.backend.payment.support.anyNonNull
-import com.pawbridge.backend.payment.support.eqNonNull
-import com.pawbridge.backend.payment.support.sameNonNull
 import com.pawbridge.backend.store.api.StorePaymentEvents
 import com.pawbridge.backend.store.api.StorePaymentEvents.Completion
 import com.pawbridge.backend.store.api.StorePaymentOrders
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.dao.DataIntegrityViolationException
@@ -61,18 +52,47 @@ import java.util.Optional
 @ExtendWith(OutputCaptureExtension::class)
 class JpaPaymentsTest {
     @Test
-    fun given__an_owned_pending_order__when__the_provider_approves__then__call_it_outside_transactions_and_apply_payment_and_order_in_one_writer() {
+    fun `본인의 결제 대기 주문일 때__제공사가 승인하면__트랜잭션 밖에서 호출하고 결제와 주문을 한 쓰기 트랜잭션에서 반영한다`() {
+        // given
         val f = Fixture()
         val response = f.done()
-        f.provider(response)
+        val saved = slot<Payment>()
 
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            response
+        }
+        every { f.store.completePayment(any(), any()) } answers {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
+            assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isFalse()
+            f.events.add("complete:" + secondArg<Long>())
+            StorePaymentEvents.Completed(Completion.APPLIED, Runnable { f.outside("rank") })
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } answers {
+            if (f.manager.writing) {
+                f.events.add("done-check")
+            }
+            Optional.empty()
+        }
+        every { f.payments.saveAndFlush(any<Payment>()) } answers {
+            f.events.add("payment")
+            firstArg()
+        }
+
+        // when
         val result = f.service.confirmPayment(7L, f.request)
 
+        // then
         assertThat(result).isSameAs(response)
         assertThat(f.events).containsExactly(
             "order", "begin:ro", "commit", "provider", "begin:rw", "complete:200", "done-check", "payment", "commit", "rank",
         )
-        val payment = f.savedPayment!!
+        verify(exactly = 1) { f.payments.saveAndFlush(capture(saved)) }
+        val payment = saved.captured
         assertThat(payment.userId).isEqualTo(7L)
         assertThat(payment.orderId).isEqualTo("order-uuid")
         assertThat(payment.paymentKey).isEqualTo("synthetic-key")
@@ -80,111 +100,177 @@ class JpaPaymentsTest {
         assertThat(payment.amount).isEqualTo(200L)
         assertThat(payment.requestedAt).isEqualTo(response.requestedAt!!.toLocalDateTime())
         assertThat(payment.approvedAt).isEqualTo(response.approvedAt!!.toLocalDateTime())
-        verify(f.toss).confirmPayment(eqNonNull("Basic c3ludGhldGljLXNlY3JldDo="), sameNonNull(f.request))
-        verifyNoMoreInteractions(f.toss)
-        verifyNoInteractions(f.compensations)
-        verify(f.store, never()).failPayment(anyString())
+        verify(exactly = 1) {
+            f.toss.confirmPayment("Basic c3ludGhldGljLXNlY3JldDo=", match { it === f.request })
+        }
+        confirmVerified(f.toss)
+        confirmVerified(f.compensations)
+        verify(exactly = 0) { f.store.failPayment(any()) }
     }
 
     @Test
-    fun given__an_existing_done_payment__when__the_owner_repeats_the_order_and_amount__then__return_the_stored_subset_without_provider() {
+    fun `이미 완료된 결제가 있을 때__소유자가 같은 주문과 금액으로 반복하면__제공사 호출 없이 저장된 부분집합을 돌려준다`() {
+        // given
         val f = Fixture()
         val existing = f.existing("stored-synthetic-key")
-        f.order(StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PAID"))
-        whenever(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE))
-            .thenReturn(Optional.of(existing))
 
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PAID")
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.of(existing)
+
+        // when
         val result = f.service.confirmPayment(7L, f.request)
 
+        // then
         assertThat(result.status).isEqualTo("DONE")
         assertThat(result.paymentKey).isEqualTo("stored-synthetic-key")
         assertThat(result.totalAmount).isEqualTo(200L)
         assertThat(result.requestedAt).isEqualTo(existing.requestedAt!!.atOffset(ZoneOffset.ofHours(9)))
         assertThat(result.approvedAt).isEqualTo(existing.approvedAt!!.atOffset(ZoneOffset.ofHours(9)))
         assertThat(f.events).containsExactly("order", "begin:ro", "commit")
-        verifyNoInteractions(f.toss, f.store)
+        confirmVerified(f.toss, f.store)
     }
 
     @Test
-    fun given__another_members_already_paid_order__when__confirming__then__reject_403_before_revealing_the_stored_payment() {
+    fun `다른 회원의 이미 결제된 주문일 때__승인하면__저장된 결제를 드러내기 전에 403으로 거부한다`() {
+        // given
         val f = Fixture()
-        f.order(StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PAID"))
-        whenever(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE))
-            .thenReturn(Optional.of(f.existing("stored-synthetic-key")))
 
-        assertThatThrownBy { f.service.confirmPayment(8L, f.request) }
-            .isInstanceOf(PaymentOrderAccessDeniedException::class.java)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PAID")
+        }
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(8L, f.request) }
+
+        // then
+        thrown.isInstanceOf(PaymentOrderAccessDeniedException::class.java)
             .hasMessageNotContaining("stored-synthetic-key")
         assertThat(f.events).containsExactly("order")
-        verify(f.payments, never()).findFirstByOrderIdAndStatusOrderByIdAsc(anyString(), any())
-        verifyNoInteractions(f.toss, f.store)
+        verify(exactly = 0) { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc(any(), any()) }
+        confirmVerified(f.toss, f.store)
     }
 
     @Test
-    fun given__an_existing_done_payment_with_a_different_amount__when__repeating__then__keep_the_original_mismatch_failure() {
+    fun `금액이 다른 완료 결제가 이미 있을 때__반복하면__원래의 불일치 실패를 유지한다`() {
+        // given
         val f = Fixture()
         val existing = f.existing("stored-synthetic-key")
-        whenever(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE))
-            .thenReturn(Optional.of(existing))
         val request = TossPaymentConfirmRequest.builder().paymentKey("synthetic-key").orderId("order-uuid").amount(201L).build()
 
-        assertThatThrownBy { f.service.confirmPayment(7L, request) }
-            .isInstanceOf(IllegalStateException::class.java)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.of(existing)
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, request) }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
             .hasMessage("Payment exists but amount mismatch")
-        verifyNoInteractions(f.toss, f.store)
+        confirmVerified(f.toss, f.store)
     }
 
     @Test
-    fun given__another_members_order__when__confirming__then__reject_before_the_provider() {
+    fun `다른 회원의 주문일 때__승인하면__제공사 호출 전에 거부한다`() {
+        // given
         val f = Fixture()
 
-        assertThatThrownBy { f.service.confirmPayment(8L, f.request) }
-            .isInstanceOf(PaymentOrderAccessDeniedException::class.java)
-        verifyNoInteractions(f.toss, f.store)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(8L, f.request) }
+
+        // then
+        thrown.isInstanceOf(PaymentOrderAccessDeniedException::class.java)
+        confirmVerified(f.toss, f.store)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PAID", "CANCELLED", "COMPLETED", "FAILED"])
-    fun given__a_non_pending_order__when__confirming__then__reject_before_the_provider(status: String) {
+    fun `결제 대기가 아닌 주문일 때__승인하면__제공사 호출 전에 거부한다`(status: String) {
+        // given
         val f = Fixture()
-        f.order(StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, status))
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .isInstanceOf(PaymentOrderNotPayableException::class.java)
-        verifyNoInteractions(f.toss, f.store)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, status)
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.isInstanceOf(PaymentOrderNotPayableException::class.java)
+        confirmVerified(f.toss, f.store)
     }
 
     @Test
-    fun given__a_different_order_amount__when__confirming__then__keep_the_original_mismatch_failure_before_the_provider() {
+    fun `주문 금액이 다를 때__승인하면__제공사 호출 전에 원래의 불일치 실패를 유지한다`() {
+        // given
         val f = Fixture()
-        f.order(StorePaymentOrders.Order(8L, "order-uuid", 7L, 300L, "PENDING"))
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .isInstanceOf(IllegalStateException::class.java)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            StorePaymentOrders.Order(8L, "order-uuid", 7L, 300L, "PENDING")
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
             .hasMessage("Payment Amount Mismatch")
-        verifyNoInteractions(f.toss, f.store)
+        confirmVerified(f.toss, f.store)
     }
 
     @Test
-    fun given__a_clear_provider_rejection__when__confirming__then__cancel_the_pending_order_in_one_writer_and_return_aborted() {
+    fun `제공사가 명확히 거절했을 때__승인하면__대기 주문을 한 쓰기 트랜잭션에서 취소하고 ABORTED를 돌려준다`() {
+        // given
         val f = Fixture()
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY,
-                "{\"code\":\"REJECT_CARD_PAYMENT\"}".toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
-            ),
-        )
 
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.BAD_REQUEST, "{\"code\":\"REJECT_CARD_PAYMENT\"}")
+        }
+        every { f.store.failPayment(any()) } answers {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
+            f.events.add("fail")
+            true
+        }
+
+        // when
         val result = f.service.confirmPayment(7L, f.request)
 
+        // then
         assertThat(result.status).isEqualTo("ABORTED")
         assertThat(result.orderId).isEqualTo("order-uuid")
         assertThat(result.paymentKey).isEqualTo("synthetic-key")
         assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:rw", "fail", "commit")
-        verify(f.toss, never()).getPayment(anyString(), anyString())
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
-        verify(f.store, never()).completePayment(anyString(), anyLong())
-        verifyNoInteractions(f.compensations)
+        verify(exactly = 0) { f.toss.getPayment(any(), any()) }
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
+        verify(exactly = 0) { f.store.completePayment(any(), any()) }
+        confirmVerified(f.compensations)
     }
 
     @ParameterizedTest
@@ -194,106 +280,177 @@ class JpaPaymentsTest {
             "400:NOT_FOUND_TERMINAL_ID", "403:INCORRECT_BASIC_AUTH_FORMAT",
         ],
     )
-    fun given__toss_did_not_process_our_request__when__confirming__then__keep_the_order_pending_without_cancel_or_record(
+    fun `토스가 요청을 처리하지 않았을 때__승인하면__취소나 기록 없이 주문을 대기 상태로 둔다`(
         input: String,
     ) {
+        // given
         val f = Fixture()
         val parts = input.split(":")
         val body = if (parts[1].isEmpty()) "" else "{\"code\":\"" + parts[1] + "\",\"message\":\"synthetic\"}"
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.valueOf(parts[0].toInt()), "synthetic", HttpHeaders.EMPTY,
-                body.toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
-            ),
-        )
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment provider did not process the request. The order remains pending.")
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.valueOf(parts[0].toInt()), body)
+        }
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment provider did not process the request. The order remains pending.")
         assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider")
-        verifyNoInteractions(f.store, f.compensations)
-        verify(f.toss, never()).getPayment(anyString(), anyString())
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
+        confirmVerified(f.store, f.compensations)
+        verify(exactly = 0) { f.toss.getPayment(any(), any()) }
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
     }
 
     @Test
-    fun given__a_403_card_decline__when__confirming__then__treat_it_as_a_business_rejection() {
+    fun `403 카드 거절일 때__승인하면__업무상 거절로 취급한다`() {
+        // given
         val f = Fixture()
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY,
-                "{\"code\":\"REJECT_CARD_PAYMENT\",\"message\":\"synthetic\"}".toByteArray(StandardCharsets.UTF_8),
-                StandardCharsets.UTF_8,
-            ),
-        )
 
-        assertThat(f.service.confirmPayment(7L, f.request).status).isEqualTo("ABORTED")
-        verify(f.store).failPayment("order-uuid")
-        verifyNoInteractions(f.compensations)
-    }
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.FORBIDDEN, "{\"code\":\"REJECT_CARD_PAYMENT\",\"message\":\"synthetic\"}")
+        }
+        every { f.store.failPayment(any()) } returns true
 
-    @Test
-    fun given__already_processed_and_a_recorded_payment__when__confirming__then__return_the_stored_done_from_a_short_read() {
-        val f = Fixture()
-        val existing = f.existing("synthetic-key")
-        whenever(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE))
-            .thenReturn(Optional.empty()).thenReturn(Optional.of(existing))
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY,
-                "{\"code\":\"ALREADY_PROCESSED_PAYMENT\"}".toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
-            ),
-        )
-
+        // when
         val result = f.service.confirmPayment(7L, f.request)
 
+        // then
+        assertThat(result.status).isEqualTo("ABORTED")
+        verify(exactly = 1) { f.store.failPayment("order-uuid") }
+        confirmVerified(f.compensations)
+    }
+
+    @Test
+    fun `이미 처리되었고 기록된 결제가 있을 때__승인하면__짧은 읽기에서 저장된 DONE을 돌려준다`() {
+        // given
+        val f = Fixture()
+        val existing = f.existing("synthetic-key")
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returnsMany
+            listOf(Optional.empty(), Optional.of(existing))
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.BAD_REQUEST, "{\"code\":\"ALREADY_PROCESSED_PAYMENT\"}")
+        }
+
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
         assertThat(result.status).isEqualTo("DONE")
         assertThat(result.paymentKey).isEqualTo("synthetic-key")
         assertThat(f.events).containsExactly("order", "begin:ro", "commit", "provider", "begin:ro", "commit")
-        verifyNoInteractions(f.store, f.compensations)
+        confirmVerified(f.store, f.compensations)
     }
 
     @Test
-    fun given__already_processed_without_a_recorded_payment__when__the_lookup_is_done__then__apply_it_in_the_writer() {
+    fun `이미 처리되었으나 기록된 결제가 없을 때__조회 결과가 DONE이면__쓰기 트랜잭션에서 반영한다`() {
+        // given
         val f = Fixture()
         val looked = f.done()
-        f.providerFails(IllegalStateException("S008 synthetic"))
-        whenever(f.toss.getPayment(anyString(), eqNonNull("synthetic-key"))).thenAnswer {
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } answers {
+            if (f.manager.writing) {
+                f.events.add("done-check")
+            }
+            Optional.empty()
+        }
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw IllegalStateException("S008 synthetic")
+        }
+        every { f.toss.getPayment(any(), "synthetic-key") } answers {
             f.outside("lookup")
             looked
         }
+        every { f.store.completePayment(any(), any()) } answers {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
+            assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isFalse()
+            f.events.add("complete:" + secondArg<Long>())
+            StorePaymentEvents.Completed(Completion.APPLIED, Runnable { f.outside("rank") })
+        }
+        every { f.payments.saveAndFlush(any<Payment>()) } answers {
+            f.events.add("payment")
+            firstArg()
+        }
 
-        assertThat(f.service.confirmPayment(7L, f.request)).isSameAs(looked)
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
+        assertThat(result).isSameAs(looked)
         assertThat(f.events).containsExactly(
             "order", "begin:ro", "commit", "provider", "begin:ro", "commit", "lookup",
             "begin:rw", "complete:200", "done-check", "payment", "commit", "rank",
         )
-        verifyNoInteractions(f.compensations)
+        confirmVerified(f.compensations)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["none", "ABORTED"])
-    fun given__already_processed_without_a_recorded_payment__when__the_lookup_is_not_done__then__record_and_never_cancel_the_order(
+    fun `이미 처리되었으나 기록된 결제가 없을 때__조회 결과가 DONE이 아니면__기록하고 주문을 취소하지 않는다`(
         looked: String,
         output: CapturedOutput,
     ) {
+        // given
         val f = Fixture()
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY,
-                "{\"code\":\"ALREADY_PROCESSED_PAYMENT\"}".toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
-            ),
-        )
-        if (looked != "none") {
-            whenever(f.toss.getPayment(anyString(), anyString())).thenReturn(
-                TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status(looked).build(),
-            )
+        val savedRecord = slot<PaymentCompensationRecord>()
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.BAD_REQUEST, "{\"code\":\"ALREADY_PROCESSED_PAYMENT\"}")
+        }
+        if (looked == "none") {
+            every { f.toss.getPayment(any(), any()) } returns null
+        } else {
+            every { f.toss.getPayment(any(), any()) } returns
+                TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status(looked).build()
+        }
+        every { f.compensations.saveAndFlush(any<PaymentCompensationRecord>()) } answers {
+            val record = firstArg<PaymentCompensationRecord>()
+            ReflectionTestUtils.setField(record, "id", 41L)
+            record
         }
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment result is unknown. The order remains pending.")
-        verifyNoInteractions(f.store)
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
-        assertThat(f.savedRecord!!.reason).isEqualTo("ALREADY_PROCESSED_UNRECORDED")
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment result is unknown. The order remains pending.")
+        confirmVerified(f.store)
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
+        verify(exactly = 1) { f.compensations.saveAndFlush(capture(savedRecord)) }
+        assertThat(savedRecord.captured.reason).isEqualTo("ALREADY_PROCESSED_UNRECORDED")
         assertThat(output.all).contains(
             "PAYMENT_COMPENSATION_REQUIRED paymentKey=synthetic-key orderId=order-uuid amount=200 userId=7 stage=UNKNOWN_RESULT reason=ALREADY_PROCESSED_UNRECORDED recordId=41",
         )
@@ -306,27 +463,42 @@ class JpaPaymentsTest {
             "400:CARD_PROCESSING_ERROR", "400:SOME_FUTURE_CODE", "404:NOT_FOUND_PAYMENT",
         ],
     )
-    fun given__a_4xx_that_is_not_a_listed_rejection__when__confirming__then__resolve_by_lookup_and_keep_the_order_pending(
+    fun `목록에 없는 4xx일 때__승인하면__조회로 해소하고 주문을 대기 상태로 둔다`(
         input: String,
     ) {
+        // given
         val f = Fixture()
         val parts = input.split(":")
         val body = if (parts[1].isEmpty()) "<html>gateway</html>" else "{\"code\":\"" + parts[1] + "\",\"message\":\"synthetic\"}"
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.valueOf(parts[0].toInt()), "synthetic", HttpHeaders.EMPTY,
-                body.toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
-            ),
-        )
-        whenever(f.toss.getPayment(anyString(), eqNonNull("synthetic-key"))).thenReturn(
-            TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status("IN_PROGRESS").build(),
-        )
+        val savedRecord = slot<PaymentCompensationRecord>()
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment result is unknown. The order remains pending.")
-        verify(f.toss).getPayment(anyString(), eqNonNull("synthetic-key"))
-        verifyNoInteractions(f.store)
-        assertThat(f.savedRecord!!.stage).isEqualTo(PaymentCompensationRecord.Stage.UNKNOWN_RESULT)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.valueOf(parts[0].toInt()), body)
+        }
+        every { f.toss.getPayment(any(), any()) } returns
+            TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status("IN_PROGRESS").build()
+        every { f.compensations.saveAndFlush(any<PaymentCompensationRecord>()) } answers {
+            val record = firstArg<PaymentCompensationRecord>()
+            ReflectionTestUtils.setField(record, "id", 41L)
+            record
+        }
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment result is unknown. The order remains pending.")
+        verify(exactly = 1) { f.toss.getPayment(any(), "synthetic-key") }
+        confirmVerified(f.store)
+        verify(exactly = 1) { f.compensations.saveAndFlush(capture(savedRecord)) }
+        assertThat(savedRecord.captured.stage).isEqualTo(PaymentCompensationRecord.Stage.UNKNOWN_RESULT)
     }
 
     @ParameterizedTest
@@ -336,125 +508,230 @@ class JpaPaymentsTest {
             "INVALID_STOPPED_CARD", "BELOW_MINIMUM_AMOUNT", "NOT_FOUND_PAYMENT_SESSION", "FDS_ERROR",
         ],
     )
-    fun given__a_listed_customer_rejection__when__confirming__then__cancel_the_order_without_lookup(code: String) {
+    fun `목록에 있는 고객 거절일 때__승인하면__조회 없이 주문을 취소한다`(code: String) {
+        // given
         val f = Fixture()
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY,
-                ("{\"code\":\"" + code + "\"}").toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
-            ),
-        )
 
-        assertThat(f.service.confirmPayment(7L, f.request).status).isEqualTo("ABORTED")
-        verify(f.store).failPayment("order-uuid")
-        verify(f.toss, never()).getPayment(anyString(), anyString())
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.BAD_REQUEST, "{\"code\":\"" + code + "\"}")
+        }
+        every { f.store.failPayment(any()) } returns true
+
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
+        assertThat(result.status).isEqualTo("ABORTED")
+        verify(exactly = 1) { f.store.failPayment("order-uuid") }
+        verify(exactly = 0) { f.toss.getPayment(any(), any()) }
     }
 
     @Test
-    fun given__a_rejection_while_a_concurrent_request_already_paid__when__confirming__then__replay_the_recorded_done() {
+    fun `거절 중에 동시 요청이 이미 결제했을 때__승인하면__기록된 DONE을 재생한다`() {
+        // given
         val f = Fixture()
-        f.failCancels = false
-        whenever(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE))
-            .thenReturn(Optional.empty())
-            .thenReturn(Optional.of(f.existing("concurrent-key")))
-        f.providerFails(
-            HttpClientErrorException.create(
-                HttpStatus.FORBIDDEN, "Forbidden", HttpHeaders.EMPTY,
-                "{\"code\":\"REJECT_CARD_PAYMENT\"}".toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
-            ),
-        )
 
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returnsMany
+            listOf(Optional.empty(), Optional.of(f.existing("concurrent-key")))
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw f.clientError(HttpStatus.FORBIDDEN, "{\"code\":\"REJECT_CARD_PAYMENT\"}")
+        }
+        every { f.store.failPayment(any()) } returns false
+
+        // when
         val result = f.service.confirmPayment(7L, f.request)
 
+        // then
         assertThat(result.status).isEqualTo("DONE")
         assertThat(result.paymentKey).isEqualTo("concurrent-key")
     }
 
     @Test
-    fun given__an_aborted_lookup_for_another_order__when__the_result_is_unknown__then__never_cancel_this_order() {
+    fun `다른 주문에 대한 ABORTED 조회일 때__결과가 불명이면__이 주문을 절대 취소하지 않는다`() {
+        // given
         val f = Fixture()
-        f.providerFails(ResourceAccessException("synthetic"))
-        whenever(f.toss.getPayment(anyString(), anyString())).thenReturn(
-            TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("other-order").status("ABORTED").build(),
-        )
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment result is unknown. The order remains pending.")
-        verifyNoInteractions(f.store)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw ResourceAccessException("synthetic")
+        }
+        every { f.toss.getPayment(any(), any()) } returns
+            TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("other-order").status("ABORTED").build()
+        every { f.compensations.saveAndFlush(any<PaymentCompensationRecord>()) } answers { firstArg() }
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment result is unknown. The order remains pending.")
+        confirmVerified(f.store)
     }
 
     @Test
-    fun given__ranking_fails_after_commit__when__the_payment_is_applied__then__still_return_the_approval() {
+    fun `커밋 후 순위 반영이 실패할 때__결제가 반영되면__그래도 승인을 돌려준다`() {
+        // given
         val f = Fixture()
         val response = f.done()
-        f.provider(response)
-        f.rankingFailure = IllegalStateException("synthetic redis")
 
-        assertThat(f.service.confirmPayment(7L, f.request)).isSameAs(response)
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
-        verifyNoInteractions(f.compensations)
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            response
+        }
+        every { f.store.completePayment(any(), any()) } returns
+            StorePaymentEvents.Completed(Completion.APPLIED, Runnable { throw IllegalStateException("synthetic redis") })
+        every { f.payments.saveAndFlush(any<Payment>()) } answers { firstArg() }
+
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
+        assertThat(result).isSameAs(response)
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
+        confirmVerified(f.compensations)
     }
 
     @Test
-    fun given__a_timeout_and_a_done_lookup__when__confirming__then__apply_the_looked_up_payment() {
+    fun `타임아웃 후 DONE 조회일 때__승인하면__조회된 결제를 반영한다`() {
+        // given
         val f = Fixture()
         val looked = f.done()
-        f.providerFails(ResourceAccessException("synthetic read timeout"))
-        whenever(f.toss.getPayment(anyString(), eqNonNull("synthetic-key"))).thenAnswer {
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } answers {
+            if (f.manager.writing) {
+                f.events.add("done-check")
+            }
+            Optional.empty()
+        }
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw ResourceAccessException("synthetic read timeout")
+        }
+        every { f.toss.getPayment(any(), "synthetic-key") } answers {
             f.outside("lookup")
             looked
         }
+        every { f.store.completePayment(any(), any()) } answers {
+            f.events.add("complete:" + secondArg<Long>())
+            StorePaymentEvents.Completed(Completion.APPLIED, Runnable { f.outside("rank") })
+        }
+        every { f.payments.saveAndFlush(any<Payment>()) } answers {
+            f.events.add("payment")
+            firstArg()
+        }
 
+        // when
         val result = f.service.confirmPayment(7L, f.request)
 
+        // then
         assertThat(result).isSameAs(looked)
         assertThat(f.events).containsExactly(
             "order", "begin:ro", "commit", "provider", "lookup", "begin:rw", "complete:200", "done-check", "payment", "commit", "rank",
         )
-        verifyNoInteractions(f.compensations)
+        confirmVerified(f.compensations)
     }
 
     @Test
-    fun given__a_provider_5xx_and_an_aborted_lookup__when__confirming__then__treat_it_as_a_clear_failure() {
+    fun `제공사 5xx 후 ABORTED 조회일 때__승인하면__명확한 실패로 취급한다`() {
+        // given
         val f = Fixture()
-        f.providerFails(
-            HttpServerErrorException.create(
-                HttpStatus.BAD_GATEWAY, "Bad Gateway", HttpHeaders.EMPTY, ByteArray(0), StandardCharsets.UTF_8,
-            ),
-        )
-        whenever(f.toss.getPayment(anyString(), eqNonNull("synthetic-key"))).thenReturn(
-            TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status("ABORTED").build(),
-        )
 
-        assertThat(f.service.confirmPayment(7L, f.request).status).isEqualTo("ABORTED")
-        verify(f.store).failPayment("order-uuid")
-        verify(f.store, never()).completePayment(anyString(), anyLong())
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw HttpServerErrorException.create(
+                HttpStatus.BAD_GATEWAY, "Bad Gateway", HttpHeaders.EMPTY, ByteArray(0), StandardCharsets.UTF_8,
+            )
+        }
+        every { f.toss.getPayment(any(), "synthetic-key") } returns
+            TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").status("ABORTED").build()
+        every { f.store.failPayment(any()) } returns true
+
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
+        assertThat(result.status).isEqualTo("ABORTED")
+        verify(exactly = 1) { f.store.failPayment("order-uuid") }
+        verify(exactly = 0) { f.store.completePayment(any(), any()) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["lookup-error", "lookup-in-progress", "lookup-other-order"])
-    fun given__an_unknown_provider_result__when__the_lookup_does_not_resolve_it__then__keep_the_order_pending_and_record_compensation(
+    fun `알 수 없는 제공사 결과일 때__조회로도 해소되지 않으면__주문을 대기로 두고 보상을 기록한다`(
         kind: String,
         output: CapturedOutput,
     ) {
+        // given
         val f = Fixture()
-        f.providerFails(ResourceAccessException("synthetic connect failure"))
+        val savedRecord = slot<PaymentCompensationRecord>()
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw ResourceAccessException("synthetic connect failure")
+        }
         if (kind == "lookup-error") {
-            whenever(f.toss.getPayment(anyString(), anyString())).thenThrow(ResourceAccessException("synthetic"))
+            every { f.toss.getPayment(any(), any()) } throws ResourceAccessException("synthetic")
         } else {
-            whenever(f.toss.getPayment(anyString(), anyString())).thenReturn(
+            every { f.toss.getPayment(any(), any()) } returns
                 TossPaymentResponse.builder().paymentKey("synthetic-key")
                     .orderId(if (kind == "lookup-other-order") "other-order" else "order-uuid")
-                    .status(if (kind == "lookup-other-order") "DONE" else "IN_PROGRESS").build(),
-            )
+                    .status(if (kind == "lookup-other-order") "DONE" else "IN_PROGRESS").build()
+        }
+        every { f.compensations.saveAndFlush(any<PaymentCompensationRecord>()) } answers {
+            val record = firstArg<PaymentCompensationRecord>()
+            ReflectionTestUtils.setField(record, "id", 41L)
+            record
         }
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .isInstanceOf(RuntimeException::class.java)
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.isInstanceOf(RuntimeException::class.java)
             .hasMessage("Payment result is unknown. The order remains pending.")
-        verifyNoInteractions(f.store)
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
-        val record = f.savedRecord!!
+        confirmVerified(f.store)
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
+        verify(exactly = 1) { f.compensations.saveAndFlush(capture(savedRecord)) }
+        val record = savedRecord.captured
         assertThat(record.stage).isEqualTo(PaymentCompensationRecord.Stage.UNKNOWN_RESULT)
         assertThat(record.reason).isEqualTo("PROVIDER_RESULT_UNKNOWN")
         assertThat(record.paymentKey).isEqualTo("synthetic-key")
@@ -472,240 +749,363 @@ class JpaPaymentsTest {
     }
 
     @Test
-    fun given__the_record_cannot_be_stored__when__compensation_is_required__then__still_log_the_fixed_line_with_no_record_id(
+    fun `보상 기록을 저장할 수 없을 때__보상이 필요하면__기록 ID 없이 고정 로그 줄을 남긴다`(
         output: CapturedOutput,
     ) {
+        // given
         val f = Fixture()
-        f.providerFails(ResourceAccessException("synthetic"))
-        whenever(f.toss.getPayment(anyString(), anyString())).thenThrow(ResourceAccessException("synthetic"))
-        doThrow(DataIntegrityViolationException("synthetic")).`when`(f.compensations)
-            .saveAndFlush(anyNonNull<PaymentCompensationRecord>())
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment result is unknown. The order remains pending.")
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            throw ResourceAccessException("synthetic")
+        }
+        every { f.toss.getPayment(any(), any()) } throws ResourceAccessException("synthetic")
+        every { f.compensations.saveAndFlush(any<PaymentCompensationRecord>()) } throws
+            DataIntegrityViolationException("synthetic")
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment result is unknown. The order remains pending.")
         assertThat(output.all).contains(
             "PAYMENT_COMPENSATION_REQUIRED paymentKey=synthetic-key orderId=order-uuid amount=200 userId=7 stage=UNKNOWN_RESULT reason=PROVIDER_RESULT_UNKNOWN recordId=none",
         )
     }
 
     @Test
-    fun given__the_locked_order_is_no_longer_payable__when__applying__then__roll_back_and_cancel_the_provider_payment() {
+    fun `잠긴 주문이 더 이상 결제 가능하지 않을 때__반영하면__롤백하고 제공사 결제를 취소한다`() {
+        // given
         val f = Fixture()
-        f.provider(f.done())
-        f.completion = Completion.REJECTED
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment processed but failed to save record. Payment Cancelled.")
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } answers {
+            if (f.manager.writing) {
+                f.events.add("done-check")
+            }
+            Optional.empty()
+        }
+        every { f.payments.findByPaymentKey(any()) } answers {
+            f.events.add("key-check")
+            Optional.empty()
+        }
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            f.done()
+        }
+        every { f.store.completePayment(any(), any()) } answers {
+            f.events.add("complete:" + secondArg<Long>())
+            StorePaymentEvents.Completed(Completion.REJECTED, Runnable { f.outside("rank") })
+        }
+        every { f.toss.cancelPayment(any(), any(), any()) } answers {
+            f.outside("cancel")
+            null
+        }
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment processed but failed to save record. Payment Cancelled.")
         assertThat(f.events).containsExactly(
             "order", "begin:ro", "commit", "provider", "begin:rw", "complete:200", "done-check", "rollback",
             "begin:ro", "key-check", "commit", "cancel",
         )
-        verify(f.payments, never()).saveAndFlush(anyNonNull<Payment>())
-        verifyNoInteractions(f.compensations)
+        verify(exactly = 0) { f.payments.saveAndFlush(any<Payment>()) }
+        confirmVerified(f.compensations)
     }
 
     @Test
-    fun given__the_same_key_is_already_recorded__when__applying_again__then__succeed_idempotently_without_cancel() {
+    fun `같은 키가 이미 기록되어 있을 때__다시 반영하면__취소 없이 멱등하게 성공한다`() {
+        // given
         val f = Fixture()
         val response = f.done()
-        f.provider(response)
-        f.completion = Completion.ALREADY_PAID
-        whenever(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE))
-            .thenReturn(Optional.empty())
-            .thenAnswer {
-                f.events.add("done-check")
-                Optional.of(f.existing("synthetic-key"))
-            }
 
-        assertThat(f.service.confirmPayment(7L, f.request)).isSameAs(response)
-        assertThat(f.events.last()).isEqualTo("commit")
-        verify(f.payments, never()).saveAndFlush(anyNonNull<Payment>())
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
-    }
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returnsMany
+            listOf(Optional.empty(), Optional.of(f.existing("synthetic-key")))
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            response
+        }
+        every { f.store.completePayment(any(), any()) } returns
+            StorePaymentEvents.Completed(Completion.ALREADY_PAID, Runnable { f.outside("rank") })
 
-    @Test
-    fun given__another_key_already_paid_the_order__when__applying__then__roll_back_and_cancel_this_payment() {
-        val f = Fixture()
-        f.provider(f.done())
-        f.completion = Completion.ALREADY_PAID
-        whenever(f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE))
-            .thenReturn(Optional.empty())
-            .thenAnswer {
-                f.events.add("done-check")
-                Optional.of(f.existing("other-key"))
-            }
-
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment processed but failed to save record. Payment Cancelled.")
-        verify(f.toss).cancelPayment(anyString(), eqNonNull("synthetic-key"), anyNonNull())
-        verify(f.payments, never()).saveAndFlush(anyNonNull<Payment>())
-    }
-
-    @Test
-    fun given__the_insert_fails_but_the_same_key_is_done__when__compensating__then__never_cancel_and_return_the_stored_payment() {
-        val f = Fixture()
-        f.provider(f.done())
-        doThrow(DataIntegrityViolationException("synthetic unique violation")).`when`(f.payments)
-            .saveAndFlush(anyNonNull<Payment>())
-        whenever(f.payments.findByPaymentKey("synthetic-key")).thenReturn(Optional.of(f.existing("synthetic-key")))
-
+        // when
         val result = f.service.confirmPayment(7L, f.request)
 
-        assertThat(result.status).isEqualTo("DONE")
-        assertThat(result.paymentKey).isEqualTo("synthetic-key")
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
-        verifyNoInteractions(f.compensations)
+        // then
+        assertThat(result).isSameAs(response)
+        assertThat(f.events.last()).isEqualTo("commit")
+        verify(exactly = 0) { f.payments.saveAndFlush(any<Payment>()) }
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
     }
 
     @Test
-    fun given__the_commit_fails_and_the_cancel_fails__when__compensating__then__record_cancel_failed(
+    fun `다른 키가 이미 주문을 결제했을 때__반영하면__롤백하고 이 결제를 취소한다`() {
+        // given
+        val f = Fixture()
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returnsMany
+            listOf(Optional.empty(), Optional.of(f.existing("other-key")))
+        every { f.payments.findByPaymentKey(any()) } returns Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            f.done()
+        }
+        every { f.store.completePayment(any(), any()) } returns
+            StorePaymentEvents.Completed(Completion.ALREADY_PAID, Runnable { f.outside("rank") })
+        every { f.toss.cancelPayment(any(), any(), any()) } returns null
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment processed but failed to save record. Payment Cancelled.")
+        verify(exactly = 1) { f.toss.cancelPayment(any(), "synthetic-key", any()) }
+        verify(exactly = 0) { f.payments.saveAndFlush(any<Payment>()) }
+    }
+
+    @Test
+    fun `삽입이 실패했지만 같은 키가 DONE일 때__보상하면__취소하지 않고 저장된 결제를 돌려준다`() {
+        // given
+        val f = Fixture()
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            f.done()
+        }
+        every { f.store.completePayment(any(), any()) } returns
+            StorePaymentEvents.Completed(Completion.APPLIED, Runnable { f.outside("rank") })
+        every { f.payments.saveAndFlush(any<Payment>()) } throws DataIntegrityViolationException("synthetic unique violation")
+        every { f.payments.findByPaymentKey("synthetic-key") } returns Optional.of(f.existing("synthetic-key"))
+
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
+        assertThat(result.status).isEqualTo("DONE")
+        assertThat(result.paymentKey).isEqualTo("synthetic-key")
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
+        confirmVerified(f.compensations)
+    }
+
+    @Test
+    fun `커밋과 취소가 모두 실패할 때__보상하면__CANCEL_FAILED를 기록한다`(
         output: CapturedOutput,
     ) {
+        // given
         val f = Fixture()
-        f.provider(f.done())
+        val savedRecord = slot<PaymentCompensationRecord>()
         f.manager.commitFailures = 1
         f.manager.commitFailureAfter = 1
-        doThrow(ResourceAccessException("synthetic")).`when`(f.toss)
-            .cancelPayment(anyString(), anyString(), anyNonNull())
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment processed but failed to save record. Payment cancellation failed.")
-        assertThat(f.savedRecord!!.stage).isEqualTo(PaymentCompensationRecord.Stage.CANCEL_FAILED)
-        assertThat(f.savedRecord!!.reason).isEqualTo("PERSIST_FAILED")
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.payments.findByPaymentKey(any()) } returns Optional.empty()
+        every { f.payments.saveAndFlush(any<Payment>()) } answers { firstArg() }
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            f.done()
+        }
+        every { f.store.completePayment(any(), any()) } returns
+            StorePaymentEvents.Completed(Completion.APPLIED, Runnable { f.outside("rank") })
+        every { f.toss.cancelPayment(any(), any(), any()) } throws ResourceAccessException("synthetic")
+        every { f.compensations.saveAndFlush(any<PaymentCompensationRecord>()) } answers {
+            val record = firstArg<PaymentCompensationRecord>()
+            ReflectionTestUtils.setField(record, "id", 41L)
+            record
+        }
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment processed but failed to save record. Payment cancellation failed.")
+        verify(exactly = 1) { f.compensations.saveAndFlush(capture(savedRecord)) }
+        assertThat(savedRecord.captured.stage).isEqualTo(PaymentCompensationRecord.Stage.CANCEL_FAILED)
+        assertThat(savedRecord.captured.reason).isEqualTo("PERSIST_FAILED")
         assertThat(output.all).contains(
             "PAYMENT_COMPENSATION_REQUIRED paymentKey=synthetic-key orderId=order-uuid amount=200 userId=7 stage=CANCEL_FAILED reason=PERSIST_FAILED recordId=41",
         )
     }
 
     @Test
-    fun given__writer_connections_fail_twice__when__applying__then__retry_with_short_pauses_and_succeed() {
+    fun `쓰기 연결이 두 번 실패할 때__반영하면__짧은 대기 후 재시도해 성공한다`() {
+        // given
         val f = Fixture()
-        f.provider(f.done())
         f.manager.writerBeginFailures = 2
 
-        assertThat(f.service.confirmPayment(7L, f.request).status).isEqualTo("DONE")
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            f.done()
+        }
+        every { f.store.completePayment(any(), any()) } returns
+            StorePaymentEvents.Completed(Completion.APPLIED, Runnable { f.outside("rank") })
+        every { f.payments.saveAndFlush(any<Payment>()) } answers { firstArg() }
+
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
+        assertThat(result.status).isEqualTo("DONE")
         assertThat(f.pauses).containsExactly(100L, 200L)
-        verify(f.payments).saveAndFlush(anyNonNull<Payment>())
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
+        verify(exactly = 1) { f.payments.saveAndFlush(any<Payment>()) }
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
     }
 
     @Test
-    fun given__no_connection_at_all_after_approval__when__applying__then__never_cancel_unverified_and_log_without_record(
+    fun `승인 후 연결이 전혀 없을 때__반영하면__확인되지 않은 결제를 취소하지 않고 기록 없이 로그만 남긴다`(
         output: CapturedOutput,
     ) {
+        // given
         val f = Fixture()
-        f.provider(f.done())
-        doAnswer {
+
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
             f.manager.writerBeginFailures = 100
             f.manager.readerBeginFailures = 100
             f.outside("provider")
             f.done()
-        }.`when`(f.toss).confirmPayment(anyString(), anyNonNull())
+        }
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment processed but its record could not be verified.")
-        verify(f.toss, never()).cancelPayment(anyString(), anyString(), anyNonNull())
-        verifyNoInteractions(f.store)
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment processed but its record could not be verified.")
+        verify(exactly = 0) { f.toss.cancelPayment(any(), any(), any()) }
+        confirmVerified(f.store)
         assertThat(output.all).contains("stage=UNKNOWN_RESULT reason=WRITER_UNAVAILABLE_UNVERIFIED recordId=none")
     }
 
     @Test
-    fun given__an_approval_for_another_order__when__confirming__then__never_touch_either_order_and_cancel_it() {
+    fun `다른 주문에 대한 승인일 때__승인하면__어느 주문도 건드리지 않고 취소한다`() {
+        // given
         val f = Fixture()
         val other = TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("other-order")
             .totalAmount(200L).status("DONE").build()
-        f.provider(other)
 
-        assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
-            .hasMessage("Payment processed but failed to save record. Payment Cancelled.")
-        verifyNoInteractions(f.store)
-        verify(f.toss).cancelPayment(anyString(), eqNonNull("synthetic-key"), anyNonNull())
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.payments.findByPaymentKey(any()) } returns Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            other
+        }
+        every { f.toss.cancelPayment(any(), any(), any()) } returns null
+
+        // when
+        val thrown = assertThatThrownBy { f.service.confirmPayment(7L, f.request) }
+
+        // then
+        thrown.hasMessage("Payment processed but failed to save record. Payment Cancelled.")
+        confirmVerified(f.store)
+        verify(exactly = 1) { f.toss.cancelPayment(any(), "synthetic-key", any()) }
     }
 
     @Test
-    fun given__a_non_done_provider_status__when__confirming__then__return_it_unchanged_without_writes() {
+    fun `DONE이 아닌 제공사 상태일 때__승인하면__쓰기 없이 그대로 돌려준다`() {
+        // given
         val f = Fixture()
         val waiting = TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid")
             .status("WAITING_FOR_DEPOSIT").build()
-        f.provider(waiting)
 
-        assertThat(f.service.confirmPayment(7L, f.request)).isSameAs(waiting)
-        verifyNoInteractions(f.store, f.compensations)
-        verify(f.payments, never()).saveAndFlush(anyNonNull<Payment>())
+        every { f.orders.getOrder("order-uuid") } answers {
+            f.outside("order")
+            f.pendingOrder
+        }
+        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
+            Optional.empty()
+        every { f.toss.confirmPayment(any(), any()) } answers {
+            f.outside("provider")
+            waiting
+        }
+
+        // when
+        val result = f.service.confirmPayment(7L, f.request)
+
+        // then
+        assertThat(result).isSameAs(waiting)
+        confirmVerified(f.store, f.compensations)
+        verify(exactly = 0) { f.payments.saveAndFlush(any<Payment>()) }
     }
 
     @Test
-    fun given__client_supplied_identifiers__when__logging__then__reduce_them_to_one_bounded_token() {
-        assertThat(JpaPayments.safe("bad\nkey=1 x")).isEqualTo("bad_key_1_x")
-        assertThat(JpaPayments.safe("a".repeat(200))).hasSize(200)
-        assertThat(JpaPayments.safe("a".repeat(250))).hasSize(200)
-        assertThat(JpaPayments.safe(null)).isNull()
+    fun `클라이언트가 보낸 식별자일 때__로그에 남기면__하나의 길이 제한된 토큰으로 줄인다`() {
+        // given
+        val longKey = "a".repeat(250)
+
+        // when
+        val sanitized = JpaPayments.safe("bad\nkey=1 x")
+        val exactlyAtLimit = JpaPayments.safe("a".repeat(200))
+        val truncated = JpaPayments.safe(longKey)
+        val missing = JpaPayments.safe(null)
+
+        // then
+        assertThat(sanitized).isEqualTo("bad_key_1_x")
+        assertThat(exactlyAtLimit).hasSize(200)
+        assertThat(truncated).hasSize(200)
+        assertThat(missing).isNull()
     }
 
+    /** Mocks, the writer/reader manager and data builders; each test stubs exactly what its flow needs. */
     private class Fixture {
         val events = ArrayList<String>()
         val pauses = ArrayList<Long>()
-        val payments: PaymentRepository = mock(PaymentRepository::class.java)
-        val compensations: PaymentCompensationRecordRepository = mock(PaymentCompensationRecordRepository::class.java)
-        val orders: StorePaymentOrders = mock(StorePaymentOrders::class.java)
-        val store: StorePaymentEvents = mock(StorePaymentEvents::class.java)
-        val toss: TossPaymentsClient = mock(TossPaymentsClient::class.java)
+        val payments = mockk<PaymentRepository>()
+        val compensations = mockk<PaymentCompensationRecordRepository>()
+        val orders = mockk<StorePaymentOrders>()
+        val store = mockk<StorePaymentEvents>()
+        val toss = mockk<TossPaymentsClient>()
         val manager = RecordingManager(events)
         val request: TossPaymentConfirmRequest =
             TossPaymentConfirmRequest.builder().paymentKey("synthetic-key").orderId("order-uuid").amount(200L).build()
-        var completion = Completion.APPLIED
-        var rankingFailure: RuntimeException? = null
-        var failCancels = true
-        var savedPayment: Payment? = null
-        var savedRecord: PaymentCompensationRecord? = null
+        val pendingOrder = StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PENDING")
         val service: JpaPayments
 
         init {
-            whenever(payments.findFirstByOrderIdAndStatusOrderByIdAsc(anyString(), any())).thenAnswer {
-                if (manager.writing) {
-                    events.add("done-check")
-                }
-                Optional.empty<Payment>()
-            }
-            whenever(payments.findByPaymentKey(anyString())).thenAnswer {
-                events.add("key-check")
-                Optional.empty<Payment>()
-            }
-            order(StorePaymentOrders.Order(8L, "order-uuid", 7L, 200L, "PENDING"))
-            whenever(payments.saveAndFlush(anyNonNull<Payment>())).thenAnswer { call ->
-                events.add("payment")
-                savedPayment = call.getArgument(0)
-                savedPayment
-            }
-            whenever(compensations.saveAndFlush(anyNonNull<PaymentCompensationRecord>())).thenAnswer { call ->
-                val record = call.getArgument<PaymentCompensationRecord>(0)
-                savedRecord = record
-                ReflectionTestUtils.setField(record, "id", 41L)
-                record
-            }
-            whenever(store.completePayment(anyString(), anyLong())).thenAnswer { call ->
-                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
-                assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isFalse()
-                events.add("complete:" + call.getArgument<Long>(1))
-                StorePaymentEvents.Completed(
-                    completion,
-                    Runnable {
-                        if (rankingFailure != null) {
-                            throw rankingFailure!!
-                        }
-                        outside("rank")
-                    },
-                )
-            }
-            whenever(store.failPayment(anyString())).thenAnswer {
-                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
-                events.add("fail")
-                failCancels
-            }
-            whenever(toss.cancelPayment(anyString(), anyString(), anyNonNull())).thenAnswer {
-                outside("cancel")
-                null
-            }
             val writes = TransactionTemplate(manager)
             val reads = TransactionTemplate(manager)
             reads.isReadOnly = true
@@ -716,33 +1116,18 @@ class JpaPaymentsTest {
             )
         }
 
-        fun order(value: StorePaymentOrders.Order) {
-            doAnswer {
-                outside("order")
-                value
-            }.`when`(orders).getOrder("order-uuid")
-        }
-
-        fun provider(response: TossPaymentResponse) {
-            whenever(toss.confirmPayment(anyString(), anyNonNull())).thenAnswer {
-                outside("provider")
-                response
-            }
-        }
-
-        fun providerFails(failure: RuntimeException) {
-            whenever(toss.confirmPayment(anyString(), anyNonNull())).thenAnswer {
-                outside("provider")
-                throw failure
-            }
-        }
-
         fun outside(event: String) {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive())
                 .`as`("no transaction around $event")
                 .isFalse()
             events.add(event)
         }
+
+        fun clientError(status: HttpStatus, body: String): HttpClientErrorException =
+            HttpClientErrorException.create(
+                status, status.reasonPhrase, HttpHeaders.EMPTY,
+                body.toByteArray(StandardCharsets.UTF_8), StandardCharsets.UTF_8,
+            )
 
         fun done(): TossPaymentResponse =
             TossPaymentResponse.builder().paymentKey("synthetic-key").orderId("order-uuid").mId("synthetic-merchant")

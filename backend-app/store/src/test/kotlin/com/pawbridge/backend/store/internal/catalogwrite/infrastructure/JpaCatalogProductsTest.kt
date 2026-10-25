@@ -1,7 +1,6 @@
 package com.pawbridge.backend.store.internal.catalogwrite.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.pawbridge.backend.store.anyNonNull
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.jpa.repository.CartItemRepository
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.jpa.repository.CategoryRepository
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.jpa.repository.OptionValueRepository
@@ -18,17 +17,14 @@ import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.ProductStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.AbstractPlatformTransactionManager
@@ -39,13 +35,13 @@ import java.util.Optional
 import java.util.function.Consumer
 
 class JpaCatalogProductsTest {
-    private val products: ProductRepository = mock(ProductRepository::class.java)
-    private val categories: CategoryRepository = mock(CategoryRepository::class.java)
-    private val skus: ProductSKURepository = mock(ProductSKURepository::class.java)
-    private val carts: CartItemRepository = mock(CartItemRepository::class.java)
-    private val links: SKUValueRepository = mock(SKUValueRepository::class.java)
-    private val options: OptionValueRepository = mock(OptionValueRepository::class.java)
-    private val snapshots: ProductSnapshots = mock(ProductSnapshots::class.java)
+    private val products = mockk<ProductRepository>()
+    private val categories = mockk<CategoryRepository>()
+    private val skus = mockk<ProductSKURepository>()
+    private val carts = mockk<CartItemRepository>()
+    private val links = mockk<SKUValueRepository>()
+    private val options = mockk<OptionValueRepository>()
+    private val snapshots = mockk<ProductSnapshots>()
     private val manager = Writer()
     private val subject = JpaCatalogProducts(
         products,
@@ -65,33 +61,35 @@ class JpaCatalogProductsTest {
     }
 
     @Test
-    fun givenCreateWithSku__whenSaved__thenReturnOriginalFieldsAndPublishWithinWriter() {
-        `when`(products.save(any(Product::class.java))).thenAnswer { call ->
-            val p = call.getArgument<Product>(0)
+    fun `SKU가 있는 생성 요청일 때__저장하면__원래 필드를 돌려주고 쓰기 트랜잭션 안에서 발행한다`() {
+        // given
+        val request = mapper.readValue(
+            """
+            {"name":"food","description":"description","imageUrl":"https://assets.invalid/p.png",
+             "skus":[{"skuCode":"FOOD-S","price":100,"stockQuantity":3}]}
+            """.trimIndent() + "\n",
+            ProductCreateRequest::class.java,
+        )
+
+        every { products.save(any()) } answers {
+            val p = firstArg<Product>()
             ReflectionTestUtils.setField(p, "id", 10L)
             p
         }
-        `when`(skus.save(any(ProductSKU::class.java))).thenAnswer { call ->
-            val sku = call.getArgument<ProductSKU>(0)
+        every { skus.save(any()) } answers {
+            val sku = firstArg<ProductSKU>()
             ReflectionTestUtils.setField(sku, "id", 101L)
             sku
         }
-        doAnswer {
+        every { snapshots.publishProductSnapshot(any()) } answers {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
             assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly()).isFalse()
-            null
-        }.`when`(snapshots).publishProductSnapshot(anyNonNull<Product>())
+        }
 
-        val response: ProductResponse = subject.createProduct(
-            mapper.readValue(
-                """
-                {"name":"food","description":"description","imageUrl":"https://assets.invalid/p.png",
-                 "skus":[{"skuCode":"FOOD-S","price":100,"stockQuantity":3}]}
-                """.trimIndent() + "\n",
-                ProductCreateRequest::class.java,
-            ),
-        )
+        // when
+        val response: ProductResponse = subject.createProduct(request)
 
+        // then
         assertThat(response.id).isEqualTo(10L)
         assertThat(response.status).isEqualTo("ACTIVE")
         assertThat(response.name).isEqualTo("food")
@@ -106,41 +104,51 @@ class JpaCatalogProductsTest {
                 assertThat(sku.options).isEmpty()
             },
         )
-        verify(snapshots).publishProductSnapshot(anyNonNull<Product>())
+        verify(exactly = 1) { snapshots.publishProductSnapshot(any<Product>()) }
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenCreateWithoutSkus__whenSaved__thenKeepOriginalNoSnapshotBranch() {
-        `when`(products.save(any(Product::class.java))).thenAnswer { call -> call.getArgument<Product>(0) }
+    fun `SKU가 없는 생성 요청일 때__저장하면__원래의 스냅샷 없음 분기를 유지한다`() {
+        // given
+        val request = mapper.readValue("{\"name\":\"no sku\"}", ProductCreateRequest::class.java)
 
-        val response = subject.createProduct(mapper.readValue("{\"name\":\"no sku\"}", ProductCreateRequest::class.java))
+        every { products.save(any()) } answers { firstArg<Product>() }
 
+        // when
+        val response = subject.createProduct(request)
+
+        // then
         assertThat(response.skus).isEmpty()
-        verifyNoInteractions(snapshots, skus, options, links)
+        confirmVerified(snapshots, skus, options, links)
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenProductAndSkuPatch__whenUpdated__thenLockAndPublishWholeProduct() {
+    fun `상품과 SKU 패치가 있을 때__수정하면__전체 상품을 잠그고 발행한다`() {
+        // given
         val p = product()
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(p))
-
-        val response = subject.updateProduct(
-            10L,
-            mapper.readValue(
-                """
-                {"name":"new food","description":"new description","imageUrl":"new.png","status":"HIDDEN",
-                 "skus":[{"id":101,"price":300,"stockQuantity":8}]}
-                """.trimIndent() + "\n",
-                ProductUpdateRequest::class.java,
-            ),
+        val request = mapper.readValue(
+            """
+            {"name":"new food","description":"new description","imageUrl":"new.png","status":"HIDDEN",
+             "skus":[{"id":101,"price":300,"stockQuantity":8}]}
+            """.trimIndent() + "\n",
+            ProductUpdateRequest::class.java,
         )
 
-        val order = inOrder(products, skus, snapshots)
-        order.verify(products).findByIdWithLock(10L)
-        order.verify(skus).findAllByProductIdWithLock(10L)
-        order.verify(snapshots).publishProductSnapshot(p)
+        every { products.findByIdWithLock(any()) } returns Optional.of(p)
+        every { skus.findAllByProductIdWithLock(any()) } returns listOf()
+        justRun { snapshots.publishProductSnapshot(any()) }
+
+        // when
+        val response = subject.updateProduct(10L, request)
+
+        // then
+        verifyOrder {
+            products.findByIdWithLock(10L)
+            skus.findAllByProductIdWithLock(10L)
+            snapshots.publishProductSnapshot(p)
+        }
         assertThat(response.name).isEqualTo("new food")
         assertThat(response.description).isEqualTo("new description")
         assertThat(response.imageUrl).isEqualTo("new.png")
@@ -152,67 +160,100 @@ class JpaCatalogProductsTest {
     }
 
     @Test
-    fun givenSkuReferencedByCart__whenDeleting__thenRefuseBeforeStatusAndSnapshot() {
+    fun `SKU가 장바구니에 담겨 있을 때__삭제하면__상태 변경과 스냅샷 전에 거부한다`() {
+        // given
         val p = product()
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(p))
-        `when`(carts.existsByProductSkuIdIn(listOf(101L, 102L))).thenReturn(true)
 
-        assertThatThrownBy { subject.deleteProduct(10L) }.isInstanceOf(IllegalStateException::class.java)
+        every { products.findByIdWithLock(any()) } returns Optional.of(p)
+        every { skus.findAllByProductIdWithLock(any()) } returns listOf()
+        every { carts.existsByProductSkuIdIn(any()) } returns true
 
+        // when
+        val thrown = assertThatThrownBy { subject.deleteProduct(10L) }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
         assertThat(p.status).isEqualTo(ProductStatus.ACTIVE)
-        verifyNoInteractions(snapshots)
+        verify(exactly = 1) { carts.existsByProductSkuIdIn(listOf(101L, 102L)) }
+        confirmVerified(snapshots)
         assertThat(manager.rollbacks).isEqualTo(1)
         assertThat(manager.commits).isZero()
     }
 
     @Test
-    fun givenAlreadyDeletedProduct__whenDeleting__thenRefuseBeforeCartAndSnapshot() {
+    fun `이미 삭제된 상품일 때__삭제하면__장바구니 확인과 스냅샷 전에 거부한다`() {
+        // given
         val p = product()
         p.updateStatus(ProductStatus.DELETED)
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(p))
 
-        assertThatThrownBy { subject.deleteProduct(10L) }.isInstanceOf(IllegalStateException::class.java)
+        every { products.findByIdWithLock(any()) } returns Optional.of(p)
+        every { skus.findAllByProductIdWithLock(any()) } returns listOf()
 
-        verifyNoInteractions(carts, snapshots)
+        // when
+        val thrown = assertThatThrownBy { subject.deleteProduct(10L) }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
+        confirmVerified(carts, snapshots)
         assertThat(manager.rollbacks).isEqualTo(1)
     }
 
     @Test
-    fun givenUnreferencedProduct__whenDeleting__thenSoftDeleteAndPublishWithinOneWriter() {
+    fun `참조되지 않는 상품일 때__삭제하면__하나의 쓰기 트랜잭션에서 소프트 삭제하고 발행한다`() {
+        // given
         val p = product()
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(p))
 
+        every { products.findByIdWithLock(any()) } returns Optional.of(p)
+        every { skus.findAllByProductIdWithLock(any()) } returns listOf()
+        every { carts.existsByProductSkuIdIn(any()) } returns false
+        justRun { snapshots.publishProductSnapshot(any()) }
+
+        // when
         subject.deleteProduct(10L)
 
+        // then
         assertThat(p.status).isEqualTo(ProductStatus.DELETED)
-        verify(carts).existsByProductSkuIdIn(listOf(101L, 102L))
-        verify(snapshots).publishProductSnapshot(p)
-        verify(products, never()).delete(any(Product::class.java))
+        verify(exactly = 1) { carts.existsByProductSkuIdIn(listOf(101L, 102L)) }
+        verify(exactly = 1) { snapshots.publishProductSnapshot(p) }
+        verify(exactly = 0) { products.delete(any()) }
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenSnapshotFailure__whenUpdating__thenPropagateAndRequestWriterRollback() {
+    fun `스냅샷 발행이 실패할 때__수정하면__전파하고 쓰기 트랜잭션 롤백을 요청한다`() {
+        // given
         val p = product()
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(p))
         val failure = IllegalStateException("synthetic snapshot failure")
-        doThrow(failure).`when`(snapshots).publishProductSnapshot(p)
 
-        assertThatThrownBy { subject.updateProduct(10L, ProductUpdateRequest()) }.isSameAs(failure)
+        every { products.findByIdWithLock(any()) } returns Optional.of(p)
+        every { skus.findAllByProductIdWithLock(any()) } returns listOf()
+        every { snapshots.publishProductSnapshot(any()) } throws failure
 
+        // when
+        val thrown = assertThatThrownBy { subject.updateProduct(10L, ProductUpdateRequest()) }
+
+        // then
+        thrown.isSameAs(failure)
+        verify(exactly = 1) { snapshots.publishProductSnapshot(p) }
         assertThat(manager.rollbacks).isEqualTo(1)
         assertThat(manager.commits).isZero()
         // This unit proves rollback dispatch, not actual database restoration.
     }
 
     @Test
-    fun givenMissingCategory__whenCreating__thenRefuseBeforeProductSave() {
-        `when`(categories.findById(99L)).thenReturn(Optional.empty())
+    fun `없는 카테고리일 때__생성하면__상품 저장 전에 거부한다`() {
+        // given
         val request = mapper.readValue("{\"name\":\"food\",\"categoryId\":99}", ProductCreateRequest::class.java)
 
-        assertThatThrownBy { subject.createProduct(request) }.isInstanceOf(IllegalArgumentException::class.java)
+        every { categories.findById(any()) } returns Optional.empty()
 
-        verifyNoInteractions(products, skus, snapshots)
+        // when
+        val thrown = assertThatThrownBy { subject.createProduct(request) }
+
+        // then
+        thrown.isInstanceOf(IllegalArgumentException::class.java)
+        verify(exactly = 1) { categories.findById(99L) }
+        confirmVerified(products, skus, snapshots)
         assertThat(manager.rollbacks).isEqualTo(1)
     }
 

@@ -4,6 +4,11 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.store.internal.cart.application.CartActorRejectedException
 import com.pawbridge.backend.store.internal.cart.application.Carts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -14,12 +19,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
@@ -41,7 +40,7 @@ import org.springframework.transaction.TransactionSystemException
 import java.util.stream.Stream
 
 class CartControllerTest {
-    val carts: Carts = mock(Carts::class.java)
+    val carts: Carts = mockk<Carts>()
     val json: ObjectMapper = ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
     lateinit var mvc: MockMvc
 
@@ -64,15 +63,19 @@ class CartControllerTest {
     }
 
     @Test
-    fun given__verified_member__when__reading__then__raw_seven_field_array_with_null_id_and_exact_long_values() {
+    fun `인증된 회원일 때__장바구니를 조회하면__id가 null이고 Long 값이 정확한 7개 필드 배열을 그대로 돌려준다`() {
+        // given
         current(7L)
-        `when`(carts.get(7)).thenReturn(
-            listOf(Carts.Item(null, 80L, "LIVE-80", "live product", 9007199254740993L, 2, 18014398509481986L)),
+
+        every { carts.get(any()) } returns listOf(
+            Carts.Item(null, 80L, "LIVE-80", "live product", 9007199254740993L, 2, 18014398509481986L),
         )
 
+        // when
         val body = mvc.perform(request("get").header("X-User-Id", "99").param("userId", "99"))
             .andExpect(status().isOk()).andReturn().response.contentAsByteArray
 
+        // then
         val node = json.readTree(body)
         assertTrue(node.isArray)
         assertEquals(1, node.size())
@@ -85,105 +88,136 @@ class CartControllerTest {
         assertEquals(9007199254740993L, item.get("price").longValue())
         assertEquals(2, item.get("quantity").intValue())
         assertEquals(18014398509481986L, item.get("totalPrice").longValue())
-        verify(carts).get(7)
-        verifyNoMoreInteractions(carts)
+        verify(exactly = 1) { carts.get(7L) }
+        confirmVerified(carts)
     }
 
     @Test
-    fun given__empty_cart__when__reading__then__empty_array() {
+    fun `장바구니가 비어 있을 때__조회하면__빈 배열을 돌려준다`() {
+        // given
         current(7L)
-        `when`(carts.get(7)).thenReturn(listOf())
 
+        every { carts.get(any()) } returns listOf()
+
+        // when
+        // then
         mvc.perform(request("get")).andExpect(status().isOk()).andExpect(content().json("[]"))
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["add", "update", "remove", "clear"])
-    fun given__verified_member_with_forged_user_sources__when__mutating__then__only_principal_and_original_200_empty(
+    fun `위조한 사용자 출처가 있는 인증된 회원일 때__장바구니를 변경하면__인증 주체만 쓰고 빈 본문 200을 돌려준다`(
         operation: String,
     ) {
+        // given
         current(7L)
 
+        when (operation) {
+            "add" -> justRun { carts.add(any(), any(), any()) }
+            "update" -> justRun { carts.update(any(), any(), any()) }
+            "remove" -> justRun { carts.remove(any(), any()) }
+            else -> justRun { carts.clear(any()) }
+        }
+
+        // when
         mvc.perform(request(operation).header("X-User-Id", "99").param("userId", "99"))
             .andExpect(status().isOk()).andExpect(content().string(""))
 
+        // then
         when (operation) {
-            "add" -> verify(carts).add(7, 80L, 2)
-            "update" -> verify(carts).update(7, 80, -1)
-            "remove" -> verify(carts).remove(7, 80)
-            else -> verify(carts).clear(7)
+            "add" -> verify(exactly = 1) { carts.add(7L, 80L, 2) }
+            "update" -> verify(exactly = 1) { carts.update(7L, 80L, -1) }
+            "remove" -> verify(exactly = 1) { carts.remove(7L, 80L) }
+            else -> verify(exactly = 1) { carts.clear(7L) }
         }
-        verifyNoMoreInteractions(carts)
+        confirmVerified(carts)
     }
 
     @ParameterizedTest
     @MethodSource("invalidPrincipals")
-    fun given__missing_or_non_long_principal__when__accessing_any_cart_endpoint__then__unauthorized_before_application(
+    fun `인증 주체가 없거나 Long이 아닐 때__장바구니 엔드포인트에 접근하면__애플리케이션 호출 전에 401을 돌려준다`(
         kind: String,
         operation: String,
     ) {
+        // given
         if (kind == "text") {
             current("99")
         }
 
+        // when
         mvc.perform(request(operation).header("X-User-Id", "99").param("userId", "99"))
             .andExpect(status().isUnauthorized()).andExpect(content().string(""))
 
-        verifyNoInteractions(carts)
+        // then
+        confirmVerified(carts)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["quantity", "skuId"])
-    fun given__invalid_integer_argument__when__patching__then__original_type_error_without_application(field: String) {
+    fun `정수가 아닌 인자가 올 때__수량을 패치하면__애플리케이션 호출 없이 원래의 타입 오류를 돌려준다`(field: String) {
+        // given
         current(7L)
+
         val call = if (field == "skuId") {
             patch("/api/v1/carts/items/bad").param("quantity", "1")
         } else {
             patch("/api/v1/carts/items/80").param("quantity", "2147483648")
         }
 
+        // when
         mvc.perform(call).andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value(field))
             .andExpect(jsonPath("\$.errors[0].reason").value("typeMismatch"))
 
-        verifyNoInteractions(carts)
+        // then
+        confirmVerified(carts)
     }
 
     @Test
-    fun given__missing_quantity__when__patching__then__bad_input_before_application() {
+    fun `수량이 없을 때__패치하면__애플리케이션 호출 전에 잘못된 입력 오류를 돌려준다`() {
+        // given
         current(7L)
 
+        // when
         mvc.perform(patch("/api/v1/carts/items/80")).andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C001"))
 
-        verifyNoInteractions(carts)
+        // then
+        confirmVerified(carts)
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__actor_or_validation_or_persistence_failure__when__adding__then__sanitized_error_without_success(
+    fun `행위자 거부나 검증 실패나 영속성 실패가 발생할 때__장바구니에 담으면__내부 정보를 가린 오류를 돌려주고 성공으로 보이지 않는다`(
         failure: RuntimeException,
         statusCode: Int,
         code: String,
     ) {
+        // given
         current(7L)
-        doThrow(failure).`when`(carts).add(7, 80L, 2)
 
+        every { carts.add(any(), any(), any()) } throws failure
+
+        // when
         val body = mvc.perform(request("add")).andExpect(status().`is`(statusCode))
             .andExpect(jsonPath("\$.code").value(code))
             .andExpect(jsonPath("\$.errors").isEmpty()).andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
     }
 
     @Test
-    fun given__reset_path__when__deleting__then__no_customer_reset_handler() {
+    fun `reset 경로일 때__삭제하면__고객용 reset 핸들러가 없어 404를 돌려준다`() {
+        // given
         current(7L)
 
+        // when
         mvc.perform(delete("/api/v1/carts/reset")).andExpect(status().isNotFound())
 
-        verifyNoInteractions(carts)
+        // then
+        confirmVerified(carts)
     }
 
     companion object {

@@ -20,7 +20,8 @@ import org.springframework.web.client.RestClient
 /** In-memory HTTP expectations; no network or provider call. */
 class HttpTossPaymentsClientTest {
     @Test
-    fun given__a_synthetic_confirmation__when__sending__then__preserve_original_post_path_basic_header_and_body() {
+    fun `승인 요청이 주어졌을 때__전송하면__원래의 POST 경로와 Basic 헤더와 본문을 유지한다`() {
+        // given
         val builder = RestClient.builder().baseUrl("https://provider.invalid/v1")
         val server = MockRestServiceServer.bindTo(builder).build()
         val client = HttpTossPaymentsClient(builder.build())
@@ -36,18 +37,21 @@ class HttpTossPaymentsClientTest {
                 ),
             )
 
+        // when
         val result = client.confirmPayment(
             "Basic synthetic-only",
             TossPaymentConfirmRequest("synthetic-key", "order-uuid", 200L),
         )
 
+        // then
         assertThat(result!!.status).isEqualTo("READY")
         assertThat(result!!.orderId).isEqualTo("order-uuid")
         server.verify()
     }
 
     @Test
-    fun given__an_internal_compensation__when__sending__then__preserve_original_cancel_path_and_reason_body() {
+    fun `내부 보상 취소가 주어졌을 때__전송하면__원래의 취소 경로와 사유 본문을 유지한다`() {
+        // given
         val builder = RestClient.builder().baseUrl("https://provider.invalid/v1")
         val server = MockRestServiceServer.bindTo(builder).build()
         val client = HttpTossPaymentsClient(builder.build())
@@ -57,18 +61,21 @@ class HttpTossPaymentsClientTest {
             .andExpect(content().json("{\"cancelReason\":\"synthetic reason\"}"))
             .andRespond(withSuccess("{\"status\":\"CANCELED\"}", MediaType.APPLICATION_JSON))
 
-        assertThat(
-            client.cancelPayment(
-                "Basic synthetic-only",
-                "synthetic-key",
-                TossPaymentCancelRequest("synthetic reason"),
-            )!!.status,
-        ).isEqualTo("CANCELED")
+        // when
+        val result = client.cancelPayment(
+            "Basic synthetic-only",
+            "synthetic-key",
+            TossPaymentCancelRequest("synthetic reason"),
+        )
+
+        // then
+        assertThat(result!!.status).isEqualTo("CANCELED")
         server.verify()
     }
 
     @Test
-    fun given__an_unknown_confirmation_result__when__looking_up__then__get_the_payment_by_key_with_the_same_basic_header() {
+    fun `승인 결과가 불명일 때__조회하면__같은 Basic 헤더로 결제 키로 GET 한다`() {
+        // given
         val builder = RestClient.builder().baseUrl("https://provider.invalid/v1")
         val server = MockRestServiceServer.bindTo(builder).build()
         val client = HttpTossPaymentsClient(builder.build())
@@ -82,24 +89,31 @@ class HttpTossPaymentsClientTest {
                 ),
             )
 
+        // when
         val result = client.getPayment("Basic synthetic-only", "synthetic-key")
 
+        // then
         assertThat(result!!.status).isEqualTo("DONE")
         assertThat(result!!.totalAmount).isEqualTo(200L)
         server.verify()
     }
 
     @Test
-    fun given__a_provider_http_failure__when__sending__then__propagate_to_the_original_business_error_branch() {
+    fun `제공사 HTTP 실패가 주어졌을 때__전송하면__원래의 업무 오류 분기로 전파한다`() {
+        // given
         val builder = RestClient.builder().baseUrl("https://provider.invalid/v1")
         val server = MockRestServiceServer.bindTo(builder).build()
         val client = HttpTossPaymentsClient(builder.build())
         server.expect(requestTo("https://provider.invalid/v1/payments/confirm"))
             .andRespond(withServerError())
 
-        assertThatThrownBy {
+        // when
+        val thrown = assertThatThrownBy {
             client.confirmPayment("Basic synthetic-only", TossPaymentConfirmRequest("synthetic-key", "order-uuid", 200L))
-        }.isInstanceOf(HttpServerErrorException::class.java)
+        }
+
+        // then
+        thrown.isInstanceOf(HttpServerErrorException::class.java)
         server.verify()
     }
 }

@@ -3,11 +3,14 @@ package com.pawbridge.backend.store.internal.directorder.web
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.pawbridge.backend.store.anyNonNull
 import com.pawbridge.backend.store.api.StoreMemberReads
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.directorder.application.OrderActorRejectedException
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.OrderStatus
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -20,13 +23,6 @@ import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.NullSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.ArgumentMatchers.isNull
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
@@ -44,7 +40,7 @@ import java.time.LocalDateTime
 import java.util.stream.Stream
 
 class OrderReadControllerTest {
-    private val orders: DirectOrders = mock(DirectOrders::class.java)
+    private val orders: DirectOrders = mockk<DirectOrders>()
     private val json: ObjectMapper = ObjectMapper().registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     private val order = DirectOrders.OrderDetails(
@@ -77,20 +73,23 @@ class OrderReadControllerTest {
     @ParameterizedTest
     @NullSource
     @EnumSource(OrderStatus::class)
-    fun given__verified_member_and_optional_status_with_forged_owner__when__listing__then__forward_verified_owner_and_default_ten_and_return_direct_page(
+    fun `검증된 회원이 위조된 소유자와 선택적 상태를 보낼 때__목록을 조회하면__검증된 소유자와 기본 10건으로 넘기고 페이지를 그대로 돌려준다`(
         statusFilter: OrderStatus?,
     ) {
+        // given
         current(7L)
         val request = StoreMemberReads.Request(0, 10, listOf())
-        `when`(orders.list(7, statusFilter?.name, request))
-            .thenReturn(StoreMemberReads.Page(listOf(order), 0, 10, 1, listOf()))
         val call = get("/api/v1/orders").param("userId", "99").header("X-User-Id", "99").header("userId", "99")
         if (statusFilter != null) {
             call.param("status", statusFilter.name)
         }
 
+        every { orders.list(any(), any(), any()) } returns StoreMemberReads.Page(listOf(order), 0, 10, 1, listOf())
+
+        // when
         val bytes = mvc.perform(call).andExpect(status().isOk()).andReturn().response.contentAsByteArray
 
+        // then
         val body = json.readTree(bytes)
         assertFalse(body.has("data"))
         assertEquals(1, body.get("content").size())
@@ -106,21 +105,24 @@ class OrderReadControllerTest {
         assertEquals(9007199254740993L, item.get("orderId").longValue())
         assertEquals(9007199254740993L, item.get("items").get(0).get("price").longValue())
         assertEquals("2026-10-20T22:00:01.123456789", item.get("createdAt").asText())
-        verify(orders).list(7, statusFilter?.name, request)
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.list(7, statusFilter?.name, request) }
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__explicit_page_status_and_scalar_sorts__when__listing_then_reading_existing_detail__then__preserve_page_metadata_sort_and_identical_order_wire() {
+    fun `페이지와 상태와 단일 필드 정렬이 명시됐을 때__목록과 기존 상세를 조회하면__페이지 메타데이터와 정렬과 동일한 주문 응답 형태를 유지한다`() {
+        // given
         current(7L)
         val sort = listOf(
             StoreMemberReads.Order("totalAmount", true, false),
             StoreMemberReads.Order("receiverName", false, true),
         )
         val request = StoreMemberReads.Request(3, 2, sort)
-        `when`(orders.list(7, "PAID", request)).thenReturn(StoreMemberReads.Page(listOf(order), 3, 2, 7, sort))
-        `when`(orders.get(7, 9007199254740993L)).thenReturn(order)
 
+        every { orders.list(any(), any(), any()) } returns StoreMemberReads.Page(listOf(order), 3, 2, 7, sort)
+        every { orders.get(any(), any()) } returns order
+
+        // when
         val history = json.readTree(
             mvc.perform(
                 get("/api/v1/orders").param("status", "PAID").param("page", "3").param("size", "2")
@@ -135,74 +137,87 @@ class OrderReadControllerTest {
                 .andExpect(status().isOk()).andReturn().response.contentAsByteArray,
         )
 
+        // then
         assertEquals(detail, history.get("content").get(0))
-        verify(orders).list(7, "PAID", request)
-        verify(orders).get(7, 9007199254740993L)
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.list(7, "PAID", request) }
+        verify(exactly = 1) { orders.get(7, 9007199254740993L) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "non-long"])
-    fun given__missing_or_non_long_principal_with_forged_owner__when__listing__then__unauthorized_before_application(
-        kind: String,
-    ) {
+    fun `주체가 없거나 Long이 아니고 소유자가 위조됐을 때__목록을 조회하면__애플리케이션 호출 전에 401을 돌려준다`(kind: String) {
+        // given
         if (kind == "non-long") {
             current("99")
         }
 
-        mvc.perform(get("/api/v1/orders").param("userId", "99").header("X-User-Id", "99").header("userId", "99"))
-            .andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        // when
+        val result = mvc.perform(get("/api/v1/orders").param("userId", "99").header("X-User-Id", "99").header("userId", "99"))
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__unsupported_status__when__listing__then__original_type_error_without_application() {
+    fun `지원하지 않는 상태일 때__목록을 조회하면__애플리케이션 호출 없이 원본의 타입 오류를 돌려준다`() {
+        // given
         current(7L)
 
-        mvc.perform(get("/api/v1/orders").param("status", "UNKNOWN"))
-            .andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C005"))
+        // when
+        val result = mvc.perform(get("/api/v1/orders").param("status", "UNKNOWN"))
+
+        // then
+        result.andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value("status"))
             .andExpect(jsonPath("\$.errors[0].value").value("UNKNOWN"))
             .andExpect(jsonPath("\$.errors[0].reason").value("typeMismatch"))
-
-        verifyNoInteractions(orders)
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__current_actor_or_query_or_database_rejection__when__listing__then__preserve_sanitized_error_without_order_data(
+    fun `현재 행위자나 조회나 데이터베이스가 거부할 때__목록을 조회하면__주문 데이터 없이 정제된 오류를 유지한다`(
         failure: RuntimeException,
         statusCode: Int,
         code: String,
         message: String,
     ) {
+        // given
         current(7L)
-        `when`(orders.list(eq(7L), isNull(), anyNonNull<StoreMemberReads.Request>())).thenThrow(failure)
 
+        every { orders.list(any(), any(), any()) } throws failure
+
+        // when
         val body = mvc.perform(get("/api/v1/orders")).andExpect(status().`is`(statusCode))
             .andExpect(jsonPath("\$.code").value(code))
             .andExpect(jsonPath("\$.message").value(message))
             .andExpect(jsonPath("\$.errors").isEmpty())
             .andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
         assertFalse(body.contains("purchased"))
         assertFalse(body.contains("saved"))
-        verify(orders).list(7, null, StoreMemberReads.Request(0, 10, listOf()))
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.list(7, null, StoreMemberReads.Request(0, 10, listOf())) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(
         strings = ["/api/orders", "/api/v1/orders/uuid/purchased-uuid", "/api/v1/orders/77/payment", "/api/v1/orders/cart/direct"],
     )
-    fun given__neighboring_unapproved_route__when__requesting__then__no_order_history_handler(path: String) {
+    fun `승인되지 않은 인접 경로일 때__요청하면__주문 내역 핸들러 없이 404를 돌려준다`(path: String) {
+        // given
         current(7L)
 
-        mvc.perform(get(path)).andExpect(status().isNotFound())
+        // when
+        val result = mvc.perform(get(path))
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isNotFound())
+        confirmVerified(orders)
     }
 
     companion object {

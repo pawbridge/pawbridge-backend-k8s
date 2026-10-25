@@ -3,42 +3,52 @@ package com.pawbridge.backend.payment.internal.confirmation.web
 import com.pawbridge.backend.payment.internal.confirmation.application.Payments
 import com.pawbridge.backend.payment.internal.confirmation.application.dto.TossPaymentConfirmRequest
 import com.pawbridge.backend.payment.internal.confirmation.application.dto.TossPaymentResponse
+import com.pawbridge.backend.payment.support.TestFaker
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException
 
 /** Direct controller boundary only; actual JWT/filter/path validation is owned by Boot integration tests. */
 class PaymentControllerTest {
-    @Test
-    fun given__a_verified_principal__when__confirming__then__pass_that_identity_and_return_the_original_bare_response() {
-        val payments = mock(Payments::class.java)
-        val controller = PaymentController(payments)
-        val request = TossPaymentConfirmRequest("synthetic-key", "order-uuid", 200L)
-        val result = TossPaymentResponse.builder().status("ABORTED").build()
-        whenever(payments.confirmPayment(7L, request)).thenReturn(result)
+    private val faker = TestFaker.faker
 
+    @Test
+    fun `검증된 주체가 있을 때__결제를 승인하면__그 신원을 넘기고 원래의 단순 응답을 돌려준다`() {
+        // given
+        val payments = mockk<Payments>()
+        val controller = PaymentController(payments)
+        val request = TossPaymentConfirmRequest(faker.internet().uuid(), faker.internet().uuid(), 200L)
+        val result = TossPaymentResponse.builder().status("ABORTED").build()
+
+        every { payments.confirmPayment(any(), any()) } returns result
+
+        // when
         val response = controller.confirmPayment(7L, request)
 
+        // then
         assertThat(response.statusCode.value()).isEqualTo(200)
         assertThat(response.body).isSameAs(result)
-        verify(payments).confirmPayment(7L, request)
-        verifyNoMoreInteractions(payments)
+        verify(exactly = 1) { payments.confirmPayment(7L, request) }
+        confirmVerified(payments)
     }
 
     @Test
-    fun given__no_verified_principal__when__confirming__then__reject_before_the_application() {
-        val payments = mock(Payments::class.java)
+    fun `검증된 주체가 없을 때__결제를 승인하면__애플리케이션 호출 전에 거부한다`() {
+        // given
+        val payments = mockk<Payments>()
         val controller = PaymentController(payments)
+        val request = TossPaymentConfirmRequest(faker.internet().uuid(), faker.internet().uuid(), 200L)
 
-        assertThatThrownBy {
-            controller.confirmPayment(null, TossPaymentConfirmRequest("synthetic-key", "order-uuid", 200L))
-        }.isInstanceOf(AuthenticationCredentialsNotFoundException::class.java)
-        verifyNoInteractions(payments)
+        // when
+        val thrown = assertThatThrownBy { controller.confirmPayment(null, request) }
+
+        // then
+        thrown.isInstanceOf(AuthenticationCredentialsNotFoundException::class.java)
+        confirmVerified(payments)
     }
 }

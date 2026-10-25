@@ -16,16 +16,14 @@ import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.ProductStatus
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.AbstractPlatformTransactionManager
@@ -38,11 +36,11 @@ import java.util.function.Consumer
 import java.util.function.Function
 
 class JpaCatalogOptionsTest {
-    private val groups: OptionGroupRepository = mock(OptionGroupRepository::class.java)
-    private val values: OptionValueRepository = mock(OptionValueRepository::class.java)
-    private val products: ProductRepository = mock(ProductRepository::class.java)
-    private val skus: ProductSKURepository = mock(ProductSKURepository::class.java)
-    private val snapshots: ProductSnapshots = mock(ProductSnapshots::class.java)
+    private val groups = mockk<OptionGroupRepository>()
+    private val values = mockk<OptionValueRepository>()
+    private val products = mockk<ProductRepository>()
+    private val skus = mockk<ProductSKURepository>()
+    private val snapshots = mockk<ProductSnapshots>()
     private val manager = Writer()
     private val subject = JpaCatalogOptions(groups, values, products, skus, snapshots, TransactionTemplate(manager))
     private val mapper = ObjectMapper()
@@ -54,23 +52,30 @@ class JpaCatalogOptionsTest {
     }
 
     @Test
-    fun givenNewGroupAndValues__whenCreated__thenReturnOriginalGroupAndValueShape() {
-        `when`(groups.save(any(OptionGroup::class.java))).thenAnswer { call ->
-            val group = call.getArgument<OptionGroup>(0)
+    fun `새 그룹과 값이 있을 때__생성하면__원래의 그룹과 값 모양을 돌려준다`() {
+        // given
+        val request = mapper.readValue(
+            "{\"name\":\"size\",\"values\":[\"small\",\"large\"]}",
+            OptionGroupRequest::class.java,
+        )
+        val sequence = AtomicLong(10L)
+
+        every { groups.existsByName(any()) } returns false
+        every { groups.save(any()) } answers {
+            val group = firstArg<OptionGroup>()
             ReflectionTestUtils.setField(group, "id", 1L)
             group
         }
-        val sequence = AtomicLong(10L)
-        `when`(values.save(any(OptionValue::class.java))).thenAnswer { call ->
-            val value = call.getArgument<OptionValue>(0)
+        every { values.save(any()) } answers {
+            val value = firstArg<OptionValue>()
             ReflectionTestUtils.setField(value, "id", sequence.incrementAndGet())
             value
         }
 
-        val result = subject.createOptionGroup(
-            mapper.readValue("{\"name\":\"size\",\"values\":[\"small\",\"large\"]}", OptionGroupRequest::class.java),
-        )
+        // when
+        val result = subject.createOptionGroup(request)
 
+        // then
         assertThat(result.id).isEqualTo(1L)
         assertThat(result.name).isEqualTo("size")
         assertThat(result.values)
@@ -82,141 +87,199 @@ class JpaCatalogOptionsTest {
                 assertThat(value.groupName).isEqualTo("size")
             },
         )
-        verifyNoInteractions(products, skus, snapshots)
+        confirmVerified(products, skus, snapshots)
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenDuplicateGroupName__whenCreating__thenRejectBeforePersisting() {
-        `when`(groups.existsByName("size")).thenReturn(true)
+    fun `그룹 이름이 중복일 때__생성하면__저장 전에 거부한다`() {
+        // given
         val request = mapper.readValue("{\"name\":\"size\"}", OptionGroupRequest::class.java)
 
-        assertThatThrownBy { subject.createOptionGroup(request) }.isInstanceOf(IllegalStateException::class.java)
+        every { groups.existsByName(any()) } returns true
 
-        verify(groups, never()).save(any(OptionGroup::class.java))
-        verifyNoInteractions(values, snapshots)
+        // when
+        val thrown = assertThatThrownBy { subject.createOptionGroup(request) }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
+        verify(exactly = 1) { groups.existsByName("size") }
+        verify(exactly = 0) { groups.save(any()) }
+        confirmVerified(values, snapshots)
         assertThat(manager.rollbacks).isEqualTo(1)
     }
 
     @Test
-    fun givenUsedGroup__whenRenamed__thenLockAffectedProductsInOrderAndPublishEach() {
+    fun `사용 중인 그룹일 때__이름을 바꾸면__영향받는 상품을 순서대로 잠그고 각각 발행한다`() {
+        // given
         val group = group()
         val first = product(10L)
         val second = product(20L)
-        `when`(groups.findByIdWithLock(1L)).thenReturn(Optional.of(group))
-        `when`(skus.findProductIdsByOptionGroupId(1L)).thenReturn(listOf(20L, 10L))
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(first))
-        `when`(products.findByIdWithLock(20L)).thenReturn(Optional.of(second))
-        `when`(skus.findAllByProductIdWithLock(10L)).thenReturn(first.skus!!)
-        `when`(skus.findAllByProductIdWithLock(20L)).thenReturn(second.skus!!)
+        val request = mapper.readValue("{\"name\":\"new size\"}", OptionGroupRequest::class.java)
 
-        val result = subject.updateOptionGroup(1L, mapper.readValue("{\"name\":\"new size\"}", OptionGroupRequest::class.java))
+        every { groups.findByIdWithLock(any()) } returns Optional.of(group)
+        every { values.findAllByOptionGroupIdWithLock(any()) } returns listOf()
+        every { skus.findProductIdsByOptionGroupId(any()) } returns listOf(20L, 10L)
+        every { products.findByIdWithLock(10L) } returns Optional.of(first)
+        every { products.findByIdWithLock(20L) } returns Optional.of(second)
+        every { skus.findAllByProductIdWithLock(10L) } returns first.skus!!
+        every { skus.findAllByProductIdWithLock(20L) } returns second.skus!!
+        justRun { snapshots.publishProductSnapshot(any()) }
 
+        // when
+        val result = subject.updateOptionGroup(1L, request)
+
+        // then
         assertThat(result.name).isEqualTo("new size")
-        val order = inOrder(groups, values, skus, products, snapshots)
-        order.verify(groups).findByIdWithLock(1L)
-        order.verify(values).findAllByOptionGroupIdWithLock(1L)
-        order.verify(skus).findProductIdsByOptionGroupId(1L)
-        order.verify(products).findByIdWithLock(10L)
-        order.verify(skus).findAllByProductIdWithLock(10L)
-        order.verify(snapshots).publishProductSnapshot(first)
-        order.verify(products).findByIdWithLock(20L)
-        order.verify(skus).findAllByProductIdWithLock(20L)
-        order.verify(snapshots).publishProductSnapshot(second)
+        verifyOrder {
+            groups.findByIdWithLock(1L)
+            values.findAllByOptionGroupIdWithLock(1L)
+            skus.findProductIdsByOptionGroupId(1L)
+            products.findByIdWithLock(10L)
+            skus.findAllByProductIdWithLock(10L)
+            snapshots.publishProductSnapshot(first)
+            products.findByIdWithLock(20L)
+            skus.findAllByProductIdWithLock(20L)
+            snapshots.publishProductSnapshot(second)
+        }
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenUsedValue__whenRenamed__thenRepublishAffectedProduct() {
+    fun `사용 중인 값일 때__이름을 바꾸면__영향받는 상품을 다시 발행한다`() {
+        // given
         val value = value()
         val product = product(10L)
-        `when`(values.findByIdWithLock(2L)).thenReturn(Optional.of(value))
-        `when`(skus.findProductIdsByOptionValueId(2L)).thenReturn(listOf(10L))
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(product))
-        `when`(skus.findAllByProductIdWithLock(10L)).thenReturn(product.skus!!)
+        val request = mapper.readValue("{\"name\":\"new small\"}", OptionValueRequest::class.java)
 
-        val result = subject.updateOptionValue(2L, mapper.readValue("{\"name\":\"new small\"}", OptionValueRequest::class.java))
+        every { values.findByIdWithLock(any()) } returns Optional.of(value)
+        every { skus.findProductIdsByOptionValueId(any()) } returns listOf(10L)
+        every { products.findByIdWithLock(any()) } returns Optional.of(product)
+        every { skus.findAllByProductIdWithLock(any()) } returns product.skus!!
+        justRun { snapshots.publishProductSnapshot(any()) }
 
+        // when
+        val result = subject.updateOptionValue(2L, request)
+
+        // then
         assertThat(result.name).isEqualTo("new small")
         assertThat(result.groupName).isEqualTo("size")
-        verify(snapshots).publishProductSnapshot(product)
+        verify(exactly = 1) { values.findByIdWithLock(2L) }
+        verify(exactly = 1) { skus.findProductIdsByOptionValueId(2L) }
+        verify(exactly = 1) { products.findByIdWithLock(10L) }
+        verify(exactly = 1) { skus.findAllByProductIdWithLock(10L) }
+        verify(exactly = 1) { snapshots.publishProductSnapshot(product) }
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenGroupWithReferencedValue__whenDeleting__thenRefusePhysicalDelete() {
+    fun `참조되는 값을 가진 그룹일 때__삭제하면__물리 삭제를 거부한다`() {
+        // given
         val value = value()
         val group = value.optionGroup!!
         group.optionValues.add(value)
-        `when`(groups.findById(1L)).thenReturn(Optional.of(group))
-        `when`(values.isOptionValueInUse(2L)).thenReturn(true)
 
-        assertThatThrownBy { subject.deleteOptionGroup(1L) }.isInstanceOf(IllegalStateException::class.java)
+        every { groups.findById(any()) } returns Optional.of(group)
+        every { values.isOptionValueInUse(any()) } returns true
 
-        verify(groups, never()).delete(any(OptionGroup::class.java))
+        // when
+        val thrown = assertThatThrownBy { subject.deleteOptionGroup(1L) }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
+        verify(exactly = 1) { groups.findById(1L) }
+        verify(exactly = 1) { values.isOptionValueInUse(2L) }
+        verify(exactly = 0) { groups.delete(any()) }
         assertThat(manager.rollbacks).isEqualTo(1)
     }
 
     @Test
-    fun givenReferencedValue__whenDeleting__thenRefusePhysicalDelete() {
-        `when`(values.findById(2L)).thenReturn(Optional.of(value()))
-        `when`(values.isOptionValueInUse(2L)).thenReturn(true)
+    fun `참조되는 값일 때__삭제하면__물리 삭제를 거부한다`() {
+        // given
+        every { values.findById(any()) } returns Optional.of(value())
+        every { values.isOptionValueInUse(any()) } returns true
 
-        assertThatThrownBy { subject.deleteOptionValue(2L) }.isInstanceOf(IllegalStateException::class.java)
+        // when
+        val thrown = assertThatThrownBy { subject.deleteOptionValue(2L) }
 
-        verify(values, never()).delete(any(OptionValue::class.java))
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
+        verify(exactly = 1) { values.findById(2L) }
+        verify(exactly = 1) { values.isOptionValueInUse(2L) }
+        verify(exactly = 0) { values.delete(any()) }
         assertThat(manager.rollbacks).isEqualTo(1)
     }
 
     @Test
-    fun givenUnreferencedGroupAndValue__whenDeleted__thenKeepOriginalPhysicalDeletes() {
+    fun `참조되지 않는 그룹과 값일 때__삭제하면__원래의 물리 삭제를 유지한다`() {
+        // given
         val group = group()
         val value = value()
-        `when`(groups.findById(1L)).thenReturn(Optional.of(group))
-        `when`(values.findById(2L)).thenReturn(Optional.of(value))
 
+        every { groups.findById(any()) } returns Optional.of(group)
+        every { values.findById(any()) } returns Optional.of(value)
+        every { values.isOptionValueInUse(any()) } returns false
+        justRun { groups.delete(any()) }
+        justRun { values.delete(any()) }
+
+        // when
         subject.deleteOptionGroup(1L)
         subject.deleteOptionValue(2L)
 
-        verify(groups).delete(group)
-        verify(values).delete(value)
-        verifyNoInteractions(snapshots)
+        // then
+        verify(exactly = 1) { groups.findById(1L) }
+        verify(exactly = 1) { values.findById(2L) }
+        verify(exactly = 1) { groups.delete(group) }
+        verify(exactly = 1) { values.delete(value) }
+        confirmVerified(snapshots)
         assertThat(manager.commits).isEqualTo(2)
     }
 
     @Test
-    fun givenExistingGroup__whenAddingValue__thenAttachAndReturnGroupIdentity() {
+    fun `그룹이 있을 때__값을 추가하면__그룹에 붙이고 그룹 신원을 돌려준다`() {
+        // given
         val group = group()
-        `when`(groups.findById(1L)).thenReturn(Optional.of(group))
-        `when`(values.save(any(OptionValue::class.java))).thenAnswer { call ->
-            val value = call.getArgument<OptionValue>(0)
+        val request = mapper.readValue("{\"name\":\"small\"}", OptionValueRequest::class.java)
+
+        every { groups.findById(any()) } returns Optional.of(group)
+        every { values.save(any()) } answers {
+            val value = firstArg<OptionValue>()
             ReflectionTestUtils.setField(value, "id", 2L)
             value
         }
 
-        val result = subject.addOptionValue(1L, mapper.readValue("{\"name\":\"small\"}", OptionValueRequest::class.java))
+        // when
+        val result = subject.addOptionValue(1L, request)
 
+        // then
         assertThat(result.id).isEqualTo(2L)
         assertThat(result.name).isEqualTo("small")
         assertThat(result.groupId).isEqualTo(1L)
         assertThat(result.groupName).isEqualTo("size")
         assertThat(group.optionValues).hasSize(1)
+        verify(exactly = 1) { groups.findById(1L) }
     }
 
     @Test
-    fun givenSnapshotFailure__whenRenaming__thenPropagateToWriterRollback() {
+    fun `스냅샷 발행이 실패할 때__이름을 바꾸면__쓰기 트랜잭션 롤백으로 전파한다`() {
+        // given
         val value = value()
         val product = product(10L)
-        `when`(values.findByIdWithLock(2L)).thenReturn(Optional.of(value))
-        `when`(skus.findProductIdsByOptionValueId(2L)).thenReturn(listOf(10L))
-        `when`(products.findByIdWithLock(10L)).thenReturn(Optional.of(product))
-        `when`(skus.findAllByProductIdWithLock(10L)).thenReturn(product.skus!!)
         val failure = IllegalStateException("synthetic snapshot failure")
-        doThrow(failure).`when`(snapshots).publishProductSnapshot(product)
         val request = mapper.readValue("{\"name\":\"new small\"}", OptionValueRequest::class.java)
 
-        assertThatThrownBy { subject.updateOptionValue(2L, request) }.isSameAs(failure)
+        every { values.findByIdWithLock(any()) } returns Optional.of(value)
+        every { skus.findProductIdsByOptionValueId(any()) } returns listOf(10L)
+        every { products.findByIdWithLock(any()) } returns Optional.of(product)
+        every { skus.findAllByProductIdWithLock(any()) } returns product.skus!!
+        every { snapshots.publishProductSnapshot(any()) } throws failure
 
+        // when
+        val thrown = assertThatThrownBy { subject.updateOptionValue(2L, request) }
+
+        // then
+        thrown.isSameAs(failure)
+        verify(exactly = 1) { snapshots.publishProductSnapshot(product) }
         assertThat(manager.rollbacks).isEqualTo(1)
         assertThat(manager.commits).isZero()
     }

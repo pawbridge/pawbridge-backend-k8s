@@ -7,6 +7,10 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.pawbridge.backend.store.internal.directorder.application.CartOrders
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.directorder.application.OrderActorRejectedException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -16,11 +20,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.dao.DataAccessResourceFailureException
@@ -42,7 +41,7 @@ import java.time.LocalDateTime
 import java.util.stream.Stream
 
 class CartOrderControllerTest {
-    val orders: CartOrders = mock(CartOrders::class.java)
+    val orders = mockk<CartOrders>()
     val json: ObjectMapper = ObjectMapper().registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
         .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -77,86 +76,110 @@ class CartOrderControllerTest {
     }
 
     @Test
-    fun given__verified_member_and_shipping_fields__when__checking_out__then__raw_original_201_order_details_and_no_client_cart_or_user_override() {
+    fun `검증된 회원과 배송 필드가 있을 때__장바구니를 주문하면__원본 그대로의 201 주문 상세를 돌려주고 클라이언트의 장바구니나 사용자 덮어쓰기를 무시한다`() {
+        // given
         current(7L)
-        `when`(orders.create(7, command)).thenReturn(response)
 
+        every { orders.create(any(), any()) } returns response
+
+        // when
         val body = mvc.perform(
             post("/api/v1/orders").header("X-User-Id", "99").param("userId", "99")
                 .contentType(MediaType.APPLICATION_JSON).content(request),
         ).andExpect(status().isCreated()).andReturn().response.contentAsByteArray
 
+        // then
         val node = json.readTree(body)
         assertEquals(12, node.size())
         assertEquals(4, node.get("items").get(0).size())
         assertEquals(json.readTree(json.writeValueAsBytes(response)), node)
         assertEquals(9007199254740993L, node.get("orderId").longValue())
         assertEquals("2026-10-21T02:00:01.123456789", node.get("createdAt").asText())
-        verify(orders).create(7, command)
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.create(7, command) }
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__original_unvalidated_shipping__when__mapping_request__then__forward_nulls_without_new_notblank_or_size_rules() {
+    fun `원본에 검증이 없는 배송 정보일 때__요청을 매핑하면__새 NotBlank나 Size 규칙 없이 null을 그대로 넘긴다`() {
+        // given
         current(7L)
         val empty = CartOrders.Command(null, null, null, null)
-        `when`(orders.create(7, empty)).thenReturn(response)
 
+        every { orders.create(any(), any()) } returns response
+
+        // when
         mvc.perform(post("/api/v1/orders").contentType(MediaType.APPLICATION_JSON).content("{}"))
             .andExpect(status().isCreated())
 
-        verify(orders).create(7, empty)
-        verifyNoMoreInteractions(orders)
+        // then
+        verify(exactly = 1) { orders.create(7, empty) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "text"])
-    fun given__missing_or_non_long_principal__when__checking_out__then__unauthorized_before_application(kind: String) {
+    fun `주체가 없거나 Long이 아닐 때__장바구니를 주문하면__애플리케이션 호출 전에 401을 돌려준다`(kind: String) {
+        // given
         if (kind == "text") {
             current("99")
         }
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             post("/api/v1/orders").header("X-User-Id", "99").contentType(MediaType.APPLICATION_JSON).content(request),
-        ).andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        )
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__actor_validation_or_persistence_failure__when__checking_out__then__existing_scoped_error_contract_without_private_details(
+    fun `행위자 검증이나 영속화 실패가 나면__장바구니를 주문하면__개인 정보 없이 기존 범위 오류 계약을 지킨다`(
         failure: RuntimeException,
         statusCode: Int,
         code: String,
     ) {
+        // given
         current(7L)
-        `when`(orders.create(7, command)).thenThrow(failure)
 
+        every { orders.create(any(), any()) } throws failure
+
+        // when
         val body = mvc.perform(post("/api/v1/orders").contentType(MediaType.APPLICATION_JSON).content(request))
             .andExpect(status().`is`(statusCode))
             .andExpect(jsonPath("\$.code").value(code))
             .andExpect(jsonPath("\$.errors").isEmpty()).andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
+        verify(exactly = 1) { orders.create(7, command) }
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__original_orders_charset_constraint__when__flushing_checkout__then__existing_c007_without_row_or_sql_details() {
+    fun `주문 문자셋 제약을 어길 때__장바구니 주문을 flush하면__행이나 SQL 상세 없이 기존 C007을 돌려준다`() {
+        // given
         current(7L)
         val sql = PSQLException(
             ServerErrorMessage(
                 "SERROR\u0000C23514\u0000Mprivate_fixture\u0000Dprivate_row\u0000spawbridge_store\u0000nck_rollback_charset_orders\u0000",
             ),
         )
-        `when`(orders.create(7, command)).thenThrow(DataIntegrityViolationException("private SQL", sql))
 
+        every { orders.create(any(), any()) } throws DataIntegrityViolationException("private SQL", sql)
+
+        // when
         val body = mvc.perform(post("/api/v1/orders").contentType(MediaType.APPLICATION_JSON).content(request))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C007")).andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
         assertFalse(body.contains("ck_rollback_charset_"))
+        verify(exactly = 1) { orders.create(7, command) }
+        confirmVerified(orders)
     }
 
     companion object {

@@ -9,6 +9,12 @@ import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrderNotFoundException
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrders
 import com.pawbridge.backend.store.internal.orderadministration.application.AdministratorRejectedException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.spyk
+import io.mockk.verify
 import jakarta.persistence.EntityManager
 import jakarta.persistence.LockModeType
 import jakarta.persistence.PersistenceException
@@ -25,27 +31,11 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.ArgumentMatchers.nullable
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doReturn
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.spy
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
@@ -65,24 +55,24 @@ import java.util.Optional
 import java.util.stream.Stream
 
 class JpaAdminOrdersTest {
-    val em: EntityManager = mock(EntityManager::class.java)
-    val orders: OrderRepository = mock(OrderRepository::class.java)
-
-    @Suppress("UNCHECKED_CAST")
-    val itemFetch: TypedQuery<Order> = mock(TypedQuery::class.java) as TypedQuery<Order>
-    val administrators: StoreOrderAdministrators = mock(StoreOrderAdministrators::class.java)
+    val em = mockk<EntityManager>()
+    val orders = mockk<OrderRepository>()
+    val itemFetch = mockk<TypedQuery<Order>>()
+    val administrators = mockk<StoreOrderAdministrators>()
     val events = ArrayList<String>()
     val writes = TransactionTemplate(Manager("write"))
-    val reads = TransactionTemplate(Manager("read"))
+    val reads = TransactionTemplate(Manager("read")).apply { isReadOnly = true }
     val service = JpaAdminOrders(em, orders, writes, reads, administrators)
     val query = AdminOrders.Query(null, null, null, null, "createdAt", "desc", 0, 20)
     var actor: StoreOrderAdministrators.Actor? = StoreOrderAdministrators.Actor(7, true, false, "ROLE_ADMIN")
-    lateinit var order: Order
     var failure = ""
 
-    @BeforeEach
-    fun setup() {
-        reads.isReadOnly = true
+    @AfterEach
+    fun close() {
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+    }
+
+    fun storedOrder(): Order {
         val entity = Order.builder().userId(88L).orderUuid("stored-uuid").totalAmount(9007199254740993L)
             .receiverName("stored receiver").receiverPhone("stored phone").deliveryAddress("stored address")
             .deliveryMessage("stored message").build()
@@ -92,67 +82,7 @@ class JpaAdminOrdersTest {
             OrderItem.builder().order(entity).productName("stored product").skuCode("STORED-SKU")
                 .price(9007199254740993L).quantity(1).build(),
         )
-        order = spy(entity)
-        doAnswer { call ->
-            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
-            events.add("map")
-            call.callRealMethod()
-        }.`when`(order).orderItems
-        `when`(administrators.currentForRead(7)).thenAnswer {
-            active(true)
-            events.add("actor:read")
-            actor
-        }
-        `when`(administrators.currentForWrite(7)).thenAnswer {
-            active(false)
-            events.add("actor:write")
-            actor
-        }
-        doAnswer { call ->
-            active(true)
-            events.add("list")
-            if (failure == "query") {
-                throw problem()
-            }
-            PageImpl(listOf(order), call.getArgument<Pageable>(1), 1)
-        }.`when`(orders).findAll(any<Specification<Order>>(), any<Pageable>())
-        `when`(em.createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids", Order::class.java))
-            .thenReturn(itemFetch)
-        `when`(itemFetch.setParameter(eq("ids"), any<Any>())).thenReturn(itemFetch)
-        `when`(itemFetch.resultList).thenAnswer {
-            active(true)
-            events.add("batch")
-            listOf(order)
-        }
-        `when`(orders.findById(33L)).thenAnswer {
-            active(true)
-            events.add("get")
-            if (failure == "query") {
-                throw problem()
-            }
-            Optional.of(order)
-        }
-        `when`(em.find(Order::class.java, 33L, LockModeType.PESSIMISTIC_WRITE)).thenAnswer {
-            active(false)
-            events.add("order-lock")
-            if (failure == "query") {
-                throw problem()
-            }
-            order
-        }
-        doAnswer {
-            active(false)
-            events.add("flush")
-            if (order.deliveryStatus == null || order.status == null || failure == "flush") {
-                throw PersistenceException("synthetic constraint failure")
-            }
-            null
-        }.`when`(em).flush()
-    }
-
-    @AfterEach
-    fun close() {
-        assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        return entity
     }
 
     fun active(readOnly: Boolean) {
@@ -169,9 +99,30 @@ class JpaAdminOrdersTest {
     }
 
     @Test
-    fun given__current_database_admin__when__reading_other_members_order__then__preserve_full_snapshot_inside_read_only_transaction() {
+    fun `현재 DB 기준 관리자일 때__다른 회원의 주문을 조회하면__읽기 전용 트랜잭션 안에서 전체 스냅샷을 그대로 돌려준다`() {
+        // given
+        val order = spyk(storedOrder())
+
+        every { order.orderItems } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("map")
+            callOriginal()
+        }
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findById(any()) } answers {
+            active(true)
+            events.add("get")
+            Optional.of(order)
+        }
+
+        // when
         val result = service.get(7, 33)
 
+        // then
         assertEquals(33L, result.orderId)
         assertEquals(88L, result.userId)
         assertEquals(9007199254740993L, result.totalAmount)
@@ -185,17 +136,47 @@ class JpaAdminOrdersTest {
         assertEquals(9007199254740993L, result.items!!.first().price)
         assertEquals("stored product", result.items!!.first().productName)
         assertEquals(listOf("begin:read", "actor:read", "get", "map", "commit:read"), events)
-        verifyNoInteractions(em)
-        verify(administrators, never()).currentForWrite(anyLong())
+        verify(exactly = 1) { administrators.currentForRead(7) }
+        verify(exactly = 1) { orders.findById(33L) }
+        verify(exactly = 0) { administrators.currentForWrite(any()) }
+        confirmVerified(em)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["READY", "SHIPPING", "DELIVERED"])
-    fun given__admin_and_locked_order__when__changing_delivery__then__only_delivery_changes_after_user_then_order_lock_and_flush(
+    fun `관리자와 잠긴 주문이 있을 때__배송 상태를 변경하면__관리자 확인과 주문 잠금과 flush 순서로 배송 상태만 바꾼다`(
         delivery: String,
     ) {
+        // given
+        val order = spyk(storedOrder())
+
+        every { order.orderItems } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("map")
+            callOriginal()
+        }
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
+            active(false)
+            events.add("order-lock")
+            order
+        }
+        every { em.flush() } answers {
+            active(false)
+            events.add("flush")
+            if (order.deliveryStatus == null || order.status == null || failure == "flush") {
+                throw PersistenceException("synthetic constraint failure")
+            }
+        }
+
+        // when
         val result = service.updateDelivery(7, 33, delivery)
 
+        // then
         assertEquals(delivery, result.deliveryStatus)
         assertEquals("PENDING", result.status)
         assertEquals(9007199254740993L, result.totalAmount)
@@ -204,20 +185,49 @@ class JpaAdminOrdersTest {
         assertEquals("stored address", result.deliveryAddress)
         assertEquals(1, result.items!!.size)
         assertEquals(listOf("begin:write", "actor:write", "order-lock", "flush", "map", "commit:write"), events)
-        verify(em).find(Order::class.java, 33L, LockModeType.PESSIMISTIC_WRITE)
-        verify(em).flush()
-        verifyNoMoreInteractions(em)
-        verifyNoInteractions(orders)
-        verify(administrators, never()).currentForRead(anyLong())
+        verify(exactly = 1) { administrators.currentForWrite(7) }
+        verify(exactly = 1) { em.find(Order::class.java, 33L, LockModeType.PESSIMISTIC_WRITE) }
+        verify(exactly = 1) { em.flush() }
+        confirmVerified(em)
+        confirmVerified(orders)
+        verify(exactly = 0) { administrators.currentForRead(any()) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PENDING", "PAID", "COMPLETED", "CANCELLED", "FAILED"])
-    fun given__admin_and_locked_order__when__changing_status__then__only_status_changes_after_user_then_order_lock_and_flush(
+    fun `관리자와 잠긴 주문이 있을 때__주문 상태를 변경하면__관리자 확인과 주문 잠금과 flush 순서로 주문 상태만 바꾼다`(
         status: String,
     ) {
+        // given
+        val order = spyk(storedOrder())
+
+        every { order.orderItems } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("map")
+            callOriginal()
+        }
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
+            active(false)
+            events.add("order-lock")
+            order
+        }
+        every { em.flush() } answers {
+            active(false)
+            events.add("flush")
+            if (order.deliveryStatus == null || order.status == null || failure == "flush") {
+                throw PersistenceException("synthetic constraint failure")
+            }
+        }
+
+        // when
         val result = service.updateStatus(7, 33, status)
 
+        // then
         assertEquals(status, result.status)
         assertEquals("READY", result.deliveryStatus)
         assertEquals(9007199254740993L, result.totalAmount)
@@ -226,83 +236,172 @@ class JpaAdminOrdersTest {
         assertEquals("stored address", result.deliveryAddress)
         assertEquals(1, result.items!!.size)
         assertEquals(listOf("begin:write", "actor:write", "order-lock", "flush", "map", "commit:write"), events)
-        verify(em).find(Order::class.java, 33L, LockModeType.PESSIMISTIC_WRITE)
-        verify(em).flush()
-        verifyNoMoreInteractions(em)
-        verifyNoInteractions(orders)
-        verify(administrators, never()).currentForRead(anyLong())
+        verify(exactly = 1) { administrators.currentForWrite(7) }
+        verify(exactly = 1) { em.find(Order::class.java, 33L, LockModeType.PESSIMISTIC_WRITE) }
+        verify(exactly = 1) { em.flush() }
+        confirmVerified(em)
+        confirmVerified(orders)
+        verify(exactly = 0) { administrators.currentForRead(any()) }
     }
 
     @ParameterizedTest
     @MethodSource("invalidActors")
-    fun given__ineligible_current_database_admin__when__changing_status__then__deny_before_order_rows(
+    fun `자격이 없는 현재 DB 관리자일 때__주문 상태를 변경하면__주문 행에 닿기 전에 거부한다`(
         state: String,
         op: String,
     ) {
         if (op != "write") {
             return
         }
+
+        // given
         actor = actorFor(state)
 
-        assertThrows(AdministratorRejectedException::class.java) { service.updateStatus(7, 33, "PAID") }
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
 
-        verifyNoInteractions(em, orders)
+        // when
+        val thrown = assertThrows(AdministratorRejectedException::class.java) { service.updateStatus(7, 33, "PAID") }
+
+        // then
+        assertTrue(thrown is AdministratorRejectedException)
+        confirmVerified(em, orders)
         assertEquals("rollback:write", events.last())
     }
 
     @Test
-    fun given__missing_order__when__changing_status__then__original_400_family_without_flush() {
-        doReturn(null).`when`(em).find(Order::class.java, 33L, LockModeType.PESSIMISTIC_WRITE)
+    fun `없는 주문일 때__주문 상태를 변경하면__flush 없이 원래의 400 계열 예외를 던진다`() {
+        // given
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } returns null
 
-        assertThrows(IllegalArgumentException::class.java) { service.updateStatus(7, 33, "PAID") }
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { service.updateStatus(7, 33, "PAID") }
 
-        verify(em, never()).flush()
+        // then
+        assertTrue(thrown is IllegalArgumentException)
+        verify(exactly = 0) { em.flush() }
         assertEquals("rollback:write", events.last())
     }
 
     @Test
-    fun given__null_status__when__updating__then__generic_failure_after_actor_and_order_lock_without_update_or_flush() {
+    fun `주문 상태가 null일 때__변경하면__관리자 확인과 주문 잠금 뒤 갱신과 flush 없이 일반 실패를 던진다`() {
+        // given
+        val order = spyk(storedOrder())
+
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
+            active(false)
+            events.add("order-lock")
+            order
+        }
+
+        // when
         val failure = assertThrows(IllegalStateException::class.java) { service.updateStatus(7, 33, null) }
 
+        // then
         assertEquals("Order status cannot be stored", failure.message)
         assertEquals("PENDING", order.status!!.name)
         assertEquals(listOf("begin:write", "actor:write", "order-lock", "rollback:write"), events)
-        verify(order, never()).updateStatus(nullable(OrderStatus::class.java))
-        verify(em, never()).flush()
+        verify(exactly = 0) { order.updateStatus(any()) }
+        verify(exactly = 0) { em.flush() }
     }
 
     @Test
-    fun given__flush_or_commit_failure__when__changing_status__then__propagate_without_success() {
+    fun `flush나 커밋이 실패했을 때__주문 상태를 변경하면__성공 없이 예외를 그대로 전파한다`() {
+        // given
+        val order = spyk(storedOrder())
+
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
+            active(false)
+            events.add("order-lock")
+            order
+        }
+        every { em.flush() } answers {
+            active(false)
+            events.add("flush")
+            if (order.deliveryStatus == null || order.status == null || failure == "flush") {
+                throw PersistenceException("synthetic constraint failure")
+            }
+        }
+
+        // when
         failure = "flush"
-        assertThrows(PersistenceException::class.java) { service.updateStatus(7, 33, "CANCELLED") }
-        assertEquals("rollback:write", events.last())
+        val flushFailure = assertThrows(PersistenceException::class.java) { service.updateStatus(7, 33, "CANCELLED") }
+        val flushRollback = events.last()
         events.clear()
         failure = "commit"
-        assertThrows(TransactionSystemException::class.java) { service.updateStatus(7, 33, "CANCELLED") }
+        val commitFailure = assertThrows(TransactionSystemException::class.java) {
+            service.updateStatus(7, 33, "CANCELLED")
+        }
+
+        // then
+        assertTrue(flushFailure is PersistenceException)
+        assertEquals("rollback:write", flushRollback)
+        assertTrue(commitFailure is TransactionSystemException)
     }
 
     @Test
-    fun given__missing_or_read_only_transaction__when__changing_status__then__fail_before_admin_or_order_lookup() {
+    fun `트랜잭션이 없거나 읽기 전용일 때__주문 상태를 변경하면__관리자나 주문 조회 전에 실패한다`() {
+        // given
         val none = JpaAdminOrders(em, orders, TransactionOperations.withoutTransaction(), reads, administrators)
 
-        assertThrows(IllegalStateException::class.java) { none.updateStatus(7, 33, "PAID") }
+        // when
+        val withoutTransaction = assertThrows(IllegalStateException::class.java) { none.updateStatus(7, 33, "PAID") }
         writes.isReadOnly = true
-        assertThrows(IllegalStateException::class.java) { service.updateStatus(7, 33, "PAID") }
+        val readOnly = assertThrows(IllegalStateException::class.java) { service.updateStatus(7, 33, "PAID") }
 
-        verifyNoInteractions(em, orders, administrators)
+        // then
+        assertTrue(withoutTransaction is IllegalStateException)
+        assertTrue(readOnly is IllegalStateException)
+        confirmVerified(em, orders, administrators)
     }
 
     @ParameterizedTest
     @MethodSource("invalidActors")
-    fun given__ineligible_or_nonexact_current_database_admin__when__using_any_operation__then__deny_before_order_rows(
+    fun `자격이 없거나 정확히 일치하지 않는 현재 DB 관리자일 때__어느 작업이든 하면__주문 행에 닿기 전에 거부한다`(
         state: String,
         op: String,
     ) {
+        // given
         actor = actorFor(state)
 
-        assertThrows(AdministratorRejectedException::class.java) { access(op) }
+        if (op == "write") {
+            every { administrators.currentForWrite(any()) } answers {
+                active(false)
+                events.add("actor:write")
+                actor
+            }
+        } else {
+            every { administrators.currentForRead(any()) } answers {
+                active(true)
+                events.add("actor:read")
+                actor
+            }
+        }
 
-        verifyNoInteractions(em, orders)
+        // when
+        val thrown = assertThrows(AdministratorRejectedException::class.java) { access(op) }
+
+        // then
+        assertTrue(thrown is AdministratorRejectedException)
+        confirmVerified(em, orders)
         assertEquals("rollback:" + (if (op == "write") "write" else "read"), events.last())
     }
 
@@ -313,32 +412,65 @@ class JpaAdminOrdersTest {
             "receiverName", "receiverPhone", "deliveryMessage", "createdAt", "updatedAt",
         ],
     )
-    fun given__existing_root_scalar_sort__when__listing__then__original_repository_spec_and_page_metadata_inside_read_transaction(
+    fun `존재하는 루트 스칼라 정렬 속성일 때__목록을 조회하면__원래의 리포지터리 사양과 페이지 메타데이터를 읽기 트랜잭션 안에서 돌려준다`(
         property: String,
     ) {
+        // given
+        val order = spyk(storedOrder())
         val input = AdminOrders.Query(null, null, null, null, property, "ASC", 0, 20)
 
+        every { order.orderItems } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("map")
+            callOriginal()
+        }
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
+            active(true)
+            events.add("list")
+            PageImpl(listOf(order), arg<Pageable>(1), 1)
+        }
+        every { em.createQuery(any<String>(), any<Class<Order>>()) } returns itemFetch
+        every { itemFetch.setParameter(any<String>(), any<Any>()) } returns itemFetch
+        every { itemFetch.resultList } answers {
+            active(true)
+            events.add("batch")
+            listOf(order)
+        }
+
+        // when
         val result = service.list(7, input)
 
+        // then
         assertEquals(1, result.content!!.size)
         assertEquals(1L, result.totalElements)
         assertEquals(20, result.size)
         assertEquals(0, result.number)
         assertEquals(property, result.sortBy)
         assertTrue(result.ascending)
-        verify(orders).findAll(
-            any<Specification<Order>>(),
-            eq(PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, property))),
-        )
-        verify(em).createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids", Order::class.java)
-        verify(itemFetch).setParameter("ids", listOf(33L))
-        verify(itemFetch).resultList
-        verifyNoMoreInteractions(em, itemFetch)
+        verify(exactly = 1) {
+            orders.findAll(
+                any<Specification<Order>>(),
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, property)),
+            )
+        }
+        verify(exactly = 1) {
+            em.createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids", Order::class.java)
+        }
+        verify(exactly = 1) { itemFetch.setParameter("ids", listOf(33L)) }
+        verify(exactly = 1) { itemFetch.resultList }
+        confirmVerified(em, itemFetch)
         assertEquals(listOf("begin:read", "actor:read", "list", "batch", "map", "commit:read"), events)
     }
 
     @Test
-    fun given__nonempty_page__when__batch_loading_items__then__preserve_original_order_metadata_and_snapshots() {
+    fun `항목이 있는 페이지일 때__항목을 일괄 조회하면__원래의 순서와 메타데이터와 스냅샷을 유지한다`() {
+        // given
+        val order = spyk(storedOrder())
         val second = Order.builder().userId(99L).orderUuid("second-uuid").totalAmount(1400L)
             .receiverName("second receiver").receiverPhone("second phone").deliveryAddress("second address").build()
         ReflectionTestUtils.setField(second, "id", 22L)
@@ -346,19 +478,34 @@ class JpaAdminOrdersTest {
             OrderItem.builder().order(second).productName("second product").skuCode("SECOND-SKU").price(700L).quantity(2).build(),
         )
         val pageable = PageRequest.of(2, 2, Sort.by(Sort.Direction.DESC, "id"))
-        doAnswer {
+
+        every { order.orderItems } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("map")
+            callOriginal()
+        }
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
             active(true)
             events.add("list")
             PageImpl(listOf(order, second), pageable, 77)
-        }.`when`(orders).findAll(any<Specification<Order>>(), eq(pageable))
-        doAnswer {
+        }
+        every { em.createQuery(any<String>(), any<Class<Order>>()) } returns itemFetch
+        every { itemFetch.setParameter(any<String>(), any<Any>()) } returns itemFetch
+        every { itemFetch.resultList } answers {
             active(true)
             events.add("batch")
             listOf(second, order)
-        }.`when`(itemFetch).resultList
+        }
 
+        // when
         val result = service.list(7, AdminOrders.Query(null, null, null, null, "id", "desc", 2, 2))
 
+        // then
         assertEquals(listOf(33L, 22L), result.content!!.map { item -> item.orderId })
         assertEquals(77L, result.totalElements)
         assertEquals(2, result.number)
@@ -368,168 +515,387 @@ class JpaAdminOrdersTest {
         assertEquals(9007199254740993L, result.content!!.first().items!!.first().price)
         assertEquals("second product", result.content!!.last().items!!.first().productName)
         assertEquals(2, result.content!!.last().items!!.first().quantity)
-        verify(itemFetch).setParameter("ids", listOf(33L, 22L))
-        verify(itemFetch).resultList
-        verify(em).createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids", Order::class.java)
-        verifyNoMoreInteractions(em, itemFetch)
+        verify(exactly = 1) { orders.findAll(any<Specification<Order>>(), pageable) }
+        verify(exactly = 1) { itemFetch.setParameter("ids", listOf(33L, 22L)) }
+        verify(exactly = 1) { itemFetch.resultList }
+        verify(exactly = 1) {
+            em.createQuery("select distinct o from Order o left join fetch o.orderItems where o.id in :ids", Order::class.java)
+        }
+        confirmVerified(em, itemFetch)
         assertEquals(listOf("begin:read", "actor:read", "list", "batch", "map", "commit:read"), events)
     }
 
     @Test
-    fun given__empty_page__when__batch_loading_items__then__skip_fetch_and_preserve_metadata() {
+    fun `빈 페이지일 때__항목을 일괄 조회하면__조회를 건너뛰고 메타데이터를 유지한다`() {
+        // given
         val pageable = PageRequest.of(4, 20, Sort.by(Sort.Direction.DESC, "id"))
-        doAnswer {
+
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
             active(true)
             events.add("list")
             PageImpl<Order>(listOf(), pageable, 77)
-        }.`when`(orders).findAll(any<Specification<Order>>(), eq(pageable))
+        }
 
+        // when
         val result = service.list(7, AdminOrders.Query(null, null, null, null, "id", "desc", 4, 20))
 
+        // then
         assertTrue(result.content!!.isEmpty())
         assertEquals(77L, result.totalElements)
         assertEquals(4, result.number)
         assertEquals(20, result.size)
-        verifyNoInteractions(em, itemFetch)
+        verify(exactly = 1) { orders.findAll(any<Specification<Order>>(), pageable) }
+        confirmVerified(em, itemFetch)
         assertEquals(listOf("begin:read", "actor:read", "list", "commit:read"), events)
     }
 
     @Test
-    fun given__batch_fetch_failure__when__listing__then__rollback_without_mapping_or_partial_response() {
-        doAnswer {
+    fun `항목 일괄 조회가 실패했을 때__목록을 조회하면__매핑이나 부분 응답 없이 롤백한다`() {
+        // given
+        val order = spyk(storedOrder())
+
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
+            active(true)
+            events.add("list")
+            PageImpl(listOf(order), arg<Pageable>(1), 1)
+        }
+        every { em.createQuery(any<String>(), any<Class<Order>>()) } returns itemFetch
+        every { itemFetch.setParameter(any<String>(), any<Any>()) } returns itemFetch
+        every { itemFetch.resultList } answers {
             active(true)
             events.add("batch")
             throw problem()
-        }.`when`(itemFetch).resultList
+        }
 
-        assertThrows(DataAccessResourceFailureException::class.java) { service.list(7, query) }
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { service.list(7, query) }
 
+        // then
+        assertTrue(thrown is DataAccessResourceFailureException)
         assertEquals(listOf("begin:read", "actor:read", "list", "batch", "rollback:read"), events)
-        verify(order, never()).orderItems
+        verify(exactly = 0) { order.orderItems }
     }
 
     @ParameterizedTest
     @MethodSource("badQueries")
-    fun given__unsupported_sort_or_page_resource_bound__when__listing__then__fixed_bad_input_before_transaction_or_admin_lookup(
+    fun `지원하지 않는 정렬이거나 페이지 범위를 넘었을 때__목록을 조회하면__트랜잭션과 관리자 조회 전에 고정된 잘못된 입력 예외를 던진다`(
         input: AdminOrders.Query,
     ) {
+        // when
         val failure = assertThrows(IllegalArgumentException::class.java) { service.list(7, input) }
 
+        // then
         assertEquals("Admin order query is not supported", failure.message)
         assertTrue(events.isEmpty())
-        verifyNoInteractions(em, orders, administrators)
+        confirmVerified(em, orders, administrators)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ASC", "desc", "anything"])
-    fun given__original_sort_order_text__when__listing_at_size_bound__then__only_asc_means_ascending(direction: String) {
+    fun `원래의 정렬 방향 문자열일 때__크기 상한으로 목록을 조회하면__ASC만 오름차순으로 해석한다`(direction: String) {
+        // given
+        val order = spyk(storedOrder())
+
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
+            active(true)
+            events.add("list")
+            PageImpl(listOf(order), arg<Pageable>(1), 1)
+        }
+        every { em.createQuery(any<String>(), any<Class<Order>>()) } returns itemFetch
+        every { itemFetch.setParameter(any<String>(), any<Any>()) } returns itemFetch
+        every { itemFetch.resultList } answers {
+            active(true)
+            events.add("batch")
+            listOf(order)
+        }
+
+        // when
         val result = service.list(7, AdminOrders.Query(null, null, null, null, "id", direction, 0, 100))
 
+        // then
         assertEquals("ASC" == direction, result.ascending)
         assertEquals(100, result.size)
     }
 
     @Test
-    fun given__all_filters_and_wildcard_keyword__when__building_specification__then__preserve_original_fields_and_unescaped_like_pattern() {
-        service.list(7, AdminOrders.Query("PAID", "SHIPPING", 99L, " A%_ B ", "createdAt", "desc", 0, 20))
-        @Suppress("UNCHECKED_CAST")
-        val captor = ArgumentCaptor.forClass(Specification::class.java) as ArgumentCaptor<Specification<Order>>
-        verify(orders).findAll(captor.capture(), any<Pageable>())
-        @Suppress("UNCHECKED_CAST")
-        val root = mock(Root::class.java) as Root<Order>
-        val query = mock(CriteriaQuery::class.java)
-        val cb = mock(CriteriaBuilder::class.java)
-        val predicate = mock(Predicate::class.java)
+    fun `모든 필터와 와일드카드 키워드가 있을 때__사양을 만들면__원래의 필드와 이스케이프되지 않은 LIKE 패턴을 유지한다`() {
+        // given
+        val order = spyk(storedOrder())
+        val root = mockk<Root<Order>>()
+        val criteria = mockk<CriteriaQuery<*>>()
+        val cb = mockk<CriteriaBuilder>()
+        val predicate = mockk<Predicate>()
         val status = path<Any>()
         val delivery = path<Any>()
         val user = path<Any>()
         val uuid = path<String>()
         val receiver = path<String>()
-        `when`(root.get<Any>("status")).thenReturn(status)
-        `when`(root.get<Any>("deliveryStatus")).thenReturn(delivery)
-        `when`(root.get<Any>("userId")).thenReturn(user)
-        `when`(root.get<String>("orderUuid")).thenReturn(uuid)
-        `when`(root.get<String>("receiverName")).thenReturn(receiver)
-        `when`(cb.equal(any<Expression<*>>(), any<Expression<*>>())).thenReturn(predicate)
-        `when`(cb.lower(any<Expression<String>>())).thenAnswer { call -> call.getArgument<Any>(0) }
-        `when`(cb.like(any<Expression<String>>(), anyString())).thenReturn(predicate)
-        `when`(cb.and(any<Expression<Boolean>>(), any<Expression<Boolean>>())).thenReturn(predicate)
-        `when`(cb.or(any<Expression<Boolean>>(), any<Expression<Boolean>>())).thenReturn(predicate)
 
-        captor.value.toPredicate(root, query, cb)
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
+            active(true)
+            events.add("list")
+            PageImpl(listOf(order), arg<Pageable>(1), 1)
+        }
+        every { em.createQuery(any<String>(), any<Class<Order>>()) } returns itemFetch
+        every { itemFetch.setParameter(any<String>(), any<Any>()) } returns itemFetch
+        every { itemFetch.resultList } answers {
+            active(true)
+            events.add("batch")
+            listOf(order)
+        }
 
-        verify(cb).equal(status, OrderStatus.PAID)
-        verify(cb).equal(delivery, DeliveryStatus.SHIPPING)
-        verify(cb).equal(user, 99L)
-        verify(cb).like(uuid, "% a%_ b %")
-        verify(cb).like(receiver, "% a%_ b %")
+        every { root.get<Any>("status") } returns status
+        every { root.get<Any>("deliveryStatus") } returns delivery
+        every { root.get<Any>("userId") } returns user
+        every { root.get<String>("orderUuid") } returns uuid
+        every { root.get<String>("receiverName") } returns receiver
+        every { cb.equal(any<Expression<*>>(), any<Any>()) } returns predicate
+        every { cb.lower(any<Expression<String>>()) } answers { firstArg<Expression<String>>() }
+        every { cb.like(any<Expression<String>>(), any<String>()) } returns predicate
+        every { cb.and(any<Expression<Boolean>>(), any<Expression<Boolean>>()) } returns predicate
+        every { cb.or(*anyVararg<Predicate>()) } returns predicate
+
+        // when
+        service.list(7, AdminOrders.Query("PAID", "SHIPPING", 99L, " A%_ B ", "createdAt", "desc", 0, 20))
+
+        // then
+        val specification = slot<Specification<Order>>()
+        verify(exactly = 1) { orders.findAll(capture(specification), any<Pageable>()) }
+        specification.captured.toPredicate(root, criteria, cb)
+        verify(exactly = 1) { cb.equal(status, OrderStatus.PAID) }
+        verify(exactly = 1) { cb.equal(delivery, DeliveryStatus.SHIPPING) }
+        verify(exactly = 1) { cb.equal(user, 99L) }
+        verify(exactly = 1) { cb.like(uuid, "% a%_ b %") }
+        verify(exactly = 1) { cb.like(receiver, "% a%_ b %") }
     }
 
     @Test
-    fun given__blank_keyword__when__building_specification__then__do_not_add_like_predicates() {
+    fun `공백 키워드일 때__사양을 만들면__LIKE 조건을 추가하지 않는다`() {
+        // given
+        val order = spyk(storedOrder())
+        val root = mockk<Root<Order>>()
+        val criteria = mockk<CriteriaQuery<*>>()
+        val cb = mockk<CriteriaBuilder>()
+
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
+            active(true)
+            events.add("list")
+            PageImpl(listOf(order), arg<Pageable>(1), 1)
+        }
+        every { em.createQuery(any<String>(), any<Class<Order>>()) } returns itemFetch
+        every { itemFetch.setParameter(any<String>(), any<Any>()) } returns itemFetch
+        every { itemFetch.resultList } answers {
+            active(true)
+            events.add("batch")
+            listOf(order)
+        }
+
+        // when
         service.list(7, AdminOrders.Query(null, null, null, "  ", "id", "desc", 0, 20))
-        @Suppress("UNCHECKED_CAST")
-        val captor = ArgumentCaptor.forClass(Specification::class.java) as ArgumentCaptor<Specification<Order>>
-        verify(orders).findAll(captor.capture(), any<Pageable>())
-        @Suppress("UNCHECKED_CAST")
-        val root = mock(Root::class.java) as Root<Order>
-        val cb = mock(CriteriaBuilder::class.java)
 
-        assertNull(captor.value.toPredicate(root, mock(CriteriaQuery::class.java), cb))
-
-        verifyNoInteractions(root, cb)
+        // then
+        val specification = slot<Specification<Order>>()
+        verify(exactly = 1) { orders.findAll(capture(specification), any<Pageable>()) }
+        assertNull(specification.captured.toPredicate(root, criteria, cb))
+        confirmVerified(root, cb)
     }
 
     @Test
-    fun given__missing_order__when__reading_and_updating__then__distinct_original_404_and_400_families() {
-        doReturn(Optional.empty<Order>()).`when`(orders).findById(33L)
-        doReturn(null).`when`(em).find(Order::class.java, 33L, LockModeType.PESSIMISTIC_WRITE)
+    fun `없는 주문일 때__조회와 배송 상태 변경을 하면__원래의 404와 400 계열을 구분해 던진다`() {
+        // given
+        every { administrators.currentForRead(any()) } answers {
+            active(true)
+            events.add("actor:read")
+            actor
+        }
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { orders.findById(any()) } returns Optional.empty<Order>()
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } returns null
 
-        assertThrows(AdminOrderNotFoundException::class.java) { service.get(7, 33) }
-        assertThrows(IllegalArgumentException::class.java) { service.updateDelivery(7, 33, "SHIPPING") }
+        // when
+        val readFailure = assertThrows(AdminOrderNotFoundException::class.java) { service.get(7, 33) }
+        val writeFailure = assertThrows(IllegalArgumentException::class.java) {
+            service.updateDelivery(7, 33, "SHIPPING")
+        }
 
-        verify(em, never()).flush()
+        // then
+        assertTrue(readFailure is AdminOrderNotFoundException)
+        assertTrue(writeFailure is IllegalArgumentException)
+        verify(exactly = 0) { em.flush() }
     }
 
     @Test
-    fun given__null_delivery_status__when__updating__then__generic_failure_after_actor_and_order_lock_without_update_or_flush() {
+    fun `배송 상태가 null일 때__변경하면__관리자 확인과 주문 잠금 뒤 갱신과 flush 없이 일반 실패를 던진다`() {
+        // given
+        val order = spyk(storedOrder())
+
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
+            active(false)
+            events.add("order-lock")
+            order
+        }
+
+        // when
         val failure = assertThrows(IllegalStateException::class.java) { service.updateDelivery(7, 33, null) }
 
+        // then
         assertEquals("Delivery status cannot be stored", failure.message)
         assertEquals(DeliveryStatus.READY, order.deliveryStatus)
         assertEquals(listOf("begin:write", "actor:write", "order-lock", "rollback:write"), events)
-        verify(order, never()).updateDeliveryStatus(nullable(DeliveryStatus::class.java))
-        verify(em, never()).flush()
+        verify(exactly = 0) { order.updateDeliveryStatus(any()) }
+        verify(exactly = 0) { em.flush() }
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__query_or_commit_failure__when__administering_orders__then__propagate_without_success(op: String, stage: String) {
+    fun `조회나 커밋이 실패했을 때__주문을 관리하면__성공 없이 예외를 그대로 전파한다`(op: String, stage: String) {
+        // given
         failure = stage
+        val order = spyk(storedOrder())
         val type: Class<out RuntimeException> = if (stage == "commit") {
             TransactionSystemException::class.java
         } else {
             DataAccessResourceFailureException::class.java
         }
 
-        assertThrows(type) { access(op) }
+        if (op == "list") {
+            every { administrators.currentForRead(any()) } answers {
+                active(true)
+                events.add("actor:read")
+                actor
+            }
+            every { orders.findAll(any<Specification<Order>>(), any<Pageable>()) } answers {
+                active(true)
+                events.add("list")
+                if (failure == "query") {
+                    throw problem()
+                }
+                PageImpl(listOf(order), arg<Pageable>(1), 1)
+            }
+            every { em.createQuery(any<String>(), any<Class<Order>>()) } returns itemFetch
+            every { itemFetch.setParameter(any<String>(), any<Any>()) } returns itemFetch
+            every { itemFetch.resultList } answers {
+                active(true)
+                events.add("batch")
+                listOf(order)
+            }
+        } else if (op == "get") {
+            every { administrators.currentForRead(any()) } answers {
+                active(true)
+                events.add("actor:read")
+                actor
+            }
+            every { orders.findById(any()) } answers {
+                active(true)
+                events.add("get")
+                if (failure == "query") {
+                    throw problem()
+                }
+                Optional.of(order)
+            }
+        } else {
+            every { administrators.currentForWrite(any()) } answers {
+                active(false)
+                events.add("actor:write")
+                actor
+            }
+            every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
+                active(false)
+                events.add("order-lock")
+                if (failure == "query") {
+                    throw problem()
+                }
+                order
+            }
+            every { em.flush() } answers {
+                active(false)
+                events.add("flush")
+                if (order.deliveryStatus == null || order.status == null || failure == "flush") {
+                    throw PersistenceException("synthetic constraint failure")
+                }
+            }
+        }
+
+        // when
+        val thrown = assertThrows(type) { access(op) }
+
+        // then
+        assertTrue(type.isInstance(thrown))
     }
 
     @Test
-    fun given__flush_failure__when__updating_delivery__then__propagate_and_request_rollback() {
+    fun `flush가 실패했을 때__배송 상태를 변경하면__예외를 전파하고 롤백을 요청한다`() {
+        // given
         failure = "flush"
+        val order = spyk(storedOrder())
 
-        assertThrows(PersistenceException::class.java) { service.updateDelivery(7, 33, "DELIVERED") }
+        every { administrators.currentForWrite(any()) } answers {
+            active(false)
+            events.add("actor:write")
+            actor
+        }
+        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
+            active(false)
+            events.add("order-lock")
+            order
+        }
+        every { em.flush() } answers {
+            active(false)
+            events.add("flush")
+            if (order.deliveryStatus == null || order.status == null || failure == "flush") {
+                throw PersistenceException("synthetic constraint failure")
+            }
+        }
 
+        // when
+        val thrown = assertThrows(PersistenceException::class.java) { service.updateDelivery(7, 33, "DELIVERED") }
+
+        // then
+        assertTrue(thrown is PersistenceException)
         assertEquals("rollback:write", events.last())
     }
 
     @ParameterizedTest
     @MethodSource("txModes")
-    fun given__missing_or_wrong_transaction__when__administering_orders__then__fail_before_admin_or_order_lookup(
+    fun `트랜잭션이 없거나 잘못됐을 때__주문을 관리하면__관리자나 주문 조회 전에 실패한다`(
         op: String,
         kind: String,
     ) {
+        // given
         var w: TransactionOperations = writes
         var r: TransactionOperations = reads
         if (kind == "none") {
@@ -541,7 +907,8 @@ class JpaAdminOrdersTest {
         }
         val service = JpaAdminOrders(em, orders, w, r, administrators)
 
-        assertThrows(IllegalStateException::class.java) {
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) {
             when (op) {
                 "list" -> service.list(7, query)
                 "get" -> service.get(7, 33)
@@ -549,7 +916,9 @@ class JpaAdminOrdersTest {
             }
         }
 
-        verifyNoInteractions(em, orders, administrators)
+        // then
+        assertTrue(thrown is IllegalStateException)
+        confirmVerified(em, orders, administrators)
     }
 
     inner class Manager(val name: String) : AbstractPlatformTransactionManager() {
@@ -578,9 +947,8 @@ class JpaAdminOrdersTest {
             return DataAccessResourceFailureException("synthetic query failure")
         }
 
-        @Suppress("UNCHECKED_CAST")
         private fun <T> path(): Path<T> {
-            return mock(Path::class.java) as Path<T>
+            return mockk<Path<T>>()
         }
 
         private fun actorFor(state: String): StoreOrderAdministrators.Actor? {
