@@ -6,7 +6,7 @@ import ch.qos.logback.core.read.ListAppender
 import com.pawbridge.backend.community.internal.note.application.NoteChangeHints
 import com.pawbridge.backend.community.internal.note.application.NoteDeletion
 import com.pawbridge.backend.community.support.TestFaker
-import com.pawbridge.backend.community.support.uninitialized
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -327,7 +327,7 @@ class JdbcNoteDeletionTest {
                 return listOf()
             }
             try {
-                return listOf(mapper.mapRow(uninitialized<ResultSet>(), 0) as T)
+                return listOf(mapper.mapRow(mockk<ResultSet>(), 0) as T)
             } catch (failure: SQLException) {
                 throw AssertionError("Recording row mapper failed", failure)
             }
