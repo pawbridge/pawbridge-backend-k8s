@@ -1,9 +1,14 @@
 package com.pawbridge.backend.store.internal.directorder.infrastructure
 
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -12,14 +17,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyMap
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionCallback
@@ -27,7 +24,7 @@ import org.springframework.transaction.support.TransactionOperations
 import org.springframework.transaction.support.TransactionSynchronizationManager
 
 class JdbcProductSearchRebuildTest {
-    private val jdbc: NamedParameterJdbcOperations = mock(NamedParameterJdbcOperations::class.java)
+    private val jdbc = mockk<NamedParameterJdbcOperations>()
     private val terms = KoreanSearchTerms()
     private val events = ArrayList<String>()
     private val upserts = ArrayList<Map<String, *>>()
@@ -59,11 +56,25 @@ class JdbcProductSearchRebuildTest {
             }
         }
         rebuild = JdbcProductSearchRebuild(jdbc, transaction, terms)
-        `when`(jdbc.queryForList(anyString(), anyMap<String, Any>(), eq(Long::class.javaObjectType))).thenAnswer { call ->
+    }
+
+    @AfterEach
+    fun closeAnalyzer() {
+        terms.close()
+    }
+
+    @ParameterizedTest
+    @CsvSource("1,1", "100,2")
+    fun `누락되거나 오래된 문서가 한도 안에 있을 때__복구하면__각 원본을 읽고 기존 upsert를 한 트랜잭션에서 재사용한다`(
+        limit: Int,
+        count: Int,
+    ) {
+        // given
+        every { jdbc.queryForList(any<String>(), any<Map<String, Any>>(), Long::class.javaObjectType) } answers {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
             events.add("query")
-            val sql = call.getArgument<String>(0)
-            val values = call.getArgument<Map<String, *>>(1)
+            val sql = firstArg<String>()
+            val values = secondArg<Map<String, *>>()
             assertEquals(KoreanSearchTerms.VERSION, values["version"])
             assertTrue(sql.contains("FROM pawbridge_store.products p JOIN pawbridge_store.product_search_source s ON s.product_id=p.id"))
             assertTrue(sql.contains("LEFT JOIN pawbridge_store.product_search_documents d ON d.product_id=p.id"))
@@ -75,39 +86,31 @@ class JdbcProductSearchRebuildTest {
             }
             if ((values["limit"] as Int) == 1) listOf(2L) else listOf(2L, 8L)
         }
-        `when`(jdbc.queryForMap(anyString(), anyMap<String, Any>())).thenAnswer { call ->
+        every { jdbc.queryForMap(any<String>(), any<Map<String, Any>>()) } answers {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
             events.add("source")
             assertEquals(
                 "SELECT sku_id,name,option_name FROM pawbridge_store.product_search_source WHERE product_id=:id",
-                call.getArgument<String>(0),
+                firstArg<String>(),
             )
-            val id = call.getArgument<Map<String, *>>(1)["id"] as Long
+            val id = secondArg<Map<String, *>>()["id"] as Long
             mapOf<String, Any>("sku_id" to id * 10, "name" to "강아지 사료", "option_name" to "용량: 2kg")
         }
-        `when`(jdbc.update(anyString(), anyMap<String, Any>())).thenAnswer { call ->
+        every { jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
             events.add("upsert")
-            assertTrue(call.getArgument<String>(0).contains("INSERT INTO pawbridge_store.product_search_documents"))
-            upserts.add(call.getArgument<Map<String, *>>(1))
+            assertTrue(firstArg<String>().contains("INSERT INTO pawbridge_store.product_search_documents"))
+            upserts.add(secondArg<Map<String, *>>())
             if ("upsert" == failAt) {
                 throw failure
             }
             1
         }
-    }
 
-    @AfterEach
-    fun closeAnalyzer() {
-        terms.close()
-    }
+        // when
+        val recovered = rebuild.rebuildPage(limit)
 
-    @ParameterizedTest
-    @CsvSource("1,1", "100,2")
-    fun given__bounded_missing_or_stale_documents__when__recovering__then__read_each_source_and_reuse_the_existing_upsert_in_one_transaction(
-        limit: Int,
-        count: Int,
-    ) {
-        assertEquals(count, rebuild.rebuildPage(limit))
+        // then
+        assertEquals(count, recovered)
         assertEquals(count, upserts.size)
         for (index in 0 until count) {
             val values = upserts[index]
@@ -128,41 +131,92 @@ class JdbcProductSearchRebuildTest {
 
     @ParameterizedTest
     @ValueSource(ints = [0, 101])
-    fun given__an_out_of_range_page__when__recovering__then__enter_the_transaction_but_execute_no_sql(limit: Int) {
-        assertThrows(IllegalArgumentException::class.java) { rebuild.rebuildPage(limit) }
+    fun `범위를 벗어난 페이지일 때__복구하면__트랜잭션에는 들어가지만 SQL은 실행하지 않는다`(limit: Int) {
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { rebuild.rebuildPage(limit) }
 
+        // then
+        assertNotNull(thrown)
         assertEquals(listOf("begin", "failure"), events)
-        verifyNoInteractions(jdbc)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__a_transaction_operation_without_an_actual_transaction__when__recovering_an_invalid_limit__then__reject_the_resource_boundary_first() {
+    fun `실제 트랜잭션이 없는 트랜잭션 연산일 때__잘못된 한도로 복구하면__리소스 경계를 먼저 거부한다`() {
+        // given
         markActual = false
 
-        assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(0) }
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(0) }
 
-        verifyNoInteractions(jdbc)
+        // then
+        assertNotNull(thrown)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__no_recovery_candidates__when__recovering__then__return_zero_and_issue_no_source_read_or_upsert() {
-        `when`(jdbc.queryForList(anyString(), anyMap<String, Any>(), eq(Long::class.javaObjectType))).thenReturn(listOf())
+    fun `복구 후보가 없을 때__복구하면__0을 돌려주고 원본 조회나 upsert를 실행하지 않는다`() {
+        // given
+        every { jdbc.queryForList(any<String>(), any<Map<String, Any>>(), Long::class.javaObjectType) } returns listOf()
 
-        assertEquals(0, rebuild.rebuildPage(100))
+        // when
+        val recovered = rebuild.rebuildPage(100)
 
-        verify(jdbc, never()).queryForMap(anyString(), anyMap<String, Any>())
-        verify(jdbc, never()).update(anyString(), anyMap<String, Any>())
+        // then
+        assertEquals(0, recovered)
+        verify(exactly = 1) { jdbc.queryForList(any<String>(), any<Map<String, Any>>(), Long::class.javaObjectType) }
+        verify(exactly = 0) { jdbc.queryForMap(any<String>(), any<Map<String, Any>>()) }
+        verify(exactly = 0) { jdbc.update(any<String>(), any<Map<String, Any>>()) }
+        confirmVerified(jdbc)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["query", "upsert", "commit"])
-    fun given__query_projection_or_commit_failure__when__recovering__then__propagate_the_same_failure_and_stop_following_work(
-        stage: String,
-    ) {
+    fun `조회나 프로젝션이나 커밋이 실패할 때__복구하면__같은 실패를 전파하고 뒤따르는 작업을 멈춘다`(stage: String) {
+        // given
         failAt = stage
 
-        assertSame(failure, assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(100) })
+        every { jdbc.queryForList(any<String>(), any<Map<String, Any>>(), Long::class.javaObjectType) } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("query")
+            val sql = firstArg<String>()
+            val values = secondArg<Map<String, *>>()
+            assertEquals(KoreanSearchTerms.VERSION, values["version"])
+            assertTrue(sql.contains("FROM pawbridge_store.products p JOIN pawbridge_store.product_search_source s ON s.product_id=p.id"))
+            assertTrue(sql.contains("LEFT JOIN pawbridge_store.product_search_documents d ON d.product_id=p.id"))
+            assertTrue(sql.contains("WHERE p.status='ACTIVE' AND (d.product_id IS NULL OR d.sku_id<>s.sku_id"))
+            assertTrue(sql.contains("OR d.source_name<>s.name OR d.source_option<>s.option_name OR d.analyzer_version<>:version)"))
+            assertTrue(sql.contains("ORDER BY p.id LIMIT :limit FOR UPDATE OF p SKIP LOCKED"))
+            if ("query" == failAt) {
+                throw failure
+            }
+            if ((values["limit"] as Int) == 1) listOf(2L) else listOf(2L, 8L)
+        }
+        every { jdbc.queryForMap(any<String>(), any<Map<String, Any>>()) } answers {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("source")
+            assertEquals(
+                "SELECT sku_id,name,option_name FROM pawbridge_store.product_search_source WHERE product_id=:id",
+                firstArg<String>(),
+            )
+            val id = secondArg<Map<String, *>>()["id"] as Long
+            mapOf<String, Any>("sku_id" to id * 10, "name" to "강아지 사료", "option_name" to "용량: 2kg")
+        }
+        every { jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            events.add("upsert")
+            assertTrue(firstArg<String>().contains("INSERT INTO pawbridge_store.product_search_documents"))
+            upserts.add(secondArg<Map<String, *>>())
+            if ("upsert" == failAt) {
+                throw failure
+            }
+            1
+        }
 
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { rebuild.rebuildPage(100) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(if (stage == "query") 0 else if (stage == "upsert") 1 else 2, upserts.size)
         assertEquals("failure", events.last())
         if (stage != "commit") {
