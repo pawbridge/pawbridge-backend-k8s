@@ -96,9 +96,9 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn("filter { failOnNoMatchingTests = true }", task)
         self.assertIn('result.testCount == 0 || result.skippedTestCount > 0', task)
         self.assertIn('outputs.upToDateWhen { false }', task)
-        for file, env in [('OwnedPostgresqlStoreOrderAdministrationTest.java', 'P13_PG_SETTINGS'),
-                          ('OwnedPostgresqlAnimalTravelTest.java', 'P14_PG_SETTINGS')]:
-            source = (ROOT / 'backend-app/boot/src/test/java/com/pawbridge/backend/boot/configuration' / file).read_text()
+        for file, env in [('OwnedPostgresqlStoreOrderAdministrationTest.kt', 'P13_PG_SETTINGS'),
+                          ('OwnedPostgresqlAnimalTravelTest.kt', 'P14_PG_SETTINGS')]:
+            source = (ROOT / 'backend-app/boot/src/test/kotlin/com/pawbridge/backend/boot/configuration' / file).read_text()
             self.assertIn('System.getenv("' + env + '")', source)
             self.assertNotIn('PAWBRIDGE_OWNED_SETTINGS_ENV', source)
             self.assertNotIn('assumeTrue', source)
