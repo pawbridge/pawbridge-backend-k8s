@@ -7,6 +7,7 @@ import com.pawbridge.backend.community.internal.chat.application.MemberChatRejec
 import com.pawbridge.backend.community.internal.chat.infrastructure.MemberChatTickets
 import java.security.Principal
 import java.time.Clock
+import java.util.Optional
 import org.springframework.http.HttpStatus
 import org.springframework.messaging.handler.annotation.Header
 import org.springframework.messaging.handler.annotation.MessageExceptionHandler
@@ -25,22 +26,25 @@ class MemberChatSocketController(
     private val clock: Clock,
 ) {
 
+    // A Kotlin nullable parameter makes Spring treat the argument as optional and wrap it in java.util.Optional,
+    // so the Principal is declared as Optional<Principal> (the Java original received the Principal itself).
     // `input` stays non-null: Spring requires the payload (`@Payload` is required by default), so an empty
     // payload fails in the argument resolver and reaches invalidFrame() exactly as before.
     @MessageMapping("/chat/send")
     fun send(
         @Payload input: Send,
-        principal: Principal?,
+        principal: Optional<Principal>,
         @Header("simpSessionId") sessionId: String,
     ) {
-        if (principal !is MemberChatTickets.Identity) {
+        val identity = principal.orElse(null)
+        if (identity !is MemberChatTickets.Identity) {
             return
         }
         val response: Any = try {
-            if (principal.expiresAt <= clock.millis()) {
+            if (identity.expiresAt <= clock.millis()) {
                 throw MemberChatRejectedException(HttpStatus.UNAUTHORIZED.value(), "로그인이 만료되었습니다.")
             }
-            service.send(principal.memberId, input)
+            service.send(identity.memberId, input)
         } catch (rejected: MemberChatRejectedException) {
             Failure(input.requestId, rejected.status(), rejected.message)
         } catch (unavailable: RuntimeException) {
