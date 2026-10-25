@@ -3,6 +3,7 @@ package com.pawbridge.backend
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.DeletePost
 import com.pawbridge.backend.community.internal.post.application.PostDeletion
@@ -17,8 +18,12 @@ import com.pawbridge.backend.community.internal.post.web.AdminPostDeleteControll
 import com.pawbridge.backend.community.internal.post.web.AdminPostUpdateController
 import com.pawbridge.backend.community.internal.post.web.PostDeleteExceptionHandler
 import com.pawbridge.backend.community.internal.post.web.PostUpdateExceptionHandler
-import com.pawbridge.backend.support.eqValue
 import com.pawbridge.backend.user.api.UserNicknameQuery
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.BeforeEach
@@ -26,15 +31,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyList
-import org.mockito.ArgumentMatchers.argThat
-import org.mockito.ArgumentMatchers.nullable
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -45,7 +41,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
@@ -76,22 +71,22 @@ class AdminPostMutationHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var reader: PostReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var remover: PostMediaRemover
 
-    @MockitoBean
+    @MockkBean
     lateinit var uploader: PostMediaUploader
 
-    @MockitoBean
+    @MockkBean
     lateinit var users: UserNicknameQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var writer: PostModification
 
-    @MockitoBean
+    @MockkBean
     lateinit var deletion: PostDeletion
 
     private val time = LocalDateTime.of(2026, 10, 20, 12, 0)
@@ -117,37 +112,30 @@ class AdminPostMutationHttpTest {
     }
 
     @BeforeEach
-    fun givenAnotherAuthorsExistingPost() {
+    fun prepareAnotherAuthorsExistingPost() {
         existing = PostSnapshot(42, 7, "title", "content", "MISSING", listOf("https://fixture.invalid/old"), time, time)
-        whenever(reader.findById(42)).thenReturn(Optional.of(existing))
-        whenever(users.findNickname(7)).thenReturn(Optional.of("작성자"))
-        @Suppress("UNCHECKED_CAST")
-        val anyImageUrls = List::class.java as Class<List<String?>>
-        whenever(
-            writer.update(
-                eqValue(42L),
-                eqValue(7L),
-                nullable(String::class.java),
-                nullable(String::class.java),
-                nullable(anyImageUrls),
-            ),
-        ).thenAnswer { call ->
+    }
+
+    @Test
+    fun `검증된 관리자와 타인 작성자 글__부분 수정하면__원작성자와 아홉 필드를 유지하고 위조 신원을 무시한다`() {
+        // given
+        every { reader.findById(42) } returns Optional.of(existing)
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } answers {
             PostSnapshot(
                 42,
                 7,
-                call.getArgument<String?>(2) ?: existing.title(),
-                call.getArgument<String?>(3) ?: existing.content(),
+                arg<String?>(2) ?: existing.title(),
+                arg<String?>(3) ?: existing.content(),
                 existing.boardType(),
-                call.getArgument<List<String?>?>(4) ?: existing.imageUrls(),
+                arg<List<String?>?>(4) ?: existing.imageUrls(),
                 time,
                 time,
             )
         }
-    }
 
-    @Test
-    fun given__verified_admin_and_foreign_author__when__partial_put__then__keep_original_author_and_nine_fields_while_ignoring_forged_identity() {
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "$ROOT/42")
                 .param("title", "")
                 .param("authorId", "99")
@@ -155,6 +143,9 @@ class AdminPostMutationHttpTest {
                 .header("X-User-Role", "ROLE_USER")
                 .header("Authorization", admin()),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.code").value(200))
             .andExpect(jsonPath("$.message").value("게시글이 수정되었습니다."))
@@ -165,89 +156,141 @@ class AdminPostMutationHttpTest {
             .andExpect(jsonPath("$.data.content").value("content"))
             .andExpect(jsonPath("$.data.boardType").value("MISSING"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verify(writer).update(42, 7, "", null, null)
-        verify(users).findNickname(7)
-        verifyNoInteractions(remover, uploader, deletion)
+        verify(exactly = 1) { writer.update(42, 7, "", null, null) }
+        verify(exactly = 1) { users.findNickname(7) }
+        confirmVerified(remover, uploader, deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__one_empty_file__when__admin_puts__then__replace_media_with_empty_list_using_existing_order() {
-        whenever(uploader.upload(anyList())).thenReturn(listOf())
-        mvc.perform(
+    fun `빈 파일 하나__관리자가 수정하면__기존 순서대로 미디어를 빈 목록으로 교체한다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(existing)
+        justRun { remover.remove(any()) }
+        every { uploader.upload(any()) } returns listOf()
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } answers {
+            PostSnapshot(
+                42,
+                7,
+                arg<String?>(2) ?: existing.title(),
+                arg<String?>(3) ?: existing.content(),
+                existing.boardType(),
+                arg<List<String?>?>(4) ?: existing.imageUrls(),
+                time,
+                time,
+            )
+        }
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "$ROOT/42")
                 .file(MockMultipartFile("files", "empty.png", "image/png", ByteArray(0)))
                 .header("Authorization", admin()),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.imageUrls").isEmpty())
-        val order = inOrder(reader, remover, uploader, users, writer)
-        order.verify(reader).findById(42)
-        order.verify(remover).remove(existing.imageUrls())
-        order.verify(uploader).upload(argThat<List<PostUpload>> { files -> files.size == 1 && files.first().size == 0L })
-        order.verify(users).findNickname(7)
-        order.verify(writer).update(42, 7, null, null, listOf())
+        verifyOrder {
+            reader.findById(42)
+            remover.remove(existing.imageUrls())
+            uploader.upload(match { files -> files != null && files.size == 1 && files.first().size == 0L })
+            users.findNickname(7)
+            writer.update(42, 7, null, null, listOf())
+        }
     }
 
     @Test
-    fun given__upload_failure_after_old_media_attempt__when__admin_puts__then__return_safe_500_without_db_or_compensation() {
-        whenever(uploader.upload(anyList())).thenThrow(IllegalStateException(PRIVATE))
-        mvc.perform(
+    fun `이전 미디어 삭제 시도 뒤 업로드 실패__관리자가 수정하면__DB 접근과 보상 없이 안전한 500을 돌려준다`() {
+        // given
+        every { reader.findById(42) } returns Optional.of(existing)
+        justRun { remover.remove(any()) }
+        every { uploader.upload(any()) } throws IllegalStateException(PRIVATE)
+
+        // when
+        val result = mvc.perform(
             multipart(HttpMethod.PUT, "$ROOT/42")
                 .file(MockMultipartFile("files", "a.png", "image/png", byteArrayOf(1)))
                 .header("Authorization", admin()),
         )
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 에러!"))
             .andExpect(content().string(Matchers.not(Matchers.containsString(PRIVATE))))
-        verify(remover).remove(existing.imageUrls())
-        verifyNoMoreInteractions(remover)
-        verifyNoInteractions(users, writer, deletion)
+        verify(exactly = 1) { remover.remove(existing.imageUrls()) }
+        confirmVerified(remover)
+        confirmVerified(users, writer, deletion)
     }
 
     @Test
-    fun given__foreign_post_then_already_deleted__when__admin_deletes_twice__then__first_returns_empty_data_and_second_404_without_repeated_effects() {
-        mvc.perform(delete("$ROOT/42").header("Authorization", admin()))
+    fun `타인 글을 삭제한 뒤 이미 삭제됨__관리자가 두 번 삭제하면__첫 번째는 빈 데이터 두 번째는 404이고 효과는 반복되지 않는다`() {
+        // given
+        every { reader.findById(42) } returns Optional.of(existing)
+        justRun { remover.remove(any()) }
+        justRun { deletion.delete(any(), any()) }
+
+        // when
+        val first = mvc.perform(delete("$ROOT/42").header("Authorization", admin()))
+        every { reader.findById(42) } returns Optional.empty()
+        val second = mvc.perform(delete("$ROOT/42").header("Authorization", admin()))
+
+        // then
+        first
             .andExpect(status().isOk())
             .andExpect(content().json("{\"code\":200,\"message\":\"게시글이 삭제되었습니다.\",\"data\":null}"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        whenever(reader.findById(42)).thenReturn(Optional.empty())
-        mvc.perform(delete("$ROOT/42").header("Authorization", admin())).andExpect(status().isNotFound())
-        val order = inOrder(remover, deletion)
-        order.verify(remover).remove(existing.imageUrls())
-        order.verify(deletion).delete(42, 7)
-        order.verifyNoMoreInteractions()
-        verifyNoInteractions(uploader, users, writer)
+        second.andExpect(status().isNotFound())
+        verifyOrder {
+            remover.remove(existing.imageUrls())
+            deletion.delete(42, 7)
+        }
+        confirmVerified(remover, deletion)
+        confirmVerified(uploader, users, writer)
     }
 
     @ParameterizedTest
     @CsvSource("PUT,missing,401", "DELETE,missing,401", "PUT,ROLE_USER,403", "DELETE,ROLE_USER,403", "PUT,ROLE_SHELTER,403", "DELETE,ROLE_SHELTER,403")
-    fun given__missing_or_non_admin_identity_and_forged_admin_header__when__requesting_bad_id__then__deny_before_binding_or_effects(
+    fun `신원 없음 또는 비관리자와 위조 관리자 헤더__잘못된 ID로 요청하면__바인딩과 효과 전에 거부한다`(
         method: String,
         role: String,
         status: Int,
     ) {
+        // given
         val request = mutation(method, "bad-id").header("X-User-Role", "ROLE_ADMIN").header("X-User-Id", "99")
         if (role != "missing") {
             request.header("Authorization", "Bearer " + F3TestInputs.token(99, role))
         }
-        mvc.perform(request).andExpect(status().`is`(status))
-        verifyNoInteractions(reader, remover, uploader, users, writer, deletion)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().`is`(status))
+        confirmVerified(reader, remover, uploader, users, writer, deletion)
     }
 
     @ParameterizedTest
     @CsvSource("PUT,missing,404", "DELETE,missing,404", "PUT,db,500", "DELETE,db,500")
-    fun given__missing_or_late_writer_failure__when__admin_mutates__then__reuse_scoped_response_and_safe_metadata_only_log(
+    fun `없는 글 또는 늦은 쓰기 실패__관리자가 변경하면__범위 응답과 안전한 메타데이터만 로그한다`(
         method: String,
         mode: String,
         expected: Int,
     ) {
+        // given
         if (mode == "missing") {
-            whenever(reader.findById(42)).thenReturn(Optional.empty())
+            every { reader.findById(42) } returns Optional.empty()
         } else if (method == "PUT") {
-            whenever(writer.update(42, 7, null, null, null)).thenThrow(IllegalStateException(PRIVATE))
+            every { reader.findById(42) } returns Optional.of(existing)
+            every { users.findNickname(7) } returns Optional.of("작성자")
+            every { writer.update(42, 7, null, null, null) } throws IllegalStateException(PRIVATE)
         } else {
-            doThrow(IllegalStateException(PRIVATE)).`when`(deletion).delete(42, 7)
+            every { reader.findById(42) } returns Optional.of(existing)
+            justRun { remover.remove(any()) }
+            every { deletion.delete(42, 7) } throws IllegalStateException(PRIVATE)
         }
         val logger = LoggerFactory.getLogger(
             if (method == "PUT") PostUpdateExceptionHandler::class.java else PostDeleteExceptionHandler::class.java,
@@ -255,8 +298,13 @@ class AdminPostMutationHttpTest {
         val events = ListAppender<ILoggingEvent>()
         events.start()
         logger.addAppender(events)
+
         try {
-            mvc.perform(mutation(method, "42").header("Authorization", admin()))
+            // when
+            val result = mvc.perform(mutation(method, "42").header("Authorization", admin()))
+
+            // then
+            result
                 .andExpect(status().`is`(expected))
                 .andExpect(jsonPath("$.message").value(if (expected == 404) "게시글을 찾을 수 없습니다." else "서버 에러!"))
                 .andExpect(content().string(Matchers.not(Matchers.containsString(PRIVATE))))
@@ -269,7 +317,7 @@ class AdminPostMutationHttpTest {
                     assertThat(event.formattedMessage).contains("java.lang.IllegalStateException")
                 }
             } else {
-                verifyNoInteractions(remover, uploader, users, writer, deletion)
+                confirmVerified(remover, uploader, users, writer, deletion)
             }
         } finally {
             logger.detachAppender(events)
@@ -279,18 +327,32 @@ class AdminPostMutationHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["PUT", "DELETE"])
-    fun given__admin_and_invalid_numeric_path__when__binding__then__preserve_original_500_before_business(method: String) {
-        mvc.perform(mutation(method, "not-a-long").header("Authorization", admin()))
+    fun `관리자와 잘못된 숫자 경로__바인딩하면__업무 처리 전에 기존 500을 유지한다`(method: String) {
+        // given
+        val request = mutation(method, "not-a-long").header("Authorization", admin())
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 에러!"))
-        verifyNoInteractions(reader, remover, uploader, users, writer, deletion)
+        confirmVerified(reader, remover, uploader, users, writer, deletion)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PUT", "DELETE"])
-    fun given__admin_on_deeper_unported_path__when__requesting__then__retain_default_deny(method: String) {
-        mvc.perform(mutation(method, "42/extra").header("Authorization", admin())).andExpect(status().isForbidden())
-        verifyNoInteractions(reader, remover, uploader, users, writer, deletion)
+    fun `관리자와 더 깊은 미이식 경로__요청하면__기본 거부를 유지한다`(method: String) {
+        // given
+        val request = mutation(method, "42/extra").header("Authorization", admin())
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(reader, remover, uploader, users, writer, deletion)
     }
 
     companion object {

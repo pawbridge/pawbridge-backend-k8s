@@ -22,16 +22,16 @@ import com.pawbridge.backend.user.internal.signup.application.ShelterApprovalReq
 import com.pawbridge.backend.user.internal.signup.application.SignedUp
 import com.pawbridge.backend.user.internal.signup.application.SignupRole
 import com.pawbridge.backend.user.internal.signup.web.LocalSignupController
+import com.ninjasquad.springmockk.MockkBean
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -40,7 +40,6 @@ import org.springframework.data.redis.RedisConnectionFailureException
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -73,20 +72,33 @@ class LocalAuthHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var verifications: EmailVerifications
 
-    @MockitoBean
+    @MockkBean
     lateinit var signups: LocalSignup
 
-    @MockitoBean
+    @MockkBean
     lateinit var resets: PasswordReset
 
     @Test
-    fun given__no_token__when__sending_and_verifying_email__then__public_routes_return_original_bodies() {
-        whenever(verifications.verifyCode("a@b.c", "123456")).thenReturn(true)
+    fun `토큰이 없을 때__이메일을 보내고 확인하면__공개 경로가 원래 본문을 돌려준다`() {
+        // given
+        justRun { verifications.sendVerificationCode(any()) }
+        every { verifications.verifyCode(any(), any()) } returns true
 
-        mvc.perform(post("/api/v1/email/send").contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"a@b.c\"}"))
+        // when
+        val sent = mvc.perform(
+            post("/api/v1/email/send").contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"a@b.c\"}"),
+        )
+        val verified = mvc.perform(
+            post("/api/v1/email/verify")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"a@b.c\",\"code\":\"123456\"}"),
+        )
+
+        // then
+        sent
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
@@ -95,11 +107,7 @@ class LocalAuthHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        mvc.perform(
-            post("/api/v1/email/verify")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"a@b.c\",\"code\":\"123456\"}"),
-        )
+        verified
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -107,22 +115,27 @@ class LocalAuthHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(verifications).sendVerificationCode("a@b.c")
-        verify(verifications).verifyCode("a@b.c", "123456")
-        verifyNoMoreInteractions(verifications)
+        verify(exactly = 1) { verifications.sendVerificationCode("a@b.c") }
+        verify(exactly = 1) { verifications.verifyCode("a@b.c", "123456") }
+        confirmVerified(verifications)
     }
 
     @Test
-    fun given__no_token__when__signing_up__then__public_route_forwards_raw_fields_and_returns_original_success() {
-        whenever(signups.signUp("a@b.c", "Kim", "pass12", "pass12", SignupRole.ROLE_USER, null))
-            .thenReturn(SignedUp(7, "a@b.c", "Kim", "아주귀여운강아지"))
+    fun `토큰이 없을 때__가입하면__공개 경로가 원본 필드를 넘기고 원래 성공 응답을 돌려준다`() {
+        // given
+        every { signups.signUp(any(), any(), any(), any(), any(), any()) } returns
+            SignedUp(7, "a@b.c", "Kim", "아주귀여운강아지")
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             post("/api/v1/users/signup")
                 .header("Authorization", "Bearer ignored")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(SIGNUP),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -131,16 +144,30 @@ class LocalAuthHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(verifications, resets)
+        verify(exactly = 1) { signups.signUp("a@b.c", "Kim", "pass12", "pass12", SignupRole.ROLE_USER, null) }
+        confirmVerified(signups, verifications, resets)
     }
 
     @Test
-    fun given__no_token__when__resetting_password__then__public_routes_return_original_messages() {
-        mvc.perform(
+    fun `토큰이 없을 때__비밀번호를 재설정하면__공개 경로가 원래 메시지를 돌려준다`() {
+        // given
+        justRun { resets.request(any()) }
+        justRun { resets.reset(any(), any(), any()) }
+
+        // when
+        val requested = mvc.perform(
             post("/api/v1/auth/password/reset-request")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"a@b.c\"}"),
         )
+        val reset = mvc.perform(
+            post("/api/v1/auth/password/reset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"a@b.c\",\"code\":\"123456\",\"newPassword\":\"NewPass1!\"}"),
+        )
+
+        // then
+        requested
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -148,34 +175,35 @@ class LocalAuthHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        mvc.perform(
-            post("/api/v1/auth/password/reset")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"a@b.c\",\"code\":\"123456\",\"newPassword\":\"NewPass1!\"}"),
-        )
+        reset
             .andExpect(status().isOk())
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"비밀번호가 재설정되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(resets).request("a@b.c")
-        verify(resets).reset("a@b.c", "123456", "NewPass1!")
+        verify(exactly = 1) { resets.request("a@b.c") }
+        verify(exactly = 1) { resets.reset("a@b.c", "123456", "NewPass1!") }
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__service_failure__when__calling_a_public_route__then__map_to_original_status_and_message(
+    fun `서비스가 실패했을 때__공개 경로를 호출하면__원래 상태와 메시지로 매핑한다`(
         path: String,
         body: String,
         failure: RuntimeException,
         status: Int,
         message: String,
     ) {
-        doThrow(failure).`when`(verifications).sendVerificationCode("a@b.c")
-        doThrow(failure).`when`(verifications).verifyCode("a@b.c", "123456")
-        whenever(signups.signUp("a@b.c", "Kim", "pass12", "pass12", SignupRole.ROLE_USER, null)).thenThrow(failure)
-        doThrow(failure).`when`(resets).reset("a@b.c", "123456", "NewPass1!")
+        // given
+        every { verifications.sendVerificationCode("a@b.c") } throws failure
+        every { verifications.verifyCode("a@b.c", "123456") } throws failure
+        every { signups.signUp("a@b.c", "Kim", "pass12", "pass12", SignupRole.ROLE_USER, null) } throws failure
+        every { resets.reset("a@b.c", "123456", "NewPass1!") } throws failure
 
-        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body))
+        // when
+        val result = mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body))
+
+        // then
+        result
             .andExpect(status().`is`(status))
             .andExpect(
                 content().json(
@@ -187,17 +215,24 @@ class LocalAuthHttpTest {
 
     @ParameterizedTest
     @MethodSource("invalidBodies")
-    fun given__invalid_or_unreadable_body__when__calling_a_public_route__then__400_before_service(
+    fun `본문이 잘못되었거나 읽을 수 없을 때__공개 경로를 호출하면__서비스 전에 400을 돌려준다`(
         path: String,
         body: String,
         message: String,
     ) {
-        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body))
+        // given
+        val request = post(path).contentType(MediaType.APPLICATION_JSON).content(body)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(verifications, signups, resets)
+        confirmVerified(verifications, signups, resets)
     }
 
     @ParameterizedTest
@@ -209,13 +244,20 @@ class LocalAuthHttpTest {
             "POST /api/v1/auth/password/other", "POST /api/auth/password/reset",
         ],
     )
-    fun given__method_or_path_outside_the_original_whitelist__when__requesting__then__deny_without_service(
+    fun `원래 허용 목록 밖의 메서드나 경로일 때__요청하면__서비스 없이 거절한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).contentType(MediaType.APPLICATION_JSON).content("{}"))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(verifications, signups, resets)
+
+        // when
+        val result = mvc.perform(
+            request(HttpMethod.valueOf(parts[0]), parts[1]).contentType(MediaType.APPLICATION_JSON).content("{}"),
+        )
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(verifications, signups, resets)
     }
 
     companion object {

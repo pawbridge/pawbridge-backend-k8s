@@ -9,14 +9,15 @@ import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
+import com.ninjasquad.springmockk.MockkBean
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -24,7 +25,6 @@ import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -56,56 +56,60 @@ class HomeVideoHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var videos: ReadHomeVideos
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(strings = ["", "Bearer invalid"])
-    fun given__anonymous_or_bad_bearer__when__reading_home_videos__then__return_exact_eleven_fields_nulls_and_microsecond_instants(
+    fun `익명이거나 잘못된 베어러일 때__홈 영상을 읽으면__열한 개 필드와 null과 마이크로초 시각을 그대로 돌려준다`(
         authorization: String,
     ) {
-        whenever(videos.read()).thenReturn(
-            listOf(
-                HomeVideo(
-                    UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                    "abcdefghijk",
-                    true,
-                    -1,
-                    Instant.parse("2026-10-01T03:04:05.123456Z"),
-                    null,
-                    "",
-                    null,
-                    null,
-                    true,
-                    Instant.parse("2026-10-19T05:06:07.654321Z"),
-                ),
-                HomeVideo(
-                    UUID.fromString("00000000-0000-0000-0000-000000000002"),
-                    "lmnopqrstuv",
-                    true,
-                    0,
-                    Instant.parse("2026-10-02T03:04:05.000001Z"),
-                    "",
-                    "기관",
-                    "https://images.fixture.invalid/video.jpg",
-                    2_147_483_648L,
-                    true,
-                    Instant.parse("2026-10-19T05:06:08.000001Z"),
-                ),
-            ),
-        )
+        // given
         val request = get("/api/v1/home/videos").header("X-User-Id", "999").header("X-User-Role", "ROLE_ADMIN")
         if (authorization.isNotEmpty()) {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        every { videos.read() } returns listOf(
+            HomeVideo(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                "abcdefghijk",
+                true,
+                -1,
+                Instant.parse("2026-10-01T03:04:05.123456Z"),
+                null,
+                "",
+                null,
+                null,
+                true,
+                Instant.parse("2026-10-19T05:06:07.654321Z"),
+            ),
+            HomeVideo(
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                "lmnopqrstuv",
+                true,
+                0,
+                Instant.parse("2026-10-02T03:04:05.000001Z"),
+                "",
+                "기관",
+                "https://images.fixture.invalid/video.jpg",
+                2_147_483_648L,
+                true,
+                Instant.parse("2026-10-19T05:06:08.000001Z"),
+            ),
+        )
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
@@ -124,17 +128,21 @@ class HomeVideoHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(videos).read()
-        verifyNoInteractions(readPost, listPosts)
+        verify(exactly = 1) { videos.read() }
+        confirmVerified(videos, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__no_visible_videos__when__reading_home__then__return_successful_empty_array() {
-        whenever(videos.read()).thenReturn(listOf())
+    fun `보이는 영상이 없을 때__홈을 읽으면__성공 응답과 빈 배열을 돌려준다`() {
+        // given
+        every { videos.read() } returns listOf()
 
-        mvc.perform(get("/api/v1/home/videos"))
+        // when
+        val result = mvc.perform(get("/api/v1/home/videos"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -142,18 +150,22 @@ class HomeVideoHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(videos).read()
+        verify(exactly = 1) { videos.read() }
     }
 
     @ParameterizedTest
     @MethodSource("readFailures")
-    fun given__query_transaction_or_runtime_failure__when__reading_home__then__return_only_safe_503_envelope(
+    fun `조회나 트랜잭션이나 런타임 실패가 났을 때__홈을 읽으면__안전한 503 응답만 돌려준다`(
         failure: RuntimeException,
     ) {
-        whenever(videos.read()).thenThrow(failure)
+        // given
+        every { videos.read() } throws failure
 
-        mvc.perform(get("/api/v1/home/videos").header("Authorization", "Bearer synthetic-private-token"))
+        // when
+        val result = mvc.perform(get("/api/v1/home/videos").header("Authorization", "Bearer synthetic-private-token"))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
@@ -162,9 +174,8 @@ class HomeVideoHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(videos).read()
-        verifyNoInteractions(readPost, listPosts)
+        verify(exactly = 1) { videos.read() }
+        confirmVerified(videos, readPost, listPosts)
     }
 
     @ParameterizedTest
@@ -176,30 +187,38 @@ class HomeVideoHttpTest {
             "OPTIONS /api/v1/home/videos",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting__then__deny_before_home_video_read(request: String) {
+    fun `노출하지 않은 메서드나 인접 경로일 때__요청하면__홈 영상 조회 전에 거절한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
 
-        mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]))
-            .andExpect(status().isForbidden())
+        // when
+        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]))
 
-        verifyNoInteractions(videos, readPost, listPosts)
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(videos, readPost, listPosts)
     }
 
     @Test
-    fun given__protected_favorite_get_and_existing_post_failure__when__requesting__then__home_advice_and_public_matcher_remain_scoped() {
-        whenever(readPost.read(42)).thenThrow(IllegalStateException("synthetic-private-post"))
+    fun `보호된 즐겨찾기 조회와 게시글 읽기 실패일 때__요청하면__홈 영상 어드바이스와 공개 매처의 범위가 유지된다`() {
+        // given
+        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
 
-        mvc.perform(get("/api/v1/favorites/42/check"))
+        // when
+        val favorite = mvc.perform(get("/api/v1/favorites/42/check"))
+        val post = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+
+        // then
+        favorite
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"인증 토큰이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+        post
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-
-        verify(readPost).read(42)
-        verifyNoInteractions(videos, listPosts)
+        verify(exactly = 1) { readPost.read(42) }
+        confirmVerified(videos, readPost, listPosts)
     }
 
     companion object {

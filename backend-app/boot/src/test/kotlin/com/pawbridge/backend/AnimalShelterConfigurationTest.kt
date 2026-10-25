@@ -7,11 +7,12 @@ import com.pawbridge.backend.animal.internal.shelter.web.ShelterDiscoveryReadCon
 import com.pawbridge.backend.animal.internal.shelter.web.ShelterReadController
 import com.pawbridge.backend.animal.internal.shelter.web.ShelterReadExceptionHandler
 import com.pawbridge.backend.boot.configuration.AnimalShelterConfiguration
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.aop.support.AopUtils
 import org.springframework.beans.factory.config.BeanDefinitionCustomizer
 import org.springframework.boot.autoconfigure.AutoConfigurations
@@ -30,14 +31,18 @@ import javax.sql.DataSource
 class AnimalShelterConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false"])
-    fun given__shelters_disabled_even_with_postgresql_backend__when__assembling_without_database_inputs__then__create_no_shelter_beans(
+    fun `보호소가 꺼졌고 postgresql 백엔드일 때__DB 입력 없이 조립하면__보호소 빈을 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = context().withPropertyValues("pawbridge.animal-query.backend=postgresql")
         if (flag == "false") {
             runner = runner.withPropertyValues("pawbridge.animal-shelters.enabled=false")
         }
+
+        // when
         runner.run { result ->
+            // then
             assertThat(result).hasNotFailed()
                 .doesNotHaveBean(ShelterReads::class.java)
                 .doesNotHaveBean(ShelterReadController::class.java)
@@ -51,13 +56,14 @@ class AnimalShelterConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "elasticsearch", "postgresql", "POSTGRESQL"])
-    fun given__enabled_shelters_and_selected_backend__when__assembling_and_closing__then__reuse_named_reader_inputs_and_register_only_source_selected_controllers(
+    fun `보호소가 켜지고 백엔드를 골랐을 때__조립하고 닫으면__읽기 입력을 재사용하고 해당 컨트롤러만 등록한다`(
         backend: String,
     ) {
-        val source = mock(DataSource::class.java)
-        val writer = mock(DataSource::class.java)
-        val manager = mock(PlatformTransactionManager::class.java)
-        val writerManager = mock(PlatformTransactionManager::class.java)
+        // given
+        val source = mockk<DataSource>()
+        val writer = mockk<DataSource>()
+        val manager = mockk<PlatformTransactionManager>()
+        val writerManager = mockk<PlatformTransactionManager>()
         val mapper = ObjectMapper()
         var runner = context().withPropertyValues("pawbridge.animal-shelters.enabled=true")
             .withBean("dataSource", DataSource::class.java, Supplier { source })
@@ -78,7 +84,10 @@ class AnimalShelterConfigurationTest {
         if (backend != "absent") {
             runner = runner.withPropertyValues("pawbridge.animal-query.backend=$backend")
         }
+
+        // when
         runner.run { result ->
+            // then
             assertThat(result).hasNotFailed()
                 .hasSingleBean(ShelterReads::class.java)
                 .hasSingleBean(ShelterReadController::class.java)
@@ -114,10 +123,22 @@ class AnimalShelterConfigurationTest {
             assertThat(PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java })
                 .contains(AnimalShelterConfiguration::class.java)
         }
-        verifyNoInteractions(source, writer, manager, writerManager)
+        confirmNoBusinessCalls(source, writer, manager, writerManager)
     }
 
     companion object {
+        /** Spring hashes registered beans, so ignore those calls and fail on any other call to the mocks. */
+        private fun confirmNoBusinessCalls(vararg mocks: Any) {
+            for (mock in mocks) {
+                excludeRecords {
+                    mock.hashCode()
+                    mock.toString()
+                    mock.equals(any())
+                }
+            }
+            confirmVerified(*mocks)
+        }
+
         private fun context(): ApplicationContextRunner {
             return ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))

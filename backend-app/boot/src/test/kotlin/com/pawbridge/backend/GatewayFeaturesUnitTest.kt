@@ -29,9 +29,14 @@ class GatewayFeaturesUnitTest {
         "http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173",
         "https://pawbridge.kr", "https://www.pawbridge.kr", "https://admin.pawbridge.kr",
     )
-    fun given__original_gateway_origin__when__preflight__then__answer_without_reaching_the_chain(origin: String) {
+    fun `원래 게이트웨이 출처일 때__사전 요청하면__체인에 닿지 않고 응답한다`(origin: String) {
+        // given
         val chain = MockFilterChain()
+
+        // when
         val response = cors(DEFAULT_ORIGINS, preflight(origin, "PATCH", "authorization, content-type"), chain)
+
+        // then
         assertThat(response.status).isEqualTo(200)
         assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo(origin)
         assertThat(response.getHeader("Access-Control-Allow-Credentials")).isEqualTo("true")
@@ -46,46 +51,68 @@ class GatewayFeaturesUnitTest {
         "http://pawbridge.kr,POST,authorization", "https://pawbridge.kr,HEAD,authorization",
         "https://pawbridge.kr,POST,x-forbidden",
     )
-    fun given__foreign_origin_method_or_header__when__preflight__then__reject(
+    fun `허용되지 않은 출처, 메서드, 헤더일 때__사전 요청하면__거절한다`(
         origin: String,
         method: String,
         headers: String,
     ) {
-        val response = cors(DEFAULT_ORIGINS, preflight(origin, method, headers), MockFilterChain())
+        // given
+        val request = preflight(origin, method, headers)
+
+        // when
+        val response = cors(DEFAULT_ORIGINS, request, MockFilterChain())
+
+        // then
         assertThat(response.status).isEqualTo(403)
         assertThat(response.getHeader("Access-Control-Allow-Origin")).isNull()
     }
 
     @Test
-    fun given__allowed_origin__when__actual_request__then__expose_retry_after_and_authorization() {
+    fun `허용된 출처일 때__실제 요청하면__Retry-After와 Authorization을 노출한다`() {
+        // given
         val request = MockHttpServletRequest("POST", "/api/v1/animals/lost-candidates")
         request.addHeader("Origin", "https://www.pawbridge.kr")
         val chain = MockFilterChain()
+
+        // when
         val response = cors(DEFAULT_ORIGINS, request, chain)
+
+        // then
         assertThat(chain.request).isNotNull()
         assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("https://www.pawbridge.kr")
         assertThat(response.getHeader("Access-Control-Expose-Headers")).contains("Retry-After", "Authorization")
     }
 
     @Test
-    fun given__foreign_origin__when__actual_request__then__continue_without_cors_headers() {
+    fun `허용되지 않은 출처일 때__실제 요청하면__CORS 헤더 없이 이어서 처리한다`() {
+        // given
         val request = MockHttpServletRequest("GET", "/api/v1/visits/today")
         request.addHeader("Origin", "https://foreign.invalid")
         val chain = MockFilterChain()
+
+        // when
         val response = cors(DEFAULT_ORIGINS, request, chain)
+
+        // then
         assertThat(chain.request).isNotNull()
         assertThat(response.status).isEqualTo(200)
         assertThat(response.getHeader("Access-Control-Allow-Origin")).isNull()
     }
 
     @Test
-    fun given__origin_override__when__preflight__then__only_the_override_is_allowed() {
-        assertThat(
-            cors("https://staging.example", preflight("https://staging.example", "GET", null), MockFilterChain()).status,
-        ).isEqualTo(200)
-        assertThat(
-            cors("https://staging.example", preflight("https://pawbridge.kr", "GET", null), MockFilterChain()).status,
-        ).isEqualTo(403)
+    fun `출처를 덮어썼을 때__사전 요청하면__덮어쓴 출처만 허용한다`() {
+        // given
+        val overridden = "https://staging.example"
+        val allowedRequest = preflight("https://staging.example", "GET", null)
+        val deniedRequest = preflight("https://pawbridge.kr", "GET", null)
+
+        // when
+        val allowedStatus = cors(overridden, allowedRequest, MockFilterChain()).status
+        val deniedStatus = cors(overridden, deniedRequest, MockFilterChain()).status
+
+        // then
+        assertThat(allowedStatus).isEqualTo(200)
+        assertThat(deniedStatus).isEqualTo(403)
     }
 
     // ---- legacy path rewrite ----
@@ -128,12 +155,18 @@ class GatewayFeaturesUnitTest {
         "GET,/api/admin/stats/intake-trend,/api/v1/admin/stats/intake-trend",
         "GET,/api/admin/stats/daily-animals,/api/v1/admin/stats/daily-animals",
     )
-    fun given__old_route_the_gateway_rewrote__when__filtering__then__present_the_v1_path(
+    fun `게이트웨이가 다시 쓰던 옛 경로일 때__필터링하면__v1 경로로 보여 준다`(
         method: String,
         path: String,
         expected: String,
     ) {
+        // given
+        // 파라미터로 주어진 method와 path를 그대로 쓴다
+
+        // when
         val seen = legacy(method, path)
+
+        // then
         assertThat(seen.uri).isEqualTo(expected)
         assertThat(seen.servletPath).isEqualTo(expected)
         assertThat(seen.pathInfo).isNull()
@@ -159,11 +192,17 @@ class GatewayFeaturesUnitTest {
         "GET,/oauth2/authorization/google", "GET,/login/oauth2/code/google", "GET,/actuator/health", "GET,/api/v1",
         "GET,/apix/animals",
     )
-    fun given__path_or_method_the_gateway_did_not_rewrite__when__filtering__then__leave_it_alone(
+    fun `게이트웨이가 다시 쓰지 않던 경로나 메서드일 때__필터링하면__그대로 둔다`(
         method: String,
         path: String,
     ) {
+        // given
+        // 파라미터로 주어진 method와 path를 그대로 쓴다
+
+        // when
         val seen = legacy(method, path)
+
+        // then
         assertThat(seen.uri).isEqualTo(path)
         assertThat(seen.original).isNull()
         assertThat(seen.status).isEqualTo(200)
@@ -171,14 +210,19 @@ class GatewayFeaturesUnitTest {
 
     @ParameterizedTest
     @CsvSource("GET,/api/users/internal/5/nickname", "PUT,/api/v1/users/internal/5/state", "DELETE,/api/users/internal/x")
-    fun given__service_to_service_user_path__when__filtering__then__refuse_with_the_gateway_404(
+    fun `서비스 간 사용자 경로일 때__필터링하면__게이트웨이 404로 거절한다`(
         method: String,
         path: String,
     ) {
+        // given
         val request = MockHttpServletRequest(method, path)
         val response = MockHttpServletResponse()
         val chain = MockFilterChain()
+
+        // when
         LegacyApiPathFilter().doFilter(request, response, chain)
+
+        // then
         assertThat(chain.request).isNull()
         assertThat(response.status).isEqualTo(404)
         assertThat(response.getContentAsString(Charsets.UTF_8))
@@ -186,27 +230,38 @@ class GatewayFeaturesUnitTest {
     }
 
     @Test
-    fun given__percent_encoded_internal_user_path__when__filtering__then__still_404() {
+    fun `퍼센트 인코딩된 내부 사용자 경로일 때__필터링하면__여전히 404다`() {
+        // given
         val paths = arrayOf(
             "/api/users/%69nternal/5/nickname",
             "/api/v1/users/internal%2F".replace("%2F", "/") + "5",
             "/api/v1/%75sers/internal/5",
         )
+
         for (path in paths) {
             val request = MockHttpServletRequest("GET", path)
             val response = MockHttpServletResponse()
             val chain = MockFilterChain()
+
+            // when
             LegacyApiPathFilter().doFilter(request, response, chain)
+
+            // then
             assertThat(chain.request).`as`(path).isNull()
             assertThat(response.status).isEqualTo(404)
         }
     }
 
     @Test
-    fun given__encoded_remainder__when__rewriting__then__servlet_path_is_decoded_and_uri_keeps_its_encoding() {
+    fun `인코딩된 나머지 경로일 때__다시 쓰면__서블릿 경로는 디코딩되고 URI는 인코딩을 유지한다`() {
+        // given
         val request = MockHttpServletRequest("GET", "/api/posts/read/a%20b")
         val chain = MockFilterChain()
+
+        // when
         LegacyApiPathFilter().doFilter(request, MockHttpServletResponse(), chain)
+
+        // then
         val seen = chain.request as HttpServletRequest
         assertThat(seen.requestURI).isEqualTo("/api/v1/posts/read/a%20b")
         assertThat(seen.servletPath).isEqualTo("/api/v1/posts/read/a b")
@@ -215,10 +270,16 @@ class GatewayFeaturesUnitTest {
     // ---- lost-candidates limits ----
 
     @Test
-    fun given__oversized_body__when__searching__then__413() {
+    fun `본문이 한도보다 클 때__검색하면__413을 돌려준다`() {
+        // given
         val filter = LostSearchLimitsFilter(10, 2, 30, 50)
         val chain = MockFilterChain()
-        assertRejected(runFilter(filter, search(TYPE, ByteArray(11)), chain), 413, "사진 크기 제한을 초과했습니다", null)
+
+        // when
+        val oversized = runFilter(filter, search(TYPE, ByteArray(11)), chain)
+
+        // then
+        assertRejected(oversized, 413, "사진 크기 제한을 초과했습니다", null)
         assertThat(chain.request).isNull()
         // exactly at the limit is admitted
         assertThat(runFilter(filter, search(TYPE, ByteArray(10)), chain).status).isEqualTo(200)
@@ -226,49 +287,70 @@ class GatewayFeaturesUnitTest {
     }
 
     @Test
-    fun given__percent_encoded_path__when__searching__then__the_same_limits_apply() {
+    fun `퍼센트 인코딩된 경로일 때__검색하면__같은 한도가 적용된다`() {
+        // given
         val filter = LostSearchLimitsFilter(10, 2, 30, 50)
         val paths = arrayOf(
             "/api/v1/animals/lost-%63andidates",
             "/api/v1/animals/lost-candidates;x=1",
             "/api/v1/animals/%6cost-candidates/",
         )
+
         for (path in paths) {
             val request = search(TYPE, ByteArray(11))
             request.requestURI = path
-            assertRejected(runFilter(filter, request, MockFilterChain()), 413, "사진 크기 제한을 초과했습니다", null)
+
+            // when
+            val response = runFilter(filter, request, MockFilterChain())
+
+            // then
+            assertRejected(response, 413, "사진 크기 제한을 초과했습니다", null)
         }
     }
 
     @Test
-    fun given__non_multipart_or_malformed_type__when__searching__then__415() {
+    fun `멀티파트가 아니거나 형식이 깨졌을 때__검색하면__415를 돌려준다`() {
+        // given
         val filter = LostSearchLimitsFilter(100, 2, 30, 50)
+
         for (type in arrayOf<String?>(null, "application/json", "text/plain", "multipart", "not a media type")) {
-            assertRejected(
-                runFilter(filter, search(type, byteArrayOf(1)), MockFilterChain()),
-                415,
-                "사진 업로드 형식을 확인해 주세요",
-                null,
-            )
+            // when
+            val response = runFilter(filter, search(type, byteArrayOf(1)), MockFilterChain())
+
+            // then
+            assertRejected(response, 415, "사진 업로드 형식을 확인해 주세요", null)
         }
     }
 
     @Test
-    fun given__declared_length_missing__when__searching__then__refuse_before_counting() {
+    fun `선언된 길이가 없을 때__검색하면__세기 전에 거절한다`() {
+        // given
         val filter = LostSearchLimitsFilter(100, 1, 1, 50)
-        assertRejected(runFilter(filter, search(TYPE, null), MockFilterChain()), 411, "사진 업로드 형식을 확인해 주세요", null)
+
+        // when
+        val refused = runFilter(filter, search(TYPE, null), MockFilterChain())
+
+        // then
+        assertRejected(refused, 411, "사진 업로드 형식을 확인해 주세요", null)
         // the refusal consumed neither the concurrency permit nor the per-minute budget
         assertThat(runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()).status).isEqualTo(200)
     }
 
     @Test
-    fun given__empty_body__when__searching__then__400() {
+    fun `본문이 비었을 때__검색하면__400을 돌려준다`() {
+        // given
         val filter = LostSearchLimitsFilter(100, 2, 30, 50)
-        assertRejected(runFilter(filter, search(TYPE, ByteArray(0)), MockFilterChain()), 400, "사진을 선택해 주세요", null)
+
+        // when
+        val response = runFilter(filter, search(TYPE, ByteArray(0)), MockFilterChain())
+
+        // then
+        assertRejected(response, 400, "사진을 선택해 주세요", null)
     }
 
     @Test
-    fun given__two_requests_in_flight__when__a_third_arrives__then__503_with_retry_after_3() {
+    fun `요청 두 건이 처리 중일 때__세 번째가 오면__Retry-After 3과 함께 503을 돌려준다`() {
+        // given
         val filter = LostSearchLimitsFilter(100, 2, 30, 50)
         val entered = CountDownLatch(2)
         val release = CountDownLatch(1)
@@ -291,51 +373,66 @@ class GatewayFeaturesUnitTest {
             worker
         }
         assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue()
-        assertRejected(runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()), 503, "잠시 후 다시 시도해 주세요", "3")
+
+        // when
+        val third = runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain())
         release.countDown()
         for (worker in workers) {
             worker.join(10_000)
         }
+
+        // then
+        assertRejected(third, 503, "잠시 후 다시 시도해 주세요", "3")
         // permits return after completion
         assertThat(runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()).status).isEqualTo(200)
     }
 
     @Test
-    fun given__per_minute_budget_spent__when__searching__then__429_with_retry_after_60_and_permit_returned() {
+    fun `분당 예산을 다 썼을 때__검색하면__Retry-After 60과 함께 429를 돌려주고 허가를 반납한다`() {
+        // given
         val filter = LostSearchLimitsFilter(100, 1, 2, 50)
-        assertThat(runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()).status).isEqualTo(200)
-        assertThat(runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()).status).isEqualTo(200)
-        assertRejected(
-            runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()),
-            429,
-            "검색 요청이 많습니다. 잠시 후 다시 시도해 주세요",
-            "60",
-        )
+        val first = runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain())
+        val second = runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain())
+
+        // when
+        val third = runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain())
+        val fourth = runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain())
+
+        // then
+        assertThat(first.status).isEqualTo(200)
+        assertThat(second.status).isEqualTo(200)
+        assertRejected(third, 429, "검색 요청이 많습니다. 잠시 후 다시 시도해 주세요", "60")
         // the 429 released its concurrency permit instead of leaking it (a leak would turn this into 503)
-        assertRejected(
-            runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()),
-            429,
-            "검색 요청이 많습니다. 잠시 후 다시 시도해 주세요",
-            "60",
-        )
+        assertRejected(fourth, 429, "검색 요청이 많습니다. 잠시 후 다시 시도해 주세요", "60")
     }
 
     @Test
-    fun given__a_timeout_escaping_the_handler__when__searching__then__504() {
+    fun `핸들러에서 시간 초과가 새어 나올 때__검색하면__504를 돌려준다`() {
+        // given
         val filter = LostSearchLimitsFilter(100, 1, 30, 50)
         val timesOut = FilterChain { _, _ -> throw ServletException(TimeoutException()) }
-        assertRejected(runFilter(filter, search(TYPE, byteArrayOf(1)), timesOut), 504, "검색 시간이 초과됐습니다", null)
         val broken = FilterChain { _, _ -> throw ServletException(IllegalStateException("boom")) }
-        assertThatThrownBy { runFilter(filter, search(TYPE, byteArrayOf(1)), broken) }
-            .isInstanceOf(ServletException::class.java)
+
+        // when
+        val timedOut = runFilter(filter, search(TYPE, byteArrayOf(1)), timesOut)
+        val brokenThrown = assertThatThrownBy { runFilter(filter, search(TYPE, byteArrayOf(1)), broken) }
+
+        // then
+        assertRejected(timedOut, 504, "검색 시간이 초과됐습니다", null)
+        brokenThrown.isInstanceOf(ServletException::class.java)
         assertThat(runFilter(filter, search(TYPE, byteArrayOf(1)), MockFilterChain()).status).isEqualTo(200)
     }
 
     @Test
-    fun given__admitted_request__when__forwarding__then__client_identity_and_internal_key_headers_are_hidden() {
+    fun `허용된 요청일 때__전달하면__클라이언트 신원과 내부 키 헤더를 숨긴다`() {
+        // given
         val filter = LostSearchLimitsFilter(100, 2, 30, 50)
         val seen = AtomicReference<HttpServletRequest>()
+
+        // when
         val response = runFilter(filter, search(TYPE, byteArrayOf(1)), FilterChain { req, _ -> seen.set(req as HttpServletRequest) })
+
+        // then
         assertThat(response.status).isEqualTo(200)
         val forwarded = seen.get()
         for (name in arrayOf("Authorization", "authorization", "X-User-Id", "X-Internal-Api-Key", "Transfer-Encoding")) {
@@ -348,27 +445,44 @@ class GatewayFeaturesUnitTest {
     }
 
     @Test
-    fun given__other_routes__when__filtering__then__apply_no_limits() {
+    fun `다른 경로일 때__필터링하면__한도를 적용하지 않는다`() {
+        // given
         val filter = LostSearchLimitsFilter(1, 1, 1, 50)
         val routes = listOf(
             arrayOf("GET", LostSearchLimitsFilter.PATH),
             arrayOf("POST", "/api/v1/animals"),
             arrayOf("POST", "/api/v1/animals/lost-candidates/extra"),
         )
+
         for (route in routes) {
             val chain = MockFilterChain()
             val request = MockHttpServletRequest(route[0], route[1])
-            assertThat(runFilter(filter, request, chain).status).isEqualTo(200)
+
+            // when
+            val response = runFilter(filter, request, chain)
+
+            // then
+            assertThat(response.status).isEqualTo(200)
             assertThat(chain.request).isNotNull()
         }
     }
 
     @Test
-    fun given__non_positive_limit__when__creating__then__refuse() {
-        assertThatThrownBy { LostSearchLimitsFilter(0, 2, 30, 50) }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { LostSearchLimitsFilter(1, 0, 30, 50) }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { LostSearchLimitsFilter(1, 2, 0, 50) }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { LostSearchLimitsFilter(1, 2, 30, 0) }.isInstanceOf(IllegalArgumentException::class.java)
+    fun `한도가 양수가 아닐 때__생성하면__거절한다`() {
+        // given
+        // 한도 값 하나씩이 0인 필터 생성 람다를 아래에서 호출한다
+
+        // when
+        val zeroBytes = assertThatThrownBy { LostSearchLimitsFilter(0, 2, 30, 50) }
+        val zeroConcurrent = assertThatThrownBy { LostSearchLimitsFilter(1, 0, 30, 50) }
+        val zeroPerMinute = assertThatThrownBy { LostSearchLimitsFilter(1, 2, 0, 50) }
+        val zeroTimeout = assertThatThrownBy { LostSearchLimitsFilter(1, 2, 30, 0) }
+
+        // then
+        zeroBytes.isInstanceOf(IllegalArgumentException::class.java)
+        zeroConcurrent.isInstanceOf(IllegalArgumentException::class.java)
+        zeroPerMinute.isInstanceOf(IllegalArgumentException::class.java)
+        zeroTimeout.isInstanceOf(IllegalArgumentException::class.java)
     }
 
     private data class Seen(
