@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.directorder.application.OrderActorRejectedException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -15,11 +19,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.dao.DataAccessResourceFailureException
@@ -44,7 +43,7 @@ import java.time.LocalDateTime
 import java.util.stream.Stream
 
 class DirectOrderControllerTest {
-    private val orders: DirectOrders = mock(DirectOrders::class.java)
+    private val orders: DirectOrders = mockk<DirectOrders>()
     private val json: ObjectMapper = ObjectMapper().registerModule(JavaTimeModule())
         .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -91,41 +90,49 @@ class DirectOrderControllerTest {
     }
 
     @Test
-    fun given__verified_long_member_and_forged_user_sources__when__buying__then__pass_full_request_with_verified_member_and_return_original_response() {
+    fun `검증된 Long 회원과 위조된 사용자 출처가 있을 때__구매하면__검증된 회원과 전체 요청을 넘기고 원본 응답을 돌려준다`() {
+        // given
         current(7L)
-        `when`(orders.create(7, command)).thenReturn(response)
 
-        fullResponse(
+        every { orders.create(any(), any()) } returns response
+
+        // when
+        val bytes =
             mvc.perform(
                 post("/api/v1/orders/direct").param("userId", "99").header("X-User-Id", "99")
                     .contentType(MediaType.APPLICATION_JSON).content(request),
-            ).andExpect(status().isCreated()).andReturn().response.contentAsByteArray,
-        )
+            ).andExpect(status().isCreated()).andReturn().response.contentAsByteArray
 
-        verify(orders).create(7, command)
-        verifyNoMoreInteractions(orders)
+        // then
+        fullResponse(bytes)
+        verify(exactly = 1) { orders.create(7, command) }
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__verified_long_member_and_forged_user_query__when__reading__then__use_only_verified_member_and_return_full_order() {
+    fun `검증된 Long 회원과 위조된 사용자 쿼리가 있을 때__주문을 조회하면__검증된 회원만 쓰고 전체 주문을 돌려준다`() {
+        // given
         current(7L)
-        `when`(orders.get(7, 9007199254740993L)).thenReturn(response)
 
-        fullResponse(
-            mvc.perform(get("/api/v1/orders/9007199254740993").param("userId", "99").header("X-User-Id", "99"))
-                .andExpect(status().isOk()).andReturn().response.contentAsByteArray,
-        )
+        every { orders.get(any(), any()) } returns response
 
-        verify(orders).get(7, 9007199254740993L)
-        verifyNoMoreInteractions(orders)
+        // when
+        val bytes = mvc.perform(get("/api/v1/orders/9007199254740993").param("userId", "99").header("X-User-Id", "99"))
+            .andExpect(status().isOk()).andReturn().response.contentAsByteArray
+
+        // then
+        fullResponse(bytes)
+        verify(exactly = 1) { orders.get(7, 9007199254740993L) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("invalidPrincipals")
-    fun given__missing_or_non_long_principal_with_forged_user__when__accessing__then__unauthorized_before_application(
+    fun `주체가 없거나 Long이 아니고 사용자가 위조됐을 때__접근하면__애플리케이션 호출 전에 401을 돌려준다`(
         kind: String,
         method: String,
     ) {
+        // given
         if (kind == "text") {
             current("99")
         }
@@ -135,28 +142,33 @@ class DirectOrderControllerTest {
             get("/api/v1/orders/33")
         }
 
-        mvc.perform(call.param("userId", "99").header("X-User-Id", "99"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(content().string(""))
+        // when
+        val result = mvc.perform(call.param("userId", "99").header("X-User-Id", "99"))
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isUnauthorized())
+            .andExpect(content().string(""))
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("invalidRequests")
-    fun given__invalid_sku_or_quantity__when__buying__then__preserve_original_field_value_reason_errors_without_application(
+    fun `잘못된 SKU나 수량일 때__구매하면__애플리케이션 호출 없이 원본의 필드 값 사유 오류를 유지한다`(
         body: String,
         field: String,
         value: String,
     ) {
+        // given
         current(7L)
 
+        // when
         val bytes = mvc.perform(post("/api/v1/orders/direct").contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.message").value("Invalid Input Value"))
             .andExpect(jsonPath("\$.code").value("C001"))
             .andReturn().response.contentAsByteArray
 
+        // then
         val errors = json.readTree(bytes).get("errors")
         assertEquals(1, errors.size())
         val error = errors.get(0)
@@ -164,34 +176,41 @@ class DirectOrderControllerTest {
         assertEquals(field, error.get("field").asText())
         assertEquals(value, error.get("value").asText())
         assertFalse(error.get("reason").asText().isBlank())
-        verifyNoInteractions(orders)
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["bad", "9223372036854775808"])
-    fun given__unparseable_order_id__when__reading__then__preserve_original_type_error_without_application(orderId: String) {
+    fun `해석할 수 없는 주문 ID일 때__조회하면__애플리케이션 호출 없이 원본의 타입 오류를 유지한다`(orderId: String) {
+        // given
         current(7L)
 
-        mvc.perform(get("/api/v1/orders/{orderId}", orderId)).andExpect(status().isBadRequest())
+        // when
+        val result = mvc.perform(get("/api/v1/orders/{orderId}", orderId))
+
+        // then
+        result.andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value("orderId"))
             .andExpect(jsonPath("\$.errors[0].value").value(orderId))
             .andExpect(jsonPath("\$.errors[0].reason").value("typeMismatch"))
-
-        verifyNoInteractions(orders)
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__actor_or_order_or_transaction_failure__when__buying__then__preserve_status_and_sanitized_body(
+    fun `행위자나 주문이나 트랜잭션이 실패할 때__구매하면__상태 코드와 정제된 본문을 유지한다`(
         failure: RuntimeException,
         statusCode: Int,
         code: String,
         message: String,
     ) {
+        // given
         current(7L)
-        `when`(orders.create(7, command)).thenThrow(failure)
 
+        every { orders.create(any(), any()) } throws failure
+
+        // when
         val body = mvc.perform(post("/api/v1/orders/direct").contentType(MediaType.APPLICATION_JSON).content(request))
             .andExpect(status().`is`(statusCode))
             .andExpect(jsonPath("\$.code").value(code))
@@ -199,47 +218,67 @@ class DirectOrderControllerTest {
             .andExpect(jsonPath("\$.errors").isEmpty())
             .andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
         assertFalse(body.contains("fixture"))
+        verify(exactly = 1) { orders.create(7, command) }
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__order_not_accessible_to_member__when__reading__then__preserve_source_bad_input_without_order_details() {
+    fun `회원이 접근할 수 없는 주문일 때__조회하면__주문 상세 없이 원본의 잘못된 입력 오류를 유지한다`() {
+        // given
         current(7L)
-        `when`(orders.get(7, 33)).thenThrow(IllegalArgumentException("private owner"))
 
-        mvc.perform(get("/api/v1/orders/33")).andExpect(status().isBadRequest())
+        every { orders.get(any(), any()) } throws IllegalArgumentException("private owner")
+
+        // when
+        val result = mvc.perform(get("/api/v1/orders/33"))
+
+        // then
+        result.andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C001"))
             .andExpect(jsonPath("\$.errors").isEmpty())
+        verify(exactly = 1) { orders.get(7, 33) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("rollbackCharsetFailures")
-    fun given__rollback_charset_constraint_in_write_or_commit_or_batch__when__buying__then__original_c007_without_private_sql_details(
+    fun `쓰기나 커밋이나 배치에서 롤백 문자셋 제약을 어길 때__구매하면__비공개 SQL 상세 없이 원본 C007을 돌려준다`(
         failure: RuntimeException,
     ) {
+        // given
         current(7L)
-        `when`(orders.create(7, command)).thenThrow(failure)
 
+        every { orders.create(any(), any()) } throws failure
+
+        // when
         val body = mvc.perform(post("/api/v1/orders/direct").contentType(MediaType.APPLICATION_JSON).content(request))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C007"))
             .andExpect(jsonPath("\$.message").value("일부 이모지 등 지원하지 않는 문자를 제외해 주세요."))
             .andExpect(jsonPath("\$.errors").isEmpty()).andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
         assertFalse(body.contains("ck_rollback_charset_"))
         assertFalse(body.contains("23514"))
+        verify(exactly = 1) { orders.create(7, command) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("unrelatedConstraintFailures")
-    fun given__other_constraint_or_schema_or_sqlstate_or_unstructured_text__when__buying__then__keep_server_error_without_private_sql_details(
+    fun `다른 제약이나 스키마나 SQLSTATE나 비정형 텍스트일 때__구매하면__비공개 SQL 상세 없이 서버 오류를 유지한다`(
         cause: SQLException,
     ) {
+        // given
         current(7L)
-        `when`(orders.create(7, command)).thenThrow(DataIntegrityViolationException("private fixture", cause))
 
+        every { orders.create(any(), any()) } throws DataIntegrityViolationException("private fixture", cause)
+
+        // when
         val body = mvc.perform(post("/api/v1/orders/direct").contentType(MediaType.APPLICATION_JSON).content(request))
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("\$.code").value("C004"))
@@ -247,19 +286,26 @@ class DirectOrderControllerTest {
             .andExpect(jsonPath("\$.errors").isEmpty())
             .andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
         assertFalse(body.contains("ck_rollback_charset_"))
         assertFalse(body.contains("23514"))
+        verify(exactly = 1) { orders.create(7, command) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["/api/v1/orders/uuid/fixture", "/api/v1/orders/33/payment", "/api/v1/orders/cart/direct"])
-    fun given__neighboring_unapproved_flow__when__requesting__then__no_direct_order_handler(path: String) {
+    fun `승인되지 않은 인접 흐름일 때__요청하면__직접 주문 핸들러 없이 404를 돌려준다`(path: String) {
+        // given
         current(7L)
 
-        mvc.perform(get(path)).andExpect(status().isNotFound())
+        // when
+        val result = mvc.perform(get(path))
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isNotFound())
+        confirmVerified(orders)
     }
 
     companion object {

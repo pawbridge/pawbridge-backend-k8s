@@ -6,12 +6,18 @@ import com.pawbridge.backend.store.internal.cart.infrastructure.jpa.model.CartIt
 import com.pawbridge.backend.store.internal.cart.infrastructure.jpa.repository.CartRepository
 import com.pawbridge.backend.store.internal.directorder.application.CartOrders
 import com.pawbridge.backend.store.internal.directorder.application.OrderActorRejectedException
-import com.pawbridge.backend.store.internal.directorder.infrastructure.jpa.repository.ProductSKURepository
+import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.Order
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.ProductStatus
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.spyk
+import io.mockk.verify
 import jakarta.persistence.PersistenceException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -19,18 +25,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyCollection
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doReturn
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.spy
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
+import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.TransactionSystemException
 import org.springframework.transaction.support.TransactionOperations
 import java.util.Optional
@@ -46,41 +42,8 @@ class JpaCartOrdersTest {
     @BeforeEach
     fun setup() {
         f = DirectOrderFixture()
-        carts = mock(CartRepository::class.java)
-        cart = spy(Cart.builder().userId(7L).build())
-        doAnswer {
-            f.writer()
-            f.events.add("cart")
-            if (f.failAt == "cart") {
-                throw DirectOrderFixture.failure()
-            }
-            Optional.of(cart)
-        }.`when`(carts).findByUserId(7L)
-        doAnswer { call ->
-            f.writer()
-            f.events.add("cart-clear")
-            call.callRealMethod()
-        }.`when`(cart).clearItems()
-        doAnswer { call ->
-            f.writer()
-            f.events.add("reference")
-            val ids: Collection<Long?> = call.getArgument(0)
-            listOf(80L, 81L).filter { ids.contains(it) }.map { id ->
-                val ref = mock(ProductSKURepository.SkuProductId::class.java)
-                `when`(ref.skuId).thenReturn(id)
-                `when`(ref.productId).thenReturn(90L)
-                ref
-            }
-        }.`when`(f.skus).findProductIdsBySkuIdIn(anyCollection())
-        doAnswer { call ->
-            f.writer()
-            f.events.add("sku-read-all")
-            if (f.failAt == "read") {
-                throw DirectOrderFixture.failure()
-            }
-            val ids: Collection<Long?> = call.getArgument(0)
-            listOf(f.target, f.sibling).filter { sku -> ids.contains(sku.id) }
-        }.`when`(f.skus).findAllById(any())
+        carts = mockk<CartRepository>()
+        cart = spyk(Cart.builder().userId(7L).build())
         service = JpaCartOrders(carts, f.writerOrders, f.skus, f.stocks, f.actors, f.write)
     }
 
@@ -94,12 +57,80 @@ class JpaCartOrdersTest {
     }
 
     @Test
-    fun given__two_live_cart_skus__when__checking_out__then__one_transaction_preserves_original_order_and_stock_followups_and_clears_cart() {
+    fun `장바구니에 판매 중인 SKU 두 개가 있을 때__주문하면__한 트랜잭션에서 원래 순서와 재고 후속 작업을 보존하고 장바구니를 비운다`() {
+        // given
         item(80, 2)
         item(81, 3)
 
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("product-lock")
+            Optional.of(f.product)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        every { f.jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            f.writer()
+            f.events.add("search")
+            if (f.failAt == "search") {
+                throw DirectOrderFixture.failure()
+            }
+            f.searchParameters.add(HashMap<String, Any?>(secondArg<Map<String, Any?>>()))
+            1
+        }
+        every { f.skus.findAllById(any()) } answers {
+            f.writer()
+            f.events.add("sku-read-all")
+            if (f.failAt == "read") {
+                throw DirectOrderFixture.failure()
+            }
+            val ids = firstArg<Collection<Long?>>()
+            listOf(f.target, f.sibling).filter { sku -> ids.contains(sku.id) }
+        }
+        every { f.writerOrders.save(any<Order>()) } answers {
+            f.writer()
+            f.events.add("order-save")
+            if (f.failAt == "order") {
+                throw DirectOrderFixture.failure()
+            }
+            val order = firstArg<Order>()
+            DirectOrderFixture.id(order, f.identity++)
+            ReflectionTestUtils.setField(order, "createdAt", f.time)
+            f.orders[order.id!!] = order
+            order
+        }
+        every { cart.clearItems() } answers {
+            f.writer()
+            f.events.add("cart-clear")
+            callOriginal()
+        }
+
+        // when
         val result = service.create(7, command)
 
+        // then
         assertEquals(350L, result.totalAmount)
         assertEquals(7L, result.userId)
         assertEquals("PENDING", result.status)
@@ -126,9 +157,13 @@ class JpaCartOrdersTest {
             ),
             f.events,
         )
-        verify(f.skus, never()).findById(anyLong())
-        verify(f.actors, never()).currentForRead(anyLong())
-        verifyNoInteractions(f.readerOrders)
+        verify(exactly = 1) { f.actors.currentForWrite(7) }
+        verify(exactly = 1) { carts.findByUserId(7L) }
+        verify(exactly = 1) { f.products.findByIdWithLock(90L) }
+        verify(exactly = 1) { f.skus.findAllByProductIdWithLock(90L) }
+        verify(exactly = 0) { f.skus.findById(any()) }
+        verify(exactly = 0) { f.actors.currentForRead(any()) }
+        confirmVerified(f.readerOrders)
         val saved = f.orders[result.orderId!!]!!
         for (row in saved.orderItems) {
             assertSame(saved, row.order)
@@ -136,26 +171,91 @@ class JpaCartOrdersTest {
     }
 
     @Test
-    fun given__price_changed_before_product_lock_acquired__when__checking_out__then__total_and_items_use_the_same_locked_current_price() {
+    fun `상품 잠금을 얻기 전에 가격이 바뀌었을 때__주문하면__합계와 항목이 같은 잠금 후 현재 가격을 쓴다`() {
+        // given
         item(80, 2)
-        doAnswer {
+
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
             f.writer()
             f.events.add("product-lock")
             f.target.updatePrice(200L)
             Optional.of(f.product)
-        }.`when`(f.products).findByIdWithLock(90L)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        every { f.jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            f.writer()
+            f.events.add("search")
+            if (f.failAt == "search") {
+                throw DirectOrderFixture.failure()
+            }
+            f.searchParameters.add(HashMap<String, Any?>(secondArg<Map<String, Any?>>()))
+            1
+        }
+        every { f.skus.findAllById(any()) } answers {
+            f.writer()
+            f.events.add("sku-read-all")
+            if (f.failAt == "read") {
+                throw DirectOrderFixture.failure()
+            }
+            val ids = firstArg<Collection<Long?>>()
+            listOf(f.target, f.sibling).filter { sku -> ids.contains(sku.id) }
+        }
+        every { f.writerOrders.save(any<Order>()) } answers {
+            f.writer()
+            f.events.add("order-save")
+            if (f.failAt == "order") {
+                throw DirectOrderFixture.failure()
+            }
+            val order = firstArg<Order>()
+            DirectOrderFixture.id(order, f.identity++)
+            ReflectionTestUtils.setField(order, "createdAt", f.time)
+            f.orders[order.id!!] = order
+            order
+        }
+        every { cart.clearItems() } answers {
+            f.writer()
+            f.events.add("cart-clear")
+            callOriginal()
+        }
 
+        // when
         val result = service.create(7, command)
 
+        // then
         assertEquals(400L, result.totalAmount)
         assertEquals(200L, result.items!!.first().price)
         assertTrue(f.events.indexOf("all-sku-lock") < f.events.indexOf("sku-read-all"))
-        verify(f.skus, never()).findById(anyLong())
+        verify(exactly = 1) { f.products.findByIdWithLock(90L) }
+        verify(exactly = 0) { f.skus.findById(any()) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["null", "wrong", "inactive", "deleted"])
-    fun given__ineligible_current_actor__when__checking_out__then__reject_before_cart_or_store_rows(kind: String) {
+    fun `현재 행위자가 자격이 없을 때__주문하면__장바구니나 저장소 행 전에 거부한다`(kind: String) {
+        // given
         f.actor = when (kind) {
             "null" -> null
             "wrong" -> StoreOrderActors.Actor(8, true, false)
@@ -163,41 +263,143 @@ class JpaCartOrdersTest {
             else -> StoreOrderActors.Actor(7, true, true)
         }
 
-        assertThrows(OrderActorRejectedException::class.java) { service.create(7, command) }
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
 
-        verifyNoInteractions(carts, f.products, f.skus, f.writerOrders, f.jdbc)
+        // when
+        val thrown = assertThrows(OrderActorRejectedException::class.java) { service.create(7, command) }
+
+        // then
+        assertNotNull(thrown)
+        verify(exactly = 1) { f.actors.currentForWrite(7) }
+        confirmVerified(carts, f.products, f.skus, f.writerOrders, f.jdbc)
         assertEquals("rollback:writer", f.events.last())
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "empty", "only-stale"])
-    fun given__no_visible_cart_items__when__checking_out__then__original_empty_error_without_consumption_or_stock_work(
+    fun `보이는 장바구니 항목이 없을 때__주문하면__장바구니 소비나 재고 작업 없이 원본의 빈 장바구니 오류를 돌려준다`(
         kind: String,
     ) {
-        if (kind == "missing") {
-            doReturn(Optional.empty<Cart>()).`when`(carts).findByUserId(7L)
-        }
+        // given
         if (kind == "only-stale") {
             item(999, 2)
         }
 
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        if (kind == "missing") {
+            every { carts.findByUserId(any()) } returns Optional.empty()
+        }
+
+        // when
         val failure = assertThrows(IllegalArgumentException::class.java) { service.create(7, command) }
 
+        // then
         assertEquals("Cart is empty", failure.message)
-        verify(cart, never()).clearItems()
-        verifyNoInteractions(f.products, f.writerOrders, f.jdbc)
+        verify(exactly = 0) { cart.clearItems() }
+        verify(exactly = 1) { carts.findByUserId(7L) }
+        confirmVerified(f.products, f.writerOrders, f.jdbc)
         if (kind == "only-stale") {
             assertEquals(1, cart.items.size)
         }
     }
 
     @Test
-    fun given__live_and_stale_cart_items__when__checking_out__then__purchase_visible_items_and_clear_whole_cart_like_original() {
+    fun `판매 중인 항목과 사라진 항목이 섞여 있을 때__주문하면__보이는 항목만 구매하고 원본처럼 장바구니 전체를 비운다`() {
+        // given
         item(80, 1)
         item(999, 3)
 
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("product-lock")
+            Optional.of(f.product)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        every { f.jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            f.writer()
+            f.events.add("search")
+            if (f.failAt == "search") {
+                throw DirectOrderFixture.failure()
+            }
+            f.searchParameters.add(HashMap<String, Any?>(secondArg<Map<String, Any?>>()))
+            1
+        }
+        every { f.skus.findAllById(any()) } answers {
+            f.writer()
+            f.events.add("sku-read-all")
+            if (f.failAt == "read") {
+                throw DirectOrderFixture.failure()
+            }
+            val ids = firstArg<Collection<Long?>>()
+            listOf(f.target, f.sibling).filter { sku -> ids.contains(sku.id) }
+        }
+        every { f.writerOrders.save(any<Order>()) } answers {
+            f.writer()
+            f.events.add("order-save")
+            if (f.failAt == "order") {
+                throw DirectOrderFixture.failure()
+            }
+            val order = firstArg<Order>()
+            DirectOrderFixture.id(order, f.identity++)
+            ReflectionTestUtils.setField(order, "createdAt", f.time)
+            f.orders[order.id!!] = order
+            order
+        }
+        every { cart.clearItems() } answers {
+            f.writer()
+            f.events.add("cart-clear")
+            callOriginal()
+        }
+
+        // when
         val result = service.create(7, command)
 
+        // then
         assertEquals(100L, result.totalAmount)
         assertEquals(1, result.items!!.size)
         assertTrue(cart.items.isEmpty())
@@ -205,36 +407,76 @@ class JpaCartOrdersTest {
     }
 
     @Test
-    fun given__duplicate_cart_sku__when__checking_out__then__fail_closed_without_implicit_merge_or_stock_change() {
+    fun `장바구니에 같은 SKU가 중복될 때__주문하면__암묵적 병합이나 재고 변경 없이 닫힌 채로 실패한다`() {
+        // given
         item(80, 1)
         item(80, 2)
 
-        assertThrows(PersistenceException::class.java) { service.create(7, command) }
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
 
-        verifyNoInteractions(f.skus, f.products, f.writerOrders)
-        verify(cart, never()).clearItems()
+        // when
+        val thrown = assertThrows(PersistenceException::class.java) { service.create(7, command) }
+
+        // then
+        assertNotNull(thrown)
+        confirmVerified(f.skus, f.products, f.writerOrders)
+        verify(exactly = 0) { cart.clearItems() }
     }
 
     @ParameterizedTest
     @ValueSource(ints = [0, -1])
-    fun given__nonpositive_stored_quantity__when__checking_out__then__reuse_original_stock_validation(quantity: Int) {
+    fun `저장된 수량이 양수가 아닐 때__주문하면__원본 재고 검증을 재사용한다`(quantity: Int) {
+        // given
         item(80, quantity)
 
-        assertThrows(IllegalArgumentException::class.java) { service.create(7, command) }
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
 
-        verifyNoInteractions(f.products, f.writerOrders, f.jdbc)
-        verify(cart, never()).clearItems()
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { service.create(7, command) }
+
+        // then
+        assertNotNull(thrown)
+        confirmVerified(f.products, f.writerOrders, f.jdbc)
+        verify(exactly = 0) { cart.clearItems() }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["inactive", "stock", "missing-under-lock"])
-    fun given__original_stock_rejection__when__checking_out__then__rollback_without_consuming_cart(kind: String) {
+    fun `원본 재고 거절 사유가 있을 때__주문하면__장바구니를 소비하지 않고 롤백한다`(kind: String) {
+        // given
         item(80, if (kind == "stock") 6 else 1)
         if (kind == "inactive") {
             f.product.updateStatus(ProductStatus.HIDDEN)
-        }
-        if (kind == "missing-under-lock") {
-            doReturn(listOf(f.sibling)).`when`(f.skus).findAllByProductIdWithLock(90L)
         }
         val type: Class<out RuntimeException> = if (kind == "missing-under-lock") {
             IllegalArgumentException::class.java
@@ -242,19 +484,59 @@ class JpaCartOrdersTest {
             IllegalStateException::class.java
         }
 
-        assertThrows(type) { service.create(7, command) }
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("product-lock")
+            Optional.of(f.product)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        if (kind == "missing-under-lock") {
+            every { f.skus.findAllByProductIdWithLock(any()) } returns listOf(f.sibling)
+        }
 
+        // when
+        val thrown = assertThrows(type) { service.create(7, command) }
+
+        // then
+        assertNotNull(thrown)
         assertEquals(5, f.target.stockQuantity)
-        verify(cart, never()).clearItems()
-        verifyNoInteractions(f.writerOrders)
+        verify(exactly = 0) { cart.clearItems() }
+        if (kind == "missing-under-lock") {
+            verify(exactly = 1) { f.skus.findAllByProductIdWithLock(90L) }
+        }
+        confirmVerified(f.writerOrders)
         assertEquals("rollback:writer", f.events.last())
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["multiply", "sum"])
-    fun given__order_amount_overflow__when__checking_out__then__bad_input_requests_rollback_of_stock_and_projection_without_consuming_cart(
+    fun `주문 금액이 넘칠 때__주문하면__장바구니를 소비하지 않고 재고와 프로젝션의 롤백을 요청하는 잘못된 입력으로 처리한다`(
         kind: String,
     ) {
+        // given
         f.target.updatePrice(Long.MAX_VALUE)
         item(80, if (kind == "multiply") 2 else 1)
         if (kind == "sum") {
@@ -262,18 +544,69 @@ class JpaCartOrdersTest {
             item(81, 1)
         }
 
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("product-lock")
+            Optional.of(f.product)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        every { f.jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            f.writer()
+            f.events.add("search")
+            if (f.failAt == "search") {
+                throw DirectOrderFixture.failure()
+            }
+            f.searchParameters.add(HashMap<String, Any?>(secondArg<Map<String, Any?>>()))
+            1
+        }
+        every { f.skus.findAllById(any()) } answers {
+            f.writer()
+            f.events.add("sku-read-all")
+            if (f.failAt == "read") {
+                throw DirectOrderFixture.failure()
+            }
+            val ids = firstArg<Collection<Long?>>()
+            listOf(f.target, f.sibling).filter { sku -> ids.contains(sku.id) }
+        }
+
+        // when
         val failure = assertThrows(IllegalArgumentException::class.java) { service.create(7, command) }
 
+        // then
         assertInstanceOf(ArithmeticException::class.java, failure.cause)
         assertEquals(1, f.searchParameters.size)
-        verifyNoInteractions(f.writerOrders)
-        verify(cart, never()).clearItems()
+        confirmVerified(f.writerOrders)
+        verify(exactly = 0) { cart.clearItems() }
         assertEquals("rollback:writer", f.events.last())
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["cart", "search", "read", "order", "commit"])
-    fun given__query_followup_order_or_commit_failure__when__checking_out__then__never_return_success(stage: String) {
+    fun `조회나 후속 작업이나 주문 저장이나 커밋이 실패할 때__주문하면__성공을 돌려주지 않는다`(stage: String) {
+        // given
         item(80, 1)
         f.failAt = stage
         val type: Class<out RuntimeException> = if (stage == "commit") {
@@ -282,10 +615,78 @@ class JpaCartOrdersTest {
             DataAccessResourceFailureException::class.java
         }
 
-        assertThrows(type) { service.create(7, command) }
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("product-lock")
+            Optional.of(f.product)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        every { f.jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            f.writer()
+            f.events.add("search")
+            if (f.failAt == "search") {
+                throw DirectOrderFixture.failure()
+            }
+            f.searchParameters.add(HashMap<String, Any?>(secondArg<Map<String, Any?>>()))
+            1
+        }
+        every { f.skus.findAllById(any()) } answers {
+            f.writer()
+            f.events.add("sku-read-all")
+            if (f.failAt == "read") {
+                throw DirectOrderFixture.failure()
+            }
+            val ids = firstArg<Collection<Long?>>()
+            listOf(f.target, f.sibling).filter { sku -> ids.contains(sku.id) }
+        }
+        every { f.writerOrders.save(any<Order>()) } answers {
+            f.writer()
+            f.events.add("order-save")
+            if (f.failAt == "order") {
+                throw DirectOrderFixture.failure()
+            }
+            val order = firstArg<Order>()
+            DirectOrderFixture.id(order, f.identity++)
+            ReflectionTestUtils.setField(order, "createdAt", f.time)
+            f.orders[order.id!!] = order
+            order
+        }
+        every { cart.clearItems() } answers {
+            f.writer()
+            f.events.add("cart-clear")
+            callOriginal()
+        }
 
+        // when
+        val thrown = assertThrows(type) { service.create(7, command) }
+
+        // then
+        assertNotNull(thrown)
         if (stage != "commit") {
-            verify(cart, never()).clearItems()
+            verify(exactly = 0) { cart.clearItems() }
             assertEquals(1, cart.items.size)
             assertEquals("rollback:writer", f.events.last())
         }
@@ -293,36 +694,152 @@ class JpaCartOrdersTest {
     }
 
     @Test
-    fun given__selected_sku_missing_after_locks__when__materializing_order__then__fixed_failure_without_consuming_cart() {
+    fun `잠금 후 선택한 SKU가 사라졌을 때__주문을 구성하면__장바구니를 소비하지 않고 고정된 실패를 돌려준다`() {
+        // given
         item(80, 1)
-        doReturn(listOf<Any>()).`when`(f.skus).findAllById(any())
 
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("product-lock")
+            Optional.of(f.product)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        every { f.jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            f.writer()
+            f.events.add("search")
+            if (f.failAt == "search") {
+                throw DirectOrderFixture.failure()
+            }
+            f.searchParameters.add(HashMap<String, Any?>(secondArg<Map<String, Any?>>()))
+            1
+        }
+        every { f.skus.findAllById(any()) } returns listOf()
+
+        // when
         val failure = assertThrows(PersistenceException::class.java) { service.create(7, command) }
 
+        // then
         assertEquals("Checkout items cannot be read", failure.message)
-        verify(cart, never()).clearItems()
-        verifyNoInteractions(f.writerOrders)
+        verify(exactly = 0) { cart.clearItems() }
+        confirmVerified(f.writerOrders)
     }
 
     @Test
-    fun given__already_consumed_cart_without_new_add__when__checking_out_again__then__empty_error_and_one_order_only() {
+    fun `이미 소비된 장바구니에 새 항목이 없을 때__다시 주문하면__빈 장바구니 오류를 내고 주문은 하나만 남는다`() {
+        // given
         item(80, 1)
+
+        every { f.actors.currentForWrite(any()) } answers {
+            f.writer()
+            f.events.add("actor:write")
+            f.actor
+        }
+        every { carts.findByUserId(any()) } answers {
+            f.writer()
+            f.events.add("cart")
+            if (f.failAt == "cart") {
+                throw DirectOrderFixture.failure()
+            }
+            Optional.of(cart)
+        }
+        every { f.skus.findProductIdsBySkuIdIn(any()) } answers {
+            f.writer()
+            f.events.add("reference")
+            val ids = firstArg<Collection<Long?>>()
+            listOf(80L, 81L).filter { ids.contains(it) }.map { id -> SkuReference(id, 90L) }
+        }
+        every { f.products.findByIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("product-lock")
+            Optional.of(f.product)
+        }
+        every { f.skus.findAllByProductIdWithLock(any()) } answers {
+            f.writer()
+            f.events.add("all-sku-lock")
+            listOf(f.target, f.sibling)
+        }
+        every { f.jdbc.update(any<String>(), any<Map<String, Any>>()) } answers {
+            f.writer()
+            f.events.add("search")
+            if (f.failAt == "search") {
+                throw DirectOrderFixture.failure()
+            }
+            f.searchParameters.add(HashMap<String, Any?>(secondArg<Map<String, Any?>>()))
+            1
+        }
+        every { f.skus.findAllById(any()) } answers {
+            f.writer()
+            f.events.add("sku-read-all")
+            if (f.failAt == "read") {
+                throw DirectOrderFixture.failure()
+            }
+            val ids = firstArg<Collection<Long?>>()
+            listOf(f.target, f.sibling).filter { sku -> ids.contains(sku.id) }
+        }
+        every { f.writerOrders.save(any<Order>()) } answers {
+            f.writer()
+            f.events.add("order-save")
+            if (f.failAt == "order") {
+                throw DirectOrderFixture.failure()
+            }
+            val order = firstArg<Order>()
+            DirectOrderFixture.id(order, f.identity++)
+            ReflectionTestUtils.setField(order, "createdAt", f.time)
+            f.orders[order.id!!] = order
+            order
+        }
+        every { cart.clearItems() } answers {
+            f.writer()
+            f.events.add("cart-clear")
+            callOriginal()
+        }
+
         service.create(7, command)
 
-        assertThrows(IllegalArgumentException::class.java) { service.create(7, command) }
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { service.create(7, command) }
 
+        // then
+        assertNotNull(thrown)
         assertEquals(1, f.orders.size)
         assertEquals(4, f.target.stockQuantity)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["none", "read-only"])
-    fun given__invalid_writer_transaction__when__checking_out__then__fail_before_actor_or_cart(kind: String) {
+    fun `작성자 트랜잭션이 잘못됐을 때__주문하면__행위자나 장바구니 전에 실패한다`(kind: String) {
+        // given
         val tx: TransactionOperations = if (kind == "none") TransactionOperations.withoutTransaction() else f.read
         val service = JpaCartOrders(carts, f.writerOrders, f.skus, f.stocks, f.actors, tx)
 
-        assertThrows(IllegalStateException::class.java) { service.create(7, command) }
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { service.create(7, command) }
 
-        verifyNoInteractions(carts, f.actors, f.skus, f.products, f.writerOrders)
+        // then
+        assertNotNull(thrown)
+        confirmVerified(carts, f.actors, f.skus, f.products, f.writerOrders)
     }
 }
