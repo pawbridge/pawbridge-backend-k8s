@@ -233,16 +233,20 @@ jobs:
   check:
     needs: [selection, proof, package]
     if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}
-    name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || 'F25 six-smoke pilot with the same candidate JAR' }}
+    name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || 'F25 six-smoke pilot with the same candidate JAR' }} (shard ${{ matrix.shard }}/4)
+    # Each shard is a fresh runner that re-provisions the fixture from F2 up to its own last stage
+    # and runs only its packaged smokes; the stage-to-shard map is SHARDS in backend_contract_profile.py.
     strategy:
       fail-fast: false
       matrix:
         profile: ${{ fromJSON(needs.selection.outputs.profiles) }}
+        shard: [1, 2, 3, 4]
     env:
       PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       PULL_REQUEST_BASE_REF: ${{ github.base_ref }}
       PUSH_BEFORE_SHA: ${{ github.event.before }}
       CONTRACT_PROFILE: ${{ matrix.profile }}
+      CONTRACT_SHARD: ${{ matrix.shard }}
       EXPECTED_CANDIDATE_JAR_SHA256: ${{ needs.package.outputs.jar_sha256 }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -594,10 +598,12 @@ jobs:
           set -euo pipefail
           test "$(sha256sum boot/build/libs/pawbridge-backend-app.jar | cut -d ' ' -f 1)" = "$EXPECTED_CANDIDATE_JAR_SHA256"
           python3 ../.github/scripts/backend_contract_profile.py --mode plan --profile "$CONTRACT_PROFILE" \
+            --shard "$CONTRACT_SHARD" \
             --jar boot/build/libs/pawbridge-backend-app.jar --plan build/ci/contract-plan.txt
 
       - name: Verify packaged POST/GET, synthetic SDK uploads, failures and normal termination
         id: jar_f3
+        if: ${{ matrix.shard == 1 }}
         run: python3 scripts/f3_ci.py smoke
 
       - name: Verify F4 listener startup with socket and process mocks only
@@ -605,10 +611,12 @@ jobs:
 
       - name: Verify packaged owner deletion, best-effort storage and rollback recovery
         id: jar_f4
+        if: ${{ matrix.shard == 1 }}
         run: python3 scripts/f4_ci.py smoke
 
       - name: Verify packaged owner PUT, SDK replacement and failure recovery
         id: jar_f5
+        if: ${{ matrix.shard == 1 }}
         run: python3 scripts/f5_ci.py smoke
 
       - name: Verify F6 ownership guards without starting resources
@@ -616,6 +624,7 @@ jobs:
 
       - name: Verify packaged public list journey, per-GET zero writes and recovery
         id: jar_f6
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f6_ci.py smoke
@@ -636,6 +645,7 @@ jobs:
 
       - name: Verify packaged public search journey, per-GET zero writes and recovery
         id: jar_f7
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f7_ci.py smoke
@@ -653,6 +663,7 @@ jobs:
 
       - name: Verify packaged public comment reads, denied writes, zero side effects and recovery
         id: jar_f8
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f8_ci.py smoke
@@ -671,6 +682,7 @@ jobs:
 
       - name: Verify packaged authenticated comment POST, F8 GET and isolated rollback recovery
         id: jar_f9
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f9_ci.py smoke
@@ -698,6 +710,7 @@ jobs:
 
       - name: Verify packaged authenticated comment deletion, preserved rows and rollback recovery
         id: jar_f10
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f10_ci.py smoke
@@ -726,6 +739,7 @@ jobs:
 
       - name: Verify packaged comment PUT, old response timestamps, no-op writes and rollback recovery
         id: jar_f11
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f11_ci.py smoke
@@ -755,10 +769,12 @@ jobs:
         run: python3 scripts/f12_ci.py prepare
 
       - name: Issue synthetic JWTs for F12
+        if: ${{ matrix.shard == 1 }}
         run: python3 scripts/ci_tokens.py issue --stage f12
 
       - name: Verify packaged authenticated profile reads, private-column exclusion and recovery
         id: jar_f12
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f12_ci.py smoke
@@ -785,10 +801,12 @@ jobs:
         run: python3 scripts/f13_ci.py prepare
 
       - name: Issue synthetic JWTs for F13
+        if: ${{ matrix.shard == 1 }}
         run: python3 scripts/ci_tokens.py issue --stage f13
 
       - name: Verify packaged nickname PUT, profile and Community visibility, no-op and recovery
         id: jar_f13
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f13_ci.py smoke
@@ -818,10 +836,12 @@ jobs:
         run: python3 scripts/f14_ci.py prepare
 
       - name: Issue synthetic JWTs for F14
+        if: ${{ matrix.shard == 1 }}
         run: python3 scripts/ci_tokens.py issue --stage f14
 
       - name: Verify packaged favorite Boolean GET, missing-user false, no side effects and permission recovery
         id: jar_f14
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f14_ci.py smoke
@@ -850,6 +870,7 @@ jobs:
 
       - name: Verify packaged public home videos, expiry, permission recovery and no side effects
         id: jar_f15
+        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f15_ci.py smoke
@@ -879,7 +900,7 @@ jobs:
 
       - name: Verify packaged enabled totals and one disabled404 phase without JWT refresh
         id: jar_f16
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f16_ci.py smoke
@@ -911,12 +932,12 @@ jobs:
         run: python3 scripts/f17_ci.py prepare
 
       - name: Issue synthetic JWTs for F17
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 1 }}
         run: python3 scripts/ci_tokens.py issue --stage f17
 
       - name: Verify packaged note recipients, source-specific SQL recovery and unchanged business snapshots
         id: jar_f17
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 1 }}
         run: |
           set -euo pipefail
           python3 scripts/f17_ci.py smoke
@@ -942,13 +963,16 @@ jobs:
 
       - name: Verify the unchanged F17 fixture for F18 without new schema or grants
         id: fixture_post_unrelated_f18
+        if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f18_ci.py prepare
 
       - name: Issue synthetic JWTs for F18
+        if: ${{ matrix.shard == 2 }}
         run: python3 scripts/ci_tokens.py issue --stage f18
 
       - name: Verify packaged block status, mixed errors, invalid-before-active and SQL recovery
         id: jar_f18
+        if: ${{ matrix.shard == 2 }}
         run: |
           set -euo pipefail
           python3 scripts/f18_ci.py smoke
@@ -978,15 +1002,16 @@ jobs:
 
       - name: Reuse the unchanged F18 and F17 fixture for F19 without schema or grants
         id: fixture_post_unrelated_f19
+        if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f19_ci.py prepare
 
       - name: Issue synthetic JWTs for F19
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
         run: python3 scripts/ci_tokens.py issue --stage f19
 
       - name: Verify packaged exact administrator count, SQL failure and safe recovery
         id: jar_f19
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
         run: |
           set -euo pipefail
           python3 scripts/f19_ci.py smoke
@@ -1013,13 +1038,16 @@ jobs:
 
       - name: Add only the existing block timestamp SELECT after the F19 regressions
         id: fixture_post_unrelated_f20
+        if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f20_ci.py prepare
 
       - name: Issue synthetic JWTs for F20
+        if: ${{ matrix.shard == 2 }}
         run: python3 scripts/ci_tokens.py issue --stage f20
 
       - name: Verify packaged block pages, display and timestamp with source-specific recovery
         id: jar_f20
+        if: ${{ matrix.shard == 2 }}
         run: |
           set -euo pipefail
           python3 scripts/f20_ci.py smoke
@@ -1047,15 +1075,16 @@ jobs:
 
       - name: Extend the owned fixture with only original notes and mailboxes after F20
         id: fixture_post_unrelated_f21
+        if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f21_ci.py prepare
 
       - name: Issue synthetic JWTs for F21
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
         run: python3 scripts/ci_tokens.py issue --stage f21
 
       - name: Verify packaged notifications, cursor and unread without writes or lifecycle execution
         id: jar_f21
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
         run: |
           set -euo pipefail
           python3 scripts/f21_ci.py smoke
@@ -1082,15 +1111,16 @@ jobs:
 
       - name: Extend only five existing reader columns after the full F21 stage
         id: fixture_post_unrelated_f22
+        if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f22_ci.py prepare
 
       - name: Issue synthetic JWTs for F22
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
         run: python3 scripts/ci_tokens.py issue --stage f22
 
       - name: Verify packaged owned note detail, unchanged read state, strict body failure recovery and denied stream/write
         id: jar_f22
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
         run: |
           set -euo pipefail
           python3 scripts/f22_ci.py smoke
@@ -1117,15 +1147,16 @@ jobs:
 
       - name: Reuse the exact F22 fixture for F23 without new DDL or privileges
         id: fixture_post_unrelated_f23
+        if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f23_ci.py prepare
 
       - name: Issue synthetic JWTs for F23
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 3 }}
         run: python3 scripts/ci_tokens.py issue --stage f23
 
       - name: Verify packaged mailbox pages, separate count and list recovery and unchanged state
         id: jar_f23
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard == 3 }}
         run: |
           set -euo pipefail
           python3 scripts/f23_ci.py smoke
@@ -1152,13 +1183,16 @@ jobs:
 
       - name: Extend only the existing member lock and outgoing block writer privileges for F24
         id: fixture_post_unrelated_f24
+        if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f24_ci.py prepare
 
       - name: Issue synthetic JWTs for F24
+        if: ${{ matrix.shard == 3 }}
         run: python3 scripts/ci_tokens.py issue --stage f24
 
       - name: Verify packaged unblock, exact permitted writes and protected state recovery
         id: jar_f24
+        if: ${{ matrix.shard == 3 }}
         run: |
           set -euo pipefail
           python3 scripts/f24_ci.py smoke
@@ -1185,13 +1219,16 @@ jobs:
 
       - name: Extend only the outgoing block INSERT columns for F25
         id: fixture_post_unrelated_f25
+        if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f25_ci.py prepare
 
       - name: Issue synthetic JWTs for F25
+        if: ${{ matrix.shard == 3 }}
         run: python3 scripts/ci_tokens.py issue --stage f25
 
       - name: Verify packaged block creation, duplicate timestamps and protected state recovery
         id: jar_f25
+        if: ${{ matrix.shard == 3 }}
         run: |
           set -euo pipefail
           python3 scripts/f25_ci.py smoke
@@ -1233,13 +1270,16 @@ jobs:
 
       - name: Extend only the owned note read and lock writer columns after the complete F25 stage
         id: fixture_post_unrelated_f26
+        if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f26_ci.py prepare
 
       - name: Issue synthetic JWTs for F26
+        if: ${{ matrix.shard == 3 }}
         run: python3 scripts/ci_tokens.py issue --stage f26
 
       - name: Verify packaged read commit, own SSE resync, expiry, restoration and owned resource shutdown
         id: jar_f26
+        if: ${{ matrix.shard == 3 }}
         run: |
           set -euo pipefail
           python3 scripts/f26_ci.py smoke
@@ -1278,13 +1318,16 @@ jobs:
 
       - name: Extend only mailbox favorite UPDATE after the complete F26 stage
         id: fixture_post_unrelated_f27
+        if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f27_ci.py prepare
 
       - name: Issue synthetic JWTs for F27
+        if: ${{ matrix.shard == 3 }}
         run: python3 scripts/ci_tokens.py issue --stage f27
 
       - name: Verify packaged favorite commit, own resync, read projections and resource shutdown
         id: jar_f27
+        if: ${{ matrix.shard == 3 }}
         run: |
           set -euo pipefail
           python3 scripts/f27_ci.py smoke
@@ -1323,13 +1366,16 @@ jobs:
 
       - name: Add only the original requests table and two DELETE grants after the complete F27 stage
         id: fixture_post_unrelated_f28
+        if: ${{ matrix.shard >= 4 }}
         run: python3 scripts/f28_ci.py prepare
 
       - name: Issue synthetic JWTs for F28
+        if: ${{ matrix.shard == 4 }}
         run: python3 scripts/ci_tokens.py issue --stage f28
 
       - name: Verify packaged deletion, protected counterpart, owned FK changes, resync and shutdown
         id: jar_f28
+        if: ${{ matrix.shard == 4 }}
         run: |
           set -euo pipefail
           python3 scripts/f28_ci.py smoke
@@ -1371,13 +1417,16 @@ jobs:
 
       - name: Add only pinned report context and exact send columns after the complete F28 stage
         id: fixture_post_unrelated_f29
+        if: ${{ matrix.shard >= 4 }}
         run: python3 scripts/f29_ci.py prepare
 
       - name: Issue synthetic JWTs for F29
+        if: ${{ matrix.shard == 4 }}
         run: python3 scripts/ci_tokens.py issue --stage f29
 
       - name: Verify packaged send, recipient note, replay, REST recovery and owned shutdown
         id: jar_f29
+        if: ${{ matrix.shard == 4 }}
         run: |
           set -euo pipefail
           python3 scripts/f29_ci.py smoke
@@ -1417,13 +1466,16 @@ jobs:
 
       - name: Add pinned User and installed chat tables only after fixed source preparation
         id: fixture_member_cleanup
+        if: ${{ matrix.shard >= 4 }}
         run: python3 scripts/f29_ci.py member-cleanup-prepare
 
       - name: Issue synthetic JWTs for member cleanup
+        if: ${{ matrix.shard == 4 }}
         run: python3 scripts/ci_tokens.py issue --stage member-cleanup
 
       - name: Verify packaged admin deletion, synchronous chat cleanup, SSE closure and authorized retry
         id: jar_f31
+        if: ${{ matrix.shard == 4 }}
         run: |
           set -euo pipefail
           python3 scripts/f29_ci.py member-cleanup-smoke
@@ -1445,16 +1497,17 @@ jobs:
 
       - name: Add only administrator role and care registration column rights after member fixture preparation
         id: fixture_admin_update
+        if: ${{ matrix.shard >= 4 }}
         run: python3 scripts/f29_ci.py admin-update-prepare
 
       - name: Add only refresh logout column rights on the exact administrator fixture
         id: fixture_auth_sessions
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard >= 4 }}
         run: python3 scripts/f29_ci.py auth-sessions-prepare
 
       - name: Compare refresh logout transactions and one Seoul expiry storage boundary
         id: pg_auth_sessions
-        if: ${{ matrix.profile == 'full' }}
+        if: ${{ matrix.profile == 'full' && matrix.shard >= 4 }}
         run: |
           set -euo pipefail
           bash ./gradlew :boot:authSessionCompatibilityTest :boot:authSessionCompatibilitySeoulTest \
@@ -1488,6 +1541,7 @@ jobs:
           set -euo pipefail
           test "$(sha256sum boot/build/libs/pawbridge-backend-app.jar | cut -d ' ' -f 1)" = "$EXPECTED_CANDIDATE_JAR_SHA256"
           python3 ../.github/scripts/backend_contract_profile.py --mode audit --profile "$CONTRACT_PROFILE" \
+            --shard "$CONTRACT_SHARD" \
             --jar boot/build/libs/pawbridge-backend-app.jar --plan build/ci/contract-plan.txt \
             --execution build/ci/contract-execution.txt
 
@@ -1495,7 +1549,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}
+          name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}-shard-${{ matrix.shard }}
           path: |
             backend-app/**/build/test-results/**/TEST-*.xml
             backend-app/build/ci/*.txt
@@ -1506,7 +1560,7 @@ jobs:
           retention-days: 7
 
       - name: Preserve the verified executable JAR
-        if: ${{ success() && matrix.profile == 'full' }}
+        if: ${{ success() && matrix.profile == 'full' && matrix.shard == 4 }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-app-boot-jar-${{ github.run_id }}-${{ github.run_attempt }}

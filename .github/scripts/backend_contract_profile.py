@@ -44,6 +44,17 @@ PILOT_PATHS = frozenset({
 })
 ALL_SMOKES = tuple('jar_f' + str(number) for number in range(3, 30)) + ('jar_f31',)
 PILOT_SKIPS = tuple('jar_f' + str(number) for number in (16, 17, 19, 21, 22, 23))
+# The packaged smokes run as parallel matrix shards. Each shard is a fresh runner that re-provisions
+# the fixture from F2 up to its own last stage, then runs only its smokes in the original order.
+# Balanced by measured step time: the later shards pay for more fixture preparation.
+SHARDS = {
+    1: tuple('jar_f' + str(number) for number in range(3, 18)),
+    2: tuple('jar_f' + str(number) for number in range(18, 23)),
+    3: tuple('jar_f' + str(number) for number in range(23, 28)),
+    4: ('jar_f28', 'jar_f29', 'jar_f31'),
+}
+# The PostgreSQL auth session contracts need the complete late fixture, so only the last shard runs them.
+CONTRACT_SHARD = 4
 IDENTITY_KEYS = ('event_name', 'repository', 'head_repository', 'head_ref',
                  'base_sha', 'head_sha', 'source_sha', 'tree_sha', 'run_id', 'run_attempt')
 
@@ -114,12 +125,19 @@ def select_profiles(context, paths):
     return [FULL]
 
 
-def expected_smokes(profile):
+def expected_smokes(profile, shard=None):
+    """The profile's smokes, limited to one shard when given; None keeps the whole unsharded set."""
     if profile == FULL:
-        return ALL_SMOKES
-    if profile == PILOT:
-        return tuple(step for step in ALL_SMOKES if step not in PILOT_SKIPS)
-    raise ProfileBlocked('Execution profile is unknown.')
+        smokes = ALL_SMOKES
+    elif profile == PILOT:
+        smokes = tuple(step for step in ALL_SMOKES if step not in PILOT_SKIPS)
+    else:
+        raise ProfileBlocked('Execution profile is unknown.')
+    if shard is None:
+        return smokes
+    if type(shard) is not int or shard not in SHARDS:
+        raise ProfileBlocked('Execution shard is unknown.')
+    return tuple(step for step in smokes if step in SHARDS[shard])
 
 
 def _identity(context):
@@ -149,8 +167,8 @@ def _encoded(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('utf-8')
 
 
-def make_plan(context, paths, profile, jar_sha256):
-    required = expected_smokes(profile)
+def make_plan(context, paths, profile, jar_sha256, shard=None):
+    required = expected_smokes(profile, shard)
     identity = _identity(context)
     paths = _paths(paths)
     selection = dict(context, requested_profile=profile)
@@ -166,14 +184,19 @@ def make_plan(context, paths, profile, jar_sha256):
         'required_smokes': list(required),
         'skipped_smokes': [step for step in ALL_SMOKES if step not in required],
     }
-    if profile == FULL:
+    if shard is not None:
+        result['shard'] = shard
+    if profile == FULL and shard in (None, CONTRACT_SHARD):
         result['required_contracts'] = list(FULL_CONTRACTS)
+    elif profile == FULL:
+        # Other full shards must prove that the auth contracts were skipped, not silently lost.
+        result['skipped_contracts'] = list(FULL_CONTRACTS)
     return result
 
 
-def audit_execution(plan, context, paths, profile, jar_sha256, steps):
+def audit_execution(plan, context, paths, profile, jar_sha256, steps, shard=None):
     """Validate both raw outcomes and conclusions; never persist arbitrary step outputs."""
-    expected = make_plan(context, paths, profile, jar_sha256)
+    expected = make_plan(context, paths, profile, jar_sha256, shard)
     if not isinstance(plan, dict) or _encoded(plan) != _encoded(expected):
         raise ProfileBlocked('The execution plan differs from the current candidate or profile.')
     if (not isinstance(steps, dict) or any(not isinstance(key, str) for key in steps)
@@ -199,6 +222,8 @@ def audit_execution(plan, context, paths, profile, jar_sha256, steps):
         'executed_smokes': expected['required_smokes'],
         'skipped_smokes': expected['skipped_smokes'], 'step_results': results,
     }
+    if shard is not None:
+        result['shard'] = shard
     if contracts:
         result['required_contracts'] = list(contracts)
     if skipped_contracts:
@@ -278,6 +303,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=('plan', 'audit'), required=True)
     parser.add_argument('--profile', choices=(FULL, PILOT), required=True)
+    parser.add_argument('--shard', type=int, choices=sorted(SHARDS))
     parser.add_argument('--jar', type=Path, required=True)
     parser.add_argument('--plan', type=Path, required=True)
     parser.add_argument('--execution', type=Path)
@@ -288,7 +314,8 @@ def main(argv=None):
         context, paths = runtime_context()
         jar_hash = _jar_hash(args.jar)
         if args.mode == 'plan':
-            _write_evidence(args.plan, 'contract-plan.txt', make_plan(context, paths, args.profile, jar_hash))
+            plan = make_plan(context, paths, args.profile, jar_hash, args.shard)
+            _write_evidence(args.plan, 'contract-plan.txt', plan)
         else:
             if args.execution is None or args.execution.parent.resolve() != args.plan.parent.resolve():
                 raise ProfileBlocked('Execution evidence must share the plan directory.')
@@ -296,11 +323,13 @@ def main(argv=None):
                 raise ProfileBlocked('The execution plan is missing or redirected.')
             plan = load_json(args.plan.read_text(encoding='utf-8'))
             steps = load_json(os.environ.get('CONTRACT_STEPS_JSON', ''))
-            result = audit_execution(plan, context, paths, args.profile, jar_hash, steps)
+            result = audit_execution(plan, context, paths, args.profile, jar_hash, steps, args.shard)
             _write_evidence(args.execution, 'contract-execution.txt', result)
     except (ProfileBlocked, OSError, UnicodeError):
         if args.mode == 'audit' and args.execution is not None:
             failed = {'schema_version': 1, 'status': 'failed', 'profile': args.profile}
+            if args.shard is not None:
+                failed['shard'] = args.shard
             if context is not None:
                 failed['identity'] = context
             if jar_hash is not None:

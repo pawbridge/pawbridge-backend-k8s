@@ -37,6 +37,22 @@ def steps(mode):
     return result
 
 
+def outcome(value):
+    return {'outcome': value, 'conclusion': value}
+
+
+def shard_steps(mode, shard):
+    """What one matrix shard reports: its own smokes ran, every other smoke was skipped."""
+    required = set(profile.expected_smokes(mode, shard))
+    result = {key: outcome('success' if key in required else 'skipped') for key in profile.ALL_SMOKES}
+    if mode == profile.FULL:
+        contracts_ran = shard == profile.CONTRACT_SHARD
+        for key in profile.FULL_CONTRACTS:
+            result[key] = outcome('success' if contracts_ran else 'skipped')
+    result['owned_cleanup'] = outcome('success')
+    return result
+
+
 class ContractProfileTest(unittest.TestCase):
     def test_given_exact_same_repository_ci_pr__when_selecting__then_keep_full_and_add_fixed_pilot(self):
         minimal = {key: context()[key] for key in ('event_name', 'repository', 'head_repository', 'head_ref', 'base_sha')}
@@ -117,6 +133,90 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
                 self.assertEqual(29 + (3 if mode == profile.FULL else 0), len(result['step_results']))
+
+    def test_given_fixed_shards__when_splitting__then_cover_every_smoke_once_in_the_original_order(self):
+        self.assertEqual([1, 2, 3, 4], sorted(profile.SHARDS))
+        ordered = tuple(key for shard in sorted(profile.SHARDS) for key in profile.SHARDS[shard])
+        # Contiguous ranges keep each shard's fixture stages a prefix of the sequential chain.
+        self.assertEqual(profile.ALL_SMOKES, ordered)
+        self.assertEqual(max(profile.SHARDS), profile.CONTRACT_SHARD)
+        for mode in (profile.FULL, profile.PILOT):
+            with self.subTest(mode=mode):
+                union = tuple(key for shard in sorted(profile.SHARDS)
+                              for key in profile.expected_smokes(mode, shard))
+                self.assertEqual(profile.expected_smokes(mode), union)
+
+    def test_given_unknown_shard__when_planning__then_reject(self):
+        for shard in (0, 5, '1', 1.0, True):
+            with self.subTest(shard=shard):
+                with self.assertRaises(profile.ProfileBlocked):
+                    profile.expected_smokes(profile.FULL, shard)
+                with self.assertRaises(profile.ProfileBlocked):
+                    profile.make_plan(context(), PATHS, profile.FULL, JAR, shard)
+
+    def test_given_each_shard__when_planning_and_auditing__then_require_only_its_smokes_and_planned_skips(self):
+        for mode in (profile.FULL, profile.PILOT):
+            for shard in sorted(profile.SHARDS):
+                with self.subTest(mode=mode, shard=shard):
+                    plan = profile.make_plan(context(), PATHS, mode, JAR, shard)
+                    required = list(profile.expected_smokes(mode, shard))
+                    self.assertEqual(shard, plan['shard'])
+                    self.assertEqual(required, plan['required_smokes'])
+                    self.assertEqual([key for key in profile.ALL_SMOKES if key not in required],
+                                     plan['skipped_smokes'])
+                    if mode == profile.FULL and shard == profile.CONTRACT_SHARD:
+                        self.assertEqual(list(profile.FULL_CONTRACTS), plan['required_contracts'])
+                        self.assertNotIn('skipped_contracts', plan)
+                    elif mode == profile.FULL:
+                        self.assertEqual(list(profile.FULL_CONTRACTS), plan['skipped_contracts'])
+                        self.assertNotIn('required_contracts', plan)
+                    else:
+                        self.assertNotIn('required_contracts', plan)
+                        self.assertNotIn('skipped_contracts', plan)
+                    result = profile.audit_execution(plan, context(), PATHS, mode, JAR,
+                                                     shard_steps(mode, shard), shard)
+                    self.assertEqual('passed', result['status'])
+                    self.assertEqual(shard, result['shard'])
+                    self.assertEqual(required, result['executed_smokes'])
+
+    def test_given_shard_ran_another_shard_or_lost_its_own_work__when_auditing__then_reject(self):
+        mode, shard = profile.FULL, 2
+        plan = profile.make_plan(context(), PATHS, mode, JAR, shard)
+        defects = {
+            'other-shard-smoke-ran': ('jar_f3', outcome('success')),
+            'own-smoke-skipped': ('jar_f18', outcome('skipped')),
+            'contract-ran-outside-its-shard': ('pg_auth_sessions', outcome('success')),
+            'contract-missing': ('restore_auth_sessions', None),
+        }
+        for defect, (key, state) in defects.items():
+            actual = shard_steps(mode, shard)
+            if state is None:
+                del actual[key]
+            else:
+                actual[key] = state
+            with self.subTest(defect=defect), self.assertRaises(profile.ProfileBlocked):
+                profile.audit_execution(plan, context(), PATHS, mode, JAR, actual, shard)
+        for other in (None, 1, 3):
+            with self.subTest(other=other), self.assertRaises(profile.ProfileBlocked):
+                profile.audit_execution(plan, context(), PATHS, mode, JAR, shard_steps(mode, shard), other)
+        contract_plan = profile.make_plan(context(), PATHS, mode, JAR, profile.CONTRACT_SHARD)
+        actual = shard_steps(mode, profile.CONTRACT_SHARD)
+        actual['pg_auth_sessions'] = outcome('skipped')
+        with self.assertRaises(profile.ProfileBlocked):
+            profile.audit_execution(contract_plan, context(), PATHS, mode, JAR, actual, profile.CONTRACT_SHARD)
+
+    def test_given_shard_argument__when_cli_plans__then_write_the_shard_plan(self):
+        with patch.object(profile, 'runtime_context', return_value=(context(), PATHS)), \
+                patch.object(profile, '_jar_hash', return_value=JAR), \
+                patch.object(profile, '_write_evidence') as write, \
+                contextlib.redirect_stdout(io.StringIO()):
+            code = profile.main(['--mode', 'plan', '--profile', profile.FULL, '--shard', '3',
+                                 '--jar', '/unused/app.jar', '--plan', '/unused/contract-plan.txt'])
+        self.assertEqual(0, code)
+        self.assertEqual(profile.make_plan(context(), PATHS, profile.FULL, JAR, 3), write.call_args.args[2])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            profile.main(['--mode', 'plan', '--profile', profile.FULL, '--shard', '5',
+                          '--jar', '/unused/app.jar', '--plan', '/unused/contract-plan.txt'])
 
     def test_given_other_source_base_head_tree_run_or_jar__when_auditing__then_reject_stale_evidence(self):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
