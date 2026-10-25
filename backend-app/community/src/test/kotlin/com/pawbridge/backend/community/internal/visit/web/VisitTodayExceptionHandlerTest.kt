@@ -11,9 +11,14 @@ import java.sql.SQLException
 
 class VisitTodayExceptionHandlerTest {
     @Test
-    fun given__storage_failure__when__handling__then__return_exact_503_envelope_with_no_store() {
-        val response = VisitTodayExceptionHandler().storageUnavailable()
+    fun `저장소 실패일 때__처리하면__캐시 금지가 붙은 정확한 503 응답 봉투를 돌려준다`() {
+        // given
+        val handler = VisitTodayExceptionHandler()
 
+        // when
+        val response = handler.storageUnavailable()
+
+        // then
         assertEquals(503, response.statusCode.value())
         assertEquals("no-store", response.headers.cacheControl)
         assertEquals(
@@ -23,7 +28,8 @@ class VisitTodayExceptionHandlerTest {
     }
 
     @Test
-    fun given__runtime_with_private_messages_and_causes__when__handling__then__return_500_without_new_cache_policy_and_log_only_type() {
+    fun `비공개 메시지와 원인이 있는 런타임 예외일 때__처리하면__새 캐시 정책 없이 500을 돌려주고 예외 형식만 로그에 남긴다`() {
+        // given
         val failure = IllegalStateException(
             "Bearer synthetic-private-token",
             SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password"),
@@ -34,8 +40,10 @@ class VisitTodayExceptionHandlerTest {
         appender.start()
         logger.addAppender(appender)
         try {
+            // when
             val response = VisitTodayExceptionHandler().serverError(failure)
 
+            // then
             assertEquals(500, response.statusCode.value())
             assertNull(response.headers.cacheControl)
             assertEquals(VisitTodayController.Response<Void>(500, "서버 에러!", null), response.body)

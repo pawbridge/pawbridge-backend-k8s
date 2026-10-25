@@ -51,9 +51,14 @@ class YouTubeVideoClientTest {
     }
 
     @Test
-    fun givenPublicEmbeddableVideo_whenLookup_thenMetadataAndSingleIdsRequest() {
-        val result = client.lookup(listOf(ID, "OtherVideo1"))
+    fun `공개되고 임베드 가능한 영상일 때__조회하면__메타데이터를 돌려주고 ids 요청 한 번만 보낸다`() {
+        // given
+        val ids = listOf(ID, "OtherVideo1")
 
+        // when
+        val result = client.lookup(ids)
+
+        // then
         assertThat(result[ID]!!.available).isTrue()
         assertThat(result[ID]!!.durationSeconds).isEqualTo(204)
         assertThat(query).contains("part=snippet,contentDetails,status", "id=AbCdEfGhI_1,OtherVideo1")
@@ -61,10 +66,15 @@ class YouTubeVideoClientTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["private", "unlisted"])
-    fun givenNonPublicVideo_whenLookup_thenNotPlayable(privacy: String) {
+    fun `비공개 영상일 때__조회하면__재생할 수 없다`(privacy: String) {
+        // given
         payload = json("\"privacyStatus\":\"" + privacy + "\",\"uploadStatus\":\"processed\",\"embeddable\":true", "")
 
-        assertThat(client.lookup(listOf(ID))[ID]!!.available).isFalse()
+        // when
+        val result = client.lookup(listOf(ID))
+
+        // then
+        assertThat(result[ID]!!.available).isFalse()
     }
 
     @ParameterizedTest
@@ -75,35 +85,63 @@ class YouTubeVideoClientTest {
             ",\"contentRating\":{\"ytRating\":\"ytAgeRestricted\"}",
         ],
     )
-    fun givenRegionalOrAgeRestriction_whenLookup_thenNotPlayable(detail: String) {
+    fun `지역 또는 연령 제한이 있을 때__조회하면__재생할 수 없다`(detail: String) {
+        // given
         payload = json("\"privacyStatus\":\"public\",\"uploadStatus\":\"processed\",\"embeddable\":true", detail)
 
-        assertThat(client.lookup(listOf(ID))[ID]!!.available).isFalse()
+        // when
+        val result = client.lookup(listOf(ID))
+
+        // then
+        assertThat(result[ID]!!.available).isFalse()
     }
 
     @Test
-    fun givenEmbeddingDisabledOrLive_whenLookup_thenNotPlayable() {
+    fun `임베드가 꺼졌거나 라이브일 때__조회하면__재생할 수 없다`() {
+        // given
         payload = json("\"privacyStatus\":\"public\",\"uploadStatus\":\"processed\",\"embeddable\":false", "")
-        assertThat(client.lookup(listOf(ID))[ID]!!.available).isFalse()
+
+        // when
+        val notEmbeddable = client.lookup(listOf(ID))
+
+        // then
+        assertThat(notEmbeddable[ID]!!.available).isFalse()
+
+        // given
         payload = json("\"privacyStatus\":\"public\",\"uploadStatus\":\"processed\",\"embeddable\":true", "")
             .replace("\"none\"", "\"live\"")
-        assertThat(client.lookup(listOf(ID))[ID]!!.available).isFalse()
+
+        // when
+        val live = client.lookup(listOf(ID))
+
+        // then
+        assertThat(live[ID]!!.available).isFalse()
     }
 
     @Test
-    fun givenSuccessfulEmptyList_whenLookup_thenAbsenceNotProviderFailure() {
+    fun `성공했지만 목록이 비었을 때__조회하면__공급자 실패가 아니라 부재로 본다`() {
+        // given
         payload = "{\"items\":[]}"
 
-        assertThat(client.lookup(listOf(ID))).isEmpty()
+        // when
+        val result = client.lookup(listOf(ID))
+
+        // then
+        assertThat(result).isEmpty()
     }
 
     @ParameterizedTest
     @ValueSource(ints = [403, 429, 500])
-    fun givenProviderFailure_whenLookup_thenSanitized503WithoutKeyOrCause(code: Int) {
+    fun `공급자가 실패할 때__조회하면__키나 원인 없이 정제된 503을 돌려준다`(code: Int) {
+        // given
         status = code
         payload = "synthetic-key should never escape"
 
-        assertThatThrownBy { client.lookup(listOf(ID)) }
+        // when
+        val thrown = assertThatThrownBy { client.lookup(listOf(ID)) }
+
+        // then
+        thrown
             .isInstanceOf(ResponseStatusException::class.java)
             .hasMessageNotContaining("synthetic-key")
             .hasMessageNotContaining("http://")
@@ -115,29 +153,44 @@ class YouTubeVideoClientTest {
     }
 
     @Test
-    fun givenMalformedProviderResponse_whenLookup_thenFailureNotAbsentVideo() {
+    fun `공급자 응답이 잘못된 형식일 때__조회하면__영상 부재가 아니라 실패로 본다`() {
+        // given
         payload = "{\"error\":\"synthetic-key\"}"
 
-        assertThatThrownBy { client.lookup(listOf(ID)) }
+        // when
+        val thrown = assertThatThrownBy { client.lookup(listOf(ID)) }
+
+        // then
+        thrown
             .isInstanceOf(ResponseStatusException::class.java)
             .hasNoCause()
     }
 
     @Test
-    fun givenOversizedProviderBody_whenLookup_thenBoundedSanitizedFailure() {
+    fun `공급자 본문이 너무 클 때__조회하면__제한된 정제 실패를 돌려준다`() {
+        // given
         payload = " ".repeat(524_289)
 
-        assertThatThrownBy { client.lookup(listOf(ID)) }
+        // when
+        val thrown = assertThatThrownBy { client.lookup(listOf(ID)) }
+
+        // then
+        thrown
             .isInstanceOf(ResponseStatusException::class.java)
             .hasNoCause()
             .hasMessageNotContaining("synthetic-key")
     }
 
     @Test
-    fun givenForeignThumbnailHost_whenLookup_thenNotPlayable() {
+    fun `썸네일 호스트가 외부일 때__조회하면__재생할 수 없다`() {
+        // given
         payload = payload.replace("https://i.ytimg.com/", "https://untrusted.example/")
 
-        assertThat(client.lookup(listOf(ID))[ID]!!.available).isFalse()
+        // when
+        val result = client.lookup(listOf(ID))
+
+        // then
+        assertThat(result[ID]!!.available).isFalse()
     }
 
     private companion object {
