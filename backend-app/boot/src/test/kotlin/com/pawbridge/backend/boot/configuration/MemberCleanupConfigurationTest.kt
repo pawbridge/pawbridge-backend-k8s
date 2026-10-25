@@ -72,9 +72,11 @@ class MemberCleanupConfigurationTest {
         justRun { manager.afterPropertiesSet() }
         justRun { streams.closeMember(any()) }
         justRun { streams.resyncAll() }
+        justRun { streams.destroy() }
         every { streams.isAutoStartup } returns false
         every { streams.isRunning } returns false
         every { streams.phase } returns 0
+        justRun { streams.destroy() }
 
         // when
         context.run { application ->
@@ -122,6 +124,7 @@ class MemberCleanupConfigurationTest {
         every { streams.isAutoStartup } returns false
         every { streams.isRunning } returns false
         every { streams.phase } returns 0
+        justRun { streams.destroy() }
 
         // when
         runner.run { context ->
@@ -148,9 +151,11 @@ class MemberCleanupConfigurationTest {
         justRun { hints.publish(any()) }
         justRun { streams.closeMember(any()) }
         justRun { streams.resyncAll() }
+        justRun { streams.destroy() }
         every { streams.isAutoStartup } returns false
         every { streams.isRunning } returns false
         every { streams.phase } returns 0
+        justRun { streams.destroy() }
 
         // when
         runner
