@@ -15,16 +15,19 @@ import java.util.stream.Stream
 class MemberReadPagesTest {
     @ParameterizedTest
     @MethodSource("pages")
-    fun given__repository_page_content__when__assembling__then__match_real_spring_page_total_and_count_execution(
+    fun `저장소 페이지 내용이 있을 때__페이지를 조립하면__실제 Spring 페이지와 같은 총계와 개수 조회 횟수를 낸다`(
         page: Int,
         size: Int,
         elements: Int,
         count: Long,
     ) {
+        // given
         val content: List<Int> = (0 until elements).toList()
         val request = StoreMemberReads.Request(page, size, listOf(StoreMemberReads.Order("createdAt", false, false)))
         val originalCalls = AtomicInteger()
         val candidateCalls = AtomicInteger()
+
+        // when
         val original = PageableExecutionUtils.getPage(
             content,
             PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")),
@@ -42,6 +45,7 @@ class MemberReadPagesTest {
             },
         )
 
+        // then
         assertEquals(original.content, candidate.content)
         assertEquals(original.number, candidate.number)
         assertEquals(original.size, candidate.size)
