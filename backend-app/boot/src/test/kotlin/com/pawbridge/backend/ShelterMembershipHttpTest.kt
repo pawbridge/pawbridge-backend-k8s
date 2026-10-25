@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembershipRejectedException
@@ -7,21 +8,19 @@ import com.pawbridge.backend.user.internal.shelter.web.AdminShelterApplicationCo
 import com.pawbridge.backend.user.internal.shelter.web.AdminShelterMemberController
 import com.pawbridge.backend.user.internal.shelter.web.ShelterApplicationController
 import com.pawbridge.backend.user.internal.shelter.web.ShelterMembershipExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -52,140 +51,176 @@ class ShelterMembershipHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var memberships: ShelterMembership
 
     @Test
-    fun given__verified_principals_and_all_eight_routes__when__calling__then__bind_explicit_ids_defaults_dates_bodies_and_original_envelopes() {
+    fun `검증된 주체와 여덟 경로가 주어졌을 때__호출하면__명시 ID와 기본값과 날짜와 본문과 원래 봉투를 바인딩한다`() {
+        // given
         val row = row()
         val admin = ShelterMembership.AdminApplication(row, "이름", "fixture@example.invalid", null)
-        whenever(memberships.submit(7, " raw ")).thenReturn(row)
-        whenever(memberships.mine(7, 0, 20)).thenReturn(ShelterMembership.Page(listOf(row), 1, 0, 20))
-        whenever(memberships.list(7, ShelterMembership.Status.PENDING, 0, 20))
-            .thenReturn(ShelterMembership.Page(listOf(admin), 1, 0, 20))
-        whenever(memberships.detail(7, 91)).thenReturn(admin)
-        whenever(memberships.approve(7, 91, "reg", "note")).thenReturn(admin)
-        whenever(memberships.reject(7, 91, "reason")).thenReturn(admin)
-        whenever(memberships.members(7, "reg", 0, 20))
-            .thenReturn(ShelterMembership.Page(listOf(ShelterMembership.Member(8L, "이름", null, null)), 1, 0, 20))
         val day = LocalDate.of(2026, 10, 20)
-        whenever(memberships.statistics(7, day, day))
-            .thenReturn(ShelterMembership.Statistics(day, day, listOf(), 2, 3, 4, 5))
-        mvc.perform(
+
+        every { memberships.submit(any(), any()) } returns row
+        every { memberships.mine(any(), any(), any()) } returns ShelterMembership.Page(listOf(row), 1, 0, 20)
+        every { memberships.list(any(), any(), any(), any()) } returns ShelterMembership.Page(listOf(admin), 1, 0, 20)
+        every { memberships.detail(any(), any()) } returns admin
+        every { memberships.approve(any(), any(), any(), any()) } returns admin
+        every { memberships.reject(any(), any(), any()) } returns admin
+        every { memberships.members(any(), any(), any(), any()) } returns
+            ShelterMembership.Page(listOf(ShelterMembership.Member(8L, "이름", null, null)), 1, 0, 20)
+        every { memberships.statistics(any(), any(), any()) } returns
+            ShelterMembership.Statistics(day, day, listOf(), 2, 3, 4, 5)
+
+        // when
+        val submitted = mvc.perform(
             post(OWN)
                 .header("Authorization", token("ROLE_USER"))
                 .header("X-User-Id", "999")
                 .contentType("application/json")
                 .content("{\"shelterName\":\" raw \"}"),
         )
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.requestedAt").value("2026-10-20T01:02:03.123456"))
-            .andExpect(jsonPath("$.data.reason").isEmpty())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        mvc.perform(get(OWN).header("Authorization", token("ROLE_USER")))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalElements").value(1))
-            .andExpect(jsonPath("$.data.sort.sorted").value(true))
-        mvc.perform(get(ADMIN).param("status", "PENDING").header("Authorization", token("ROLE_ADMIN")))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.content[0].application.id").value(91))
-        mvc.perform(get("$ADMIN/91").header("Authorization", token("ROLE_ADMIN")))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.applicantName").value("이름"))
-        mvc.perform(
+        val mine = mvc.perform(get(OWN).header("Authorization", token("ROLE_USER")))
+        val listed = mvc.perform(get(ADMIN).param("status", "PENDING").header("Authorization", token("ROLE_ADMIN")))
+        val detailed = mvc.perform(get("$ADMIN/91").header("Authorization", token("ROLE_ADMIN")))
+        val approved = mvc.perform(
             post("$ADMIN/91/approve")
                 .header("Authorization", token("ROLE_ADMIN"))
                 .contentType("application/json")
                 .content("{\"careRegNo\":\"reg\",\"note\":\"note\"}"),
-        ).andExpect(status().isOk())
-        mvc.perform(
+        )
+        val rejected = mvc.perform(
             post("$ADMIN/91/reject")
                 .header("Authorization", token("ROLE_ADMIN"))
                 .contentType("application/json")
                 .content("{\"reason\":\"reason\"}"),
-        ).andExpect(status().isOk())
-        mvc.perform(get("/api/v1/admin/users/shelters/reg/members").header("Authorization", token("ROLE_ADMIN")))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.content[0].approvalApplicationId").isEmpty())
-        mvc.perform(
+        )
+        val members = mvc.perform(
+            get("/api/v1/admin/users/shelters/reg/members").header("Authorization", token("ROLE_ADMIN")),
+        )
+        val statistics = mvc.perform(
             get("$ADMIN/stats")
                 .param("startDate", day.toString())
                 .param("endDate", day.toString())
                 .header("Authorization", token("ROLE_ADMIN")),
         )
+
+        // then
+        submitted
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.requestedAt").value("2026-10-20T01:02:03.123456"))
+            .andExpect(jsonPath("$.data.reason").isEmpty())
+            .andExpect(header().doesNotExist("Set-Cookie"))
+        mine
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.totalElements").value(1))
+            .andExpect(jsonPath("$.data.sort.sorted").value(true))
+        listed
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].application.id").value(91))
+        detailed
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.applicantName").value("이름"))
+        approved.andExpect(status().isOk())
+        rejected.andExpect(status().isOk())
+        members
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].approvalApplicationId").isEmpty())
+        statistics
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.currentPending").value(3))
-        verify(memberships).submit(7, " raw ")
-        verify(memberships).mine(7, 0, 20)
-        verify(memberships).list(7, ShelterMembership.Status.PENDING, 0, 20)
-        verify(memberships).detail(7, 91)
-        verify(memberships).approve(7, 91, "reg", "note")
-        verify(memberships).reject(7, 91, "reason")
-        verify(memberships).members(7, "reg", 0, 20)
-        verify(memberships).statistics(7, day, day)
-        verifyNoMoreInteractions(memberships)
+        verify(exactly = 1) { memberships.submit(7, " raw ") }
+        verify(exactly = 1) { memberships.mine(7, 0, 20) }
+        verify(exactly = 1) { memberships.list(7, ShelterMembership.Status.PENDING, 0, 20) }
+        verify(exactly = 1) { memberships.detail(7, 91) }
+        verify(exactly = 1) { memberships.approve(7, 91, "reg", "note") }
+        verify(exactly = 1) { memberships.reject(7, 91, "reason") }
+        verify(exactly = 1) { memberships.members(7, "reg", 0, 20) }
+        verify(exactly = 1) { memberships.statistics(7, day, day) }
+        confirmVerified(memberships)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__an_authenticated_role__when__reading_own_applications__then__allow_the_service_to_apply_current_database_policy(
+    fun `인증된 역할이 주어졌을 때__내 신청을 읽으면__서비스가 현재 DB 정책을 적용하게 둔다`(
         role: String,
     ) {
-        whenever(memberships.mine(7, 0, 20)).thenReturn(ShelterMembership.Page(listOf(), 0, 0, 20))
-        mvc.perform(get(OWN).header("Authorization", token(role))).andExpect(status().isOk())
-        verify(memberships).mine(7, 0, 20)
+        // given
+        every { memberships.mine(any(), any(), any()) } returns ShelterMembership.Page(listOf(), 0, 0, 20)
+
+        // when
+        val result = mvc.perform(get(OWN).header("Authorization", token(role)))
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { memberships.mine(7, 0, 20) }
         cleared()
     }
 
     @Test
-    fun given__missing_jwt_or_forged_admin_role__when__a_bad_id_and_body_are_sent__then__authenticate_and_authorize_before_binding() {
-        mvc.perform(
+    fun `JWT가 없거나 관리자 역할이 위조됐을 때__잘못된 ID와 본문을 보내면__바인딩 전에 인증과 인가를 한다`() {
+        // given
+        // when
+        val missingJwt = mvc.perform(
             post("$ADMIN/bad/approve")
                 .header("X-User-Role", "ROLE_ADMIN")
                 .contentType("application/json")
                 .content("{"),
         )
-            .andExpect(status().isUnauthorized())
-        mvc.perform(
+        val forgedRole = mvc.perform(
             post("$ADMIN/bad/approve")
                 .header("Authorization", token("ROLE_USER"))
                 .header("X-User-Role", "ROLE_ADMIN")
                 .contentType("application/json")
                 .content("{"),
         )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(memberships)
+
+        // then
+        missingJwt.andExpect(status().isUnauthorized())
+        forgedRole.andExpect(status().isForbidden())
+        confirmVerified(memberships)
         cleared()
     }
 
     @Test
-    fun given__an_admin_with_malformed_parameters_or_missing_dates__when__binding__then__retain_local_empty_400_and_global_missing_parameter_envelope() {
-        mvc.perform(get("$ADMIN/bad").header("Authorization", token("ROLE_ADMIN")))
-            .andExpect(status().isBadRequest())
-            .andExpect(content().string(""))
-        mvc.perform(get(ADMIN).param("status", "other").header("Authorization", token("ROLE_ADMIN")))
-            .andExpect(status().isBadRequest())
-            .andExpect(content().string(""))
-        mvc.perform(
+    fun `관리자의 파라미터가 잘못되었거나 날짜가 빠졌을 때__바인딩하면__로컬 빈 400과 전역 누락 파라미터 봉투를 유지한다`() {
+        // given
+        // when
+        val badId = mvc.perform(get("$ADMIN/bad").header("Authorization", token("ROLE_ADMIN")))
+        val badStatus = mvc.perform(get(ADMIN).param("status", "other").header("Authorization", token("ROLE_ADMIN")))
+        val missingEnd = mvc.perform(
             get("$ADMIN/stats").param("startDate", "2026-10-20").header("Authorization", token("ROLE_ADMIN")),
         )
+
+        // then
+        badId
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string(""))
+        badStatus
+            .andExpect(status().isBadRequest())
+            .andExpect(content().string(""))
+        missingEnd
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("필수 요청 파라미터 'endDate'(이)가 누락되었습니다."))
-        verifyNoInteractions(memberships)
+        confirmVerified(memberships)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["business", "database", "commit"])
-    fun given__business_or_late_storage_failure__when__approving__then__return_safe_original_error_without_secret_cookie_or_context(
+    fun `업무 오류나 늦은 저장소 오류가 났을 때__승인하면__비밀과 쿠키와 컨텍스트 없이 안전한 원래 오류를 돌려준다`(
         phase: String,
     ) {
+        // given
         val failure: RuntimeException = when (phase) {
             "business" -> ShelterMembershipRejectedException(ShelterMembershipRejectedException.Reason.CONFLICT)
             "database" -> DataAccessResourceFailureException("synthetic-private-secret")
             else -> TransactionSystemException("synthetic-private-secret")
         }
-        whenever(memberships.approve(7, 91, "reg", "note")).thenThrow(failure)
+
+        every { memberships.approve(any(), any(), any(), any()) } throws failure
+
+        // when
         val response = mvc.perform(
             post("$ADMIN/91/approve")
                 .header("Authorization", token("ROLE_ADMIN"))
@@ -195,28 +230,39 @@ class ShelterMembershipHttpTest {
             .andExpect(status().`is`(if (phase == "business") 409 else 500))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andReturn().response
+
+        // then
         assertThat(response.contentAsString).doesNotContain("synthetic-private-secret")
         assertThat(response.getHeader("Cache-Control")).contains("no-store")
+        verify(exactly = 1) { memberships.approve(7, 91, "reg", "note") }
         cleared()
     }
 
     @Test
-    fun given__invalid_request_bodies_and_adjacent_routes__when__calling__then__reject_without_business_invocation() {
-        mvc.perform(
+    fun `잘못된 요청 본문과 인접 경로가 주어졌을 때__호출하면__업무 호출 없이 거부한다`() {
+        // given
+        // when
+        val blankName = mvc.perform(
             post(OWN)
                 .header("Authorization", token("ROLE_USER"))
                 .contentType("application/json")
                 .content("{\"shelterName\":\" \"}"),
-        ).andExpect(status().isBadRequest())
-        mvc.perform(
+        )
+        val blankReason = mvc.perform(
             post("$ADMIN/91/reject")
                 .header("Authorization", token("ROLE_ADMIN"))
                 .contentType("application/json")
                 .content("{\"reason\":\" \"}"),
-        ).andExpect(status().isBadRequest())
-        mvc.perform(put("$ADMIN/91/approve").header("Authorization", token("ROLE_ADMIN"))).andExpect(status().isForbidden())
-        mvc.perform(get("$OWN/extra").header("Authorization", token("ROLE_USER"))).andExpect(status().isForbidden())
-        verifyNoInteractions(memberships)
+        )
+        val wrongMethod = mvc.perform(put("$ADMIN/91/approve").header("Authorization", token("ROLE_ADMIN")))
+        val extraPath = mvc.perform(get("$OWN/extra").header("Authorization", token("ROLE_USER")))
+
+        // then
+        blankName.andExpect(status().isBadRequest())
+        blankReason.andExpect(status().isBadRequest())
+        wrongMethod.andExpect(status().isForbidden())
+        extraPath.andExpect(status().isForbidden())
+        confirmVerified(memberships)
     }
 
     companion object {

@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.homevideo.application.ReadHomeVideos
 import com.pawbridge.backend.community.internal.homevideo.web.HomeVideoController
@@ -13,6 +14,9 @@ import com.pawbridge.backend.community.internal.visit.application.ReadTodayVisit
 import com.pawbridge.backend.community.internal.visit.application.TodayVisits
 import com.pawbridge.backend.community.internal.visit.web.VisitTodayController
 import com.pawbridge.backend.community.internal.visit.web.VisitTodayExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import jakarta.servlet.http.Cookie
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -20,9 +24,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -30,7 +31,6 @@ import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -66,25 +66,26 @@ class VisitTodayHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var visits: ReadTodayVisits
 
-    @MockitoBean
+    @MockkBean
     lateinit var videos: ReadHomeVideos
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @MethodSource("publicReads")
-    fun given__anonymous_or_bad_bearer_with_ignored_identity_and_cookie__when__reading_today__then__return_exact_date_and_integral_long_without_cookie(
+    fun `익명 또는 잘못된 Bearer와 무시될 신원·쿠키가 주어졌을 때__오늘 방문을 조회하면__쿠키 없이 정확한 날짜와 정수 long을 돌려준다`(
         count: Long,
         authorization: String,
     ) {
-        whenever(visits.read()).thenReturn(TodayVisits(LocalDate.of(2026, 10, 19), count))
+        // given
+        every { visits.read() } returns TodayVisits(LocalDate.of(2026, 10, 19), count)
         val request = get("/api/v1/visits/today")
             .header("X-User-Id", "999")
             .header("X-User-Role", "ROLE_ADMIN")
@@ -95,6 +96,7 @@ class VisitTodayHttpTest {
             request.header("Authorization", authorization)
         }
 
+        // when
         val response = mvc.perform(request)
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
@@ -107,24 +109,28 @@ class VisitTodayHttpTest {
             )
             .andReturn().response
 
+        // then
         val number = mapper.readTree(response.contentAsString).path("data").path("count")
         assertThat(number.isIntegralNumber).isTrue()
         assertThat(number.longValue()).isEqualTo(count)
-        verify(visits).read()
-        verifyNoInteractions(videos, readPost, listPosts)
+        verify(exactly = 1) { visits.read() }
+        confirmVerified(visits, videos, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__data_access_failure__when__reading_today__then__return_safe_503_with_explicit_no_store() {
-        whenever(visits.read()).thenThrow(
-            DataAccessResourceFailureException(
-                "synthetic-private-query",
-                SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password"),
-            ),
+    fun `데이터 접근 실패가 주어졌을 때__오늘 방문을 조회하면__명시적 no-store와 안전한 503을 돌려준다`() {
+        // given
+        every { visits.read() } throws DataAccessResourceFailureException(
+            "synthetic-private-query",
+            SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password"),
         )
 
-        mvc.perform(get("/api/v1/visits/today"))
+        // when
+        val result = mvc.perform(get("/api/v1/visits/today"))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -134,19 +140,20 @@ class VisitTodayHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(visits).read()
-        verifyNoInteractions(videos, readPost, listPosts)
+        verify(exactly = 1) { visits.read() }
+        confirmVerified(visits, videos, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("runtimeFailures")
-    fun given__non_dao_runtime_failure__when__reading_today__then__return_500_and_observe_the_existing_security_cache_headers(
+    fun `DAO가 아닌 런타임 실패가 주어졌을 때__오늘 방문을 조회하면__500을 돌려주고 기존 보안 캐시 헤더를 따른다`(
         failure: RuntimeException,
     ) {
-        whenever(visits.read()).thenThrow(failure)
-        whenever(readPost.read(42)).thenThrow(IllegalStateException("synthetic-private-post"))
+        // given
+        every { visits.read() } throws failure
+        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
 
+        // when
         val visit = mvc.perform(get("/api/v1/visits/today"))
             .andExpect(status().isInternalServerError())
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -156,11 +163,12 @@ class VisitTodayHttpTest {
             .andExpect(status().isInternalServerError())
             .andReturn().response
 
+        // then
         // Both handlers leave cache policy to the same candidate security chain.
         assertThat(visit.getHeader("Cache-Control")).isNotNull().isEqualTo(post.getHeader("Cache-Control"))
-        verify(visits).read()
-        verify(readPost).read(42)
-        verifyNoInteractions(videos, listPosts)
+        verify(exactly = 1) { visits.read() }
+        verify(exactly = 1) { readPost.read(42) }
+        confirmVerified(visits, videos, readPost, listPosts)
     }
 
     @ParameterizedTest
@@ -172,19 +180,29 @@ class VisitTodayHttpTest {
             "OPTIONS /api/v1/visits/today",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting__then__deny_before_visit_read(request: String) {
+    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__요청하면__방문 조회 전에 거부한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
 
-        mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1])).andExpect(status().isForbidden())
+        // when
+        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]))
 
-        verifyNoInteractions(visits, videos, readPost, listPosts)
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(visits, videos, readPost, listPosts)
     }
 
     @Test
-    fun given__protected_favorite_and_home_runtime_failure__when__requesting__then__visit_matcher_and_advice_preserve_existing_contracts() {
-        whenever(videos.read()).thenThrow(IllegalStateException("synthetic-private-home-video"))
+    fun `보호된 즐겨찾기와 홈 런타임 실패가 주어졌을 때__요청하면__방문 매처와 어드바이스가 기존 계약을 유지한다`() {
+        // given
+        every { videos.read() } throws IllegalStateException("synthetic-private-home-video")
 
-        mvc.perform(get("/api/v1/favorites/42/check"))
+        // when
+        val favorite = mvc.perform(get("/api/v1/favorites/42/check"))
+        val home = mvc.perform(get("/api/v1/home/videos").header("Authorization", "Bearer invalid"))
+
+        // then
+        favorite
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -192,7 +210,7 @@ class VisitTodayHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        mvc.perform(get("/api/v1/home/videos").header("Authorization", "Bearer invalid"))
+        home
             .andExpect(status().isServiceUnavailable())
             .andExpect(
                 content().json(
@@ -200,9 +218,8 @@ class VisitTodayHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(videos).read()
-        verifyNoInteractions(visits, readPost, listPosts)
+        verify(exactly = 1) { videos.read() }
+        confirmVerified(visits, videos, readPost, listPosts)
     }
 
     companion object {

@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.visit.application.TodayVisits
 import com.pawbridge.backend.community.internal.visit.application.VisitCollection
@@ -7,15 +8,14 @@ import com.pawbridge.backend.community.internal.visit.application.VisitCollectio
 import com.pawbridge.backend.community.internal.visit.application.VisitIdentity
 import com.pawbridge.backend.community.internal.visit.web.VisitCollectionController
 import com.pawbridge.backend.community.internal.visit.web.VisitCollectionExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import jakarta.servlet.http.Cookie
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -23,7 +23,6 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -59,7 +58,7 @@ class VisitCollectionHttpTest {
     @Autowired
     lateinit var identity: VisitIdentity
 
-    @MockitoBean
+    @MockkBean
     lateinit var visits: VisitCollection
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -75,17 +74,21 @@ class VisitCollectionHttpTest {
     }
 
     @Test
-    fun given__first_and_existing_identity__when__initializing__then__host_cookie_until_midnight_without_count() {
-        val response = mvc.perform(
-            post("/api/v1/visits/identity")
-                .header("Origin", ORIGIN)
-                .header("Authorization", "Bearer invalid")
-                .header("X-User-Id", "999"),
-        )
+    fun `첫 신원과 기존 신원이 주어졌을 때__초기화하면__자정까지의 호스트 쿠키를 주고 횟수는 세지 않는다`() {
+        // given
+        val first = post("/api/v1/visits/identity")
+            .header("Origin", ORIGIN)
+            .header("Authorization", "Bearer invalid")
+            .header("X-User-Id", "999")
+
+        // when
+        val response = mvc.perform(first)
             .andExpect(status().isNoContent())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(content().string(""))
             .andReturn().response
+
+        // then
         val cookie = response.getHeader("Set-Cookie")!!
         assertThat(cookie)
             .contains("__Host-pb_visit=", "Path=/", "Secure", "HttpOnly", "SameSite=Lax", "Max-Age=60")
@@ -95,17 +98,23 @@ class VisitCollectionHttpTest {
         mvc.perform(post("/api/v1/visits/identity").header("Origin", ORIGIN).cookie(Cookie(VisitIdentity.NAME, value)))
             .andExpect(status().isNoContent())
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verifyNoInteractions(visits)
+        confirmVerified(visits)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "https://outside.fixture.invalid"])
-    fun given__unapproved_origin_even_for_bot__when__posting__then__403_before_cookie_or_storage(origin: String) {
+    fun `봇이어도 승인되지 않은 출처가 주어졌을 때__게시하면__쿠키나 저장 전에 403을 돌려준다`(origin: String) {
+        // given
         val request = post("/api/v1/visits/identity").header("User-Agent", "crawler")
         if (origin != "missing") {
             request.header("Origin", origin)
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -115,32 +124,48 @@ class VisitCollectionHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(visits)
+        confirmVerified(visits)
     }
 
     @Test
-    fun given__known_bot__when__initializing_or_counting__then__204_no_cookie_or_storage() {
-        for (path in listOf("identity", "today")) {
+    fun `알려진 봇이 주어졌을 때__신원을 초기화하거나 집계하면__쿠키나 저장 없이 204를 돌려준다`() {
+        // given
+        val paths = listOf("identity", "today")
+
+        // when
+        val results = paths.map { path ->
             mvc.perform(post("/api/v1/visits/$path").header("Origin", ORIGIN).header("User-Agent", "HeadlessChrome"))
+        }
+
+        // then
+        results.forEach { result ->
+            result
                 .andExpect(status().isNoContent())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(header().doesNotExist("Set-Cookie"))
                 .andExpect(content().string(""))
         }
-        verifyNoInteractions(visits)
+        confirmVerified(visits)
     }
 
     @Test
-    fun given__cookie_and_untrusted_identity_headers__when__counting__then__exact_day_count_without_identity_echo_or_mint() {
+    fun `쿠키와 신뢰할 수 없는 신원 헤더가 주어졌을 때__집계하면__신원 반사나 발급 없이 정확한 일별 횟수를 돌려준다`() {
+        // given
         val cookie = identity.initialize(null, NOW)!!.value
-        whenever(visits.count(cookie)).thenReturn(TodayVisits(LocalDate.of(2026, 10, 12), 7))
-        mvc.perform(
+
+        every { visits.count(any()) } returns TodayVisits(LocalDate.of(2026, 10, 12), 7)
+
+        // when
+        val result = mvc.perform(
             post("/api/v1/visits/today")
                 .header("Origin", ORIGIN)
                 .header("X-User-Id", "999")
                 .header("Authorization", "Bearer invalid")
                 .cookie(Cookie(VisitIdentity.NAME, cookie)),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -150,19 +175,27 @@ class VisitCollectionHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(visits).count(cookie)
+        verify(exactly = 1) { visits.count(cookie) }
     }
 
     @Test
-    fun given__missing_or_ambiguous_cookie__when__counting__then__409_without_mint() {
-        whenever(visits.count(null))
-            .thenThrow(VisitCollectionRejectedException(VisitCollectionRejectedException.Reason.COOKIE))
-        for (duplicate in listOf(false, true)) {
+    fun `쿠키가 없거나 모호할 때__집계하면__발급 없이 409를 돌려준다`() {
+        // given
+        every { visits.count(any()) } throws VisitCollectionRejectedException(VisitCollectionRejectedException.Reason.COOKIE)
+        val requests = listOf(false, true).map { duplicate ->
             val request = post("/api/v1/visits/today").header("Origin", ORIGIN)
             if (duplicate) {
                 request.cookie(Cookie(VisitIdentity.NAME, "synthetic-one"), Cookie(VisitIdentity.NAME, "synthetic-two"))
             }
-            mvc.perform(request)
+            request
+        }
+
+        // when
+        val results = requests.map { request -> mvc.perform(request) }
+
+        // then
+        results.forEach { result ->
+            result
                 .andExpect(status().isConflict())
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(header().doesNotExist("Set-Cookie"))
@@ -173,12 +206,13 @@ class VisitCollectionHttpTest {
                     ),
                 )
         }
-        verify(visits, times(2)).count(null)
+        verify(exactly = 2) { visits.count(null) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "invalid", "USER"])
-    fun given__no_actual_admin_token_despite_role_header__when__reading_period__then__deny_without_query(role: String) {
+    fun `실제 관리자 토큰이 없고 역할 헤더만 있을 때__기간을 조회하면__조회 없이 거부한다`(role: String) {
+        // given
         val request = get("/api/v1/admin/visits/stats/period")
             .param("startDate", "2026-10-12")
             .param("endDate", "2026-10-12")
@@ -190,23 +224,46 @@ class VisitCollectionHttpTest {
         if (role == "USER") {
             request.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
         }
-        mvc.perform(request).andExpect(status().`is`(if (role == "USER") 403 else 401))
-        verifyNoInteractions(visits)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().`is`(if (role == "USER") 403 else 401))
+        confirmVerified(visits)
     }
 
     @Test
-    fun given__actual_admin_and_dates__when__reading_period__then__exact_envelope_and_explicit_parameter_binding() {
+    fun `실제 관리자와 날짜가 주어졌을 때__기간을 조회하면__정확한 봉투와 명시적 파라미터 바인딩을 쓴다`() {
+        // given
         val day = LocalDate.of(2026, 10, 12)
-        whenever(visits.period(day, day))
-            .thenReturn(VisitCollection.Period(day, day, day, NOW, listOf(VisitCollection.Day(day, 7))))
         val token = F3TestInputs.token(7, "ROLE_ADMIN")
-        mvc.perform(
+
+        every { visits.period(any(), any()) } returns
+            VisitCollection.Period(day, day, day, NOW, listOf(VisitCollection.Day(day, 7)))
+
+        // when
+        val ok = mvc.perform(
             get("/api/v1/admin/visits/stats/period")
                 .header("Authorization", "Bearer $token")
                 .header("X-User-Role", "ROLE_USER")
                 .param("startDate", day.toString())
                 .param("endDate", day.toString()),
         )
+        val badDate = mvc.perform(
+            get("/api/v1/admin/visits/stats/period")
+                .header("Authorization", "Bearer $token")
+                .param("startDate", "bad")
+                .param("endDate", day.toString()),
+        )
+        val missingEnd = mvc.perform(
+            get("/api/v1/admin/visits/stats/period")
+                .header("Authorization", "Bearer $token")
+                .param("startDate", day.toString()),
+        )
+
+        // then
+        ok
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(
@@ -215,31 +272,27 @@ class VisitCollectionHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        mvc.perform(
-            get("/api/v1/admin/visits/stats/period")
-                .header("Authorization", "Bearer $token")
-                .param("startDate", "bad")
-                .param("endDate", day.toString()),
-        )
+        badDate
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("날짜 형식을 확인해 주세요."))
-        mvc.perform(
-            get("/api/v1/admin/visits/stats/period")
-                .header("Authorization", "Bearer $token")
-                .param("startDate", day.toString()),
-        )
+        missingEnd
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("필수 요청 파라미터 'endDate'(이)가 누락되었습니다."))
-        verify(visits).period(day, day)
+        verify(exactly = 1) { visits.period(day, day) }
     }
 
     @Test
-    fun given__storage_or_runtime_failure__when__counting__then__safe_error_without_private_details() {
-        whenever(visits.count(null)).thenThrow(
-            DataAccessResourceFailureException("synthetic-private-sql"),
-            IllegalStateException("synthetic-private-key"),
-        )
-        mvc.perform(post("/api/v1/visits/today").header("Origin", ORIGIN))
+    fun `저장소 또는 런타임 실패가 주어졌을 때__집계하면__내부 정보 없이 안전한 오류를 돌려준다`() {
+        // given
+        every { visits.count(any()) } throws DataAccessResourceFailureException("synthetic-private-sql") andThenThrows
+            IllegalStateException("synthetic-private-key")
+
+        // when
+        val storage = mvc.perform(post("/api/v1/visits/today").header("Origin", ORIGIN))
+        val runtime = mvc.perform(post("/api/v1/visits/today").header("Origin", ORIGIN))
+
+        // then
+        storage
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(
@@ -248,9 +301,10 @@ class VisitCollectionHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        mvc.perform(post("/api/v1/visits/today").header("Origin", ORIGIN))
+        runtime
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
+        verify(exactly = 2) { visits.count(null) }
     }
 
     companion object {

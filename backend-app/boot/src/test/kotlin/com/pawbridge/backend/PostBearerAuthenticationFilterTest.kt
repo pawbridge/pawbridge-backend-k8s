@@ -2,12 +2,10 @@ package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.security.PostBearerAuthenticationFilter
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.sameValue
 import io.jsonwebtoken.Jwts
+import io.mockk.spyk
+import io.mockk.verify
 import jakarta.servlet.FilterChain
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -15,12 +13,8 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.never
-import org.mockito.Mockito.spy
-import org.mockito.Mockito.verify
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
-import org.springframework.security.core.context.SecurityContext
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.web.context.RequestAttributeSecurityContextRepository
 import org.springframework.security.web.util.matcher.RequestMatcher
@@ -38,13 +32,15 @@ class PostBearerAuthenticationFilterTest {
 
     @ParameterizedTest
     @MethodSource("verifiedRoles")
-    fun given__verified_role__when__filtering_a_protected_request__then__keep_long_principal_null_credentials_and_only_exact_admin_authority(
+    fun `검증된 역할이 주어졌을 때__보호 요청을 필터링하면__Long 주체와 정확한 관리자 권한만 유지한다`(
         role: String,
         authorities: List<String>,
     ) {
+        // given
         val request = MockHttpServletRequest("GET", "/api/v1/admin/users/stats/total-users")
         request.addHeader("Authorization", "Bearer " + F3TestInputs.token(7, role))
 
+        // when
         filter.doFilter(
             request,
             MockHttpServletResponse(),
@@ -58,17 +54,20 @@ class PostBearerAuthenticationFilterTest {
             },
         )
 
+        // then
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__business_failure_after_authentication__when__the_chain_throws__then__propagate_it_and_clear_context_without_an_authentication_response() {
+    fun `인증 뒤 업무 실패가 주어졌을 때__체인이 던지면__전파하고 인증 응답 없이 컨텍스트를 비운다`() {
+        // given
         val request = MockHttpServletRequest("GET", "/api/v1/admin/users/stats/total-users")
         request.addHeader("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
         val response = MockHttpServletResponse()
         val failure = IllegalStateException("synthetic-private-query")
 
-        assertThatThrownBy {
+        // when
+        val thrown = assertThatThrownBy {
             filter.doFilter(
                 request,
                 response,
@@ -77,16 +76,19 @@ class PostBearerAuthenticationFilterTest {
                     throw failure
                 },
             )
-        }.isSameAs(failure)
+        }
 
+        // then
+        thrown.isSameAs(failure)
         assertThat(response.status).isEqualTo(200)
         assertThat(response.contentAsString).isEmpty()
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun givenVerifiedStreamExpiry__whenFiltering__thenSaveOnlyRequestContextWithLongIdentityAndInstantWithoutSessionOrCredentials() {
-        val repository = spy(RequestAttributeSecurityContextRepository())
+    fun `검증된 스트림 만료가 주어졌을 때__필터링하면__Long 신원과 Instant만 요청 컨텍스트에 저장한다`() {
+        // given
+        val repository = spyk(RequestAttributeSecurityContextRepository())
         val filter = PostBearerAuthenticationFilter(
             PostTokenAuthenticator(F3TestInputs.KEY),
             RequestMatcher { true },
@@ -105,6 +107,7 @@ class PostBearerAuthenticationFilterTest {
         request.addHeader("X-Auth-Expires-At", Long.MAX_VALUE)
         val response = MockHttpServletResponse()
 
+        // when
         filter.doFilter(
             request,
             response,
@@ -116,11 +119,9 @@ class PostBearerAuthenticationFilterTest {
                 assertThat(repository.loadDeferredContext(request).get().authentication).isSameAs(identity)
             },
         )
-        verify(repository).saveContext(
-            anyNonNull<SecurityContext>(),
-            sameValue<HttpServletRequest>(request),
-            sameValue<HttpServletResponse>(response),
-        )
+
+        // then
+        verify(exactly = 1) { repository.saveContext(any(), refEq(request), refEq(response)) }
         assertThat(request.getSession(false)).isNull()
         assertThat(
             repository.loadDeferredContext(MockHttpServletRequest("GET", "/api/v1/notes/stream")).get().authentication,
@@ -130,10 +131,11 @@ class PostBearerAuthenticationFilterTest {
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun givenSignedTokenWithoutExpiry__whenFilteringRestOrExactStream__thenRequireExpiryOnlyForStreamAndNeverSaveRest(
+    fun `만료 없는 토큰이 주어졌을 때__REST나 스트림을 필터링하면__스트림만 거부하고 저장하지 않는다`(
         stream: Boolean,
     ) {
-        val repository = spy(RequestAttributeSecurityContextRepository())
+        // given
+        val repository = spyk(RequestAttributeSecurityContextRepository())
         val filter = PostBearerAuthenticationFilter(
             PostTokenAuthenticator(F3TestInputs.KEY),
             RequestMatcher { true },
@@ -145,6 +147,8 @@ class PostBearerAuthenticationFilterTest {
         request.addHeader("Authorization", "Bearer $token")
         val response = MockHttpServletResponse()
         val reached = AtomicBoolean()
+
+        // when
         filter.doFilter(
             request,
             response,
@@ -153,13 +157,11 @@ class PostBearerAuthenticationFilterTest {
                 assertThat(SecurityContextHolder.getContext().authentication!!.details).isNull()
             },
         )
+
+        // then
         assertThat(reached.get()).isEqualTo(!stream)
         assertThat(response.status).isEqualTo(if (stream) 401 else 200)
-        verify(repository, never()).saveContext(
-            anyNonNull<SecurityContext>(),
-            anyNonNull<HttpServletRequest>(),
-            anyNonNull<HttpServletResponse>(),
-        )
+        verify(exactly = 0) { repository.saveContext(any(), any(), any()) }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
         assertThat(request.getSession(false)).isNull()
     }

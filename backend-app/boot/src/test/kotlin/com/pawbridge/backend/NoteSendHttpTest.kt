@@ -1,28 +1,25 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.SendPrivateNote
 import com.pawbridge.backend.community.internal.note.application.SendPrivateNote.SendNote
 import com.pawbridge.backend.community.internal.note.web.NoteSendController
 import com.pawbridge.backend.community.internal.note.web.NoteSendExceptionHandler
-import com.pawbridge.backend.support.anyNonNull
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -49,19 +46,23 @@ class NoteSendHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var sending: SendPrivateNote
 
     @ParameterizedTest
     @ValueSource(strings = ["USER", "EXPIRYLESS_ADMIN"])
-    fun givenSignedRestCallerAndSpoofedHeaders__whenSending__thenBindVerifiedIdentityAndPreserveSixInputs(kind: String) {
-        whenever(sending.send(eq(7L), anyNonNull<SendNote>())).thenReturn(SendPrivateNote.Receipt(NOTE))
+    fun `서명된 REST 호출자와 위조 헤더가 주어졌을 때__쪽지를 보내면__검증된 신원과 여섯 입력을 전달한다`(kind: String) {
+        // given
         val token = if (kind == "USER") {
             F3TestInputs.token(7, "ROLE_USER")
         } else {
             Jwts.builder().claim("userId", 7L).claim("role", "ROLE_ADMIN").signWith(F3TestInputs.KEY).compact()
         }
-        mvc.perform(
+
+        every { sending.send(any(), any()) } returns SendPrivateNote.Receipt(NOTE)
+
+        // when
+        val result = mvc.perform(
             post("/api/v1/notes")
                 .header("Authorization", "Bearer $token")
                 .header("X-User-Id", "999")
@@ -69,6 +70,9 @@ class NoteSendHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(BODY),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -78,14 +82,15 @@ class NoteSendHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(sending).send(7L, SendNote(8L, " raw body ", REQUEST, null, null, null))
-        verifyNoMoreInteractions(sending)
+        verify(exactly = 1) { sending.send(7L, SendNote(8L, " raw body ", REQUEST, null, null, null)) }
+        confirmVerified(sending)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID"])
-    fun givenNoValidTokenAndMalformedBody__whenSending__thenAuthenticateBeforeBindingWithoutCallingTheUseCase(kind: String) {
+    fun `유효한 토큰이 없고 본문이 깨졌을 때__쪽지를 보내면__본문 바인딩 전에 인증하고 유스케이스를 호출하지 않는다`(kind: String) {
+        // given
         val request = post("/api/v1/notes")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{malformed")
@@ -93,43 +98,62 @@ class NoteSendHttpTest {
         if (kind == "INVALID") {
             request.header("Authorization", "Bearer invalid")
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(sending)
+        confirmVerified(sending)
         cleared()
     }
 
     @Test
-    fun givenVerifiedCallerAndMalformedBody__whenSending__thenUseScoped400WithoutInvokingTheUseCase() {
-        mvc.perform(
+    fun `검증된 호출자의 본문이 깨졌을 때__쪽지를 보내면__유스케이스 호출 없이 범위 한정 400을 돌려준다`() {
+        // given
+        val token = F3TestInputs.token(7, "ROLE_USER")
+
+        // when
+        val result = mvc.perform(
             post("/api/v1/notes")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+                .header("Authorization", "Bearer $token")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{malformed"),
         )
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        verifyNoInteractions(sending)
+        confirmVerified(sending)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["/api/notes", "/api/v1/notes/unexposed/send"])
-    fun givenAdjacentUnexposedPost__whenUsingAValidToken__thenKeepDenyAllWithoutCallingTheUseCase(path: String) {
-        mvc.perform(
+    fun `노출되지 않은 인접 POST 경로가 주어졌을 때__유효한 토큰으로 호출하면__유스케이스 호출 없이 전부 거부한다`(path: String) {
+        // given
+        val token = F3TestInputs.token(7, "ROLE_USER")
+
+        // when
+        val result = mvc.perform(
             post(path)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+                .header("Authorization", "Bearer $token")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(BODY),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verifyNoInteractions(sending)
+        confirmVerified(sending)
         cleared()
     }
 

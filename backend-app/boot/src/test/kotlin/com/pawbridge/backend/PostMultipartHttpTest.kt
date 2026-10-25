@@ -30,13 +30,16 @@ import java.util.concurrent.atomic.AtomicInteger
 class PostMultipartHttpTest {
     @ParameterizedTest
     @CsvSource("POST,false", "POST,true", "PUT,false", "PUT,true")
-    fun given__multipart_parsing_failure__when__authenticating_before_handler_selection__then__reject_missing_token_or_return_safe_legacy_500(
+    fun `멀티파트 파싱 실패가 주어졌을 때__핸들러 선택 전에 인증하면__토큰 없음은 거부하고 안전한 500을 돌려준다`(
         method: String,
         oversized: Boolean,
     ) {
+        // given
         val values = F3TestInputs.values()
         val reads = ReadDatabaseSettings.fromEnvironment { name -> values[name] }
         val writes = PostWriteSettings.fromEnvironment { name -> values[name] }
+
+        // when
         WebApplicationContextRunner()
             .withInitializer(ConfigDataApplicationContextInitializer())
             .withUserConfiguration(PawBridgeApplication::class.java)
@@ -80,6 +83,7 @@ class PostMultipartHttpTest {
                         input
                     }
                 }
+                // then
                 try {
                     mvc.perform(request(null)).andExpect(status().isUnauthorized())
                     assertThat(parseCalls.get()).isZero()

@@ -5,13 +5,11 @@ import com.pawbridge.backend.store.internal.catalog.application.StoreCatalog
 import com.pawbridge.backend.store.internal.catalog.infrastructure.JdbcStoreCatalog
 import com.pawbridge.backend.store.internal.catalog.web.StoreCatalogController
 import com.pawbridge.backend.store.internal.catalog.web.StoreCatalogExceptionHandler
+import io.mockk.mockk
+import io.mockk.spyk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.spy
-import org.mockito.Mockito.verify
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -24,13 +22,18 @@ import javax.sql.DataSource
 
 class StoreCatalogConfigurationTest {
     @Test
-    fun given__no_explicit_enablement__when__starting_without_database_inputs__then__create_no_catalog_reader_or_routes() {
-        for (value in arrayOf("", "pawbridge.store-catalog.enabled=false")) {
+    fun `명시적 활성화가 없을 때__DB 입력 없이 시작하면__카탈로그 리더와 경로를 만들지 않는다`() {
+        // given
+        val values = arrayOf("", "pawbridge.store-catalog.enabled=false")
+
+        // when
+        for (value in values) {
             var runner = ApplicationContextRunner().withUserConfiguration(StoreCatalogConfiguration::class.java)
             if (value.isNotEmpty()) {
                 runner = runner.withPropertyValues(value)
             }
             runner.run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                 assertThat(context.getBeansOfType(StoreCatalog::class.java)).isEmpty()
                 assertThat(context.getBeansOfType(StoreCatalogController::class.java)).isEmpty()
@@ -42,15 +45,19 @@ class StoreCatalogConfigurationTest {
     }
 
     @Test
-    fun given__explicit_enablement__when__assembling_and_closing__then__reuse_reader_manager_with_five_second_queries_and_close_owned_nori() {
-        val source = mock(DataSource::class.java)
+    fun `명시적 활성화가 있을 때__조립하고 닫으면__매니저를 재사용하고 5초 질의와 소유한 Nori를 닫는다`() {
+        // given
+        val source = mockk<DataSource>()
         val manager = JdbcTransactionManager(source)
         val catalog = arrayOfNulls<JdbcStoreCatalog>(1)
+
+        // when
         ApplicationContextRunner().withUserConfiguration(StoreCatalogConfiguration::class.java)
             .withBean("dataSource", DataSource::class.java, Supplier { source })
             .withBean("transactionManager", JdbcTransactionManager::class.java, Supplier { manager })
             .withPropertyValues("pawbridge.store-catalog.enabled=true")
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                 catalog[0] = context.getBean(JdbcStoreCatalog::class.java)
                 val jdbc = context.getBean("storeCatalogJdbc", JdbcTemplate::class.java)
@@ -69,12 +76,15 @@ class StoreCatalogConfigurationTest {
                 // Observe close ownership without opening a database or repeating catalog SQL tests.
                 val terms = ReflectionTestUtils.getField(catalog[0]!!, "terms")
                 val analyzer = ReflectionTestUtils.getField(terms!!, "analyzer") as AutoCloseable
-                val closeProbe = spy(analyzer)
+                val closeProbe = spyk(analyzer)
                 ReflectionTestUtils.setField(terms, "analyzer", closeProbe)
             }
+
+        // then
         val terms = ReflectionTestUtils.getField(catalog[0]!!, "terms")
-        verify(ReflectionTestUtils.getField(terms!!, "analyzer") as AutoCloseable).close()
-        verify(source, never()).getConnection()
-        verify(source, never()).getConnection(anyString(), anyString())
+        val closedAnalyzer = ReflectionTestUtils.getField(terms!!, "analyzer") as AutoCloseable
+        verify(exactly = 1) { closedAnalyzer.close() }
+        verify(exactly = 0) { source.connection }
+        verify(exactly = 0) { source.getConnection(any(), any()) }
     }
 }

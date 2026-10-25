@@ -160,21 +160,15 @@ import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountControll
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler
 import com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.confirmVerified
+import io.mockk.mockk
 import jakarta.persistence.EntityManagerFactory
 import jakarta.servlet.MultipartConfigElement
-import java.net.http.HttpClient
-import java.time.Clock
-import java.time.ZoneOffset
-import java.util.List
-import javax.sql.DataSource
-import java.util.function.Function
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.aop.support.AopUtils
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.web.servlet.MultipartAutoConfiguration
@@ -194,19 +188,37 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.util.unit.DataSize
+import java.net.http.HttpClient
+import java.time.Clock
+import java.time.ZoneOffset
+import java.util.List
+import java.util.function.Function
+import javax.sql.DataSource
 
 class PawBridgeApplicationTest {
     @Test
-    fun given__missing_settings__when__validating_startup__then__no_default_database_is_selected() {
-        assertThatThrownBy { ReadDatabaseSettings.fromEnvironment(Function { key -> emptyMap<String, String>()[key] }) }
+    fun `설정이 없을 때__시작을 검증하면__기본 데이터베이스를 고르지 않는다`() {
+        // given
+        val environment = emptyMap<String, String>()
+
+        // when
+        val thrown = catchThrowable { ReadDatabaseSettings.fromEnvironment(Function { key -> environment[key] }) }
+
+        // then
+        assertThat(thrown)
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("PAWBRIDGE_DB_URL")
     }
 
     @Test
-    fun given__explicit_inputs__when__validating_startup__then__preserve_values_and_bound_pool() {
+    fun `명시적 입력이 주어졌을 때__시작을 검증하면__값을 보존하고 풀 크기를 제한한다`() {
+        // given
         val inputs: Map<String, String> = inputs()
+
+        // when
         val settings = ReadDatabaseSettings.fromEnvironment(Function { key -> inputs[key] })
+
+        // then
         assertThat(settings.jdbcUrl()).isEqualTo(inputs["PAWBRIDGE_DB_URL"])
         assertThat(settings.username()).isEqualTo(inputs["PAWBRIDGE_DB_USER"])
         assertThat(settings.maximumPoolSize()).isEqualTo(10)
@@ -214,32 +226,44 @@ class PawBridgeApplicationTest {
     }
 
     @Test
-    fun given__invalid_endpoint_or_pool__when__validating_startup__then__reject_without_echoing_input() {
+    fun `잘못된 엔드포인트나 풀이 주어졌을 때__시작을 검증하면__입력을 되풀이하지 않고 거부한다`() {
+        // given
         val urls = arrayOf(
             "jdbc:h2:mem:ignored",
             "jdbc:postgresql://localhost/pawbridge_f2_ci?password=private-value",
             "jdbc:postgresql://private-value@localhost/pawbridge_f2_ci",
             "jdbc:postgresql://localhost:0/pawbridge_f2_ci",
         )
-        for (url in urls) {
+
+        // when
+        val rejectedUrls = urls.map { url ->
             val values = inputs()
             values["PAWBRIDGE_DB_URL"] = url
-            assertThatThrownBy { ReadDatabaseSettings.fromEnvironment(Function { key -> values[key] }) }
-                .hasMessage("Missing or invalid explicit setting: PAWBRIDGE_DB_URL")
+            catchThrowable { ReadDatabaseSettings.fromEnvironment(Function { key -> values[key] }) }
         }
-        for (size in arrayOf("0", "51", "invalid")) {
+        val rejectedSizes = arrayOf("0", "51", "invalid").map { size ->
             val values = inputs()
             values["PAWBRIDGE_DB_POOL_MAX_SIZE"] = size
-            assertThatThrownBy { ReadDatabaseSettings.fromEnvironment(Function { key -> values[key] }) }
-                .hasMessage("Missing or invalid explicit setting: PAWBRIDGE_DB_POOL_MAX_SIZE")
+            catchThrowable { ReadDatabaseSettings.fromEnvironment(Function { key -> values[key] }) }
+        }
+
+        // then
+        assertThat(rejectedUrls).hasSize(urls.size).allSatisfy { thrown ->
+            assertThat(thrown).hasMessage("Missing or invalid explicit setting: PAWBRIDGE_DB_URL")
+        }
+        assertThat(rejectedSizes).hasSize(3).allSatisfy { thrown ->
+            assertThat(thrown).hasMessage("Missing or invalid explicit setting: PAWBRIDGE_DB_POOL_MAX_SIZE")
         }
     }
 
     @Test
-    fun given__reports_explicitly_enabled__when__context_starts__then__reuse_existing_jdbc_transactions_and_clock() {
+    fun `리포트가 명시적으로 켜졌을 때__컨텍스트가 시작되면__기존 JDBC와 트랜잭션과 시계를 재사용한다`() {
+        // given
         val values = F3TestInputs.values()
         val settings = ReadDatabaseSettings.fromEnvironment(values::get)
         val writeSettings = PostWriteSettings.fromEnvironment(values::get)
+
+        // when
         WebApplicationContextRunner().withUserConfiguration(PawBridgeApplication::class.java)
             .withInitializer { context ->
                 context.beanFactory.registerSingleton("readDatabaseSettings", settings)
@@ -247,6 +271,7 @@ class PawBridgeApplicationTest {
             }
             .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.animal-reports.enabled=true")
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                 val reports = context.getBean(AnimalReports::class.java)
                 assertThat(ReflectionTestUtils.getField(reports, "reader")).isSameAs(context.getBean("readJdbc"))
@@ -262,10 +287,13 @@ class PawBridgeApplicationTest {
     }
 
     @Test
-    fun given__explicit_candidate_assembly__when__context_starts__then__only_explicit_read_and_write_dependencies_are_assembled() {
+    fun `명시적 후보 조립이 주어졌을 때__컨텍스트가 시작되면__명시한 읽기와 쓰기 의존성만 조립한다`() {
+        // given
         val values = F3TestInputs.values()
         val settings = ReadDatabaseSettings.fromEnvironment(values::get)
         val writeSettings = PostWriteSettings.fromEnvironment(values::get)
+
+        // when
         WebApplicationContextRunner()
             .withUserConfiguration(PawBridgeApplication::class.java)
             .withInitializer { context ->
@@ -274,6 +302,7 @@ class PawBridgeApplicationTest {
             }
             .withPropertyValues("spring.sql.init.mode=never", "spring.jmx.enabled=false", "pawbridge.visits.enabled=true")
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                 assertThat(context.getBeansOfType(JdbcPostSearchRebuild::class.java)).isEmpty()
                 assertThat(context.getBeansOfType(JdbcProductSearchRebuild::class.java)).isEmpty()
@@ -607,12 +636,15 @@ class PawBridgeApplicationTest {
     }
 
     @Test
-    fun given__candidate_multipart_configuration__when__binding_servlet_configuration__then__preserve_file_and_request_limits() {
+    fun `후보 멀티파트 설정이 주어졌을 때__서블릿 설정에 바인딩하면__파일과 요청 한도를 보존한다`() {
+        // given
+        // when
         WebApplicationContextRunner()
             .withInitializer(ConfigDataApplicationContextInitializer())
             .withConfiguration(AutoConfigurations.of(MultipartAutoConfiguration::class.java))
             .withPropertyValues("spring.config.location=classpath:/application.properties")
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                 val properties = context.getBean(MultipartProperties::class.java)
                 assertThat(properties.maxFileSize).isEqualTo(DataSize.ofMegabytes(100))
@@ -625,11 +657,12 @@ class PawBridgeApplicationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["false", "absent"])
-    fun given__false_or_absent_visit_flag__when__assembling_actual_configuration__then__no_visit_beans_or_jdbc_calls(
+    fun `방문 플래그가 false이거나 없을 때__실제 설정을 조립하면__방문 빈과 JDBC 호출이 없다`(
         flag: String,
     ) {
-        val jdbc = mock(JdbcTemplate::class.java)
-        val transaction = mock(TransactionTemplate::class.java)
+        // given
+        val jdbc = mockk<JdbcTemplate>()
+        val transaction = mockk<TransactionTemplate>()
         var runner = WebApplicationContextRunner()
             .withUserConfiguration(VisitReadConfiguration::class.java)
             .withInitializer { context ->
@@ -640,13 +673,16 @@ class PawBridgeApplicationTest {
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.visits.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(VisitCountReader::class.java)).isEmpty()
             assertThat(context.getBeansOfType(ReadTodayVisits::class.java)).isEmpty()
             assertThat(context.getBeansOfType(VisitTodayController::class.java)).isEmpty()
             assertThat(context.getBeansOfType(VisitTodayExceptionHandler::class.java)).isEmpty()
-            verifyNoInteractions(jdbc, transaction)
+            confirmVerified(jdbc, transaction)
         }
     }
 

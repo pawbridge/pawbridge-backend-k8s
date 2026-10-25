@@ -3,6 +3,7 @@ package com.pawbridge.backend
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.InvalidPostSearchInputException
 import com.pawbridge.backend.community.internal.post.application.ListPosts
@@ -15,6 +16,9 @@ import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
 import com.pawbridge.backend.community.internal.post.web.PostSearchController
 import com.pawbridge.backend.community.internal.post.web.PostSearchExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
@@ -22,16 +26,12 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -62,24 +62,36 @@ class PostSearchHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var searchPosts: SearchPosts
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "malformed"])
-    fun given__public_search_with_untrusted_identity__when__getting_results__then__preserve_raw_keyword_and_nine_fields(
+    fun `신뢰할 수 없는 신원의 공개 검색이 주어졌을 때__결과를 조회하면__원본 키워드와 아홉 필드를 유지한다`(
         bearer: String,
     ) {
+        // given
         val keyword = "  강아지  "
         val created = LocalDateTime.of(2026, 10, 19, 0, 1, 2, 123456000)
         val updated = LocalDateTime.of(2026, 10, 19, 1, 2)
-        whenever(searchPosts.search(keyword)).thenReturn(
+        val request = get("/api/v1/posts/search")
+            .param("keyword", keyword)
+            .param("page", "invalid")
+            .param("size", "0")
+            .param("boardType", "COMMUNICATION")
+            .header("X-User-Id", "999")
+            .header("X-User-Role", "ROLE_ADMIN")
+        if (bearer == "malformed") {
+            request.header("Authorization", "Bearer invalid")
+        }
+
+        every { searchPosts.search(any()) } returns
             listOf(
                 PostDetails(
                     42,
@@ -93,20 +105,13 @@ class PostSearchHttpTest {
                     updated,
                 ),
                 PostDetails(43, 8, null, "다른 글", "내용", "MISSING", null, created, updated),
-            ),
-        )
-        val request = get("/api/v1/posts/search")
-            .param("keyword", keyword)
-            .param("page", "invalid")
-            .param("size", "0")
-            .param("boardType", "COMMUNICATION")
-            .header("X-User-Id", "999")
-            .header("X-User-Role", "ROLE_ADMIN")
-        if (bearer == "malformed") {
-            request.header("Authorization", "Bearer invalid")
-        }
+            )
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.code").value(200))
@@ -132,15 +137,20 @@ class PostSearchHttpTest {
             .andExpect(jsonPath("$.data[1].boardType").value("MISSING"))
             .andExpect(content().string(Matchers.containsString("\"authorNickname\":null")))
             .andExpect(content().string(Matchers.containsString("\"imageUrls\":null")))
-        verify(searchPosts).search(keyword)
+        verify(exactly = 1) { searchPosts.search(keyword) }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__no_search_results__when__getting_results__then__return_empty_array_without_paging_envelope() {
-        whenever(searchPosts.search("일치없음")).thenReturn(listOf())
+    fun `검색 결과가 없을 때__결과를 조회하면__페이지 봉투 없이 빈 배열을 돌려준다`() {
+        // given
+        every { searchPosts.search(any()) } returns listOf()
 
-        mvc.perform(get("/api/v1/posts/search").param("keyword", "일치없음"))
+        // when
+        val result = mvc.perform(get("/api/v1/posts/search").param("keyword", "일치없음"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -148,12 +158,19 @@ class PostSearchHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(searchPosts).search("일치없음")
+        verify(exactly = 1) { searchPosts.search("일치없음") }
     }
 
     @Test
-    fun given__missing_keyword__when__getting_results__then__preserve_required_parameter_400_without_business_call() {
-        mvc.perform(get("/api/v1/posts/search"))
+    fun `키워드가 없을 때__결과를 조회하면__업무 호출 없이 필수 파라미터 400을 유지한다`() {
+        // given
+        val request = get("/api/v1/posts/search")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -161,64 +178,77 @@ class PostSearchHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(searchPosts)
+        confirmVerified(searchPosts)
     }
 
     @Test
-    fun given__missing_post_on_existing_read_path__when__getting_post__then__search_advice_does_not_replace_original_404() {
-        whenever(readPost.read(42)).thenThrow(PostNotFoundException())
+    fun `기존 읽기 경로에 없는 게시글이 주어졌을 때__조회하면__검색 어드바이스가 원래 404를 바꾸지 않는다`() {
+        // given
+        every { readPost.read(any()) } throws PostNotFoundException()
 
-        mvc.perform(get("/api/v1/posts/read/42"))
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(searchPosts, listPosts)
+        verify(exactly = 1) { readPost.read(42) }
+        confirmVerified(searchPosts, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("searchFailures")
-    fun given__search_failure_with_sensitive_values__when__getting_results__then__safe_scoped_error_without_secret_logs(
+    fun `민감한 값이 담긴 검색 실패가 주어졌을 때__결과를 조회하면__비밀 로그 없이 범위 한정 오류를 돌려준다`(
         expectedStatus: Int,
         expectedMessage: String,
         failure: RuntimeException,
     ) {
+        // given
         val keyword = "synthetic-private-keyword"
-        whenever(searchPosts.search(keyword)).thenThrow(failure)
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
-        try {
+
+        every { searchPosts.search(any()) } throws failure
+
+        // when
+        val result = try {
             mvc.perform(
                 get("/api/v1/posts/search")
                     .param("keyword", keyword)
                     .header("Authorization", "Bearer synthetic-private-header"),
             )
-                .andExpect(status().`is`(expectedStatus))
-                .andExpect(
-                    content().json(
-                        "{\"code\":" + expectedStatus + ",\"message\":\"" + expectedMessage + "\",\"data\":null}",
-                        JsonCompareMode.STRICT,
-                    ),
-                )
-            assertThat(appender.list).allSatisfy { event ->
-                assertThat(event.throwableProxy).isNull()
-                assertThat(event.formattedMessage).doesNotContain(
-                    keyword,
-                    "synthetic-private-token",
-                    "synthetic-private-content",
-                    "private-image",
-                    "synthetic-private-password",
-                    "synthetic-private-header",
-                    "jdbc:postgresql:",
-                )
-            }
         } finally {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(searchPosts).search(keyword)
+
+        // then
+        result
+            .andExpect(status().`is`(expectedStatus))
+            .andExpect(
+                content().json(
+                    "{\"code\":" + expectedStatus + ",\"message\":\"" + expectedMessage + "\",\"data\":null}",
+                    JsonCompareMode.STRICT,
+                ),
+            )
+        assertThat(appender.list).allSatisfy { event ->
+            assertThat(event.throwableProxy).isNull()
+            assertThat(event.formattedMessage).doesNotContain(
+                keyword,
+                "synthetic-private-token",
+                "synthetic-private-content",
+                "private-image",
+                "synthetic-private-password",
+                "synthetic-private-header",
+                "jdbc:postgresql:",
+            )
+        }
+        verify(exactly = 1) { searchPosts.search(keyword) }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -231,22 +261,36 @@ class PostSearchHttpTest {
             "PATCH /api/v1/posts/search",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting__then__deny_without_search(request: String) {
+    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__요청하면__검색 없이 거부한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]).param("keyword", "강아지"))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(searchPosts)
+
+        // when
+        val result = mvc.perform(
+            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]).param("keyword", "강아지"),
+        )
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(searchPosts)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PUT", "DELETE"])
-    fun given__write_method_overlapping_search_path_without_token__when__requesting__then__preserve_write_authentication(
+    fun `토큰 없이 검색 경로와 겹치는 쓰기 메서드가 주어졌을 때__요청하면__쓰기 인증을 유지한다`(
         method: String,
     ) {
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(method), "/api/v1/posts/search"))
+        // given
+        val httpMethod = org.springframework.http.HttpMethod.valueOf(method)
+
+        // when
+        val result = mvc.perform(request(httpMethod, "/api/v1/posts/search"))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(searchPosts)
+        confirmVerified(searchPosts)
     }
 
     companion object {

@@ -7,6 +7,8 @@ import com.pawbridge.backend.user.internal.nickname.application.UserNicknameStor
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameController
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameExceptionHandler
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
+import io.mockk.justRun
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
@@ -15,7 +17,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.Mockito.mock
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.aop.framework.Advised
@@ -68,52 +69,73 @@ class UserNicknameTransactionTest {
     }
 
     @Test
-    fun given__production_configuration__when__changing__then__real_transaction_advisor_wraps_lookup_duplicate_check_update_and_commit() {
+    fun `운영 구성이 주어졌을 때__닉네임을 바꾸면__실제 트랜잭션 어드바이저가 조회·중복 확인·수정·커밋을 감싼다`() {
+        // given
         assertThat(AopUtils.isCglibProxy(change)).isTrue()
         assertThat((change as Advised).advisors).anySatisfy { advisor ->
             assertThat(advisor.advice).isInstanceOf(TransactionInterceptor::class.java)
         }
 
+        // when
         change.change(7, "새닉네임")
 
+        // then
         assertThat(users.events).containsExactly("begin", "find:7", "exists:새닉네임", "update:7:새닉네임", "commit")
         assertReturned()
     }
 
     @Test
-    fun given__unchanged_nickname__when__changing__then__lookup_runs_in_writer_transaction_but_duplicate_update_and_auditing_are_skipped() {
-        change.change(7, "기존닉네임")
+    fun `닉네임이 그대로일 때__바꾸면__쓰기 트랜잭션에서 조회만 하고 중복 확인·수정·감사는 건너뛴다`() {
+        // given
+        val unchanged = "기존닉네임"
 
+        // when
+        change.change(7, unchanged)
+
+        // then
         assertThat(users.events).containsExactly("begin", "find:7", "commit")
         assertReturned()
     }
 
     @Test
-    fun given__missing_user__when__changing__then__rollback_follows_lookup_without_duplicate_or_update() {
+    fun `회원이 없을 때__바꾸면__조회 뒤 중복 확인이나 수정 없이 롤백한다`() {
+        // given
         users.current = Optional.empty()
 
-        assertThatThrownBy { change.change(7, "새닉네임") }.isInstanceOf(UserNotFoundException::class.java)
+        // when
+        val thrown = assertThatThrownBy { change.change(7, "새닉네임") }
 
+        // then
+        thrown.isInstanceOf(UserNotFoundException::class.java)
         assertThat(users.events).containsExactly("begin", "find:7", "rollback")
         assertReturned()
     }
 
     @Test
-    fun given__duplicate_nickname__when__changing__then__rollback_follows_duplicate_check_without_update() {
+    fun `닉네임이 중복일 때__바꾸면__중복 확인 뒤 수정 없이 롤백한다`() {
+        // given
         users.duplicate = true
 
-        assertThatThrownBy { change.change(7, "새닉네임") }.isInstanceOf(NicknameDuplicateException::class.java)
+        // when
+        val thrown = assertThatThrownBy { change.change(7, "새닉네임") }
 
+        // then
+        thrown.isInstanceOf(NicknameDuplicateException::class.java)
         assertThat(users.events).containsExactly("begin", "find:7", "exists:새닉네임", "rollback")
         assertReturned()
     }
 
     @Test
-    fun given__update_failure_then_recovery__when__changing__then__original_failure_rolls_back_and_next_request_uses_new_transaction() {
+    fun `수정 실패 뒤 복구되는 경우__바꾸면__원래 실패를 롤백하고 다음 요청은 새 트랜잭션을 쓴다`() {
+        // given
         val failure = DataAccessResourceFailureException("synthetic-private-database-message")
         users.updateFailure = failure
 
-        assertThatThrownBy { change.change(7, "새닉네임") }.isSameAs(failure)
+        // when
+        val thrown = assertThatThrownBy { change.change(7, "새닉네임") }
+
+        // then
+        thrown.isSameAs(failure)
         assertThat(users.events).containsExactly("begin", "find:7", "exists:새닉네임", "update:7:새닉네임", "rollback")
         assertReturned()
         users.events.clear()
@@ -126,11 +148,16 @@ class UserNicknameTransactionTest {
     }
 
     @Test
-    fun given__transaction_start_failure__when__changing__then__no_store_call_precedes_failure_and_next_request_recovers() {
+    fun `트랜잭션 시작이 실패할 때__바꾸면__저장소 호출 없이 실패하고 다음 요청은 복구된다`() {
+        // given
         val failure = CannotCreateTransactionException("synthetic-private-start-message")
         transactions.startFailure = failure
 
-        assertThatThrownBy { change.change(7, "새닉네임") }.isSameAs(failure)
+        // when
+        val thrown = assertThatThrownBy { change.change(7, "새닉네임") }
+
+        // then
+        thrown.isSameAs(failure)
         assertThat(users.events).containsExactly("begin")
         assertReturned()
         users.events.clear()
@@ -144,11 +171,12 @@ class UserNicknameTransactionTest {
 
     @ParameterizedTest
     @MethodSource("commitFailures")
-    fun given__commit_failure_after_successful_store__when__requesting_through_real_proxy__then__http_never_returns_success_and_classifies_only_structured_charset_metadata(
+    fun `저장 뒤 커밋이 실패할 때__프록시로 요청하면__성공 없이 구조화된 문자셋 정보만 분류한다`(
         failure: RuntimeException,
         expectedStatus: Int,
         message: String,
     ) {
+        // given
         transactions.commitFailure = failure
         val assembled = context!!
         val mvc = MockMvcBuilders.standaloneSetup(assembled.getBean(UserNicknameController::class.java))
@@ -157,11 +185,15 @@ class UserNicknameTransactionTest {
             .build()
         SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(7L, null, listOf())
 
-        mvc.perform(
+        // when
+        val failed = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":\"새닉네임\"}"),
         )
+
+        // then
+        failed
             .andExpect(status().`is`(expectedStatus))
             .andExpect(
                 content().json(
@@ -169,17 +201,18 @@ class UserNicknameTransactionTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
         assertThat(users.events).containsExactly("begin", "find:7", "exists:새닉네임", "update:7:새닉네임", "commit")
         assertReturned()
         users.events.clear()
         transactions.commitFailure = null
 
-        mvc.perform(
+        val recovered = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":\"새닉네임\"}"),
         )
+
+        recovered
             .andExpect(status().isOk())
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"닉네임이 변경되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
@@ -201,7 +234,12 @@ class UserNicknameTransactionTest {
         fun recordingStore(): RecordingStore = RecordingStore()
 
         @Bean("writeJdbc")
-        fun writeJdbc(): JdbcTemplate = mock(JdbcTemplate::class.java)
+        fun writeJdbc(): JdbcTemplate {
+            val jdbc = mockk<JdbcTemplate>()
+            // Spring runs this lifecycle callback when the bean is created; the test never uses the template.
+            justRun { jdbc.afterPropertiesSet() }
+            return jdbc
+        }
 
         @Bean("writeTransactionManager")
         fun writeTransactionManager(users: RecordingStore): RecordingTransactionManager {

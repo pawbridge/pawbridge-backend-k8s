@@ -1,11 +1,11 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.AdminPostReadConfiguration
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.PostPageReader
 import com.pawbridge.backend.community.internal.post.application.ReadAdminPosts
 import com.pawbridge.backend.community.internal.post.application.ReadPost
-import com.pawbridge.backend.support.anyNonNull
 import com.pawbridge.backend.user.internal.animalactivity.application.FavoriteActivityRejectedException
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities
 import com.pawbridge.backend.user.internal.animalactivity.web.UserAnimalActivitiesController
@@ -13,22 +13,19 @@ import com.pawbridge.backend.user.internal.animalactivity.web.UserAnimalActiviti
 import com.pawbridge.backend.user.internal.favorite.application.FavoriteStatusQuery
 import com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusController
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -59,27 +56,34 @@ class UserAnimalActivitiesHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var activities: UserAnimalActivities
 
-    @MockitoBean
+    @MockkBean
     lateinit var statusQuery: FavoriteStatusQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var posts: ReadAdminPosts
 
-    @MockitoBean
+    @MockkBean
     lateinit var post: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var postPages: PostPageReader
 
     @Test
-    fun given__a_verified_principal_and_forged_header__when__adding_and_removing__then__retain_original_messages_nullable_fields_and_explicit_long_id() {
-        whenever(activities.add(7, 8)).thenReturn(
-            UserAnimalActivities.Favorite(Long.MAX_VALUE, 7L, 8L, LocalDateTime.parse("2026-10-20T01:02:03.123456789")),
-        )
-        mvc.perform(post("/api/v1/favorites/8").header("Authorization", token()).header("X-User-Id", "999"))
+    fun `검증된 주체와 위조 헤더가 주어졌을 때__좋아요를 추가하고 제거하면__원래 메시지와 널 필드와 긴 ID를 유지한다`() {
+        // given
+        every { activities.add(any(), any()) } returns
+            UserAnimalActivities.Favorite(Long.MAX_VALUE, 7L, 8L, LocalDateTime.parse("2026-10-20T01:02:03.123456789"))
+        justRun { activities.remove(any(), any()) }
+
+        // when
+        val added = mvc.perform(post("/api/v1/favorites/8").header("Authorization", token()).header("X-User-Id", "999"))
+        val removed = mvc.perform(delete("/api/v1/favorites/8").header("Authorization", token()))
+
+        // then
+        added
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -87,54 +91,67 @@ class UserAnimalActivitiesHttpTest {
                 ),
             )
             .andExpect(header().doesNotExist("Set-Cookie"))
-        mvc.perform(delete("/api/v1/favorites/8").header("Authorization", token()))
+        removed
             .andExpect(status().isOk())
             .andExpect(content().json("{\"code\":200,\"message\":\"좋아요가 제거되었습니다.\",\"data\":null}"))
-        verify(activities).add(7, 8)
-        verify(activities).remove(7, 8)
-        verifyNoMoreInteractions(activities)
+        verify(exactly = 1) { activities.add(7, 8) }
+        verify(exactly = 1) { activities.remove(7, 8) }
+        confirmVerified(activities)
         cleared()
     }
 
     @Test
-    fun given__favorite_and_registered_pages__when__reading__then__return_source_dto_and_default_or_multi_sort_forwarding() {
-        whenever(activities.favorites(7)).thenReturn(UserAnimalActivities.Favorites(7L, 0, listOf()))
-        whenever(activities.registered(anyLong(), anyNonNull<UserAnimalActivities.PageRequest>()))
-            .thenReturn(UserAnimalActivities.AnimalPage(listOf(), 0, 20, 41, 3, false))
-        mvc.perform(get("/api/v1/users/me/favorite-animals").header("Authorization", token()))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(0))
-        mvc.perform(get("/api/v1/users/me/registered-animals").header("Authorization", token()))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.page").value(0))
-            .andExpect(jsonPath("$.data.totalElements").value(41))
-        mvc.perform(
+    fun `좋아요와 등록 동물 페이지가 주어졌을 때__조회하면__원본 DTO와 기본 또는 다중 정렬 전달을 유지한다`() {
+        // given
+        every { activities.favorites(any()) } returns UserAnimalActivities.Favorites(7L, 0, listOf())
+        every { activities.registered(any(), any()) } returns UserAnimalActivities.AnimalPage(listOf(), 0, 20, 41, 3, false)
+
+        // when
+        val favorites = mvc.perform(get("/api/v1/users/me/favorite-animals").header("Authorization", token()))
+        val defaultSort = mvc.perform(get("/api/v1/users/me/registered-animals").header("Authorization", token()))
+        val multiSort = mvc.perform(
             get("/api/v1/users/me/registered-animals")
                 .param("page", "3")
                 .param("sort", "name,desc", "createdAt,asc")
                 .header("Authorization", token()),
         )
+
+        // then
+        favorites
             .andExpect(status().isOk())
-        verify(activities).favorites(7)
-        verify(activities).registered(7, UserAnimalActivities.PageRequest(0, 20, "createdAt,desc"))
-        verify(activities).registered(7, UserAnimalActivities.PageRequest(3, 20, "name,desc,createdAt,asc"))
+            .andExpect(jsonPath("$.data.totalCount").value(0))
+        defaultSort
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.page").value(0))
+            .andExpect(jsonPath("$.data.totalElements").value(41))
+        multiSort.andExpect(status().isOk())
+        verify(exactly = 1) { activities.favorites(7) }
+        verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(0, 20, "createdAt,desc")) }
+        verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(3, 20, "name,desc,createdAt,asc")) }
         cleared()
     }
 
     @Test
-    fun given__missing_jwt_or_forged_identity__when__a_bad_path_is_sent__then__authenticate_before_binding_and_do_no_business() {
-        mvc.perform(post("/api/v1/favorites/bad").header("X-User-Id", "7")).andExpect(status().isUnauthorized())
-        mvc.perform(post("/api/v1/favorites/bad").header("Authorization", token()))
-            .andExpect(status().isInternalServerError())
-        verifyNoInteractions(activities)
+    fun `JWT가 없거나 신원이 위조되고 경로가 잘못됐을 때__요청하면__바인딩 전에 인증하고 업무를 하지 않는다`() {
+        // given
+        val forged = post("/api/v1/favorites/bad").header("X-User-Id", "7")
+        val malformedPath = post("/api/v1/favorites/bad").header("Authorization", token())
+
+        // when
+        val unauthenticated = mvc.perform(forged)
+        val badPath = mvc.perform(malformedPath)
+
+        // then
+        unauthenticated.andExpect(status().isUnauthorized())
+        badPath.andExpect(status().isInternalServerError())
+        confirmVerified(activities)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["duplicate", "missing", "animal", "user", "runtime", "commit"])
-    fun given__business_or_storage_failure__when__mutating__then__retain_original_wire_and_never_expose_private_exception_text(
-        phase: String,
-    ) {
+    fun `업무 또는 저장소 실패가 주어졌을 때__변경하면__원래 응답을 유지하고 내부 예외 문구를 노출하지 않는다`(phase: String) {
+        // given
         val failure: RuntimeException = when (phase) {
             "duplicate" -> FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.ALREADY_EXISTS)
             "missing" -> FavoriteActivityRejectedException(FavoriteActivityRejectedException.Reason.NOT_FOUND)
@@ -144,9 +161,9 @@ class UserAnimalActivitiesHttpTest {
             else -> IllegalStateException("synthetic-private-secret")
         }
         if (phase == "missing") {
-            doThrow(failure).`when`(activities).remove(7, 8)
+            every { activities.remove(any(), any()) } throws failure
         } else {
-            whenever(activities.add(7, 8)).thenThrow(failure)
+            every { activities.add(any(), any()) } throws failure
         }
         val expectedStatus = if (phase == "duplicate") {
             409
@@ -158,36 +175,59 @@ class UserAnimalActivitiesHttpTest {
             500
         }
         val request = if (phase == "missing") delete("/api/v1/favorites/8") else post("/api/v1/favorites/8")
+
+        // when
         val response = mvc.perform(request.header("Authorization", token()))
             .andExpect(status().`is`(expectedStatus))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andReturn().response
+
+        // then
         assertThat(response.contentAsString).doesNotContain("synthetic-private-secret")
         assertThat(response.getHeader("Cache-Control")).contains("no-store")
+        if (phase == "missing") {
+            verify(exactly = 1) { activities.remove(7, 8) }
+        } else {
+            verify(exactly = 1) { activities.add(7, 8) }
+        }
+        confirmVerified(activities)
         cleared()
     }
 
     @Test
-    fun given__source_non_shelter_database_rejection__when__registered_animals_are_requested__then__preserve_generic500_instead_of_inventing403() {
-        whenever(activities.registered(anyLong(), anyNonNull<UserAnimalActivities.PageRequest>()))
-            .thenThrow(IllegalStateException("synthetic-private"))
-        mvc.perform(get("/api/v1/users/me/registered-animals").header("Authorization", token()))
+    fun `원본의 비보호소 DB 거절이 주어졌을 때__등록 동물을 요청하면__403을 만들지 않고 일반 500을 유지한다`() {
+        // given
+        every { activities.registered(any(), any()) } throws IllegalStateException("synthetic-private")
+
+        // when
+        val result = mvc.perform(get("/api/v1/users/me/registered-animals").header("Authorization", token()))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 에러!"))
+        verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(0, 20, "createdAt,desc")) }
         cleared()
     }
 
     @Test
-    fun given__the_existing_status_read_and_adjacent_mutations__when__requesting__then__keep_status_sam_and_default_deny_intact() {
-        whenever(statusQuery.isFavorite(7, 8)).thenReturn(true)
-        mvc.perform(get("/api/v1/favorites/8/check").header("Authorization", token()))
+    fun `기존 상태 조회와 인접 변경 요청이 주어졌을 때__요청하면__상태 조회와 기본 거부를 그대로 유지한다`() {
+        // given
+        every { statusQuery.isFavorite(any(), any()) } returns true
+
+        // when
+        val statusResult = mvc.perform(get("/api/v1/favorites/8/check").header("Authorization", token()))
+        val putResult = mvc.perform(put("/api/v1/favorites/8").header("Authorization", token()))
+        val extraResult = mvc.perform(post("/api/v1/favorites/8/extra").header("Authorization", token()))
+
+        // then
+        statusResult
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data").value(true))
-        verify(statusQuery).isFavorite(7, 8)
-        mvc.perform(put("/api/v1/favorites/8").header("Authorization", token())).andExpect(status().isForbidden())
-        mvc.perform(post("/api/v1/favorites/8/extra").header("Authorization", token()))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(activities)
+        putResult.andExpect(status().isForbidden())
+        extraResult.andExpect(status().isForbidden())
+        verify(exactly = 1) { statusQuery.isFavorite(7, 8) }
+        confirmVerified(activities)
     }
 
     companion object {

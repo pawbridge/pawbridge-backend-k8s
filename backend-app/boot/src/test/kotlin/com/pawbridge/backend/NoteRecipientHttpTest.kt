@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.NoteBlockReader
 import com.pawbridge.backend.community.internal.note.application.ReadNoteRecipient
@@ -16,17 +17,16 @@ import com.pawbridge.backend.user.api.ContactMemberUnavailableException
 import com.pawbridge.backend.user.internal.favorite.application.FavoriteStatusQuery
 import com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusController
 import com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -35,7 +35,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -75,29 +74,33 @@ class NoteRecipientHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var blocks: NoteBlockReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var favorites: FavoriteStatusQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @Test
-    fun given__verified_principal_and_spoofed_identity__when__reading_recipient__then__return_only_four_raw_fields_and_use_the_path_member() {
+    fun `검증된 주체와 위조 신원이 주어졌을 때__수신자를 읽으면__경로 회원의 원본 필드 네 개만 돌려준다`() {
+        // given
         val target = Long.MAX_VALUE
         val recipient = ContactMember(target, "  ", true, false)
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(members.get(target)).thenReturn(recipient)
 
-        val response = mvc.perform(
+        every { members.get(7) } returns active(7)
+        every { members.get(target) } returns recipient
+        every { blocks.blocked(any(), any()) } returns false
+
+        // when
+        val result = mvc.perform(
             authenticatedRecipient(target)
                 .header("X-User-Id", "999")
                 .header("X-User-Role", "ROLE_ADMIN")
@@ -106,6 +109,9 @@ class NoteRecipientHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":999,\"member\":999}"),
         )
+
+        // then
+        val response = result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -117,31 +123,35 @@ class NoteRecipientHttpTest {
                 ),
             )
             .andReturn().response
-
         val id = mapper.readTree(response.contentAsString).path("data").path("userId")
         assertThat(id.isIntegralNumber()).isTrue()
         assertThat(id.longValue()).isEqualTo(target)
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7)
-        order.verify(blocks).blocked(7, target)
-        order.verify(members).get(target)
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(favorites, readPost, listPosts)
+        verifySequence {
+            members.get(7)
+            blocks.blocked(7, target)
+            members.get(target)
+        }
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_invalid_jwt_with_malformed_member__when__reading__then__authentication_precedes_binding_and_dependencies(
+    fun `토큰이 없거나 잘못되고 회원 경로가 깨졌을 때__읽으면__바인딩과 의존성 전에 인증 실패를 준다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = get("/api/v1/notes/recipients/abc").header("X-User-Id", "7")
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
@@ -150,20 +160,24 @@ class NoteRecipientHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verifyNoInteractions(members, blocks, favorites, readPost, listPosts)
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun given__verified_jwt_and_malformed_or_overflow_member__when__binding__then__return_message_only_400_before_dependencies(
+    fun `검증된 토큰과 깨지거나 넘치는 회원 경로일 때__바인딩하면__의존성 전에 메시지만 담은 400을 준다`(
         target: String,
     ) {
-        mvc.perform(
-            get("/api/v1/notes/recipients/{member}", target)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
+        // given
+        val request = get("/api/v1/notes/recipients/{member}", target)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -173,94 +187,97 @@ class NoteRecipientHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verifyNoInteractions(members, blocks, favorites, readPost, listPosts)
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0, -1])
-    fun given__nonpositive_target_after_active_caller__when__reading__then__block_query_precedes_message_only_401(
+    fun `활성 호출자와 양수가 아닌 대상이 주어졌을 때__읽으면__차단 조회 뒤 메시지만 담은 401을 준다`(
         target: Long,
     ) {
-        whenever(members.get(7)).thenReturn(active(7))
+        // given
+        every { members.get(any()) } returns active(7)
+        every { blocks.blocked(any(), any()) } returns false
 
-        mvc.perform(authenticatedRecipient(target))
+        // when
+        val result = mvc.perform(authenticatedRecipient(target))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"로그인이 필요합니다.\"}", JsonCompareMode.STRICT))
-
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7)
-        order.verify(blocks).blocked(7, target)
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(favorites, readPost, listPosts)
+        verifySequence {
+            members.get(7)
+            blocks.blocked(7, target)
+        }
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedRecipients")
-    fun given__self_block_or_inactive_member__when__reading__then__return_the_original_message_only_403_and_stop(
+    fun `자기 자신 차단 비활성 대상이 주어졌을 때__읽으면__원래 메시지의 403을 주고 멈춘다`(
         scenario: String,
         target: Long,
         message: String,
     ) {
-        whenever(members.get(7)).thenReturn(
-            if (scenario == "current-pending") ContactMember(7L, "탈퇴한 회원", false, true) else active(7),
-        )
-        if (scenario == "blocked") {
-            whenever(blocks.blocked(7, target)).thenReturn(true)
-        }
+        // given
+        every { members.get(7) } returns
+            if (scenario == "current-pending") ContactMember(7L, "탈퇴한 회원", false, true) else active(7)
+        every { blocks.blocked(any(), any()) } returns (scenario == "blocked")
         if (scenario == "target-missing") {
-            whenever(members.get(target)).thenReturn(ContactMember(target, "탈퇴한 회원", false, false))
+            every { members.get(target) } returns ContactMember(target, "탈퇴한 회원", false, false)
         }
 
-        mvc.perform(authenticatedRecipient(target))
+        // when
+        val result = mvc.perform(authenticatedRecipient(target))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to message)), JsonCompareMode.STRICT))
-
-        verify(members).get(7)
-        if (scenario == "self" || scenario == "current-pending") {
-            verifyNoInteractions(blocks)
-        } else {
-            verify(blocks).blocked(7, target)
+        verify(exactly = 1) { members.get(7) }
+        if (scenario != "self" && scenario != "current-pending") {
+            verify(exactly = 1) { blocks.blocked(7, target) }
         }
         if (scenario == "target-missing") {
-            verify(members).get(target)
+            verify(exactly = 1) { members.get(target) }
         }
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(favorites, readPost, listPosts)
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("dependencyFailures")
-    fun given__user_or_block_failure_before_invalid_target__when__reading__then__preserve_source_specific_safe_503(
+    fun `유효하지 않은 대상 전에 회원이나 차단 조회가 실패했을 때__읽으면__원인별 안전한 503을 유지한다`(
         source: String,
         failure: RuntimeException,
         message: String,
     ) {
+        // given
         if (source == "user") {
-            whenever(members.get(7)).thenThrow(failure)
+            every { members.get(any()) } throws failure
         } else {
-            whenever(members.get(7)).thenReturn(active(7))
-            whenever(blocks.blocked(7, 0)).thenThrow(failure)
+            every { members.get(any()) } returns active(7)
+            every { blocks.blocked(any(), any()) } throws failure
         }
 
-        mvc.perform(authenticatedRecipient(0))
+        // when
+        val result = mvc.perform(authenticatedRecipient(0))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to message)), JsonCompareMode.STRICT))
-
-        verify(members).get(7)
-        if (source == "user") {
-            verifyNoInteractions(blocks)
-        } else {
-            verify(blocks).blocked(7, 0)
+        verify(exactly = 1) { members.get(7) }
+        if (source != "user") {
+            verify(exactly = 1) { blocks.blocked(7, 0) }
         }
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(favorites, readPost, listPosts)
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -274,31 +291,39 @@ class NoteRecipientHttpTest {
             "DELETE /api/v1/notes/recipients/8",
         ],
     )
-    fun given__unexposed_note_chat_internal_path_or_method__when__requesting_with_a_valid_token__then__deny_before_dependencies(
+    fun `노출되지 않은 쪽지 채팅 내부 경로나 메서드일 때__유효한 토큰으로 요청하면__의존성 전에 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
-            .andExpect(status().isForbidden())
 
-        verifyNoInteractions(members, blocks, favorites, readPost, listPosts)
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     @Test
-    fun given__existing_favorite_and_public_post_paths__when__reading__then__keep_authentication_and_scoped_failure_contracts() {
-        whenever(readPost.read(42)).thenThrow(IllegalStateException("synthetic-private-post"))
+    fun `기존 즐겨찾기와 공개 게시글 경로일 때__읽으면__인증과 범위 실패 계약을 유지한다`() {
+        // given
+        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
 
-        mvc.perform(get("/api/v1/favorites/42/check")).andExpect(status().isUnauthorized())
-        mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+        // when
+        val favorite = mvc.perform(get("/api/v1/favorites/42/check"))
+        val post = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+
+        // then
+        favorite.andExpect(status().isUnauthorized())
+        post
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-
-        verify(readPost).read(42)
-        verifyNoInteractions(members, blocks, favorites, listPosts)
+        verify(exactly = 1) { readPost.read(42) }
+        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     private fun authenticatedRecipient(target: Long): MockHttpServletRequestBuilder {

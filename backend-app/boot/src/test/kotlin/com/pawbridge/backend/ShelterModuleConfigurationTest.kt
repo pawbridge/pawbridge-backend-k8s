@@ -13,12 +13,11 @@ import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimal
 import com.pawbridge.backend.user.internal.animalactivity.infrastructure.ModuleUserAnimalLookup
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership
 import com.pawbridge.backend.user.internal.shelter.infrastructure.ModuleShelterLookup
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.util.ReflectionTestUtils
@@ -39,8 +38,11 @@ class ShelterModuleConfigurationTest {
     }
 
     @Test
-    fun given__features_off__when__assembling_without_inputs__then__no_api_or_public_bean() {
+    fun `기능이 꺼져 있을 때__입력 없이 구성하면__API와 공개 빈이 없다`() {
+        // given
+        // when
         runner().run { context ->
+            // then
             assertThat(context)
                 .hasNotFailed()
                 .doesNotHaveBean(AnimalShelterReads::class.java)
@@ -51,12 +53,16 @@ class ShelterModuleConfigurationTest {
     }
 
     @Test
-    fun given__shelter_membership_and_animal_activities__when__assembling__then__share_one_reader_api_and_separate_it_from_the_user_writer() {
-        val reader = mock(DataSource::class.java)
-        val readerManager = mock(PlatformTransactionManager::class.java)
-        val writer = mock(JdbcTemplate::class.java)
-        val writerManager = mock(PlatformTransactionManager::class.java)
+    fun `보호소 멤버십과 동물 활동이 주어졌을 때__구성하면__리더 API 하나를 공유하고 사용자 writer와 분리한다`() {
+        // given
+        val reader = mockk<DataSource>()
+        val readerManager = mockk<PlatformTransactionManager>()
+        val writer = mockk<JdbcTemplate>()
+        val writerManager = mockk<PlatformTransactionManager>()
 
+        justRun { writer.afterPropertiesSet() }
+
+        // when
         runner()
             .withBean("dataSource", DataSource::class.java, Supplier { reader })
             .withBean("transactionManager", PlatformTransactionManager::class.java, Supplier { readerManager })
@@ -69,6 +75,7 @@ class ShelterModuleConfigurationTest {
                 "pawbridge.user-animal-activities.enabled=true",
             )
             .run { context ->
+                // then
                 assertThat(context)
                     .hasNotFailed()
                     .hasSingleBean(AnimalShelterReads::class.java)
@@ -96,8 +103,8 @@ class ShelterModuleConfigurationTest {
                     .isInstanceOf(ModuleUserAnimalLookup::class.java)
                 assertThat(context.getBeansOfType(DataSource::class.java)).hasSize(1)
                 assertThat(context.getBeansOfType(PlatformTransactionManager::class.java)).hasSize(2)
-                verify(readerManager, never()).getTransaction(any<TransactionDefinition>())
-                verify(writerManager, never()).getTransaction(any<TransactionDefinition>())
+                verify(exactly = 0) { readerManager.getTransaction(any<TransactionDefinition>()) }
+                verify(exactly = 0) { writerManager.getTransaction(any<TransactionDefinition>()) }
             }
     }
 }
