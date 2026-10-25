@@ -15,7 +15,7 @@ class AdminUserDeletionController(private val deletion: UserDeletion) {
     // The path variable is java.lang.Long deliberately: kotlin.Long? makes it optional (a blank segment reaches the
     // service as null) and kotlin.Long is a primitive (a blank segment becomes a type mismatch, and reflection tests
     // look the method up by Long.class). A non-null java.lang.Long keeps the Java behaviour: required and boxed,
-    // so a blank segment fails before this method runs.
+    // so a blank segment fails before the handler runs.
     @DeleteMapping("/api/v1/admin/users/{userId}")
     fun delete(@PathVariable("userId") userId: java.lang.Long): ResponseEntity<Response<Void>> {
         deletion.delete(userId.toLong())

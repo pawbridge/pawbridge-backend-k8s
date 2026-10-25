@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController
 
 // Path ids use java.lang.Long deliberately: kotlin.Long? makes the variable optional (a blank segment reaches the
 // service as null) and kotlin.Long is a primitive (a blank segment becomes a type mismatch). A non-null
-// java.lang.Long keeps the Java behaviour: required and boxed, so a blank segment fails before this method runs.
+// java.lang.Long keeps the Java behaviour: required and boxed, so a blank segment fails before the handler runs.
 
 /** Original mock payment route: no owner, amount or provider check, kept as-is behind its own flag. */
 @RestController
