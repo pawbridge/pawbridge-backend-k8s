@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.user.internal.session.application.AuthSessionRejectedException
 import com.pawbridge.backend.user.internal.session.application.AuthSessionRejectedException.Reason
@@ -8,6 +9,10 @@ import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToke
 import com.pawbridge.backend.user.internal.session.web.AuthSessionController
 import com.pawbridge.backend.user.internal.session.web.AuthSessionExceptionHandler
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import jakarta.servlet.http.Cookie
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -15,12 +20,6 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
@@ -31,7 +30,6 @@ import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.context.annotation.Bean
 import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -63,7 +61,7 @@ class AuthSessionHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var sessions: AuthSessions
 
     class Controller {
@@ -74,11 +72,11 @@ class AuthSessionHttpTest {
     }
 
     @Test
-    fun given__an_allowed_page_with_the_refresh_cookie__when__refreshing__then__return_only_the_access_token_and_rotate_the_cookie() {
-        whenever(sessions.refresh(PRESENTED)).thenReturn(
-            AuthSessions.Rotated("synthetic-access", IssuedRefreshToken(NEXT, 1_209_600)),
-        )
+    fun `허용된 페이지가 리프레시 쿠키를 가질 때__갱신하면__접근 토큰만 돌려주고 쿠키를 교체한다`() {
+        // given
+        every { sessions.refresh(any()) } returns AuthSessions.Rotated("synthetic-access", IssuedRefreshToken(NEXT, 1_209_600))
 
+        // when
         val result = mvc.perform(
             browser("/api/v1/auth/refresh")
                 .cookie(Cookie("__Secure-pb_refresh", PRESENTED))
@@ -93,21 +91,26 @@ class AuthSessionHttpTest {
             )
             .andReturn()
 
+        // then
         val cookie = result.response.getHeader("Set-Cookie")
         assertThat(cookie).startsWith("__Secure-pb_refresh=" + NEXT + "; Path=/api/v1/auth; Max-Age=1209600; Expires=")
             .endsWith("; Secure; HttpOnly; SameSite=Lax")
             .doesNotContain("Domain=")
         assertThat(result.response.contentAsString).doesNotContain(NEXT).doesNotContain("refreshToken")
-        verify(sessions).refresh(PRESENTED)
-        verifyNoMoreInteractions(sessions)
+        verify(exactly = 1) { sessions.refresh(PRESENTED) }
+        confirmVerified(sessions)
     }
 
     @Test
-    fun given__a_concurrent_refresh_already_rotated_the_cookie__when__refreshing__then__return_access_without_touching_the_cookie() {
-        whenever(sessions.refresh(PRESENTED)).thenReturn(AuthSessions.AccessOnly("synthetic-access"))
+    fun `동시 갱신이 이미 쿠키를 교체했을 때__갱신하면__쿠키를 건드리지 않고 접근 토큰만 돌려준다`() {
+        // given
+        every { sessions.refresh(any()) } returns AuthSessions.AccessOnly("synthetic-access")
 
-        mvc.perform(browser("/api/v1/auth/refresh").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
-            .andExpect(status().isOk())
+        // when
+        val response = mvc.perform(browser("/api/v1/auth/refresh").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
+
+        // then
+        response.andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json(
@@ -118,11 +121,17 @@ class AuthSessionHttpTest {
     }
 
     @Test
-    fun given__a_legacy_refresh_body_without_cookie__when__refreshing__then__ignore_the_body_and_reject_as_missing() {
-        whenever(sessions.refresh(null)).thenThrow(AuthSessionRejectedException(Reason.MISSING))
+    fun `쿠키 없이 옛 갱신 본문만 있을 때__갱신하면__본문을 무시하고 없음으로 거부한다`() {
+        // given
+        every { sessions.refresh(any()) } throws AuthSessionRejectedException(Reason.MISSING)
 
-        mvc.perform(browser("/api/v1/auth/refresh").content("{\"refreshToken\":\"" + PRESENTED + "\"}"))
-            .andExpect(status().isUnauthorized())
+        // when
+        val response = mvc.perform(
+            browser("/api/v1/auth/refresh").content("{\"refreshToken\":\"" + PRESENTED + "\"}"),
+        )
+
+        // then
+        response.andExpect(status().isUnauthorized())
             .andExpect(header().string("Set-Cookie", CLEAR_COOKIE))
             .andExpect(
                 content().json(
@@ -130,16 +139,20 @@ class AuthSessionHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(sessions).refresh(null)
+        verify(exactly = 1) { sessions.refresh(null) }
     }
 
     @ParameterizedTest
     @EnumSource(value = Reason::class, names = ["INVALID", "REUSED"])
-    fun given__an_invalid_or_reused_cookie__when__refreshing__then__401_and_clear_the_cookie(reason: Reason) {
-        whenever(sessions.refresh(PRESENTED)).thenThrow(AuthSessionRejectedException(reason))
+    fun `잘못되거나 재사용된 쿠키일 때__갱신하면__401과 함께 쿠키를 지운다`(reason: Reason) {
+        // given
+        every { sessions.refresh(any()) } throws AuthSessionRejectedException(reason)
 
-        mvc.perform(browser("/api/v1/auth/refresh").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
-            .andExpect(status().isUnauthorized())
+        // when
+        val response = mvc.perform(browser("/api/v1/auth/refresh").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
+
+        // then
+        response.andExpect(status().isUnauthorized())
             .andExpect(header().string("Set-Cookie", CLEAR_COOKIE))
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"유효하지 않은 토큰입니다.\",\"data\":null}", JsonCompareMode.STRICT),
@@ -153,10 +166,11 @@ class AuthSessionHttpTest {
             "form-type", "text-type", "malformed-type",
         ],
     )
-    fun given__a_request_no_allowed_page_could_send__when__refreshing_or_logging_out__then__403_before_the_session_service(
+    fun `허용된 페이지가 보낼 수 없는 요청일 때__갱신하거나 로그아웃하면__세션 서비스 전에 403을 돌려준다`(
         kind: String,
     ) {
         for (path in listOf("/api/v1/auth/refresh", "/api/v1/auth/logout")) {
+            // given
             val request = post(path).cookie(Cookie("__Secure-pb_refresh", PRESENTED)).content("{}")
             when (kind) {
                 "missing-origin" -> request.contentType("application/json")
@@ -168,93 +182,113 @@ class AuthSessionHttpTest {
                 "text-type" -> request.header("Origin", ORIGIN).contentType("text/plain")
                 else -> request.header("Origin", ORIGIN).header("Content-Type", "application/")
             }
-            mvc.perform(request)
-                .andExpect(status().isForbidden())
+
+            // when
+            val response = mvc.perform(request)
+
+            // then
+            response.andExpect(status().isForbidden())
                 .andExpect(header().doesNotExist("Set-Cookie"))
                 .andExpect(
                     content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
                 )
         }
-        verifyNoInteractions(sessions)
+        confirmVerified(sessions)
     }
 
     @Test
-    fun given__json_with_a_charset_from_the_second_allowed_origin__when__refreshing__then__accept_it() {
-        whenever(sessions.refresh(PRESENTED)).thenReturn(AuthSessions.AccessOnly("synthetic-access"))
+    fun `두 번째 허용 출처가 charset 있는 JSON을 보낼 때__갱신하면__받아들인다`() {
+        // given
+        every { sessions.refresh(any()) } returns AuthSessions.AccessOnly("synthetic-access")
 
-        mvc.perform(
+        // when
+        val response = mvc.perform(
             post("/api/v1/auth/refresh")
                 .header("Origin", "https://pawbridge.kr")
                 .contentType("application/json;charset=UTF-8")
                 .cookie(Cookie("__Secure-pb_refresh", PRESENTED)),
-        ).andExpect(status().isOk())
+        )
+
+        // then
+        response.andExpect(status().isOk())
     }
 
     @Test
-    fun given__an_expired_access_token_or_none__when__logging_out_repeatedly__then__revoke_by_cookie_and_always_clear_it() {
+    fun `접근 토큰이 만료됐거나 없을 때__반복해서 로그아웃하면__쿠키로 폐기하고 항상 쿠키를 지운다`() {
+        // given
         val expired = Jwts.builder()
             .claim("userId", 7)
             .expiration(Date(System.currentTimeMillis() - 60_000))
             .signWith(F3TestInputs.KEY)
             .compact()
 
-        for (attempt in 0 until 2) {
+        justRun { sessions.logout(any()) }
+
+        // when
+        val repeated = (0 until 2).map {
             mvc.perform(
                 browser("/api/v1/auth/logout")
                     .cookie(Cookie("__Secure-pb_refresh", PRESENTED))
                     .header("Authorization", "Bearer $expired"),
             )
-                .andExpect(status().isOk())
+        }
+        val withoutCookie = mvc.perform(browser("/api/v1/auth/logout"))
+
+        // then
+        for (response in repeated) {
+            response.andExpect(status().isOk())
                 .andExpect(header().string("Set-Cookie", CLEAR_COOKIE))
                 .andExpect(
                     content().json("{\"code\":200,\"message\":\"로그아웃되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
                 )
         }
-        mvc.perform(browser("/api/v1/auth/logout"))
-            .andExpect(status().isOk())
+        withoutCookie.andExpect(status().isOk())
             .andExpect(header().string("Set-Cookie", CLEAR_COOKIE))
-
-        verify(sessions, times(2)).logout(PRESENTED)
-        verify(sessions).logout(null)
-        verifyNoMoreInteractions(sessions)
+        verify(exactly = 2) { sessions.logout(PRESENTED) }
+        verify(exactly = 1) { sessions.logout(null) }
+        confirmVerified(sessions)
     }
 
     @Test
-    fun given__a_database_failure__when__refreshing__then__safe_500_that_keeps_the_cookie_and_logs_no_details(
+    fun `데이터베이스 실패일 때__갱신하면__쿠키를 유지한 안전한 500이고 세부 정보를 로그에 남기지 않는다`(
         output: CapturedOutput,
     ) {
-        whenever(sessions.refresh(PRESENTED)).thenThrow(
-            TransactionSystemException("synthetic-private-token", RuntimeException("synthetic-private-sql")),
-        )
+        // given
+        every { sessions.refresh(any()) } throws
+            TransactionSystemException("synthetic-private-token", RuntimeException("synthetic-private-sql"))
+        every { sessions.logout(any()) } throws TransactionSystemException("synthetic-private-token")
 
-        mvc.perform(browser("/api/v1/auth/refresh").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
-            .andExpect(status().isInternalServerError())
+        // when
+        val refresh = mvc.perform(browser("/api/v1/auth/refresh").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
+        val logout = mvc.perform(browser("/api/v1/auth/logout").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
+
+        // then
+        refresh.andExpect(status().isInternalServerError())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-
-        doThrow(TransactionSystemException("synthetic-private-token")).`when`(sessions).logout(PRESENTED)
-        mvc.perform(browser("/api/v1/auth/logout").cookie(Cookie("__Secure-pb_refresh", PRESENTED)))
-            .andExpect(status().isInternalServerError())
-
+        logout.andExpect(status().isInternalServerError())
         assertThat(output.all).contains("Auth session request failed (TransactionSystemException)")
             .doesNotContain("synthetic-private-token", "synthetic-private-sql", PRESENTED)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["/api/v1/auth/refresh", "/api/v1/auth/logout"])
-    fun given__a_browser_preflight_from_the_site__when__asking_for_a_credentialed_json_post__then__allow_exactly_that_origin(
+    fun `사이트의 브라우저 사전 요청일 때__자격 증명 JSON POST를 물으면__정확히 그 출처만 허용한다`(
         path: String,
     ) {
-        mvc.perform(
+        // when
+        val response = mvc.perform(
             options(path)
                 .header("Origin", ORIGIN)
                 .header("Access-Control-Request-Method", "POST")
                 .header("Access-Control-Request-Headers", "content-type"),
         )
-            .andExpect(status().isOk())
+
+        // then
+        response.andExpect(status().isOk())
             .andExpect(header().string("Access-Control-Allow-Origin", ORIGIN))
             .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
-        verifyNoInteractions(sessions)
+        confirmVerified(sessions)
     }
 
     @ParameterizedTest
@@ -264,11 +298,18 @@ class AuthSessionHttpTest {
             "POST /api/v1/auth/login", "POST /api/auth/logout",
         ],
     )
-    fun given__adjacent_or_unported_auth_route__when__requesting__then__deny_before_session_service(spec: String) {
+    fun `인접하거나 이식되지 않은 인증 경로일 때__요청하면__세션 서비스 전에 거부한다`(spec: String) {
+        // given
         val split = spec.split(" ", limit = 2)
-        mvc.perform(request(HttpMethod.valueOf(split[0]), split[1]).header("X-User-Id", "7").header("Origin", ORIGIN))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(sessions)
+
+        // when
+        val response = mvc.perform(
+            request(HttpMethod.valueOf(split[0]), split[1]).header("X-User-Id", "7").header("Origin", ORIGIN),
+        )
+
+        // then
+        response.andExpect(status().isForbidden())
+        confirmVerified(sessions)
     }
 
     companion object {
@@ -301,19 +342,23 @@ class AuthSessionDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var sessions: AuthSessions
 
     @ParameterizedTest
     @ValueSource(strings = ["/api/v1/auth/refresh", "/api/v1/auth/logout"])
-    fun given__default_off_despite_cookie_and_token__when__posting__then__preserve_default403_without_service(path: String) {
-        mvc.perform(
+    fun `기본 꺼짐에 쿠키와 토큰이 있을 때__POST하면__서비스 없이 기본 403을 유지한다`(path: String) {
+        // when
+        val response = mvc.perform(
             post(path)
                 .header("Origin", AuthSessionHttpTest.ORIGIN)
                 .contentType("application/json")
                 .cookie(Cookie("__Secure-pb_refresh", AuthSessionHttpTest.PRESENTED))
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(sessions)
+        )
+
+        // then
+        response.andExpect(status().isForbidden())
+        confirmVerified(sessions)
     }
 }

@@ -1,19 +1,18 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
 import com.pawbridge.backend.boot.configuration.AnimalShelterConfiguration
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
-import com.pawbridge.backend.support.anyNonNull
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -33,35 +32,42 @@ class AnimalShelterHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var shelters: ShelterReads
 
     @Test
-    fun given__enabled_shelters_without_explicit_postgresql__when__requesting_four_canonical_gets__then__reach_only_general_reads_without_jwt_or_sessions() {
-        whenever(shelters.search(anyNonNull<ShelterReads.Search>(), anyNonNull<ShelterReads.PageRequest>()))
-            .thenReturn(ShelterReads.Page(listOf(), 0))
+    fun `보호소가 켜졌고 postgresql 지정이 없을 때__표준 GET 4개를 요청하면__JWT나 세션 없이 일반 조회에만 닿는다`() {
+        // given
         val detail = ShelterReads.Details(42L, "CARE-42", "fixture", null, null, null, null, null, null, null, null, null, null, null)
-        whenever(shelters.findById(42)).thenReturn(detail)
-        whenever(shelters.findByCareRegNo("CARE-42")).thenReturn(detail)
-        whenever(shelters.count()).thenReturn(17L)
-        mvc.perform(get("/api/v1/shelters").param("keyword", "fixture").header("Authorization", "Bearer invalid"))
-            .andExpect(status().isOk())
+
+        every { shelters.search(any(), any()) } returns ShelterReads.Page(listOf(), 0)
+        every { shelters.findById(42) } returns detail
+        every { shelters.findByCareRegNo("CARE-42") } returns detail
+        every { shelters.count() } returns 17L
+
+        // when
+        val list = mvc.perform(get("/api/v1/shelters").param("keyword", "fixture").header("Authorization", "Bearer invalid"))
+        val byId = mvc.perform(get("/api/v1/shelters/42").param("view", "detail"))
+        val byCareRegNo = mvc.perform(get("/api/v1/shelters/by-care-reg-no/CARE-42"))
+        val count = mvc.perform(get("/api/v1/shelters/count"))
+
+        // then
+        list.andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
-        mvc.perform(get("/api/v1/shelters/42").param("view", "detail"))
-            .andExpect(status().isOk())
+        byId.andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(42))
-        mvc.perform(get("/api/v1/shelters/by-care-reg-no/CARE-42"))
-            .andExpect(status().isOk())
+        byCareRegNo.andExpect(status().isOk())
             .andExpect(jsonPath("$.careRegNo").value("CARE-42"))
-        mvc.perform(get("/api/v1/shelters/count")).andExpect(status().isOk()).andExpect(content().string("17"))
-        verify(shelters).search(anyNonNull<ShelterReads.Search>(), anyNonNull<ShelterReads.PageRequest>())
-        verify(shelters).findById(42)
-        verify(shelters).findByCareRegNo("CARE-42")
-        verify(shelters).count()
+        count.andExpect(status().isOk()).andExpect(content().string("17"))
+        verify(exactly = 1) { shelters.search(any(), any()) }
+        verify(exactly = 1) { shelters.findById(42) }
+        verify(exactly = 1) { shelters.findByCareRegNo("CARE-42") }
+        verify(exactly = 1) { shelters.count() }
     }
 
     @Test
-    fun given__general_reads_only__when__requesting_discovery_neighbors_or_mutations_even_as_admin__then__deny_before_shelter_code() {
+    fun `일반 조회만 열렸을 때__관리자도 탐색 이웃 경로나 변경을 요청하면__보호소 코드 전에 거부한다`() {
+        // given
         val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
         val paths = listOf(
             "/api/v1/shelters/discovery",
@@ -74,6 +80,8 @@ class AnimalShelterHttpTest {
             "/api/v1/shelters/count/extra",
             "/api/shelters/42",
         )
+
+        // when
         for (path in paths) {
             mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
         }
@@ -81,13 +89,20 @@ class AnimalShelterHttpTest {
             mvc.perform(request(method, "/api/v1/shelters/42").header("Authorization", admin))
                 .andExpect(status().isForbidden())
         }
-        verifyNoInteractions(shelters)
+
+        // then
+        confirmVerified(shelters)
     }
 
     @Test
-    fun given__existing_user_private_read__when__jwt_is_missing_or_invalid__then__keep_existing_authentication_rejection() {
-        mvc.perform(get("/api/v1/users/me")).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer invalid")).andExpect(status().isUnauthorized())
-        verifyNoInteractions(shelters)
+    fun `기존 사용자 비공개 조회일 때__JWT가 없거나 잘못되면__기존 인증 거부를 유지한다`() {
+        // when
+        val missing = mvc.perform(get("/api/v1/users/me"))
+        val invalid = mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer invalid"))
+
+        // then
+        missing.andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
+        invalid.andExpect(status().isUnauthorized())
+        confirmVerified(shelters)
     }
 }
