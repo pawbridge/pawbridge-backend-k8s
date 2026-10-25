@@ -6,16 +6,17 @@ import com.pawbridge.backend.community.internal.chat.application.MemberChatRejec
 import com.pawbridge.backend.community.internal.chat.infrastructure.MemberChatTickets
 import com.pawbridge.backend.community.internal.chat.web.MemberChatProtocolErrors
 import com.pawbridge.backend.community.internal.chat.web.MemberChatSessions
+import com.pawbridge.backend.user.api.ContactMember
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.messaging.Message
 import org.springframework.messaging.MessageChannel
@@ -30,19 +31,13 @@ class MemberChatProtocolTest {
         fun values(): List<ChannelInterceptor> = interceptors
     }
 
-    private val tickets = mock(MemberChatTickets::class.java)
-    private val sessions = mock(MemberChatSessions::class.java)
-    private val chat = mock(MemberChat::class.java)
-
-    @Suppress("UNCHECKED_CAST")
-    private val sessionProvider = mock(ObjectProvider::class.java) as ObjectProvider<MemberChatSessions>
-
-    @Suppress("UNCHECKED_CAST")
-    private val chatProvider = mock(ObjectProvider::class.java) as ObjectProvider<MemberChat>
+    private val tickets = mockk<MemberChatTickets>()
+    private val sessions = mockk<MemberChatSessions>()
+    private val chat = mockk<MemberChat>()
+    private val sessionProvider = mockk<ObjectProvider<MemberChatSessions>>()
+    private val chatProvider = mockk<ObjectProvider<MemberChat>>()
 
     private fun inbound(): ChannelInterceptor {
-        whenever(sessionProvider.getObject()).thenReturn(sessions)
-        whenever(chatProvider.getObject()).thenReturn(chat)
         val config = MemberChatSocketConfiguration(tickets, sessionProvider, chatProvider, "https://fixture.invalid")
         val channel = Channel()
         config.configureClientInboundChannel(channel)
@@ -51,56 +46,88 @@ class MemberChatProtocolTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["SEND", "SUBSCRIBE"])
-    fun given__anonymous_pending_socket__when__sending_or_subscribing_before_ticket_authentication__then__drop_and_close_without_business(
+    fun `인증 전 익명 소켓일 때__티켓 인증 전에 보내기나 구독을 하면__업무 호출 없이 프레임을 버리고 연결을 닫는다`(
         command: String,
     ) {
-        doThrow(MemberChatRejectedException(401, "expired")).`when`(sessions).requireCurrent("owned")
-        assertThat(
-            inbound().preSend(
-                frame(StompCommand.valueOf(command), if (command == "SEND") "/app/chat/send" else "/user/queue/chat"),
-                mock(MessageChannel::class.java),
-            ),
-        ).isNull()
-        verify(sessions).close("owned")
-        verifyNoInteractions(tickets, chat)
+        // given
+        every { sessionProvider.getObject() } returns sessions
+        every { chatProvider.getObject() } returns chat
+        every { sessions.requireCurrent(any()) } throws MemberChatRejectedException(401, "expired")
+        justRun { sessions.close(any()) }
+
+        val destination = if (command == "SEND") "/app/chat/send" else "/user/queue/chat"
+        val frame = frame(StompCommand.valueOf(command), destination)
+
+        // when
+        val result = inbound().preSend(frame, mockk<MessageChannel>())
+
+        // then
+        assertThat(result).isNull()
+        verify(exactly = 1) { sessions.close("owned") }
+        confirmVerified(tickets, chat)
     }
 
     @Test
-    fun given__atomic_ticket_identity__when__connecting__then__check_active_and_bind_that_identity_once() {
+    fun `원자적 티켓 신원일 때__연결하면__활성 회원을 확인하고 그 신원을 한 번만 바인딩한다`() {
+        // given
         val identity = MemberChatTickets.Identity(7, Long.MAX_VALUE)
-        whenever(tickets.consume("synthetic")).thenReturn(identity)
         val headers = StompHeaderAccessor.create(StompCommand.CONNECT)
         headers.sessionId = "owned"
         headers.addNativeHeader("ticket", "synthetic")
         headers.setLeaveMutable(true)
         val message = MessageBuilder.createMessage(ByteArray(0), headers.messageHeaders)
-        assertThat(inbound().preSend(message, mock(MessageChannel::class.java))).isSameAs(message)
-        val order = inOrder(tickets, chat, sessions)
-        order.verify(tickets).consume("synthetic")
-        order.verify(chat).active(7)
-        order.verify(sessions).authenticate("owned", identity)
+
+        every { sessionProvider.getObject() } returns sessions
+        every { chatProvider.getObject() } returns chat
+        every { tickets.consume(any()) } returns identity
+        every { chat.active(any()) } returns ContactMember(7, "synthetic", true, false)
+        justRun { sessions.authenticate(any(), any()) }
+
+        // when
+        val result = inbound().preSend(message, mockk<MessageChannel>())
+
+        // then
+        assertThat(result).isSameAs(message)
+        verifyOrder {
+            tickets.consume("synthetic")
+            chat.active(7)
+            sessions.authenticate("owned", identity)
+        }
         assertThat(headers.user).isSameAs(identity)
     }
 
     @Test
-    fun given__private_parser_failure__when__producing_protocol_error__then__keep_only_fixed_safe_text() {
+    fun `내부 파서 실패일 때__프로토콜 오류를 만들면__고정된 안전한 문구만 남긴다`() {
+        // given
         val protocol = MemberChatProtocolErrors()
-        val error = protocol.handleClientMessageProcessingError(
-            MessageBuilder.withPayload("private-body-token".toByteArray(Charsets.UTF_8)).build(),
-            IllegalArgumentException("private-body-token"),
-        )
+        val message = MessageBuilder.withPayload("private-body-token".toByteArray(Charsets.UTF_8)).build()
+
+        // when
+        val error = protocol.handleClientMessageProcessingError(message, IllegalArgumentException("private-body-token"))
+
+        // then
         assertThat(String(error.payload, Charsets.UTF_8)).doesNotContain("private-body-token")
         assertThat(error.headers.toString()).doesNotContain("private-body-token")
     }
 
     @Test
-    fun given__authenticated_socket__when__subscribing_to_another_destination__then__drop_and_close() {
-        assertThat(
-            inbound().preSend(frame(StompCommand.SUBSCRIBE, "/topic/other"), mock(MessageChannel::class.java)),
-        ).isNull()
-        verify(sessions).requireCurrent("owned")
-        verify(sessions).close("owned")
-        verifyNoInteractions(chat, tickets)
+    fun `인증된 소켓일 때__다른 목적지를 구독하면__프레임을 버리고 연결을 닫는다`() {
+        // given
+        every { sessionProvider.getObject() } returns sessions
+        every { chatProvider.getObject() } returns chat
+        justRun { sessions.requireCurrent(any()) }
+        justRun { sessions.close(any()) }
+
+        val frame = frame(StompCommand.SUBSCRIBE, "/topic/other")
+
+        // when
+        val result = inbound().preSend(frame, mockk<MessageChannel>())
+
+        // then
+        assertThat(result).isNull()
+        verify(exactly = 1) { sessions.requireCurrent("owned") }
+        verify(exactly = 1) { sessions.close("owned") }
+        confirmVerified(chat, tickets)
     }
 
     companion object {

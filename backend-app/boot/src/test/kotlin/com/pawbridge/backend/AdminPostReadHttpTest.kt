@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.AdminPostReadConfiguration
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.PostDetails
@@ -8,20 +9,18 @@ import com.pawbridge.backend.community.internal.post.application.PostPageReader
 import com.pawbridge.backend.community.internal.post.application.ReadAdminPosts
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.AdminPostReadController
-import com.pawbridge.backend.support.anyNonNull
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
@@ -44,73 +43,103 @@ class AdminPostReadHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var posts: ReadAdminPosts
 
-    @MockitoBean
+    @MockkBean
     lateinit var post: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var pageReader: PostPageReader
 
     @Test
-    fun given__default_admin_page__when__reading__then__match_original_page_json_and_ignore_forged_identity_headers() {
-        whenever(posts.read(anyNonNull<PostPageReader.Request>())).thenReturn(ReadAdminPosts.Page(listOf(row()), 41))
-        mvc.perform(
+    fun `기본 관리자 페이지__조회하면__원래 페이지 JSON과 같고 위조 신원 헤더를 무시한다`() {
+        // given
+        every { posts.read(any()) } returns ReadAdminPosts.Page(listOf(row()), 41)
+
+        // when
+        val result = mvc.perform(
             get(ROOT)
                 .header("Authorization", admin())
                 .header("X-User-Role", "ROLE_USER")
                 .header("X-User-Id", "999"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(EXPECTED_DEFAULT, JsonCompareMode.STRICT))
-        verify(posts).read(PostPageReader.Request(0, 20, listOf(PostPageReader.Order("createdAt", false, false))))
-        verifyNoInteractions(post)
+        verify(exactly = 1) {
+            posts.read(PostPageReader.Request(0, 20, listOf(PostPageReader.Order("createdAt", false, false))))
+        }
+        confirmVerified(posts, post)
     }
 
     @ParameterizedTest
     @MethodSource("paging")
-    fun given__invalid_or_large_page_parameters__when__binding__then__reuse_original_fallback_and_maximum(
+    fun `잘못되었거나 큰 페이지 매개변수__바인딩하면__원래 대체값과 최댓값을 재사용한다`(
         page: String,
         size: String,
         expectedPage: Int,
         expectedSize: Int,
     ) {
-        whenever(posts.read(anyNonNull<PostPageReader.Request>())).thenReturn(ReadAdminPosts.Page(listOf(), 0))
-        mvc.perform(get(ROOT).param("page", page).param("size", size).header("Authorization", admin()))
-            .andExpect(status().isOk())
-        verify(posts).read(
-            PostPageReader.Request(expectedPage, expectedSize, listOf(PostPageReader.Order("createdAt", false, false))),
-        )
+        // given
+        every { posts.read(any()) } returns ReadAdminPosts.Page(listOf(), 0)
+
+        // when
+        val result = mvc.perform(get(ROOT).param("page", page).param("size", size).header("Authorization", admin()))
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) {
+            posts.read(
+                PostPageReader.Request(expectedPage, expectedSize, listOf(PostPageReader.Order("createdAt", false, false))),
+            )
+        }
     }
 
     @Test
-    fun given__repeated_sort_with_ignorecase__when__binding__then__retain_original_order_list_without_added_tiebreak() {
-        whenever(posts.read(anyNonNull<PostPageReader.Request>())).thenReturn(ReadAdminPosts.Page(listOf(), 0))
-        mvc.perform(
+    fun `대소문자 무시가 있는 반복 정렬__바인딩하면__보조 정렬 추가 없이 원래 순서 목록을 유지한다`() {
+        // given
+        every { posts.read(any()) } returns ReadAdminPosts.Page(listOf(), 0)
+
+        // when
+        val result = mvc.perform(
             get(ROOT)
                 .param("sort", "title,content,desc,ignorecase", "postId,asc")
                 .header("Authorization", admin()),
-        ).andExpect(status().isOk())
-        verify(posts).read(
-            PostPageReader.Request(
-                0,
-                20,
-                listOf(
-                    PostPageReader.Order("title", false, true),
-                    PostPageReader.Order("content", false, true),
-                    PostPageReader.Order("postId", true, false),
-                ),
-            ),
         )
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) {
+            posts.read(
+                PostPageReader.Request(
+                    0,
+                    20,
+                    listOf(
+                        PostPageReader.Order("title", false, true),
+                        PostPageReader.Order("content", false, true),
+                        PostPageReader.Order("postId", true, false),
+                    ),
+                ),
+            )
+        }
     }
 
     @Test
-    fun given__admin_detail__when__reading__then__reuse_exact_nine_fields_and_null_media_without_new_query() {
+    fun `관리자 상세__조회하면__정확히 아홉 필드와 null 미디어를 새 조회 없이 재사용한다`() {
+        // given
         val row = PostDetails(7, 9, null, "title", "content", "COMMUNICATION", null, null, null)
-        whenever(post.read(7)).thenReturn(row)
-        mvc.perform(get("$ROOT/7").header("Authorization", admin()))
+
+        every { post.read(any()) } returns row
+
+        // when
+        val result = mvc.perform(get("$ROOT/7").header("Authorization", admin()))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -118,15 +147,21 @@ class AdminPostReadHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(post).read(7)
-        verifyNoInteractions(posts)
+        verify(exactly = 1) { post.read(7) }
+        confirmVerified(posts, post)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [-1, 0, 7])
-    fun given__missing_or_deleted_numeric_post__when__reading__then__retain_original_404_without_positive_id_guard(id: Long) {
-        whenever(post.read(id)).thenThrow(PostNotFoundException())
-        mvc.perform(get("$ROOT/$id").header("Authorization", admin()))
+    fun `없거나 삭제된 숫자 글__조회하면__양수 ID 검사 없이 원래 404를 유지한다`(id: Long) {
+        // given
+        every { post.read(any()) } throws PostNotFoundException()
+
+        // when
+        val result = mvc.perform(get("$ROOT/$id").header("Authorization", admin()))
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json(
@@ -134,72 +169,112 @@ class AdminPostReadHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(post).read(id)
-        verifyNoInteractions(posts)
+        verify(exactly = 1) { post.read(id) }
+        confirmVerified(posts, post)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["no-number", "9223372036854775808", "read", "search"])
-    fun given__malformed_or_overflow_id__when__admin_binds__then__retain_measured_original_500_without_service_call(
+    fun `숫자가 아니거나 넘치는 ID__관리자가 바인딩하면__서비스 호출 없이 측정된 원래 500을 유지한다`(
         id: String,
     ) {
-        mvc.perform(get("$ROOT/$id").header("Authorization", admin()))
+        // given
+        val request = get("$ROOT/$id").header("Authorization", admin())
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
-        verifyNoInteractions(posts, post)
+        confirmVerified(posts, post)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "/7"])
-    fun given__user_token_and_admin_header__when__requesting__then__deny_before_binding_or_query(suffix: String) {
-        mvc.perform(
-            get(ROOT + suffix)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN"),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(posts, post)
+    fun `사용자 토큰과 관리자 헤더__요청하면__바인딩이나 조회 전에 거부한다`(suffix: String) {
+        // given
+        val request = get(ROOT + suffix)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Role", "ROLE_ADMIN")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(posts, post)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "invalid"])
-    fun given__missing_or_invalid_token__when__requesting_bad_id__then__authenticate_before_binding(mode: String) {
+    fun `없거나 잘못된 토큰__잘못된 ID로 요청하면__바인딩 전에 인증한다`(mode: String) {
+        // given
         val request = get("$ROOT/no-number").header("X-User-Role", "ROLE_ADMIN")
         if (mode == "invalid") {
             request.header("Authorization", "Bearer invalid")
         }
-        mvc.perform(request).andExpect(status().isUnauthorized())
-        verifyNoInteractions(posts, post)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(posts, post)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["read", "search"])
-    fun given__ported_id_mapping_literals__when__requested_without_bearer__then__authenticate_before_the_original_500_binding(
+    fun `이식된 ID 매핑 리터럴 경로__Bearer 없이 요청하면__원래 500 바인딩 전에 인증한다`(
         path: String,
     ) {
-        mvc.perform(get("$ROOT/$path").header("X-User-Role", "ROLE_ADMIN")).andExpect(status().isUnauthorized())
-        verifyNoInteractions(posts, post)
+        // given
+        val request = get("$ROOT/$path").header("X-User-Role", "ROLE_ADMIN")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(posts, post)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["list", "detail"])
-    fun given__query_or_commit_runtime_failure__when__reading__then__return_safe_original_500(mode: String) {
+    fun `조회 또는 커밋 런타임 실패__조회하면__안전한 원래 500을 돌려준다`(mode: String) {
+        // given
         val failure = org.springframework.transaction.TransactionSystemException("private synthetic details")
         if (mode == "list") {
-            whenever(posts.read(anyNonNull<PostPageReader.Request>())).thenThrow(failure)
+            every { posts.read(any()) } throws failure
         } else {
-            whenever(post.read(7)).thenThrow(failure)
+            every { post.read(any()) } throws failure
         }
-        mvc.perform(get(ROOT + (if (mode == "list") "" else "/7")).header("Authorization", admin()))
+
+        // when
+        val result = mvc.perform(get(ROOT + (if (mode == "list") "" else "/7")).header("Authorization", admin()))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
     }
 
     @Test
-    fun given__admin_and_deeper_or_unported_mutations__when__requesting__then__retain_default_deny() {
-        mvc.perform(delete("$ROOT/7/extra").header("Authorization", admin())).andExpect(status().isForbidden())
-        mvc.perform(put("$ROOT/7/extra").header("Authorization", admin())).andExpect(status().isForbidden())
-        mvc.perform(post(ROOT).header("Authorization", admin())).andExpect(status().isForbidden())
-        verifyNoInteractions(posts, post)
+    fun `관리자와 더 깊은 경로 또는 미이식 변경__요청하면__기본 거부를 유지한다`() {
+        // given
+        val token = admin()
+
+        // when
+        val deleted = mvc.perform(delete("$ROOT/7/extra").header("Authorization", token))
+        val updated = mvc.perform(put("$ROOT/7/extra").header("Authorization", token))
+        val created = mvc.perform(post(ROOT).header("Authorization", token))
+
+        // then
+        deleted.andExpect(status().isForbidden())
+        updated.andExpect(status().isForbidden())
+        created.andExpect(status().isForbidden())
+        confirmVerified(posts, post)
     }
 
     companion object {

@@ -8,15 +8,15 @@ import com.pawbridge.backend.user.internal.passwordreset.application.PasswordRes
 import com.pawbridge.backend.user.internal.passwordreset.web.PasswordResetController
 import com.pawbridge.backend.user.internal.signup.application.LocalSignup
 import com.pawbridge.backend.user.internal.signup.web.LocalSignupController
+import com.ninjasquad.springmockk.MockkBean
+import io.mockk.confirmVerified
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -45,13 +45,13 @@ class LocalAuthDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var verifications: EmailVerifications
 
-    @MockitoBean
+    @MockkBean
     lateinit var signups: LocalSignup
 
-    @MockitoBean
+    @MockkBean
     lateinit var resets: PasswordReset
 
     @ParameterizedTest
@@ -61,8 +61,15 @@ class LocalAuthDisabledHttpTest {
             "/api/v1/auth/password/reset-request", "/api/v1/auth/password/reset",
         ],
     )
-    fun given__flag_not_exactly_true__when__calling_a_public_route__then__deny_before_service(path: String) {
-        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden())
-        verifyNoInteractions(verifications, signups, resets)
+    fun `플래그가 정확히 true가 아닐 때__공개 경로를 호출하면__서비스 전에 거절한다`(path: String) {
+        // given
+        val request = post(path).contentType(MediaType.APPLICATION_JSON).content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(verifications, signups, resets)
     }
 }

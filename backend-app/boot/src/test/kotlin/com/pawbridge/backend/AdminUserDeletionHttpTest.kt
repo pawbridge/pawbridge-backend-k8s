@@ -1,21 +1,22 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.user.internal.deletion.application.MemberCleanupUnavailableException
 import com.pawbridge.backend.user.internal.deletion.application.UserDeletion
 import com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionController
 import com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionExceptionHandler
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -24,7 +25,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
@@ -51,12 +51,16 @@ class AdminUserDeletionHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var deletion: UserDeletion
 
     @Test
-    fun given__verified_admin_and_spoofed_member_headers__when__deleting__then__use_only_the_bound_target_and_exact_original_envelope() {
-        mvc.perform(
+    fun `검증된 관리자와 위조 회원 헤더__삭제하면__바인딩된 대상만 쓰고 원래 봉투를 그대로 돌려준다`() {
+        // given
+        justRun { deletion.delete(any()) }
+
+        // when
+        val result = mvc.perform(
             delete(PATH + Long.MAX_VALUE)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
                 .header("X-User-Id", "8")
@@ -65,65 +69,85 @@ class AdminUserDeletionHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":8}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"회원이 삭제되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(deletion).delete(Long.MAX_VALUE)
-        verifyNoMoreInteractions(deletion)
+        verify(exactly = 1) { deletion.delete(Long.MAX_VALUE) }
+        confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__signed_nonadmin_with_spoofed_admin_header__when__deleting_an_invalid_target__then__authorize_before_binding_or_business() {
-        mvc.perform(
-            delete(PATH + "not-a-number")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Id", "1")
-                .header("X-User-Role", "ROLE_ADMIN"),
-        )
+    fun `서명된 비관리자와 위조 관리자 헤더__잘못된 대상을 삭제하면__바인딩이나 업무 처리 전에 권한을 거부한다`() {
+        // given
+        val request = delete(PATH + "not-a-number")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Id", "1")
+            .header("X-User-Role", "ROLE_ADMIN")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(deletion)
+        confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("rejectedTokens")
-    fun given__missing_or_invalid_bearer__when__deleting_a_malformed_target__then__reject_before_binding_and_clear_context(
+    fun `없거나 잘못된 Bearer__잘못된 대상을 삭제하면__바인딩 전에 거부하고 컨텍스트를 비운다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = delete(PATH + "not-a-number").header("X-User-Role", "ROLE_ADMIN")
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(deletion)
+        confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__authorized_deletion_failure__when__the_scoped_advice_handles_it__then__preserve_user_status_without_private_details(
+    fun `승인된 삭제 실패__범위 지정 어드바이스가 처리하면__내부 정보 없이 사용자 상태를 유지한다`(
         failure: RuntimeException,
         status: Int,
         message: String,
     ) {
-        doThrow(failure).`when`(deletion).delete(8)
-        mvc.perform(delete(PATH + 8).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+        // given
+        every { deletion.delete(any()) } throws failure
+
+        // when
+        val result = mvc.perform(delete(PATH + 8).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+
+        // then
+        result
             .andExpect(status().`is`(status))
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -133,8 +157,8 @@ class AdminUserDeletionHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(deletion).delete(8)
-        verifyNoMoreInteractions(deletion)
+        verify(exactly = 1) { deletion.delete(8) }
+        confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -147,36 +171,48 @@ class AdminUserDeletionHttpTest {
             "DELETE /internal/private-notes/members/8",
         ],
     )
-    fun given__an_unexposed_neighbor_or_internal_route__when__a_valid_admin_requests_it__then__keep_generic_default_deny(
+    fun `노출되지 않은 이웃 경로나 내부 경로__유효한 관리자가 요청하면__일반 기본 거부를 유지한다`(
         wire: String,
     ) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(deletion)
+        confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__an_admin_and_malformed_long__when__binding_before_deletion__then__use_the_existing_scoped_safe_runtime_envelope() {
-        mvc.perform(
-            delete(PATH + "not-a-number").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
+    fun `관리자와 잘못된 Long__삭제 전에 바인딩하면__기존 범위 지정 안전 런타임 봉투를 쓴다`() {
+        // given
+        val request = delete(PATH + "not-a-number")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(deletion)
+        confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 

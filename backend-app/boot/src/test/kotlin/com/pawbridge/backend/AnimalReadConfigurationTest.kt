@@ -14,15 +14,15 @@ import com.pawbridge.backend.animal.internal.recommendation.web.AnimalRecommenda
 import com.pawbridge.backend.animal.internal.recommendation.web.AnimalRecommendationExceptionHandler
 import com.pawbridge.backend.boot.configuration.AnimalDiscoveryConfiguration
 import com.pawbridge.backend.boot.configuration.AnimalRecommendationsConfiguration
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.every
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.aop.support.AopUtils
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
@@ -42,9 +42,10 @@ import javax.sql.DataSource
 class AnimalReadConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on", "1"])
-    fun given__features_not_enabled_and_no_ai_or_database_inputs__when__assembling__then__create_no_animal_beans(
+    fun `기능이 꺼져 있고 AI·DB 입력이 없을 때__조립하면__동물 빈을 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))
             .withUserConfiguration(AnimalDiscoveryConfiguration::class.java, AnimalRecommendationsConfiguration::class.java)
@@ -54,7 +55,10 @@ class AnimalReadConfigurationTest {
                 "pawbridge.animal-recommendations.enabled=$flag",
             )
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(AnimalDiscovery::class.java)
                 .doesNotHaveBean(KoreanSearchAnalyzer::class.java)
@@ -68,11 +72,15 @@ class AnimalReadConfigurationTest {
     }
 
     @Test
-    fun given__discovery_enabled__when__assembling__then__reuse_reader_inputs_and_close_the_single_owned_analyzer() {
-        val source = mock(DataSource::class.java)
-        val manager = mock(PlatformTransactionManager::class.java)
+    fun `탐색이 켜졌을 때__조립하고 닫으면__읽기 입력을 재사용하고 하나뿐인 분석기를 닫는다`() {
+        // given
+        val source = mockk<DataSource>()
+        val manager = mockk<PlatformTransactionManager>()
         val owned = AtomicReference<KoreanSearchAnalyzer>()
+
+        // when
         inputs(source, manager).withPropertyValues("pawbridge.animal-discovery.enabled=true").run { context ->
+            // then
             assertThat(context).hasNotFailed()
             val animals = context.getBean(AnimalDiscovery::class.java)
             val jdbc = (ReflectionTestUtils.getField(animals, "jdbc") as NamedParameterJdbcTemplate).jdbcTemplate as JdbcTemplate
@@ -92,18 +100,19 @@ class AnimalReadConfigurationTest {
             assertThat(context).doesNotHaveBean(AnimalRecommendations::class.java)
             assertThat(PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java })
                 .contains(AnimalDiscoveryConfiguration::class.java, AnimalRecommendationsConfiguration::class.java)
-            verifyNoInteractions(source, manager)
+            confirmNoBusinessCalls(source, manager)
         }
         assertThatThrownBy { owned.get().tokens("말티즈") }.isInstanceOf(IllegalStateException::class.java)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun given__recommendations_only_with_explicit_urls__when__assembling__then__reuse_core_reader_without_discovery_routes_and_preserve_url_precedence(
+    fun `추천만 켜지고 URL이 명시됐을 때__조립하면__탐색 경로 없이 읽기를 재사용하고 URL 우선순위를 지킨다`(
         preferred: Boolean,
     ) {
-        val source = mock(DataSource::class.java)
-        val manager = mock(PlatformTransactionManager::class.java)
+        // given
+        val source = mockk<DataSource>()
+        val manager = mockk<PlatformTransactionManager>()
         var runner = inputs(source, manager).withPropertyValues(
             "pawbridge.animal-recommendations.enabled=true",
             "python-ai-service.url=https://fallback.example.invalid",
@@ -111,7 +120,10 @@ class AnimalReadConfigurationTest {
         if (preferred) {
             runner = runner.withPropertyValues("lost-search.python-url=https://preferred.example.invalid")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(AnimalDiscovery::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(KoreanSearchAnalyzer::class.java)).hasSize(1)
@@ -136,23 +148,31 @@ class AnimalReadConfigurationTest {
             if (preferred) {
                 assertThat(target).doesNotContain("https://fallback.example.invalid")
             }
-            verifyNoInteractions(source, manager)
+            confirmNoBusinessCalls(source, manager)
         }
     }
 
     @Test
-    fun given__recommendations_enabled_without_either_source_url__when__assembling__then__fail_configuration_instead_of_creating_a_fallback() {
-        inputs(mock(DataSource::class.java), mock(PlatformTransactionManager::class.java))
-            .withPropertyValues("pawbridge.animal-recommendations.enabled=true")
-            .run { context -> assertThat(context).hasFailed() }
+    fun `추천이 켜졌지만 두 URL이 모두 없을 때__조립하면__대체 빈을 만들지 않고 설정 실패로 끝난다`() {
+        // given
+        val source = mockk<DataSource>()
+        val manager = mockk<PlatformTransactionManager>()
+        val runner = inputs(source, manager).withPropertyValues("pawbridge.animal-recommendations.enabled=true")
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasFailed()
+        }
     }
 
     @Test
-    fun given__missing_key_with_explicit_url__when__calling_the_assembled_controller__then__keep_etc_empty_and_dog_unavailable_without_outer_transaction() {
-        val animals = mock(AnimalDiscovery::class.java)
-        val source = mock(DataSource::class.java)
-        val manager = mock(PlatformTransactionManager::class.java)
-        ApplicationContextRunner()
+    fun `키가 없고 URL이 명시됐을 때__조립된 컨트롤러를 부르면__외부 트랜잭션 없이 ETC는 빈 값 DOG는 사용 불가로 둔다`() {
+        // given
+        val animals = mockk<AnimalDiscovery>()
+        val source = mockk<DataSource>()
+        val manager = mockk<PlatformTransactionManager>()
+        val runner = ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))
             .withUserConfiguration(AnimalRecommendationsConfiguration::class.java)
             .withBean(AnimalDiscovery::class.java, Supplier { animals })
@@ -163,31 +183,44 @@ class AnimalReadConfigurationTest {
                 "pawbridge.animal-recommendations.enabled=true",
                 "python-ai-service.url=https://fixture.example.invalid",
             )
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                assertThat(ReflectionTestUtils.getField(context.getBean(PythonAnimalRecommendations::class.java), "internalKey"))
-                    .isEqualTo("")
-                val controller = context.getBean(AnimalRecommendationController::class.java)
-                for (species in arrayOf(Species.ETC, Species.DOG)) {
-                    doAnswer(
-                        Answer<Any?> {
-                            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()
-                            source(species)
-                        },
-                    ).`when`(animals).findById(42L)
-                    if (species == Species.ETC) {
-                        assertThat(controller.recommend(javaLong(42L))).isEmpty()
-                    } else {
-                        assertThatThrownBy { controller.recommend(javaLong(42L)) }
-                            .isInstanceOf(RecommendationUnavailableException::class.java)
-                    }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasNotFailed()
+            assertThat(ReflectionTestUtils.getField(context.getBean(PythonAnimalRecommendations::class.java), "internalKey"))
+                .isEqualTo("")
+            val controller = context.getBean(AnimalRecommendationController::class.java)
+            for (species in arrayOf(Species.ETC, Species.DOG)) {
+                every { animals.findById(42L) } answers {
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()
+                    source(species)
                 }
-                assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()
-                verifyNoInteractions(source, manager)
+                if (species == Species.ETC) {
+                    assertThat(controller.recommend(javaLong(42L))).isEmpty()
+                } else {
+                    assertThatThrownBy { controller.recommend(javaLong(42L)) }
+                        .isInstanceOf(RecommendationUnavailableException::class.java)
+                }
             }
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()
+            confirmNoBusinessCalls(source, manager)
+        }
     }
 
     companion object {
+        /** Spring hashes registered beans, so ignore those calls and fail on any other call to the mocks. */
+        private fun confirmNoBusinessCalls(vararg mocks: Any) {
+            for (mock in mocks) {
+                excludeRecords {
+                    mock.hashCode()
+                    mock.toString()
+                    mock.equals(any())
+                }
+            }
+            confirmVerified(*mocks)
+        }
+
         private fun inputs(source: DataSource, manager: PlatformTransactionManager): ApplicationContextRunner {
             return ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))

@@ -1,18 +1,18 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.animal.internal.statistics.application.AnimalStatistics
 import com.pawbridge.backend.boot.configuration.AnimalStatisticsConfiguration
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -33,29 +33,43 @@ class AnimalStatisticsHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var statistics: AnimalStatistics
 
     @Test
-    fun given__enabled_statistics__when__anonymous_or_bad_bearer_calls_three_exact_public_gets__then__reach_registered_controllers_without_session() {
-        whenever(statistics.today()).thenReturn(AnimalStatistics.Today(LocalDate.of(2026, 10, 20), 2L, 3L))
-        whenever(statistics.status(null, null)).thenReturn(listOf())
-        whenever(statistics.regional(null, null)).thenReturn(listOf())
-        mvc.perform(get("/api/v1/animals/stats/today").header("Authorization", "Bearer invalid"))
-            .andExpect(status().isOk())
+    fun `통계가 켜졌을 때__익명이나 잘못된 토큰이 공개 GET 3개를 부르면__세션 없이 등록된 컨트롤러에 닿는다`() {
+        // given
+        every { statistics.today() } returns AnimalStatistics.Today(LocalDate.of(2026, 10, 20), 2L, 3L)
+        every { statistics.status(null, null) } returns listOf()
+        every { statistics.regional(null, null) } returns listOf()
+
+        // when
+        val today = mvc.perform(get("/api/v1/animals/stats/today").header("Authorization", "Bearer invalid"))
+        val statusList = mvc.perform(get("/api/v1/animals/stats/status"))
+        val regional = mvc.perform(get("/api/v1/animals/stats/regional"))
+
+        // then
+        today.andExpect(status().isOk())
             .andExpect(jsonPath("$.rescuedToday").value(2))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        mvc.perform(get("/api/v1/animals/stats/status")).andExpect(status().isOk()).andExpect(content().json("[]"))
-        mvc.perform(get("/api/v1/animals/stats/regional")).andExpect(status().isOk()).andExpect(content().json("[]"))
-        verify(statistics).today()
-        verify(statistics).status(null, null)
-        verify(statistics).regional(null, null)
+        statusList.andExpect(status().isOk()).andExpect(content().json("[]"))
+        regional.andExpect(status().isOk()).andExpect(content().json("[]"))
+        verify(exactly = 1) { statistics.today() }
+        verify(exactly = 1) { statistics.status(null, null) }
+        verify(exactly = 1) { statistics.regional(null, null) }
     }
 
     @Test
-    fun given__two_enabled_admin_gets__when__checking_missing_invalid_user_shelter_and_admin_tokens__then__keep_jwt_and_admin_role_before_mvc() {
+    fun `관리자 GET 2개가 켜졌을 때__토큰 없음 잘못됨 사용자 보호소 관리자를 확인하면__MVC 전에 JWT와 관리자 역할을 지킨다`() {
+        // given
         val from = LocalDate.of(2026, 10, 1)
         val to = LocalDate.of(2026, 10, 20)
+        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
+
+        every { statistics.dailyAnimals(from, to) } returns listOf()
+        every { statistics.intakeTrend(from, to) } returns AnimalStatistics.IntakeTrend(from, to, listOf(), 0)
+
+        // when
         for (path in listOf("/api/v1/admin/stats/daily-animals", "/api/v1/admin/stats/intake-trend")) {
             mvc.perform(get(path)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
             mvc.perform(get(path).header("Authorization", "Bearer invalid")).andExpect(status().isUnauthorized())
@@ -65,33 +79,33 @@ class AnimalStatisticsHttpTest {
                     .andExpect(jsonPath("$.message").value("관리자 권한이 필요합니다."))
             }
         }
-        verifyNoInteractions(statistics)
-        whenever(statistics.dailyAnimals(from, to)).thenReturn(listOf())
-        whenever(statistics.intakeTrend(from, to)).thenReturn(AnimalStatistics.IntakeTrend(from, to, listOf(), 0))
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-        mvc.perform(
+        confirmVerified(statistics)
+        val daily = mvc.perform(
             get("/api/v1/admin/stats/daily-animals")
                 .param("startDate", from.toString())
                 .param("endDate", to.toString())
                 .header("Authorization", admin),
         )
-            .andExpect(status().isOk())
-            .andExpect(content().json("[]"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        mvc.perform(
+        val trend = mvc.perform(
             get("/api/v1/admin/stats/intake-trend")
                 .param("startDate", from.toString())
                 .param("endDate", to.toString())
                 .header("Authorization", admin),
         )
-            .andExpect(status().isOk())
+
+        // then
+        daily.andExpect(status().isOk())
+            .andExpect(content().json("[]"))
+            .andExpect(header().doesNotExist("Set-Cookie"))
+        trend.andExpect(status().isOk())
             .andExpect(jsonPath("$.previousDayCount").value(0))
-        verify(statistics).dailyAnimals(from, to)
-        verify(statistics).intakeTrend(from, to)
+        verify(exactly = 1) { statistics.dailyAnimals(from, to) }
+        verify(exactly = 1) { statistics.intakeTrend(from, to) }
     }
 
     @Test
-    fun given__exact_statistics_gets_only__when__requesting_neighbors_aliases_or_mutations_as_admin__then__deny_and_preserve_existing_private_user_rejection() {
+    fun `정확한 통계 GET만 열렸을 때__관리자가 이웃 경로 별칭 변경을 요청하면__거부하고 기존 비공개 사용자 거부를 유지한다`() {
+        // given
         val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
         val paths = listOf(
             "/api/v1/animals/stats",
@@ -105,6 +119,8 @@ class AnimalStatisticsHttpTest {
             "/api/admin/stats/daily-animals",
             "/api/admin/stats/intake-trend",
         )
+
+        // when
         for (path in paths) {
             mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
         }
@@ -115,6 +131,8 @@ class AnimalStatisticsHttpTest {
         }
         mvc.perform(get("/api/v1/users/me")).andExpect(status().isUnauthorized())
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer invalid")).andExpect(status().isUnauthorized())
-        verifyNoInteractions(statistics)
+
+        // then
+        confirmVerified(statistics)
     }
 }
