@@ -1,38 +1,31 @@
 package com.pawbridge.backend.animal.internal.travel.infrastructure.collection
 
-import com.pawbridge.backend.animal.anyNonNull
-import com.pawbridge.backend.animal.eqNonNull
 import com.pawbridge.backend.animal.internal.travel.application.PetTravelException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyMap
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneOffset
 import javax.sql.DataSource
 
 class PetTravelBulkCollectorTest {
-    private val source: DataSource = mock(DataSource::class.java)
-    private val catalog: PostgresqlTravelCollectionCatalog = mock(PostgresqlTravelCollectionCatalog::class.java)
-    private val client: TourApiClient = mock(TourApiClient::class.java)
+    private val source: DataSource = mockk<DataSource>()
+    private val catalog: PostgresqlTravelCollectionCatalog = mockk<PostgresqlTravelCollectionCatalog>()
+    private val client: TourApiClient = mockk<TourApiClient>()
+    private val connection: Connection = mockk<Connection>()
+    private val statement: PreparedStatement = mockk<PreparedStatement>()
+    private val lockRow: ResultSet = mockk<ResultSet>()
     private val properties = TourApiProperties()
     private val now: Instant = Instant.parse("2026-09-13T00:00:00Z")
     private val collector = PetTravelCollector(source, catalog, client, properties, Clock.fixed(now, ZoneOffset.UTC))
@@ -44,197 +37,487 @@ class PetTravelBulkCollectorTest {
     fun setup() {
         properties.isEnabled = true
         properties.isBulkPetEnabled = true
-        val connection = mock(Connection::class.java)
-        val statement = mock(PreparedStatement::class.java)
-        val result = mock(ResultSet::class.java)
-        `when`(source.connection).thenReturn(connection)
-        `when`(connection.prepareStatement(anyString())).thenReturn(statement)
-        `when`(statement.executeQuery()).thenReturn(result)
-        `when`(result.next()).thenReturn(true)
-        `when`(result.getObject(1)).thenReturn(1)
-        `when`(catalog.reserveRequest(anyString(), anyNonNull<LocalDate>(), anyInt())).thenReturn(true)
-        `when`(catalog.petCollectionState()).thenReturn(start)
-        `when`(catalog.collectionState())
-            .thenReturn(PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null))
-        `when`(client.fetch(TourApiClient.Operation.REGIONS, ""))
-            .thenReturn(listOf(mapOf("code" to "11", "name" to "서울")))
-        `when`(client.fetchPage(TourApiClient.Operation.SYNC, "1", 1)).thenReturn(TourApiClient.Page(listOf(), 0))
-        `when`(catalog.pending(properties.maxDetailsPerRun)).thenReturn(listOf(target))
-        `when`(client.fetch(TourApiClient.Operation.COMMON, "123"))
-            .thenReturn(listOf(mapOf("contentid" to "123", "title" to "공원")))
-        `when`(catalog.publishCommon(eqNonNull(target), anyMap(), eqNonNull(now))).thenReturn(true)
     }
 
     @Test
-    fun given__disabled_collection__when__collect__then__no_database_or_http() {
+    fun `수집이 꺼져 있을 때__수집하면__데이터베이스와 HTTP를 쓰지 않고 거부한다`() {
+        // given
         properties.isEnabled = false
 
-        assertThatThrownBy { collector.collect() }.hasMessage("TRAVEL_COLLECTION_DISABLED")
+        // when
+        val failure = catchThrowable { collector.collect() }
 
-        verifyNoInteractions(source, catalog, client)
+        // then
+        assertThat(failure).hasMessage("TRAVEL_COLLECTION_DISABLED")
+        confirmVerified(source, catalog, client)
     }
 
     @Test
-    fun given__busy_postgresql_session_lock__when__collect__then__close_without_starting_a_run() {
-        val connection = source.connection
-        val statement = connection.prepareStatement("")
-        val result = statement.executeQuery()
-        `when`(result.getObject(1)).thenReturn(0)
+    fun `다른 세션이 PostgreSQL 잠금을 쥐고 있을 때__수집하면__실행을 시작하지 않고 연결을 닫는다`() {
+        // given
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 0
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
 
-        assertThatThrownBy { collector.collect() }.hasMessage("TRAVEL_COLLECTION_BUSY")
+        // when
+        val failure = catchThrowable { collector.collect() }
 
-        verify(statement).setInt(1, 2)
-        verify(statement).setQueryTimeout(5)
-        verify(connection).close()
-        verify(connection, never()).getMetaData()
-        verify(connection, never()).abort(any())
-        verifyNoInteractions(catalog, client)
+        // then
+        assertThat(failure).hasMessage("TRAVEL_COLLECTION_BUSY")
+        verify(exactly = 1) { statement.setInt(1, 2) }
+        verify(exactly = 1) { statement.queryTimeout = 5 }
+        verify(exactly = 1) { connection.close() }
+        verify(exactly = 0) { connection.metaData }
+        verify(exactly = 0) { connection.abort(any()) }
+        confirmVerified(catalog, client)
     }
 
     @Test
-    fun givenBulkFailure__whenCollect__thenCommonContinuesWithoutIndividualPetFallback() {
-        `when`(client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1)).thenThrow(PetTravelException.unavailable())
+    fun `대량 조회가 실패했을 때__수집하면__개별 반려동물 조회로 대체하지 않고 공통 수집을 이어간다`() {
+        // given
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
 
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns start
+        justRun { catalog.petCollectionFailed(any(), any()) }
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) } throws PetTravelException.unavailable()
+
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.pendingVisitDetails(any(), any()) } returns listOf()
+        every { catalog.hasPendingVisitDetails() } returns false
+
+        // when
         val result = collector.collect()
 
+        // then
         assertThat(result.status).isEqualTo("PARTIAL")
         assertThat(result.published).isEqualTo(1)
-        verify(catalog).petCollectionFailed("PET_BULK_FAILED", false)
-        verify(client, never()).fetch(eqNonNull(TourApiClient.Operation.PET), anyString())
+        verify(exactly = 1) { catalog.petCollectionFailed("PET_BULK_FAILED", false) }
+        verify(exactly = 0) { client.fetch(TourApiClient.Operation.PET, any()) }
     }
 
     @Test
-    fun givenBulkQuotaExhausted__whenCollect__thenOtherOperationBudgetsRemainUsable() {
-        `when`(catalog.reserveRequest(eqNonNull("PET_BULK"), anyNonNull<LocalDate>(), anyInt())).thenReturn(false)
+    fun `대량 조회의 요청 한도가 소진됐을 때__수집하면__다른 작업의 예산은 계속 쓸 수 있다`() {
+        // given
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
 
-        assertThat(collector.collect().published).isEqualTo(1)
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns start
+        every { catalog.reserveRequest("PET_BULK", any(), any()) } returns false
+        justRun { catalog.petCollectionFailed(any(), any()) }
 
-        verify(client, never()).fetchPage(eqNonNull(TourApiClient.Operation.PET_BULK), anyString(), anyInt())
-        verify(catalog).petCollectionFailed("PET_BULK_QUOTA", false)
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.pendingVisitDetails(any(), any()) } returns listOf()
+        every { catalog.hasPendingVisitDetails() } returns false
+
+        // when
+        val result = collector.collect()
+
+        // then
+        assertThat(result.published).isEqualTo(1)
+        verify(exactly = 0) { client.fetchPage(TourApiClient.Operation.PET_BULK, any(), any()) }
+        verify(exactly = 1) { catalog.petCollectionFailed("PET_BULK_QUOTA", false) }
     }
 
     @Test
-    fun givenRecentCompletedBulkCycle__whenCollect__thenSkipUntilNextDay() {
-        `when`(catalog.petCollectionState()).thenReturn(
-            PostgresqlTravelCollectionCatalog.PetCollectionState(1, null, "cycle", now.minusSeconds(3600)),
-        )
+    fun `최근에 대량 주기가 완료됐을 때__수집하면__다음 날까지 건너뛴다`() {
+        // given
+        val completed = PostgresqlTravelCollectionCatalog.PetCollectionState(1, null, "cycle", now.minusSeconds(3600))
 
-        assertThat(collector.collect().published).isEqualTo(1)
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
 
-        verify(catalog, never()).reserveRequest(eqNonNull("PET_BULK"), anyNonNull<LocalDate>(), anyInt())
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns completed
+
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.pendingVisitDetails(any(), any()) } returns listOf()
+        every { catalog.hasPendingVisitDetails() } returns false
+        every { catalog.hasUnresolvedRegions() } returns false
+
+        // when
+        val result = collector.collect()
+
+        // then
+        assertThat(result.published).isEqualTo(1)
+        verify(exactly = 0) { catalog.reserveRequest("PET_BULK", any(), any()) }
     }
 
     @Test
-    fun givenInterruptedBulkCycle__whenCollect__thenResumeSavedPageEvenWithRecentPreviousCompletion() {
+    fun `대량 주기가 중단됐을 때__수집하면__최근 완료 이력이 있어도 저장된 페이지부터 재개한다`() {
+        // given
         val state = PostgresqlTravelCollectionCatalog.PetCollectionState(2, 101, "cycle", now.minusSeconds(3600))
         val page = TourApiClient.Page(listOf(mapOf("contentid" to "123", "acmpyNeedMtr" to "목줄")), 101)
-        `when`(catalog.petCollectionState()).thenReturn(state)
-        `when`(client.fetchPage(TourApiClient.Operation.PET_BULK, "", 2)).thenReturn(page)
 
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
+
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns state
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 2) } returns page
+        justRun { catalog.savePetPage(any(), any(), any(), any()) }
+
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.pendingVisitDetails(any(), any()) } returns listOf()
+        every { catalog.hasPendingVisitDetails() } returns false
+        every { catalog.hasUnresolvedRegions() } returns false
+
+        // when
         collector.collect()
 
-        verify(catalog).savePetPage(state, page, now, now.plus(Duration.ofDays(14)))
-        verify(client, never()).fetchPage(TourApiClient.Operation.PET_BULK, "", 1)
+        // then
+        verify(exactly = 1) { catalog.savePetPage(state, page, now, now.plus(Duration.ofDays(14))) }
+        verify(exactly = 0) { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) }
     }
 
     @Test
-    fun givenInventoryShift__whenCollect__thenRestartBulkWithoutStoppingCommonDetails() {
+    fun `목록이 바뀌었을 때__수집하면__공통 상세 수집을 멈추지 않고 대량 수집을 다시 시작한다`() {
+        // given
         val page = TourApiClient.Page(listOf(), 0)
-        `when`(client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1)).thenReturn(page)
-        doThrow(IllegalStateException("PET_INVENTORY_CHANGED")).`when`(catalog).savePetPage(
-            eqNonNull(start),
-            eqNonNull(page),
-            anyNonNull<Instant>(),
-            anyNonNull<Instant>(),
-        )
 
-        assertThat(collector.collect().published).isEqualTo(1)
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
 
-        verify(catalog).petCollectionFailed("PET_INVENTORY_CHANGED", true)
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns start
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) } returns page
+        every { catalog.savePetPage(start, page, any(), any()) } throws IllegalStateException("PET_INVENTORY_CHANGED")
+        justRun { catalog.petCollectionFailed(any(), any()) }
+
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.pendingVisitDetails(any(), any()) } returns listOf()
+        every { catalog.hasPendingVisitDetails() } returns false
+
+        // when
+        val result = collector.collect()
+
+        // then
+        assertThat(result.published).isEqualTo(1)
+        verify(exactly = 1) { catalog.petCollectionFailed("PET_INVENTORY_CHANGED", true) }
     }
 
     @Test
-    fun givenLargeInventory__whenPageLimitReached__thenYieldToCommonCollection() {
+    fun `목록이 커서 페이지 한도에 도달했을 때__수집하면__공통 수집에 차례를 넘긴다`() {
+        // given
         properties.maxBulkPagesPerRun = 1
         val page = TourApiClient.Page(
             (1000 until 1100).map { id -> mapOf("contentid" to id.toString()) },
             9686,
         )
-        `when`(client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1)).thenReturn(page)
 
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
+
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns start
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) } returns page
+        justRun { catalog.savePetPage(any(), any(), any(), any()) }
+
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.pendingVisitDetails(any(), any()) } returns listOf()
+        every { catalog.hasPendingVisitDetails() } returns false
+
+        // when
         val result = collector.collect()
 
+        // then
         assertThat(result.status).isEqualTo("PARTIAL")
         assertThat(result.published).isEqualTo(1)
-        verify(catalog).savePetPage(
-            eqNonNull(start),
-            eqNonNull(page),
-            anyNonNull<Instant>(),
-            anyNonNull<Instant>(),
-        )
-        verify(client, times(1)).fetchPage(eqNonNull(TourApiClient.Operation.PET_BULK), anyString(), anyInt())
-        verify(catalog).finishRun(
-            anyString(),
-            eqNonNull("PARTIAL"),
-            eq("PET_BULK_PENDING"),
-            anyInt(),
-            anyInt(),
-            eq(1),
-            eqNonNull(now),
-        )
+        verify(exactly = 1) { catalog.savePetPage(start, page, any(), any()) }
+        verify(exactly = 1) { client.fetchPage(TourApiClient.Operation.PET_BULK, any(), any()) }
+        verify(exactly = 1) { catalog.finishRun(any(), "PARTIAL", "PET_BULK_PENDING", any(), any(), 1, now) }
     }
 
     @Test
-    fun givenLockLostDuringBulkHttp__whenResponseArrives__thenDoNotCommitOrContinue() {
-        val result = source.connection.prepareStatement("").executeQuery()
-        `when`(result.getObject(1)).thenReturn(1, 1, 0, 0)
-        `when`(client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1)).thenReturn(TourApiClient.Page(listOf(), 0))
+    fun `대량 HTTP 중에 잠금을 잃었을 때__응답이 도착하면__커밋도 계속도 하지 않는다`() {
+        // given
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returnsMany listOf(1, 1, 0, 0)
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
+        justRun { connection.abort(any()) }
 
-        assertThatThrownBy { collector.collect() }.hasMessage("TRAVEL_COLLECTION_FAILED").hasNoCause()
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns start
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) } returns TourApiClient.Page(listOf(), 0)
 
-        verify(catalog, never()).savePetPage(
-            anyNonNull<PostgresqlTravelCollectionCatalog.PetCollectionState>(),
-            anyNonNull<TourApiClient.Page>(),
-            anyNonNull<Instant>(),
-            anyNonNull<Instant>(),
-        )
-        verify(client, never()).fetch(eqNonNull(TourApiClient.Operation.REGIONS), anyString())
+        // when
+        val failure = catchThrowable { collector.collect() }
+
+        // then
+        assertThat(failure).hasMessage("TRAVEL_COLLECTION_FAILED").hasNoCause()
+        verify(exactly = 0) { catalog.savePetPage(any(), any(), any(), any()) }
+        verify(exactly = 0) { client.fetch(TourApiClient.Operation.REGIONS, any()) }
     }
 
     @Test
-    fun givenIntroFailure__whenCollectVisitResources__thenInformationAndImagesStillPublish() {
+    fun `소개 조회가 실패했을 때__방문 자원을 수집하면__정보와 이미지는 계속 게시한다`() {
+        // given
         val visit = PostgresqlTravelCollectionCatalog.VisitTarget("123", "12", "20260913000000", 1)
-        `when`(catalog.pendingVisitDetails(eqNonNull(PostgresqlTravelCollectionCatalog.VisitResource.INTRO), anyInt()))
-            .thenReturn(listOf(visit))
-        `when`(catalog.pendingVisitDetails(eqNonNull(PostgresqlTravelCollectionCatalog.VisitResource.INFO), anyInt()))
-            .thenReturn(listOf(visit))
-        `when`(catalog.pendingVisitDetails(eqNonNull(PostgresqlTravelCollectionCatalog.VisitResource.IMAGES), anyInt()))
-            .thenReturn(listOf(visit))
-        `when`(client.fetchDetail(TourApiClient.Operation.INTRO, "123", "12")).thenThrow(PetTravelException.unavailable())
         val info = listOf(mapOf("contentid" to "123", "contenttypeid" to "12", "infoname" to "안내", "infotext" to "설명"))
-        `when`(client.fetchDetail(TourApiClient.Operation.INFO, "123", "12")).thenReturn(info)
-        `when`(client.fetchDetail(TourApiClient.Operation.IMAGES, "123", "12")).thenReturn(listOf())
 
-        assertThat(collector.collect().status).isEqualTo("PARTIAL")
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
 
-        verify(catalog).visitDetailFailed(PostgresqlTravelCollectionCatalog.VisitResource.INTRO, visit, now)
-        verify(catalog).saveVisitInformation(visit, info, now)
-        verify(catalog).saveVisitImages(visit, listOf(), now)
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.petCollectionState() } returns start
+        justRun { catalog.savePetPage(any(), any(), any(), any()) }
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) } returns TourApiClient.Page(listOf(), 0)
+
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.hasPendingVisitDetails() } returns false
+        every { catalog.pendingVisitDetails(PostgresqlTravelCollectionCatalog.VisitResource.INTRO, any()) } returns listOf(visit)
+        every { catalog.pendingVisitDetails(PostgresqlTravelCollectionCatalog.VisitResource.INFO, any()) } returns listOf(visit)
+        every { catalog.pendingVisitDetails(PostgresqlTravelCollectionCatalog.VisitResource.IMAGES, any()) } returns listOf(visit)
+        every { client.fetchDetail(TourApiClient.Operation.INTRO, "123", "12") } throws PetTravelException.unavailable()
+        every { client.fetchDetail(TourApiClient.Operation.INFO, "123", "12") } returns info
+        every { client.fetchDetail(TourApiClient.Operation.IMAGES, "123", "12") } returns listOf()
+        justRun { catalog.visitDetailFailed(any(), any(), any()) }
+        every { catalog.saveVisitInformation(any(), any(), any()) } returns true
+        every { catalog.saveVisitImages(any(), any(), any()) } returns true
+
+        // when
+        val result = collector.collect()
+
+        // then
+        assertThat(result.status).isEqualTo("PARTIAL")
+        verify(exactly = 1) {
+            catalog.visitDetailFailed(PostgresqlTravelCollectionCatalog.VisitResource.INTRO, visit, now)
+        }
+        verify(exactly = 1) { catalog.saveVisitInformation(visit, info, now) }
+        verify(exactly = 1) { catalog.saveVisitImages(visit, listOf(), now) }
     }
 
     @Test
-    fun givenIntroQuotaExhausted__whenCollectVisitResources__thenOtherOperationBudgetsContinue() {
+    fun `소개 요청 한도가 소진됐을 때__방문 자원을 수집하면__다른 작업의 예산은 계속 쓴다`() {
+        // given
         val visit = PostgresqlTravelCollectionCatalog.VisitTarget("123", "12", "20260913000000", 1)
-        `when`(catalog.pendingVisitDetails(anyNonNull<PostgresqlTravelCollectionCatalog.VisitResource>(), anyInt()))
-            .thenReturn(listOf(visit))
-        `when`(catalog.reserveRequest(eqNonNull("INTRO"), anyNonNull<LocalDate>(), anyInt())).thenReturn(false)
-        `when`(client.fetchDetail(TourApiClient.Operation.INFO, "123", "12")).thenReturn(listOf())
-        `when`(client.fetchDetail(TourApiClient.Operation.IMAGES, "123", "12")).thenReturn(listOf())
 
-        assertThat(collector.collect().status).isEqualTo("PARTIAL")
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns lockRow
+        every { lockRow.next() } returns true
+        every { lockRow.getObject(1) } returns 1
+        justRun { lockRow.close() }
+        justRun { statement.close() }
+        justRun { connection.close() }
 
-        verify(client, never()).fetchDetail(TourApiClient.Operation.INTRO, "123", "12")
-        verify(client).fetchDetail(TourApiClient.Operation.INFO, "123", "12")
-        verify(client).fetchDetail(TourApiClient.Operation.IMAGES, "123", "12")
+        justRun { catalog.startRun(any(), any()) }
+        justRun { catalog.finishRun(any(), any(), any(), any(), any(), any(), any()) }
+        every { catalog.reserveRequest(any(), any(), any()) } returns true
+        every { catalog.reserveRequest("INTRO", any(), any()) } returns false
+        every { catalog.petCollectionState() } returns start
+        justRun { catalog.savePetPage(any(), any(), any(), any()) }
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) } returns TourApiClient.Page(listOf(), 0)
+
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } returns
+            listOf(mapOf("code" to "11", "name" to "서울"))
+        justRun { catalog.saveRegions(any(), any()) }
+        every { catalog.collectionState() } returns
+            PostgresqlTravelCollectionCatalog.CollectionState("SHOWN", 1, null, null)
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } returns TourApiClient.Page(listOf(), 0)
+        justRun { catalog.beginDetails(any()) }
+        justRun { catalog.completeCycle(any()) }
+
+        every { catalog.pending(properties.maxDetailsPerRun) } returns listOf(target)
+        every { catalog.pending(1) } returns listOf()
+        every { client.fetch(TourApiClient.Operation.COMMON, "123") } returns
+            listOf(mapOf("contentid" to "123", "title" to "공원"))
+        every { catalog.publishCommon(target, any(), now) } returns true
+        every { catalog.hasPendingVisitDetails() } returns false
+        every { catalog.pendingVisitDetails(any(), any()) } returns listOf(visit)
+        every { client.fetchDetail(TourApiClient.Operation.INFO, "123", "12") } returns listOf()
+        every { client.fetchDetail(TourApiClient.Operation.IMAGES, "123", "12") } returns listOf()
+        every { catalog.saveVisitInformation(any(), any(), any()) } returns true
+        every { catalog.saveVisitImages(any(), any(), any()) } returns true
+
+        // when
+        val result = collector.collect()
+
+        // then
+        assertThat(result.status).isEqualTo("PARTIAL")
+        verify(exactly = 0) { client.fetchDetail(TourApiClient.Operation.INTRO, "123", "12") }
+        verify(exactly = 1) { client.fetchDetail(TourApiClient.Operation.INFO, "123", "12") }
+        verify(exactly = 1) { client.fetchDetail(TourApiClient.Operation.IMAGES, "123", "12") }
     }
 }

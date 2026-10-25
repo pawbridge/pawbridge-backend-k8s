@@ -1,14 +1,18 @@
 package com.pawbridge.backend.animal.internal.travel.infrastructure.collection
 
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 
 class TourApiPropertiesTest {
     @Test
-    fun givenDefaults__whenConfigured__thenUseBoundedCollectionAndFourteenDayRefresh() {
+    fun `기본 설정일 때__구성하면__제한된 수집과 14일 갱신 주기를 쓴다`() {
+        // given
+
+        // when
         val properties = TourApiProperties()
 
+        // then
         assertThat(properties.maxPagesPerRun).isEqualTo(10)
         assertThat(properties.maxDetailsPerRun).isEqualTo(18)
         assertThat(properties.maxVisitDetailsPerRun).isEqualTo(18)
@@ -20,26 +24,44 @@ class TourApiPropertiesTest {
     }
 
     @Test
-    fun givenNonpositiveRefreshDays__whenConfigured__thenReject() {
-        for (days in intArrayOf(0, -1)) {
-            assertThatThrownBy { TourApiProperties().detailRefreshDays = days }
-                .isInstanceOf(IllegalArgumentException::class.java)
+    fun `갱신 일수가 양수가 아닐 때__구성하면__거부한다`() {
+        // given
+        val invalidDays = intArrayOf(0, -1)
+
+        for (days in invalidDays) {
+            // when
+            val failure = catchThrowable { TourApiProperties().detailRefreshDays = days }
+
+            // then
+            assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
         }
     }
 
     @Test
-    fun givenVisitDetailBatchOutsideBounds__whenConfigured__thenReject() {
-        for (limit in intArrayOf(0, 101)) {
-            assertThatThrownBy { TourApiProperties().maxVisitDetailsPerRun = limit }
-                .isInstanceOf(IllegalArgumentException::class.java)
+    fun `방문 상세 배치가 범위를 벗어날 때__구성하면__거부한다`() {
+        // given
+        val invalidLimits = intArrayOf(0, 101)
+
+        for (limit in invalidLimits) {
+            // when
+            val failure = catchThrowable { TourApiProperties().maxVisitDetailsPerRun = limit }
+
+            // then
+            assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
         }
     }
 
     @Test
-    fun givenBudgetAboveCeiling__whenConfigured__thenReject() {
-        for (limit in intArrayOf(0, 1001)) {
-            assertThatThrownBy { TourApiProperties().dailyRequestLimit = limit }
-                .isInstanceOf(IllegalArgumentException::class.java)
+    fun `예산이 상한을 벗어날 때__구성하면__거부한다`() {
+        // given
+        val invalidLimits = intArrayOf(0, 1001)
+
+        for (limit in invalidLimits) {
+            // when
+            val failure = catchThrowable { TourApiProperties().dailyRequestLimit = limit }
+
+            // then
+            assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
         }
     }
 }
