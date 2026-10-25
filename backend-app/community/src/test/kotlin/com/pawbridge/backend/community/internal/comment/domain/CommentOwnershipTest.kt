@@ -8,15 +8,30 @@ import org.junit.jupiter.api.function.Executable
 
 class CommentOwnershipTest {
     @Test
-    fun given__same_author__when__checking_ownership__then__allow() {
-        assertDoesNotThrow(Executable { CommentOwnership.requireAuthor(7L, 7L) })
+    fun `작성자가 같을 때__소유권을 확인하면__허용한다`() {
+        // given
+        val storedAuthorId = 7L
+        val requesterId = 7L
+
+        // when
+        val check = Executable { CommentOwnership.requireAuthor(storedAuthorId, requesterId) }
+
+        // then
+        assertDoesNotThrow(check)
     }
 
     @Test
-    fun given__different_author__when__checking_ownership__then__reject_with_comment_message() {
+    fun `작성자가 다를 때__소유권을 확인하면__댓글 권한 메시지로 거부한다`() {
+        // given
+        val storedAuthorId = 7L
+        val requesterId = 8L
+
+        // when
         val failure = assertThrows(CommentNotOwnedException::class.java) {
-            CommentOwnership.requireAuthor(7L, 8L)
+            CommentOwnership.requireAuthor(storedAuthorId, requesterId)
         }
+
+        // then
         assertEquals("댓글에 접근할 권한이 없습니다.", failure.message)
     }
 }

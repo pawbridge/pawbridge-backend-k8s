@@ -11,18 +11,16 @@ import com.pawbridge.backend.community.internal.report.application.AnimalReports
 import com.pawbridge.backend.community.internal.report.application.AnimalReports.Kind
 import com.pawbridge.backend.community.internal.report.web.AnimalReportExceptionHandler
 import com.pawbridge.backend.user.api.UserNicknameQuery
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.InvalidDataAccessApiUsageException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -109,39 +107,40 @@ class JdbcAnimalReportsTest {
         val write = Jdbc(events)
         val readManager = Manager(events, "read")
         val writeManager = Manager(events, "write")
-        val uploader: PostMediaUploader = mock(PostMediaUploader::class.java)
-        val remover: PostMediaRemover = mock(PostMediaRemover::class.java)
-        val users: UserNicknameQuery = mock(UserNicknameQuery::class.java)
-        val reports: JdbcAnimalReports
-
-        init {
-            whenever(users.findNickname(7L)).thenAnswer {
-                events.add("nickname")
-                Optional.of("작성자")
-            }
-            whenever(uploader.upload(any())).thenAnswer {
-                events.add("upload")
-                listOf("https://fixture.invalid/new.png")
-            }
-            reports = JdbcAnimalReports(
-                read,
-                write,
-                TransactionTemplate(readManager),
-                TransactionTemplate(writeManager),
-                users,
-                uploader,
-                remover,
-                ObjectMapper(),
-                Clock.fixed(TIME, ZoneOffset.UTC),
-            )
-        }
+        val uploader = mockk<PostMediaUploader>()
+        val remover = mockk<PostMediaRemover>()
+        val users = mockk<UserNicknameQuery>()
+        val reports = JdbcAnimalReports(
+            read,
+            write,
+            TransactionTemplate(readManager),
+            TransactionTemplate(writeManager),
+            users,
+            uploader,
+            remover,
+            ObjectMapper(),
+            Clock.fixed(TIME, ZoneOffset.UTC),
+        )
     }
 
     @Test
-    fun given__valid_report__when__creating__then__validate_upload_insert_commit_then_nickname_without_outbox() {
+    fun `올바른 신고일 때__작성하면__검증 업로드 INSERT 커밋 뒤에 닉네임을 읽고 outbox는 쓰지 않는다`() {
+        // given
         val f = Fixture()
+
+        every { f.uploader.upload(any()) } answers {
+            f.events.add("upload")
+            listOf("https://fixture.invalid/new.png")
+        }
+        every { f.users.findNickname(any()) } answers {
+            f.events.add("nickname")
+            Optional.of("작성자")
+        }
+
+        // when
         val result = f.reports.create(draft(Kind.MISSING, " 서울특별시 ", " 강남구 ", AnimalType.DOG), listOf(photo()), 7L)
 
+        // then
         assertThat(result.reportId).isEqualTo(43)
         assertThat(result.title).isEqualTo("실종 · 서울 · 개")
         assertThat(result.authorNickname).isEqualTo("작성자")
@@ -153,23 +152,32 @@ class JdbcAnimalReportsTest {
         assertThat(f.write.sql.first()).contains("INSERT INTO pawbridge_community.animal_reports", "RETURNING report_id")
         assertThat(f.write.sql.first().count { it == '?' }.toLong())
             .isEqualTo(f.write.arguments.first().size.toLong())
-        verifyNoInteractions(f.remover)
+        verify(exactly = 1) { f.users.findNickname(7L) }
+        confirmVerified(f.remover)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["create", "update"])
-    fun given__failing_nickname_read__when__writing__then__commit_report_first_and_fall_back_outside_the_writer_transaction(
+    fun `닉네임 조회가 실패할 때__작성하거나 수정하면__신고를 먼저 커밋하고 작성자 트랜잭션 밖에서 대체 닉네임을 쓴다`(
         operation: String,
     ) {
         // On the shared pool a failing read inside the writer transaction would mark it rollback-only.
+
+        // given
         val f = Fixture()
         val insideWriter = ArrayList<Boolean>()
-        doAnswer {
+
+        every { f.uploader.upload(any()) } answers {
+            f.events.add("upload")
+            listOf("https://fixture.invalid/new.png")
+        }
+        every { f.users.findNickname(any()) } answers {
             insideWriter.add(TransactionSynchronizationManager.isActualTransactionActive())
             f.events.add("nickname")
             throw IllegalStateException("private-user")
-        }.`when`(f.users).findNickname(7L)
+        }
 
+        // when
         val result = if (operation == "create") {
             f.reports.create(draft(Kind.MISSING, null, null, null), listOf(photo()), 7L)
         } else {
@@ -184,26 +192,38 @@ class JdbcAnimalReportsTest {
             )
         }
 
+        // then
         assertThat(result.authorNickname).isEqualTo("사용자7")
         assertThat(insideWriter).containsExactly(false)
         assertThat(f.events).endsWith("write-commit", "nickname").doesNotContain("write-rollback")
-        verifyNoInteractions(f.remover)
+        verify(exactly = 1) { f.users.findNickname(7L) }
+        confirmVerified(f.remover)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__insert_or_commit_failure__when__creating__then__compensate_only_body_failure(commit: Boolean) {
+    fun `INSERT나 커밋이 실패할 때__작성하면__본문 실패일 때만 업로드한 사진을 보상 삭제한다`(commit: Boolean) {
+        // given
         val f = Fixture()
         f.write.failInsert = !commit
         f.writeManager.failCommit = commit
 
-        assertThatThrownBy { f.reports.create(draft(Kind.MISSING, null, null, null), listOf(photo()), 7L) }
-            .isInstanceOf(RuntimeException::class.java)
+        every { f.uploader.upload(any()) } answers {
+            f.events.add("upload")
+            listOf("https://fixture.invalid/new.png")
+        }
+        justRun { f.remover.remove(any()) }
+
+        // when
+        val thrown = catchThrowable { f.reports.create(draft(Kind.MISSING, null, null, null), listOf(photo()), 7L) }
+
+        // then
+        assertThat(thrown).isInstanceOf(RuntimeException::class.java)
         if (commit) {
-            verifyNoInteractions(f.remover)
+            confirmVerified(f.remover)
             assertThat(f.events).endsWith("write-commit")
         } else {
-            verify(f.remover).remove(listOf("https://fixture.invalid/new.png"))
+            verify(exactly = 1) { f.remover.remove(listOf("https://fixture.invalid/new.png")) }
             assertThat(f.events).endsWith("write-rollback")
         }
     }
@@ -212,7 +232,8 @@ class JdbcAnimalReportsTest {
     @ValueSource(
         strings = ["null", "kind", "future", "region", "province", "district", "long", "empty-photo", "fake-photo", "six-photos"],
     )
-    fun given__invalid_input__when__creating__then__reject_before_upload_or_sql(defect: String) {
+    fun `잘못된 입력일 때__작성하면__업로드나 SQL 전에 거부한다`(defect: String) {
+        // given
         val f = Fixture()
         val valid = draft(Kind.MISSING, null, null, null)
         var request: Draft? = valid
@@ -244,55 +265,76 @@ class JdbcAnimalReportsTest {
         val input = request
         val uploads = files
 
-        assertThatThrownBy { f.reports.create(input, uploads, 7L) }
-            .isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
-                assertThat(e.statusCode.value()).isEqualTo(400)
-            }
+        // when
+        val thrown = catchThrowable { f.reports.create(input, uploads, 7L) }
+
+        // then
+        assertThat(thrown).isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
+            assertThat(e.statusCode.value()).isEqualTo(400)
+        }
         assertThat(f.write.sql).isEmpty()
-        verifyNoInteractions(f.uploader, f.remover, f.users)
+        confirmVerified(f.uploader, f.remover, f.users)
     }
 
     @Test
-    fun given__invalid_body_and_missing_author__when__creating__then__body_error_precedes_login_and_valid_body_requires_login() {
+    fun `본문이 잘못되고 작성자도 없을 때__작성하면__본문 오류가 로그인 확인보다 먼저고 올바른 본문은 로그인을 요구한다`() {
+        // given
         val f = Fixture()
 
-        assertThatThrownBy { f.reports.create(null, null, null) }
-            .isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
-                assertThat(e.statusCode.value()).isEqualTo(400)
-            }
-        assertThatThrownBy { f.reports.create(draft(Kind.MISSING, null, null, null), null, 0L) }
-            .isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
-                assertThat(e.statusCode.value()).isEqualTo(401)
-            }
-        verifyNoInteractions(f.uploader, f.users, f.remover)
+        // when
+        val invalidBody = catchThrowable { f.reports.create(null, null, null) }
+        val missingAuthor = catchThrowable { f.reports.create(draft(Kind.MISSING, null, null, null), null, 0L) }
+
+        // then
+        assertThat(invalidBody).isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
+            assertThat(e.statusCode.value()).isEqualTo(400)
+        }
+        assertThat(missingAuthor).isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
+            assertThat(e.statusCode.value()).isEqualTo(401)
+        }
+        confirmVerified(f.uploader, f.users, f.remover)
         assertThat(f.write.sql).isEmpty()
     }
 
     @Test
-    fun given__old_client_omitting_classification__when__updating__then__preserve_classification_images_and_audit_noop() {
+    fun `구버전 클라이언트가 분류를 생략할 때__수정하면__분류와 이미지를 보존하고 감사 시각은 그대로 둔다`() {
+        // given
         val f = Fixture()
 
+        every { f.users.findNickname(any()) } returns Optional.of("작성자")
+
+        // when
         val result = f.reports.update(42, draft(Kind.MISSING, null, null, null), null, 7L)
 
+        // then
         assertThat(result.province).isEqualTo("서울특별시")
         assertThat(result.district).isEqualTo("강남구")
         assertThat(result.animalType).isEqualTo(AnimalType.DOG)
         assertThat(result.imageUrls).isEqualTo(row().imageUrls)
         assertThat(result.updatedAt).isEqualTo(row().updatedAt)
         assertThat(f.write.sql).hasSize(1)
-        verifyNoInteractions(f.uploader, f.remover)
+        verify(exactly = 1) { f.users.findNickname(7L) }
+        confirmVerified(f.uploader, f.remover)
     }
 
     @Test
-    fun given__changed_fields__when__updating__then__bind_only_report_columns_keep_images_and_return_preflush_audit() {
+    fun `필드가 바뀌었을 때__수정하면__신고 컬럼만 바인딩하고 이미지는 유지하며 flush 전 감사 시각을 돌려준다`() {
+        // given
         val f = Fixture()
         val input = Draft(
             Kind.MISSING, row().occurredOn, null, "부산", null, "고양이", null, null, null, null, null,
             "새 내용", "부산광역시", null, AnimalType.CAT,
         )
 
+        every { f.users.findNickname(any()) } answers {
+            f.events.add("nickname")
+            Optional.of("작성자")
+        }
+
+        // when
         val result = f.reports.update(42, input, null, 7L)
 
+        // then
         assertThat(f.write.sql).hasSize(2)
         assertThat(f.write.sql.last()).contains("UPDATE pawbridge_community.animal_reports").doesNotContain("image_urls=")
         assertThat(result.region).isEqualTo("부산")
@@ -300,67 +342,80 @@ class JdbcAnimalReportsTest {
         assertThat(result.imageUrls).isEqualTo(row().imageUrls)
         assertThat(result.updatedAt).isEqualTo(row().updatedAt)
         assertThat(f.events).endsWith("write-commit", "nickname")
+        verify(exactly = 1) { f.users.findNickname(7L) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["photos", "missing", "foreign", "kind"])
-    fun given__update_rejection__when__updating__then__retain_original_failure_precedence_without_writes(defect: String) {
+    fun `수정이 거부될 때__수정하면__기존 실패 우선순위를 지키고 쓰기는 하지 않는다`(defect: String) {
+        // given
         val f = Fixture()
         if (defect == "missing") f.write.rows = listOf()
         val kind = if (defect == "kind") Kind.SIGHTING else Kind.MISSING
         val author = if (defect == "foreign") 8L else 7L
 
-        assertThatThrownBy {
+        // when
+        val thrown = catchThrowable {
             f.reports.update(
                 42,
                 draft(kind, null, null, null),
                 if (defect == "photos") listOf(photo()) else null,
                 author,
             )
-        }.isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
+        }
+
+        // then
+        assertThat(thrown).isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
             assertThat(e.statusCode.value())
                 .isEqualTo(if (defect == "missing") 404 else if (defect == "foreign") 403 else 400)
         }
         assertThat(f.write.sql).noneMatch { sql -> sql.startsWith("UPDATE") }
-        verifyNoInteractions(f.uploader, f.remover, f.users)
+        confirmVerified(f.uploader, f.remover, f.users)
     }
 
     @Test
-    fun given__visible_owner__when__deleting__then__soft_delete_only_and_repeated_or_foreign_reject() {
+    fun `보이는 소유 신고일 때__삭제하면__소프트 삭제만 하고 반복하거나 남의 신고는 거부한다`() {
+        // given
         val f = Fixture()
 
+        // when
         f.reports.delete(42, 7L)
-        assertThat(f.write.sql).hasSize(2)
-        assertThat(f.write.sql.last()).contains("SET deleted_at=?,updated_at=?").doesNotContain("DELETE FROM")
-        verifyNoInteractions(f.remover, f.uploader, f.users)
-
+        val deleteSql = ArrayList(f.write.sql)
         f.write.rows = listOf()
-        assertThatThrownBy { f.reports.delete(42, 7L) }
-            .isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
-                assertThat(e.statusCode.value()).isEqualTo(404)
-            }
+        val repeated = catchThrowable { f.reports.delete(42, 7L) }
         f.write.rows = listOf(row())
-        assertThatThrownBy { f.reports.delete(42, 8L) }
-            .isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
-                assertThat(e.statusCode.value()).isEqualTo(403)
-            }
+        val foreign = catchThrowable { f.reports.delete(42, 8L) }
+
+        // then
+        assertThat(deleteSql).hasSize(2)
+        assertThat(deleteSql.last()).contains("SET deleted_at=?,updated_at=?").doesNotContain("DELETE FROM")
+        assertThat(repeated).isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
+            assertThat(e.statusCode.value()).isEqualTo(404)
+        }
+        assertThat(foreign).isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
+            assertThat(e.statusCode.value()).isEqualTo(403)
+        }
+        confirmVerified(f.remover, f.uploader, f.users)
     }
 
     @Test
-    fun given__filtered_partial_page_and_unavailable_nickname__when__listing__then__literal_search_stable_order_and_independent_fallback() {
+    fun `필터와 부분 페이지가 있고 닉네임을 조회할 수 없을 때__목록을 조회하면__문자 그대로 검색하고 안정 정렬하며 대체 닉네임을 독립 적용한다`() {
+        // given
         val f = Fixture()
-        doAnswer {
-            f.events.add("nickname")
-            throw IllegalStateException("private-user")
-        }.`when`(f.users).findNickname(7L)
-
-        val result = f.reports.list(
-            Filter(
-                1, 12, Kind.MISSING, "  DOG%_  ", "서울특별시", "강남구", AnimalType.DOG,
-                LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 20),
-            ),
+        val filter = Filter(
+            1, 12, Kind.MISSING, "  DOG%_  ", "서울특별시", "강남구", AnimalType.DOG,
+            LocalDate.of(2026, 10, 19), LocalDate.of(2026, 10, 20),
         )
 
+        every { f.users.findNickname(any()) } answers {
+            f.events.add("nickname")
+            throw IllegalStateException("private-user")
+        }
+
+        // when
+        val result = f.reports.list(filter)
+
+        // then
         assertThat(result.total).isEqualTo(13)
         assertThat(result.content.first().authorNickname).isEqualTo("사용자7")
         assertThat(f.read.sql).hasSize(1)
@@ -375,44 +430,57 @@ class JdbcAnimalReportsTest {
             .doesNotContain("DOG%")
         assertThat(f.read.arguments.first()).contains("dog%_", 12, 12L)
         assertThat(f.events).containsExactly("read-begin", "select", "read-commit", "nickname")
+        verify(exactly = 1) { f.users.findNickname(7L) }
     }
 
     @Test
-    fun given__empty_later_page__when__listing__then__count_with_identical_filters_and_missing_detail_is_404() {
+    fun `뒤쪽 페이지가 비어 있을 때__목록을 조회하면__같은 필터로 개수를 세고 없는 상세는 404이다`() {
+        // given
         val f = Fixture()
         f.read.rows = listOf()
 
-        assertThat(f.reports.list(Filter(3, 12, null, null, null, null, null, null, null)).total).isEqualTo(25)
-        assertThat(f.read.sql).hasSize(2)
-        assertThat(f.read.sql.last()).startsWith("SELECT count(*)").contains("deleted_at IS NULL")
-        assertThatThrownBy { f.reports.get(42) }
-            .isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
-                assertThat(e.statusCode.value()).isEqualTo(404)
-            }
+        // when
+        val total = f.reports.list(Filter(3, 12, null, null, null, null, null, null, null)).total
+        val listSql = ArrayList(f.read.sql)
+        val missing = catchThrowable { f.reports.get(42) }
+
+        // then
+        assertThat(total).isEqualTo(25)
+        assertThat(listSql).hasSize(2)
+        assertThat(listSql.last()).startsWith("SELECT count(*)").contains("deleted_at IS NULL")
+        assertThat(missing).isInstanceOfSatisfying(ResponseStatusException::class.java) { e ->
+            assertThat(e.statusCode.value()).isEqualTo(404)
+        }
     }
 
     @Test
-    fun given__jpa_offset_boundary__when__listing__then__allow_int_max_but_reject_overflow_inside_transaction_before_sql_with_500() {
+    fun `JPA 오프셋 경계일 때__목록을 조회하면__int 최댓값은 허용하고 넘치면 트랜잭션 안에서 SQL 전에 500으로 거부한다`() {
+        // given
         val exact = Fixture()
-        exact.reports.list(Filter(Integer.MAX_VALUE, 1, null, null, null, null, null, null, null))
-        assertThat(exact.read.arguments.first()).containsExactly(1, Integer.MAX_VALUE.toLong())
         val overflow = Fixture()
+
+        // when
+        exact.reports.list(Filter(Integer.MAX_VALUE, 1, null, null, null, null, null, null, null))
         val failure = catchThrowable {
             overflow.reports.list(Filter(1_073_741_824, 2, null, null, null, null, null, null, null))
         }
+        val response = AnimalReportExceptionHandler().failure(failure as RuntimeException)
+
+        // then
+        assertThat(exact.read.arguments.first()).containsExactly(1, Integer.MAX_VALUE.toLong())
         assertThat(failure).isInstanceOf(InvalidDataAccessApiUsageException::class.java)
             .hasMessage("Page offset exceeds Integer.MAX_VALUE (2147483647)")
         assertThat(overflow.read.sql).isEmpty()
         assertThat(overflow.events).containsExactly("read-begin", "read-rollback")
-        verifyNoInteractions(overflow.users, overflow.uploader, overflow.remover)
-        val response = AnimalReportExceptionHandler().failure(failure as RuntimeException)
+        confirmVerified(overflow.users, overflow.uploader, overflow.remover)
         assertThat(response.statusCode.value()).isEqualTo(500)
         assertThat(response.body!!.message).isEqualTo("서버 에러!")
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["page", "size", "keyword", "province", "dates", "future"])
-    fun given__invalid_search__when__listing__then__no_read_or_user_call(defect: String) {
+    fun `잘못된 검색 조건일 때__목록을 조회하면__읽기나 사용자 호출을 하지 않는다`(defect: String) {
+        // given
         val f = Fixture()
         val filter = Filter(
             if (defect == "page") -1 else 0,
@@ -432,9 +500,13 @@ class JdbcAnimalReportsTest {
             },
         )
 
-        assertThatThrownBy { f.reports.list(filter) }.isInstanceOf(ResponseStatusException::class.java)
+        // when
+        val thrown = catchThrowable { f.reports.list(filter) }
+
+        // then
+        assertThat(thrown).isInstanceOf(ResponseStatusException::class.java)
         assertThat(f.read.sql).isEmpty()
-        verifyNoInteractions(f.users)
+        confirmVerified(f.users)
     }
 
     private companion object {
