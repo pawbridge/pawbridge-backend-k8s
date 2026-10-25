@@ -2,6 +2,12 @@ package com.pawbridge.backend.community.internal.post.infrastructure.media
 
 import com.pawbridge.backend.community.internal.post.application.PostUpload
 import com.pawbridge.backend.community.internal.report.infrastructure.S3AnimalReportMediaUploader
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -12,40 +18,39 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
+import software.amazon.awssdk.services.s3.model.DeleteObjectResponse
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.PutObjectResponse
 import java.io.ByteArrayInputStream
 import java.util.stream.Stream
 
 class S3PostMediaRemoverTest {
-    private val s3 = mock(S3Client::class.java)
+    private val s3 = mockk<S3Client>()
     private val base = "https://fixture.invalid"
     private val remover = S3PostMediaRemover(s3, "synthetic-bucket", "$base///", "owner")
 
     @Test
-    fun given__null_or_empty_list__when__remove__then__sdk_is_not_called() {
-        remover.remove(null)
+    fun `목록이 null이거나 비었을 때__삭제하면__SDK를 호출하지 않는다`() {
+        // given
+        val nothing: List<String?>? = null
+
+        // when
+        remover.remove(nothing)
         remover.remove(listOf())
-        verifyNoInteractions(s3)
+
+        // then
+        confirmVerified(s3)
     }
 
     @Test
-    fun given__duplicate_null_and_ordered_urls__when__remove__then__valid_calls_preserve_order_and_duplicates() {
-        val requests = ArrayList<DeleteObjectRequest>()
-        whenever(s3.deleteObject(any(DeleteObjectRequest::class.java))).thenAnswer { call ->
-            requests.add(call.getArgument(0))
-            null
-        }
+    fun `중복되고 null이 섞인 순서 있는 URL일 때__삭제하면__유효한 호출만 순서와 중복을 보존해 보낸다`() {
+        // given
+        every { s3.deleteObject(any<DeleteObjectRequest>()) } returns DeleteObjectResponse.builder().build()
 
+        // when
         remover.remove(
             listOf(
                 "$base/owner/posts/images/first.png",
@@ -55,11 +60,15 @@ class S3PostMediaRemoverTest {
             ),
         )
 
+        // then
+        val requests = mutableListOf<DeleteObjectRequest>()
+        verify(exactly = 3) { s3.deleteObject(capture(requests)) }
         assertEquals(
             listOf("owner/posts/images/first.png", "owner/posts/images/first.png", "owner/posts/videos/last.mp4"),
             requests.map { it.key() },
         )
         assertTrue(requests.all { request -> "synthetic-bucket" == request.bucket() })
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
@@ -81,83 +90,108 @@ class S3PostMediaRemoverTest {
             "",
         ],
     )
-    fun given__invalid_url_before_valid_url__when__remove__then__reject_only_that_url_and_continue(invalid: String) {
+    fun `유효한 URL 앞에 잘못된 URL이 있을 때__삭제하면__그 URL만 거부하고 계속한다`(invalid: String) {
+        // given
+        every { s3.deleteObject(any<DeleteObjectRequest>()) } returns DeleteObjectResponse.builder().build()
+
+        // when
         remover.remove(listOf(invalid, "$base/owner/posts/images/next.png"))
 
-        verify(s3).deleteObject(
-            DeleteObjectRequest.builder().bucket("synthetic-bucket").key("owner/posts/images/next.png").build(),
-        )
-        verifyNoMoreInteractions(s3)
+        // then
+        verify(exactly = 1) {
+            s3.deleteObject(
+                DeleteObjectRequest.builder().bucket("synthetic-bucket").key("owner/posts/images/next.png").build(),
+            )
+        }
+        confirmVerified(s3)
     }
 
     @Test
-    fun given__sdk_failure_on_first_url__when__remove__then__next_url_is_attempted_without_application_retry() {
-        whenever(s3.deleteObject(any(DeleteObjectRequest::class.java)))
-            .thenThrow(IllegalStateException("secret signed URL must not escape"))
-            .thenReturn(null)
+    fun `첫 URL에서 SDK가 실패할 때__삭제하면__재시도 없이 다음 URL을 시도한다`() {
+        // given
+        every { s3.deleteObject(any<DeleteObjectRequest>()) } throws
+            IllegalStateException("secret signed URL must not escape") andThen
+            DeleteObjectResponse.builder().build()
 
-        assertDoesNotThrow(Executable { remover.remove(listOf("$base/owner/first", "$base/owner/second")) })
+        // when
+        val removal = Executable { remover.remove(listOf("$base/owner/first", "$base/owner/second")) }
 
-        val order = inOrder(s3)
-        order.verify(s3).deleteObject(
-            DeleteObjectRequest.builder().bucket("synthetic-bucket").key("owner/first").build(),
-        )
-        order.verify(s3).deleteObject(
-            DeleteObjectRequest.builder().bucket("synthetic-bucket").key("owner/second").build(),
-        )
-        order.verifyNoMoreInteractions()
+        // then
+        assertDoesNotThrow(removal)
+        verifySequence {
+            s3.deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key("owner/first").build())
+            s3.deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key("owner/second").build())
+        }
     }
 
     @Test
-    fun given__empty_configured_prefix__when__remove__then__owned_base_is_allowed_but_traversal_and_encoding_are_not() {
+    fun `설정된 접두사가 비었을 때__삭제하면__소유한 기준 URL은 허용하고 경로 탈출과 인코딩은 막는다`() {
+        // given
         val root = S3PostMediaRemover(s3, "synthetic-bucket", base, "")
 
+        every { s3.deleteObject(any<DeleteObjectRequest>()) } returns DeleteObjectResponse.builder().build()
+
+        // when
         root.remove(
             listOf("$base/posts/images/a.png", "$base/../outside", "$base/a%2fb", "$base/a?token=x"),
         )
 
-        verify(s3).deleteObject(
-            DeleteObjectRequest.builder().bucket("synthetic-bucket").key("posts/images/a.png").build(),
-        )
-        verifyNoMoreInteractions(s3)
+        // then
+        verify(exactly = 1) {
+            s3.deleteObject(
+                DeleteObjectRequest.builder().bucket("synthetic-bucket").key("posts/images/a.png").build(),
+            )
+        }
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
     @ValueSource(
         strings = ["/owner/", "../", "owner/../", "owner//", " owner/", "owner/ ", "owner\\", "owner?x=1", "owner%2f"],
     )
-    fun given__invalid_configured_prefix__when__construct__then__reject_without_sdk_calls(prefix: String) {
-        assertThrows(IllegalArgumentException::class.java) {
-            S3PostMediaRemover(s3, "synthetic-bucket", base, prefix)
+    fun `잘못된 접두사가 설정됐을 때__생성하면__SDK 호출 없이 거부한다`(prefix: String) {
+        // given
+        val invalidPrefix = prefix
+
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) {
+            S3PostMediaRemover(s3, "synthetic-bucket", base, invalidPrefix)
         }
-        verifyNoInteractions(s3)
+
+        // then
+        assertEquals(IllegalArgumentException::class.java, thrown.javaClass)
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
     @MethodSource("opaqueUploadSuffixes")
-    fun given__uploader_generated_opaque_key__when__removing_saved_url__then__delete_exact_put_key_without_reinterpretation(
+    fun `업로더가 만든 불투명 키일 때__저장된 URL을 삭제하면__다시 해석하지 않고 올린 키 그대로 삭제한다`(
         suffix: String,
         mime: String,
     ) {
-        val uploaded = ArrayList<PutObjectRequest>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { call ->
-            uploaded.add(call.getArgument(0))
-            null
-        }
+        // given
         val uploader = S3PostMediaUploader(s3, "synthetic-bucket", base, "owner")
         val file = PostUpload("pet$suffix", mime, 1, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1)) })
-        val savedUrls = uploader.upload(listOf(file))
 
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } returns PutObjectResponse.builder().build()
+        every { s3.deleteObject(any<DeleteObjectRequest>()) } returns DeleteObjectResponse.builder().build()
+
+        // when
+        val savedUrls = uploader.upload(listOf(file))
         remover.remove(savedUrls)
 
-        val put = uploaded.first()
+        // then
+        val uploaded = slot<PutObjectRequest>()
+        verify(exactly = 1) { s3.putObject(capture(uploaded), any<RequestBody>()) }
+        val put = uploaded.captured
         val folder = "owner/posts/" + (if (mime.startsWith("video/")) "videos/" else "images/")
         assertTrue(put.key().startsWith(folder))
         assertEquals(suffix, put.key().substring(folder.length + 36))
         assertEquals(listOf(base + "/" + put.key()), savedUrls)
-        verify(s3).putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))
-        verify(s3).deleteObject(DeleteObjectRequest.builder().bucket(put.bucket()).key(put.key()).build())
-        verifyNoMoreInteractions(s3)
+        verify(exactly = 1) {
+            s3.deleteObject(DeleteObjectRequest.builder().bucket(put.bucket()).key(put.key()).build())
+        }
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
@@ -176,53 +210,69 @@ class S3PostMediaRemoverTest {
             "https://fixture.invalid/owner/posts/images/\n12345678-1234-4234-8234-123456789abc.png",
         ],
     )
-    fun given__opaque_characters_outside_exact_uploader_grammar__when__remove__then__retain_scope_and_traversal_guards(
+    fun `업로더 문법 밖의 문자가 있는 불투명 URL일 때__삭제하면__범위와 경로 탈출 방어를 유지한다`(
         url: String,
     ) {
-        remover.remove(listOf(url))
-        verifyNoInteractions(s3)
+        // given
+        val unsafe = listOf(url)
+
+        // when
+        remover.remove(unsafe)
+
+        // then
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["image/png", "video/mp4"])
-    fun given__empty_prefix_post_upload__when__removing_saved_url__then__delete_the_exact_root_key(mime: String) {
-        val uploaded = ArrayList<PutObjectRequest>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { call ->
-            uploaded.add(call.getArgument(0))
-            null
-        }
+    fun `접두사가 빈 게시글 업로드일 때__저장된 URL을 삭제하면__루트 키 그대로 삭제한다`(mime: String) {
+        // given
         val rootUploader = S3PostMediaUploader(s3, "synthetic-bucket", base, "")
         val rootRemover = S3PostMediaRemover(s3, "synthetic-bucket", base, "")
         val file = PostUpload("pet.png", mime, 1, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1)) })
-        val savedUrls = rootUploader.upload(listOf(file))
 
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } returns PutObjectResponse.builder().build()
+        every { s3.deleteObject(any<DeleteObjectRequest>()) } returns DeleteObjectResponse.builder().build()
+
+        // when
+        val savedUrls = rootUploader.upload(listOf(file))
         rootRemover.remove(savedUrls)
 
-        val key = uploaded.first().key()
+        // then
+        val uploaded = slot<PutObjectRequest>()
+        verify(exactly = 1) { s3.putObject(capture(uploaded), any<RequestBody>()) }
+        val key = uploaded.captured.key()
         val folder = if (mime.startsWith("video/")) "posts/videos/" else "posts/images/"
         assertTrue(key.startsWith(folder))
         assertEquals(listOf(base + "/" + key), savedUrls)
-        verify(s3).deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key(key).build())
+        verify(exactly = 1) {
+            s3.deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key(key).build())
+        }
     }
 
     @Test
-    fun given__empty_prefix_report_upload__when__removing_saved_url__then__delete_the_exact_root_key() {
-        val uploaded = ArrayList<PutObjectRequest>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { call ->
-            uploaded.add(call.getArgument(0))
-            null
-        }
+    fun `접두사가 빈 제보 업로드일 때__저장된 URL을 삭제하면__루트 키 그대로 삭제한다`() {
+        // given
         val rootRemover = S3PostMediaRemover(s3, "synthetic-bucket", base, "")
         val reportUploader = S3AnimalReportMediaUploader(s3, "synthetic-bucket", base, "", rootRemover)
         val file = PostUpload("lost.png", "image/png", 1, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1)) })
-        val savedUrls = reportUploader.upload(listOf(file))
 
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } returns PutObjectResponse.builder().build()
+        every { s3.deleteObject(any<DeleteObjectRequest>()) } returns DeleteObjectResponse.builder().build()
+
+        // when
+        val savedUrls = reportUploader.upload(listOf(file))
         rootRemover.remove(savedUrls)
 
-        val key = uploaded.first().key()
+        // then
+        val uploaded = slot<PutObjectRequest>()
+        verify(exactly = 1) { s3.putObject(capture(uploaded), any<RequestBody>()) }
+        val key = uploaded.captured.key()
         assertTrue(key.startsWith("reports/images/"))
         assertEquals(listOf(base + "/" + key), savedUrls)
-        verify(s3).deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key(key).build())
+        verify(exactly = 1) {
+            s3.deleteObject(DeleteObjectRequest.builder().bucket("synthetic-bucket").key(key).build())
+        }
     }
 
     @ParameterizedTest
@@ -243,14 +293,17 @@ class S3PostMediaRemoverTest {
             "",
         ],
     )
-    fun given__empty_prefix__when__removing_url_outside_public_base_or_with_unsafe_key__then__do_not_call_the_sdk(
+    fun `접두사가 빈 상태에서 공개 기준 밖이거나 안전하지 않은 키의 URL일 때__삭제하면__SDK를 호출하지 않는다`(
         url: String,
     ) {
+        // given
         val rootRemover = S3PostMediaRemover(s3, "synthetic-bucket", base, "")
 
+        // when
         rootRemover.remove(listOf(url))
 
-        verifyNoInteractions(s3)
+        // then
+        confirmVerified(s3)
     }
 
     companion object {

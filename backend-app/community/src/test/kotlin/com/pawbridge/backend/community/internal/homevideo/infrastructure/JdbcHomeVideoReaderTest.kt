@@ -1,6 +1,8 @@
 package com.pawbridge.backend.community.internal.homevideo.infrastructure
 
 import com.pawbridge.backend.community.internal.homevideo.application.HomeVideo
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -10,8 +12,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.NullAndEmptySource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -32,30 +32,35 @@ class JdbcHomeVideoReaderTest {
 
     @ParameterizedTest
     @NullAndEmptySource
-    fun given__nullable_or_empty_metadata__when__reading__then__map_all_eleven_fields_and_bind_instant_without_local_time_conversion(
+    fun `메타데이터가 null이거나 비었을 때__읽으면__열한 필드를 모두 매핑하고 시각을 지역 시간 변환 없이 바인딩한다`(
         metadata: String?,
     ) {
+        // given
         val fixture = Fixture()
         val duration: Long? = if (metadata == null) null else 3_000_000_001L
-        val row = mock(ResultSet::class.java)
-        whenever(row.getObject("id", UUID::class.java)).thenReturn(ID)
-        whenever(row.getString("video_id")).thenReturn("abcdefghijk")
-        whenever(row.getBoolean("published")).thenReturn(true)
-        whenever(row.getInt("position")).thenReturn(2)
-        whenever(row.getTimestamp("created_at")).thenReturn(Timestamp.from(CREATED))
-        whenever(row.getString("title")).thenReturn(metadata)
-        whenever(row.getString("channel_title")).thenReturn(metadata)
-        whenever(row.getString("thumbnail_url")).thenReturn(metadata)
-        whenever(row.getObject("duration_seconds")).thenReturn(duration)
-        whenever(row.getBoolean("available")).thenReturn(true)
-        whenever(row.getTimestamp("checked_at")).thenReturn(Timestamp.from(CHECKED))
+        val row = mockk<ResultSet>()
+
+        every { row.getObject("id", UUID::class.java) } returns ID
+        every { row.getString("video_id") } returns "abcdefghijk"
+        every { row.getBoolean("published") } returns true
+        every { row.getInt("position") } returns 2
+        every { row.getTimestamp("created_at") } returns Timestamp.from(CREATED)
+        every { row.getString("title") } returns metadata
+        every { row.getString("channel_title") } returns metadata
+        every { row.getString("thumbnail_url") } returns metadata
+        every { row.getObject("duration_seconds") } returns duration
+        every { row.getBoolean("available") } returns true
+        every { row.getTimestamp("checked_at") } returns Timestamp.from(CHECKED)
         fixture.jdbc.rows = listOf(row)
 
+        // when
+        val result = fixture.reader.read(CUTOFF)
+
+        // then
         assertEquals(
             listOf(HomeVideo(ID, "abcdefghijk", true, 2, CREATED, metadata, metadata, metadata, duration, true, CHECKED)),
-            fixture.reader.read(CUTOFF),
+            result,
         )
-
         assertArrayEquals(arrayOf<Any?>(Timestamp.from(CUTOFF)), fixture.jdbc.arguments)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
@@ -64,11 +69,15 @@ class JdbcHomeVideoReaderTest {
     }
 
     @Test
-    fun given__no_visible_rows__when__reading__then__return_empty_list_after_read_only_completion() {
+    fun `보이는 행이 없을 때__읽으면__읽기 전용 완료 뒤에 빈 목록을 돌려준다`() {
+        // given
         val fixture = Fixture()
 
-        assertEquals(listOf<HomeVideo>(), fixture.reader.read(CUTOFF))
+        // when
+        val result = fixture.reader.read(CUTOFF)
 
+        // then
+        assertEquals(listOf<HomeVideo>(), result)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertEquals(0, fixture.transactions.rollbacks)
@@ -76,64 +85,88 @@ class JdbcHomeVideoReaderTest {
     }
 
     @Test
-    fun given__query_failure_then_recovery__when__reading__then__propagate_failure_without_empty_fallback_and_release_transaction() {
+    fun `질의가 실패했다가 복구될 때__읽으면__빈 목록으로 대체하지 않고 전파하며 트랜잭션을 놓는다`() {
+        // given
         val fixture = Fixture()
         val failure = DataAccessResourceFailureException("synthetic-private-sql")
         fixture.jdbc.failure = failure
 
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { fixture.reader.read(CUTOFF) },
-        )
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { fixture.reader.read(CUTOFF) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, fixture.transactions.rollbacks)
         assertEquals(0, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
+
+        // given
         fixture.jdbc.failure = null
 
-        assertEquals(listOf<HomeVideo>(), fixture.reader.read(CUTOFF))
+        // when
+        val recovered = fixture.reader.read(CUTOFF)
+
+        // then
+        assertEquals(listOf<HomeVideo>(), recovered)
         assertEquals(2, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @Test
-    fun given__transaction_start_failure_then_recovery__when__reading__then__no_query_runs_before_successful_begin() {
+    fun `트랜잭션 시작이 실패했다가 복구될 때__읽으면__시작에 성공하기 전에는 질의하지 않는다`() {
+        // given
         val fixture = Fixture()
         val failure = CannotCreateTransactionException("synthetic-private-begin")
         fixture.transactions.startFailure = failure
 
-        assertSame(
-            failure,
-            assertThrows(CannotCreateTransactionException::class.java) { fixture.reader.read(CUTOFF) },
-        )
+        // when
+        val thrown = assertThrows(CannotCreateTransactionException::class.java) { fixture.reader.read(CUTOFF) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(0, fixture.jdbc.queries)
         assertEquals(0, fixture.transactions.commits)
         assertEquals(0, fixture.transactions.rollbacks)
         assertFalse(fixture.transactions.active)
+
+        // given
         fixture.transactions.startFailure = null
 
-        assertEquals(listOf<HomeVideo>(), fixture.reader.read(CUTOFF))
+        // when
+        val recovered = fixture.reader.read(CUTOFF)
+
+        // then
+        assertEquals(listOf<HomeVideo>(), recovered)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @Test
-    fun given__transaction_completion_failure_then_recovery__when__reading__then__no_list_is_returned_before_successful_completion() {
+    fun `트랜잭션 완료가 실패했다가 복구될 때__읽으면__완료에 성공하기 전에는 목록을 돌려주지 않는다`() {
+        // given
         val fixture = Fixture()
         val failure = TransactionSystemException("synthetic-private-completion")
         fixture.transactions.completionFailure = failure
 
-        assertSame(
-            failure,
-            assertThrows(TransactionSystemException::class.java) { fixture.reader.read(CUTOFF) },
-        )
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { fixture.reader.read(CUTOFF) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
+
+        // given
         fixture.transactions.completionFailure = null
 
-        assertEquals(listOf<HomeVideo>(), fixture.reader.read(CUTOFF))
+        // when
+        val recovered = fixture.reader.read(CUTOFF)
+
+        // then
+        assertEquals(listOf<HomeVideo>(), recovered)
         assertEquals(2, fixture.jdbc.queries)
         assertEquals(2, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)

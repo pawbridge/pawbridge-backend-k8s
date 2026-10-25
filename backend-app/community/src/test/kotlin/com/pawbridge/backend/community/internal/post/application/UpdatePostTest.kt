@@ -3,144 +3,199 @@ package com.pawbridge.backend.community.internal.post.application
 import com.pawbridge.backend.community.internal.post.domain.PostNotOwnedException
 import com.pawbridge.backend.user.api.UserNicknameQuery
 import com.pawbridge.backend.user.api.UserNicknameUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import java.io.ByteArrayInputStream
 import java.time.LocalDateTime
 import java.util.Optional
 
 class UpdatePostTest {
-    private val reader = mock(PostReader::class.java)
-    private val remover = mock(PostMediaRemover::class.java)
-    private val uploader = mock(PostMediaUploader::class.java)
-    private val users = mock(UserNicknameQuery::class.java)
-    private val writer = mock(PostModification::class.java)
+    private val reader = mockk<PostReader>()
+    private val remover = mockk<PostMediaRemover>()
+    private val uploader = mockk<PostMediaUploader>()
+    private val users = mockk<UserNicknameQuery>()
+    private val writer = mockk<PostModification>()
     private val update = UpdatePost(reader, remover, uploader, users, writer)
     private val time = LocalDateTime.of(2026, 1, 1, 0, 0)
     private val previous = PostSnapshot(42, 7, "제목", "본문", "MISSING", listOf("https://fixture.invalid/old"), time, time)
 
-    @BeforeEach
-    fun givenExistingOwner() {
-        whenever(reader.findById(42)).thenReturn(Optional.of(previous))
-        whenever(users.findNickname(7)).thenReturn(Optional.of("작성자"))
-    }
-
     @Test
-    fun given__another_authors_post__when__updating_as_admin__then__retain_its_author_and_reuse_the_same_writer_without_media() {
-        whenever(writer.update(42, 7, "admin edit", null, null)).thenReturn(previous)
+    fun `다른 작성자의 게시글일 때__관리자로 수정하면__원작성자를 유지하고 같은 저장 경로를 미디어 없이 재사용한다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(previous)
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } returns previous
 
+        // when
         val result = update.updateAsAdmin(42, "admin edit", null, listOf())
 
+        // then
         assertThat(result.authorId).isEqualTo(7)
         assertThat(result.authorNickname).isEqualTo("작성자")
-        val order = inOrder(reader, users, writer)
-        order.verify(reader).findById(42)
-        order.verify(users).findNickname(7)
-        order.verify(writer).update(42, 7, "admin edit", null, null)
-        order.verifyNoMoreInteractions()
-        verifyNoInteractions(remover, uploader)
+        verifyOrder {
+            reader.findById(42)
+            users.findNickname(7)
+            writer.update(42, 7, "admin edit", null, null)
+        }
+        confirmVerified(reader, users, writer, remover, uploader)
     }
 
     @Test
-    fun given__omitted_files_and_null_fields__when__updating__then__pass_null_patch_without_media_and_keep_missing_board() {
-        whenever(writer.update(42, 7, null, null, null)).thenReturn(previous)
+    fun `파일이 생략되고 필드가 null일 때__수정하면__미디어 없이 null 패치를 넘기고 실종 게시판을 유지한다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(previous)
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } returns previous
 
+        // when
         val response = update.update(42, 7, null, null, listOf())
 
+        // then
         assertThat(response.authorNickname).isEqualTo("작성자")
         assertThat(response.boardType).isEqualTo("MISSING")
-        verifyNoInteractions(remover, uploader)
-        verify(writer).update(42, 7, null, null, null)
+        verify(exactly = 1) { writer.update(42, 7, null, null, null) }
+        confirmVerified(remover, uploader)
     }
 
     @Test
-    fun given__one_empty_file_and_explicit_empty_text__when__updating__then__remove_upload_lookup_and_write_in_order() {
+    fun `빈 파일 하나와 명시적 빈 문자열이 있을 때__수정하면__삭제와 업로드와 조회와 저장을 순서대로 한다`() {
+        // given
         val file = PostUpload("empty.png", "image/png", 0, PostUpload.Content { ByteArrayInputStream(ByteArray(0)) })
-        whenever(uploader.upload(listOf(file))).thenReturn(listOf())
-        whenever(writer.update(42, 7, "", "", listOf()))
-            .thenReturn(PostSnapshot(42, 7, "", "", "MISSING", listOf(), time, time))
 
-        assertThat(update.update(42, 7, "", "", listOf(file)).imageUrls).isEmpty()
+        every { reader.findById(any()) } returns Optional.of(previous)
+        justRun { remover.remove(any()) }
+        every { uploader.upload(any()) } returns listOf()
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } returns
+            PostSnapshot(42, 7, "", "", "MISSING", listOf(), time, time)
 
-        val order = inOrder(reader, remover, uploader, users, writer)
-        order.verify(reader).findById(42)
-        order.verify(remover).remove(previous.imageUrls())
-        order.verify(uploader).upload(listOf(file))
-        order.verify(users).findNickname(7)
-        order.verify(writer).update(42, 7, "", "", listOf())
+        // when
+        val result = update.update(42, 7, "", "", listOf(file))
+
+        // then
+        assertThat(result.imageUrls).isEmpty()
+        verifyOrder {
+            reader.findById(42)
+            remover.remove(previous.imageUrls())
+            uploader.upload(listOf(file))
+            users.findNickname(7)
+            writer.update(42, 7, "", "", listOf())
+        }
     }
 
     @Test
-    fun given__foreign_author__when__updating__then__deny_before_any_external_or_writer_work() {
-        assertThatThrownBy { update.update(42, 8, "수정", null, listOf()) }
-            .isInstanceOf(PostNotOwnedException::class.java)
-        verifyNoInteractions(remover, uploader, users, writer)
+    fun `작성자가 다를 때__수정하면__외부 작업과 저장 전에 거부한다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(previous)
+
+        // when
+        val thrown = assertThatThrownBy { update.update(42, 8, "수정", null, listOf()) }
+
+        // then
+        thrown.isInstanceOf(PostNotOwnedException::class.java)
+        confirmVerified(remover, uploader, users, writer)
     }
 
     @Test
-    fun given__missing_post__when__updating__then__404_before_any_external_or_writer_work() {
-        whenever(reader.findById(42)).thenReturn(Optional.empty())
+    fun `게시글이 없을 때__수정하면__외부 작업과 저장 전에 404를 던진다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.empty()
 
-        assertThatThrownBy { update.update(42, 7, "수정", null, listOf()) }
-            .isInstanceOf(PostNotFoundException::class.java)
-        verifyNoInteractions(remover, uploader, users, writer)
+        // when
+        val thrown = assertThatThrownBy { update.update(42, 7, "수정", null, listOf()) }
+
+        // then
+        thrown.isInstanceOf(PostNotFoundException::class.java)
+        confirmVerified(remover, uploader, users, writer)
     }
 
     @Test
-    fun given__upload_failure_after_old_media_attempt__when__updating__then__propagate_without_writer_or_compensation() {
+    fun `기존 미디어 삭제를 시도한 뒤 업로드가 실패할 때__수정하면__저장이나 보상 없이 예외를 전파한다`() {
+        // given
         val file = PostUpload("a.png", "image/png", 1, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1)) })
         val failure = IllegalStateException("synthetic upload failure")
-        whenever(uploader.upload(listOf(file))).thenThrow(failure)
 
-        assertThatThrownBy { update.update(42, 7, null, null, listOf(file)) }.isSameAs(failure)
-        verify(remover).remove(previous.imageUrls())
-        verifyNoInteractions(users, writer)
-        verifyNoMoreInteractions(remover)
+        every { reader.findById(any()) } returns Optional.of(previous)
+        justRun { remover.remove(any()) }
+        every { uploader.upload(any()) } throws failure
+
+        // when
+        val thrown = assertThatThrownBy { update.update(42, 7, null, null, listOf(file)) }
+
+        // then
+        thrown.isSameAs(failure)
+        verify(exactly = 1) { remover.remove(previous.imageUrls()) }
+        confirmVerified(users, writer, remover)
     }
 
     @Test
-    fun given__late_writer_rejection_after_upload__when__updating__then__propagate_without_retry_or_media_compensation() {
+    fun `업로드 뒤 저장이 늦게 거부될 때__수정하면__재시도나 미디어 보상 없이 예외를 전파한다`() {
+        // given
         val file = PostUpload("a.png", "image/png", 1, PostUpload.Content { ByteArrayInputStream(byteArrayOf(1)) })
-        whenever(uploader.upload(listOf(file))).thenReturn(listOf("https://fixture.invalid/new"))
         val failure = PostNotFoundException()
-        whenever(writer.update(42, 7, null, null, listOf("https://fixture.invalid/new"))).thenThrow(failure)
 
-        assertThatThrownBy { update.update(42, 7, null, null, listOf(file)) }.isSameAs(failure)
-        verify(writer).update(42, 7, null, null, listOf("https://fixture.invalid/new"))
-        verify(remover).remove(previous.imageUrls())
-        verifyNoMoreInteractions(remover, writer)
+        every { reader.findById(any()) } returns Optional.of(previous)
+        justRun { remover.remove(any()) }
+        every { uploader.upload(any()) } returns listOf("https://fixture.invalid/new")
+        every { users.findNickname(any()) } returns Optional.of("작성자")
+        every { writer.update(any(), any(), any(), any(), any()) } throws failure
+
+        // when
+        val thrown = assertThatThrownBy { update.update(42, 7, null, null, listOf(file)) }
+
+        // then
+        thrown.isSameAs(failure)
+        verify(exactly = 1) { writer.update(42, 7, null, null, listOf("https://fixture.invalid/new")) }
+        verify(exactly = 1) { remover.remove(previous.imageUrls()) }
+        confirmVerified(remover, writer)
     }
 
     @Test
-    fun given__missing_nickname__when__updating__then__use_legacy_fallback_after_media_before_writer() {
-        whenever(users.findNickname(7)).thenReturn(Optional.empty())
-        whenever(writer.update(42, 7, null, null, null)).thenReturn(previous)
+    fun `닉네임이 없을 때__수정하면__미디어 처리 뒤 저장 전에 기존 대체 이름을 쓴다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(previous)
+        every { users.findNickname(any()) } returns Optional.empty()
+        every { writer.update(any(), any(), any(), any(), any()) } returns previous
 
-        assertThat(update.update(42, 7, null, null, listOf()).authorNickname).isEqualTo("사용자7")
+        // when
+        val result = update.update(42, 7, null, null, listOf())
+
+        // then
+        assertThat(result.authorNickname).isEqualTo("사용자7")
     }
 
     @Test
-    fun given__empty_nickname__when__updating__then__preserve_legacy_null_nickname() {
-        whenever(users.findNickname(7)).thenReturn(Optional.of(""))
-        whenever(writer.update(42, 7, null, null, null)).thenReturn(previous)
+    fun `닉네임이 빈 문자열일 때__수정하면__기존 동작대로 null 닉네임을 유지한다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(previous)
+        every { users.findNickname(any()) } returns Optional.of("")
+        every { writer.update(any(), any(), any(), any(), any()) } returns previous
 
-        assertThat(update.update(42, 7, null, null, listOf()).authorNickname).isNull()
+        // when
+        val result = update.update(42, 7, null, null, listOf())
+
+        // then
+        assertThat(result.authorNickname).isNull()
     }
 
     @Test
-    fun given__nickname_transport_unavailable__when__updating__then__use_legacy_fallback() {
-        whenever(users.findNickname(7))
-            .thenThrow(UserNicknameUnavailableException(IllegalStateException("synthetic")))
-        whenever(writer.update(42, 7, null, null, null)).thenReturn(previous)
+    fun `닉네임 조회 통신이 불가능할 때__수정하면__기존 대체 이름을 쓴다`() {
+        // given
+        every { reader.findById(any()) } returns Optional.of(previous)
+        every { users.findNickname(any()) } throws UserNicknameUnavailableException(IllegalStateException("synthetic"))
+        every { writer.update(any(), any(), any(), any(), any()) } returns previous
 
-        assertThat(update.update(42, 7, null, null, listOf()).authorNickname).isEqualTo("사용자7")
+        // when
+        val result = update.update(42, 7, null, null, listOf())
+
+        // then
+        assertThat(result.authorNickname).isEqualTo("사용자7")
     }
 }

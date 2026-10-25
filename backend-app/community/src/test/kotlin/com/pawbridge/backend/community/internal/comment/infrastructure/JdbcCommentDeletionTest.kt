@@ -3,30 +3,20 @@ package com.pawbridge.backend.community.internal.comment.infrastructure
 import com.pawbridge.backend.community.internal.comment.application.CommentNotFoundException
 import com.pawbridge.backend.community.internal.comment.application.UnsupportedCommentCharactersException
 import com.pawbridge.backend.community.internal.comment.domain.CommentNotOwnedException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.dao.DataAccessResourceFailureException
@@ -37,6 +27,7 @@ import org.springframework.transaction.TransactionSystemException
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionCallback
 import org.springframework.transaction.support.TransactionOperations
+import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
@@ -49,71 +40,42 @@ import java.util.Calendar
 import java.util.stream.Stream
 
 class JdbcCommentDeletionTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val transactions = mock(TransactionOperations::class.java)
-    private val connection = mock(Connection::class.java)
-    private val result = mock(ResultSet::class.java)
-    private val clock = mock(Clock::class.java)
+    private val jdbc = mockk<JdbcOperations>()
+    private val transactions = RecordingTransactions()
+    private val connection = mockk<Connection>()
+    private val result = mockk<ResultSet>()
+    private val clock = mockk<Clock>()
     private val deletion = JdbcCommentDeletion(jdbc, transactions, clock)
     private val calls = ArrayList<StatementCall>()
     private val failure: RuntimeException = DataAccessResourceFailureException("synthetic SQL failure")
-    private var transactionActive = false
-    private var failAt = 0
-    private var updateCount = 1
-    private var failTimestampBinding = false
-
-    @BeforeEach
-    fun prepareTransactionAndJdbc() {
-        whenever(clock.zone).thenReturn(ZONE)
-        whenever(clock.instant()).thenReturn(DELETED, UPDATED)
-        whenever(transactions.execute(any<TransactionCallback<Void>>())).thenAnswer { invocation ->
-            transactionActive = true
-            try {
-                invocation.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-            } finally {
-                transactionActive = false
-            }
-        }
-        whenever(connection.prepareStatement(anyString())).thenAnswer { invocation ->
-            assertTrue(transactionActive)
-            val statement = mock(PreparedStatement::class.java)
-            val call = StatementCall(invocation.getArgument(0), statement)
-            calls.add(call)
-            doAnswer { binding ->
-                call.values[binding.getArgument(0)] = binding.getArgument(1)
-                null
-            }.`when`(statement).setObject(anyInt(), any())
-            doAnswer { binding ->
-                call.values[binding.getArgument(0)] = binding.getArgument(1)
-                call.calendars[binding.getArgument(0)] = binding.getArgument(2)
-                null
-            }.`when`(statement).setTimestamp(anyInt(), any(Timestamp::class.java), any(Calendar::class.java))
-            if (failTimestampBinding && calls.size == 2) {
-                doThrow(failure).`when`(statement)
-                    .setTimestamp(eq(1), any(Timestamp::class.java), any(Calendar::class.java))
-            }
-            statement
-        }
-        whenever(result.next()).thenReturn(true)
-        whenever(result.getLong("author_id")).thenReturn(7L)
-        whenever(jdbc.query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>()))
-            .thenAnswer { invocation ->
-                invocation.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
-                if (failAt == calls.size) throw failure
-                invocation.getArgument<ResultSetExtractor<*>>(1).extractData(result)
-            }
-        whenever(jdbc.update(any(PreparedStatementCreator::class.java))).thenAnswer { invocation ->
-            invocation.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
-            if (failAt == calls.size) throw failure
-            updateCount
-        }
-    }
 
     @Test
-    fun given__own_active_comment__when__delete__then__ordinary_lookup_and_two_distinct_dates_use_one_transaction() {
+    fun `본인의 활성 댓글일 때__삭제하면__한 트랜잭션에서 일반 조회와 서로 다른 두 시각의 UPDATE를 실행한다`() {
+        // given
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returnsMany listOf(DELETED, UPDATED)
+        every { connection.prepareStatement(any<String>()) } answers {
+            assertTrue(transactions.active)
+            val call = StatementCall(firstArg<String>())
+            calls.add(call)
+            call.statement
+        }
+        every { result.next() } returns true
+        every { result.getLong("author_id") } returns 7L
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            1
+        }
+
+        // when
         deletion.delete(42L, 7L)
 
-        assertFalse(transactionActive)
+        // then
+        assertFalse(transactions.active)
         assertEquals(2, calls.size)
         val lookup = calls.first()
         val lookupSql = lookup.sql.replace(Regex("\\s+"), " ").trim()
@@ -138,119 +100,264 @@ class JdbcCommentDeletionTest {
         )
         assertEquals("UTC", update.calendars[1]!!.timeZone.id)
         assertEquals("UTC", update.calendars[2]!!.timeZone.id)
-        verify(clock, times(2)).instant()
-        verify(transactions).execute(any<TransactionCallback<Void>>())
-        verify(jdbc).query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>())
-        verify(jdbc).update(any(PreparedStatementCreator::class.java))
-        verifyNoMoreInteractions(jdbc)
+        verify(exactly = 2) { clock.instant() }
+        assertEquals(1, transactions.executions)
+        verify(exactly = 1) { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) }
+        verify(exactly = 1) { jdbc.update(any<PreparedStatementCreator>()) }
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__missing_or_deleted_comment__when__delete_by_another_author__then__not_found_precedes_ownership_and_update() {
-        whenever(result.next()).thenReturn(false)
+    fun `없거나 삭제된 댓글일 때__다른 작성자가 삭제하면__소유권 확인과 UPDATE보다 먼저 찾을 수 없음으로 실패한다`() {
+        // given
+        every { connection.prepareStatement(any<String>()) } answers {
+            val call = StatementCall(firstArg<String>())
+            calls.add(call)
+            call.statement
+        }
+        every { result.next() } returns false
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
 
+        // when
         val rejected = assertThrows(CommentNotFoundException::class.java) { deletion.delete(42L, 99L) }
+
+        // then
         assertEquals("댓글을 찾을 수 없습니다.", rejected.message)
         assertEquals(1, calls.size)
-        assertFalse(transactionActive)
-        verify(jdbc, never()).update(any(PreparedStatementCreator::class.java))
-        verifyNoInteractions(clock)
+        assertFalse(transactions.active)
+        verify(exactly = 1) { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) }
+        verify(exactly = 0) { jdbc.update(any<PreparedStatementCreator>()) }
+        confirmVerified(jdbc, clock)
     }
 
     @Test
-    fun given__different_author__when__delete__then__ownership_rejection_precedes_clock_and_update() {
-        whenever(result.getLong("author_id")).thenReturn(8L)
+    fun `작성자가 다를 때__삭제하면__시계 조회와 UPDATE보다 먼저 소유권으로 거부한다`() {
+        // given
+        every { connection.prepareStatement(any<String>()) } answers {
+            val call = StatementCall(firstArg<String>())
+            calls.add(call)
+            call.statement
+        }
+        every { result.next() } returns true
+        every { result.getLong("author_id") } returns 8L
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
 
+        // when
         assertThrows(CommentNotOwnedException::class.java) { deletion.delete(42L, 7L) }
+
+        // then
         assertEquals(1, calls.size)
-        assertFalse(transactionActive)
-        verify(jdbc, never()).update(any(PreparedStatementCreator::class.java))
-        verifyNoInteractions(clock)
+        assertFalse(transactions.active)
+        verify(exactly = 1) { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) }
+        verify(exactly = 0) { jdbc.update(any<PreparedStatementCreator>()) }
+        confirmVerified(jdbc, clock)
     }
 
     @Test
-    fun given__row_disappears_after_lookup__when__delete__then__unexpected_failure_is_not_not_found_or_retried() {
-        updateCount = 0
+    fun `조회 뒤 행이 사라졌을 때__삭제하면__찾을 수 없음이 아닌 예상 밖 실패로 처리하고 재시도하지 않는다`() {
+        // given
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returnsMany listOf(DELETED, UPDATED)
+        every { connection.prepareStatement(any<String>()) } answers {
+            val call = StatementCall(firstArg<String>())
+            calls.add(call)
+            call.statement
+        }
+        every { result.next() } returns true
+        every { result.getLong("author_id") } returns 7L
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            0
+        }
 
+        // when
         assertThrows(IllegalStateException::class.java) { deletion.delete(42L, 7L) }
+
+        // then
         assertEquals(2, calls.size)
-        assertFalse(transactionActive)
-        verify(jdbc, times(1)).update(any(PreparedStatementCreator::class.java))
-        verify(transactions, times(1)).execute(any<TransactionCallback<Void>>())
+        assertFalse(transactions.active)
+        verify(exactly = 1) { jdbc.update(any<PreparedStatementCreator>()) }
+        assertEquals(1, transactions.executions)
     }
 
     @ParameterizedTest
     @ValueSource(ints = [1, 2])
-    fun given__lookup_or_update_failure__when__delete__then__original_failure_leaves_transaction_without_retry(
+    fun `조회나 UPDATE가 실패할 때__삭제하면__재시도 없이 트랜잭션을 벗어나 원래 예외를 전파한다`(
         statement: Int,
     ) {
-        failAt = statement
+        // given
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returnsMany listOf(DELETED, UPDATED)
+        every { connection.prepareStatement(any<String>()) } answers {
+            val call = StatementCall(firstArg<String>())
+            calls.add(call)
+            call.statement
+        }
+        every { result.next() } returns true
+        every { result.getLong("author_id") } returns 7L
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (statement == calls.size) throw failure
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (statement == calls.size) throw failure
+            1
+        }
 
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { deletion.delete(42L, 7L) },
-        )
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { deletion.delete(42L, 7L) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(statement, calls.size)
-        assertFalse(transactionActive)
-        verify(transactions, times(1)).execute(any<TransactionCallback<Void>>())
+        assertFalse(transactions.active)
+        assertEquals(1, transactions.executions)
     }
 
     @ParameterizedTest
     @MethodSource("commitFailures")
-    fun given__commit_failure_after_update__when__delete__then__only_named_charset_error_is_translated(
+    fun `UPDATE 뒤 커밋이 실패할 때__삭제하면__이름 붙은 문자셋 오류만 사용자 오류로 바꾼다`(
         commitFailure: TransactionSystemException,
         translated: Boolean,
     ) {
-        failAfterCallback(commitFailure)
+        // given
+        transactions.failureAfterCallback = commitFailure
 
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returnsMany listOf(DELETED, UPDATED)
+        every { connection.prepareStatement(any<String>()) } answers {
+            val call = StatementCall(firstArg<String>())
+            calls.add(call)
+            call.statement
+        }
+        every { result.next() } returns true
+        every { result.getLong("author_id") } returns 7L
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            1
+        }
+
+        // when
+        val rejected = assertThrows(RuntimeException::class.java) { deletion.delete(42L, 7L) }
+
+        // then
         if (translated) {
-            val rejected = assertThrows(UnsupportedCommentCharactersException::class.java) {
-                deletion.delete(42L, 7L)
-            }
+            assertTrue(rejected is UnsupportedCommentCharactersException)
             assertSame(commitFailure, rejected.cause)
             assertEquals("일부 이모지 등 지원하지 않는 문자를 제외해 주세요.", rejected.message)
         } else {
-            assertSame(
-                commitFailure,
-                assertThrows(TransactionSystemException::class.java) { deletion.delete(42L, 7L) },
-            )
+            assertSame(commitFailure, rejected)
         }
         assertEquals(2, calls.size)
-        assertFalse(transactionActive)
-        verify(transactions, times(1)).execute(any<TransactionCallback<Void>>())
+        assertFalse(transactions.active)
+        assertEquals(1, transactions.executions)
     }
 
     @Test
-    fun given__timestamp_binding_failure__when__preparing_update__then__close_statement_before_propagating_failure() {
-        failTimestampBinding = true
+    fun `타임스탬프 바인딩이 실패할 때__UPDATE를 준비하면__문장을 닫은 뒤 실패를 전파한다`() {
+        // given
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returnsMany listOf(DELETED, UPDATED)
+        every { connection.prepareStatement(any<String>()) } answers {
+            val call = StatementCall(firstArg<String>(), if (calls.size == 1) failure else null)
+            calls.add(call)
+            call.statement
+        }
+        every { result.next() } returns true
+        every { result.getLong("author_id") } returns 7L
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            1
+        }
 
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { deletion.delete(42L, 7L) },
-        )
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { deletion.delete(42L, 7L) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(2, calls.size)
-        verify(calls.last().statement).close()
-        assertFalse(transactionActive)
+        assertEquals(1, calls.last().closed)
+        assertFalse(transactions.active)
     }
 
-    private fun failAfterCallback(commitFailure: RuntimeException) {
-        doAnswer { invocation ->
-            transactionActive = true
+    /** An in-memory TransactionOperations that records running state and calls, and can fail after the callback. */
+    private class RecordingTransactions : TransactionOperations {
+        var active = false
+        var executions = 0
+        var failureAfterCallback: RuntimeException? = null
+
+        override fun <T> execute(action: TransactionCallback<T>): T? {
+            executions++
+            active = true
             try {
-                invocation.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-                throw commitFailure
+                val result = action.doInTransaction(SimpleTransactionStatus())
+                val failure = failureAfterCallback
+                if (failure != null) {
+                    throw failure
+                }
+                return result
             } finally {
-                transactionActive = false
+                active = false
             }
-        }.`when`(transactions).execute(any<TransactionCallback<Void>>())
+        }
     }
 
+    /**
+     * An in-memory PreparedStatement that records bound values.
+     * PreparedStatement has many overloads of setObject and setTimestamp, so a small Proxy is simpler than a strict mock.
+     */
     private class StatementCall(
         val sql: String,
-        val statement: PreparedStatement,
+        private val timestampFailure: RuntimeException? = null,
     ) {
         val values = LinkedHashMap<Int, Any?>()
         val calendars = LinkedHashMap<Int, Calendar>()
+        var closed = 0
+
+        val statement: PreparedStatement = Proxy.newProxyInstance(
+            PreparedStatement::class.java.classLoader,
+            arrayOf(PreparedStatement::class.java),
+        ) { _, method, arguments ->
+            when (method.name) {
+                "setObject" -> {
+                    values[arguments[0] as Int] = arguments[1]
+                    null
+                }
+                "setTimestamp" -> {
+                    if (timestampFailure != null) {
+                        throw timestampFailure
+                    }
+                    values[arguments[0] as Int] = arguments[1]
+                    calendars[arguments[0] as Int] = arguments[2] as Calendar
+                    null
+                }
+                "close" -> {
+                    closed++
+                    null
+                }
+                else -> throw UnsupportedOperationException(method.name)
+            }
+        } as PreparedStatement
     }
 
     companion object {

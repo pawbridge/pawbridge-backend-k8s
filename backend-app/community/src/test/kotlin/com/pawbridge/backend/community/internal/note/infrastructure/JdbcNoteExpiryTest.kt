@@ -1,5 +1,9 @@
 package com.pawbridge.backend.community.internal.note.infrastructure
 
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -9,10 +13,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.TransactionDefinition
@@ -28,14 +28,20 @@ class JdbcNoteExpiryTest {
 
     @ParameterizedTest
     @ValueSource(ints = [0, 17])
-    fun given__zero_or_nonzero_expired_notes__when__expiring__then__sample_once_inside_transaction_delete_both_batches_and_return_only_notes(
+    fun `만료된 쪽지가 0건이거나 있을 때__만료 처리를 하면__트랜잭션 안에서 시각을 한 번 재고 두 배치를 지우고 쪽지 수만 돌려준다`(
         deletedNotes: Int,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.deletedNotes = deletedNotes
 
-        assertEquals(deletedNotes, fixture.expiry.expire())
+        every { fixture.clock.instant() } answers { fixture.sampleClock() }
 
+        // when
+        val expired = fixture.expiry.expire()
+
+        // then
+        assertEquals(deletedNotes, expired)
         assertEquals(listOf("begin", "clock", "notes", "requests", "commit", "cleanup"), fixture.events)
         assertEquals(listOf(NOTES_SQL, REQUESTS_SQL), fixture.jdbc.calls.map { it.sql })
         assertArrayEquals(arrayOf<Any?>(Timestamp.from(NOW)), fixture.jdbc.calls[0].arguments)
@@ -47,9 +53,10 @@ class JdbcNoteExpiryTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__clock_or_either_delete_fails__when__expiring__then__propagate_the_same_failure_without_later_sql_and_finish_rollback(
+    fun `시계나 두 삭제 중 하나가 실패할 때__만료 처리를 하면__같은 예외를 전파하고 이후 SQL 없이 롤백을 마친다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException =
             if (phase == FailurePhase.CLOCK) {
@@ -64,8 +71,13 @@ class JdbcNoteExpiryTest {
             fixture.jdbc.failure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { fixture.expiry.expire() })
+        every { fixture.clock.instant() } answers { fixture.sampleClock() }
 
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.expiry.expire() }
+
+        // then
+        assertSame(failure, thrown)
         val expected = ArrayList(listOf("begin", "clock"))
         if (phase != FailurePhase.CLOCK) {
             expected.add("notes")
@@ -92,28 +104,29 @@ class JdbcNoteExpiryTest {
         val events = ArrayList<String>()
         val manager = Manager(events)
         val jdbc = RecordingJdbc(manager, events)
-        val clock: Clock = mock(Clock::class.java)
+        val clock: Clock = mockk<Clock>()
         val expiry: JdbcNoteExpiry
         var clockFailure: RuntimeException? = null
 
         init {
-            whenever(clock.instant()).thenAnswer {
-                assertTrue(manager.active)
-                assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
-                events.add("clock")
-                if (clockFailure != null) {
-                    throw clockFailure!!
-                }
-                NOW
-            }
             val transaction = TransactionTemplate(manager)
             transaction.timeout = 15
             expiry = JdbcNoteExpiry(jdbc, transaction, clock)
         }
 
+        fun sampleClock(): Instant {
+            assertTrue(manager.active)
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("clock")
+            if (clockFailure != null) {
+                throw clockFailure!!
+            }
+            return NOW
+        }
+
         fun assertReturned() {
-            verify(clock).instant()
-            verifyNoMoreInteractions(clock)
+            verify(exactly = 1) { clock.instant() }
+            confirmVerified(clock)
             assertFalse(manager.active)
             assertFalse(TransactionSynchronizationManager.isSynchronizationActive())
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive())

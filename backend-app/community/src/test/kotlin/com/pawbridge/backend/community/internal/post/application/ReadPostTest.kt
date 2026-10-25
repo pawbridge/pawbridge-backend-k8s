@@ -14,7 +14,8 @@ import java.util.Optional
 
 class ReadPostTest {
     @Test
-    fun given__post_and_nickname__when__read__then__details_preserve_post_fields() {
+    fun `게시글과 닉네임이 있을 때__조회하면__게시글 필드를 그대로 담은 상세를 돌려준다`() {
+        // given
         val post = createPost()
         val readPost = ReadPost(
             postReader { postId ->
@@ -27,8 +28,10 @@ class ReadPostTest {
             },
         )
 
+        // when
         val details = readPost.read(post.postId())
 
+        // then
         assertEquals(
             PostDetails(
                 post.postId(),
@@ -46,62 +49,97 @@ class ReadPostTest {
     }
 
     @Test
-    fun given__missing_user__when__read__then__author_id_fallback_is_returned() {
+    fun `작성자가 없을 때__조회하면__작성자 번호 기반 대체 이름을 돌려준다`() {
+        // given
         val readPost = createReader(userNicknameQuery { Optional.empty() })
 
-        assertEquals("사용자7", readPost.read(42L).authorNickname)
+        // when
+        val details = readPost.read(42L)
+
+        // then
+        assertEquals("사용자7", details.authorNickname)
     }
 
     @Test
-    fun given__nickname_unavailable__when__read__then__author_id_fallback_is_returned() {
+    fun `닉네임을 조회할 수 없을 때__조회하면__작성자 번호 기반 대체 이름을 돌려준다`() {
+        // given
         val readPost = createReader(
             userNicknameQuery { throw UserNicknameUnavailableException(IllegalStateException("unavailable")) },
         )
 
-        assertEquals("사용자7", readPost.read(42L).authorNickname)
+        // when
+        val details = readPost.read(42L)
+
+        // then
+        assertEquals("사용자7", details.authorNickname)
     }
 
     @Test
-    fun given__empty_nickname__when__read__then__legacy_empty_body_is_represented_as_null() {
+    fun `닉네임이 빈 문자열일 때__조회하면__기존 동작대로 null로 나타낸다`() {
+        // given
         val readPost = createReader(userNicknameQuery { Optional.of("") })
 
-        assertNull(readPost.read(42L).authorNickname)
+        // when
+        val details = readPost.read(42L)
+
+        // then
+        assertNull(details.authorNickname)
     }
 
     @Test
-    fun given__whitespace_nickname__when__read__then__whitespace_is_preserved() {
+    fun `닉네임이 공백일 때__조회하면__공백을 그대로 보존한다`() {
+        // given
         val readPost = createReader(userNicknameQuery { Optional.of("  \t ") })
 
-        assertEquals("  \t ", readPost.read(42L).authorNickname)
+        // when
+        val details = readPost.read(42L)
+
+        // then
+        assertEquals("  \t ", details.authorNickname)
     }
 
     @Test
-    fun given__missing_post__when__read__then__not_found_prevents_nickname_lookup() {
+    fun `게시글이 없을 때__조회하면__찾을 수 없음 예외를 던지고 닉네임을 조회하지 않는다`() {
+        // given
         val readPost = ReadPost(
             postReader { Optional.empty() },
             userNicknameQuery { throw AssertionError("Nickname lookup must follow a successful post lookup") },
         )
 
-        assertThrows(PostNotFoundException::class.java) { readPost.read(-1L) }
+        // when
+        val thrown = assertThrows(PostNotFoundException::class.java) { readPost.read(-1L) }
+
+        // then
+        assertEquals(PostNotFoundException::class.java, thrown.javaClass)
     }
 
     @Test
-    fun given__post_read_failure__when__read__then__failure_propagates_before_nickname_lookup() {
+    fun `게시글 조회가 실패할 때__조회하면__닉네임 조회 전에 예외를 그대로 전파한다`() {
+        // given
         val failure = IllegalStateException("post mapping failed")
         val readPost = ReadPost(
             postReader { throw failure },
             userNicknameQuery { throw AssertionError("Nickname lookup must follow a successful post lookup") },
         )
 
-        assertSame(failure, assertThrows(IllegalStateException::class.java) { readPost.read(42L) })
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { readPost.read(42L) }
+
+        // then
+        assertSame(failure, thrown)
     }
 
     @Test
-    fun given__unexpected_nickname_failure__when__read__then__failure_is_not_hidden_by_fallback() {
+    fun `닉네임 조회가 예상 밖으로 실패할 때__조회하면__대체 이름으로 가리지 않고 예외를 전파한다`() {
+        // given
         val failure = IllegalArgumentException("programming failure")
         val readPost = createReader(userNicknameQuery { throw failure })
 
-        assertSame(failure, assertThrows(IllegalArgumentException::class.java) { readPost.read(42L) })
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) { readPost.read(42L) }
+
+        // then
+        assertSame(failure, thrown)
     }
 
     private fun createReader(nicknameQuery: UserNicknameQuery): ReadPost =
