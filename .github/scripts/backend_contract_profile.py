@@ -55,6 +55,10 @@ SHARDS = {
 }
 # The PostgreSQL auth session contracts need the complete late fixture, so only the last shard runs them.
 CONTRACT_SHARD = 4
+# Smokes that leave fixture state a later step reads, mapped to the workflow step that reproduces
+# exactly that state in shards that skip the smoke. The F4 smoke creates the two support tables
+# that later business snapshots select from; no other smoke leaves state a later step reads.
+STATE_STEPS = {'jar_f4': 'shape_f4'}
 IDENTITY_KEYS = ('event_name', 'repository', 'head_repository', 'head_ref',
                  'base_sha', 'head_sha', 'source_sha', 'tree_sha', 'run_id', 'run_attempt')
 
@@ -140,6 +144,20 @@ def expected_smokes(profile, shard=None):
     return tuple(step for step in smokes if step in SHARDS[shard])
 
 
+def shard_of(smoke):
+    for shard, smokes in SHARDS.items():
+        if smoke in smokes:
+            return shard
+    raise ProfileBlocked('Packaged step is not assigned to a shard.')
+
+
+def state_steps(shard):
+    """(reproduced, skipped) state steps: reproduce only where an earlier shard owns the smoke."""
+    reproduced = [step for smoke, step in STATE_STEPS.items() if shard > shard_of(smoke)]
+    skipped = [step for smoke, step in STATE_STEPS.items() if shard <= shard_of(smoke)]
+    return reproduced, skipped
+
+
 def _identity(context):
     try:
         identity = {key: context[key] for key in IDENTITY_KEYS}
@@ -186,6 +204,7 @@ def make_plan(context, paths, profile, jar_sha256, shard=None):
     }
     if shard is not None:
         result['shard'] = shard
+        result['reproduced_state'], result['skipped_state'] = state_steps(shard)
     if profile == FULL and shard in (None, CONTRACT_SHARD):
         result['required_contracts'] = list(FULL_CONTRACTS)
     elif profile == FULL:
@@ -206,9 +225,13 @@ def audit_execution(plan, context, paths, profile, jar_sha256, steps, shard=None
     required = set(expected['required_smokes'])
     contracts = tuple(expected.get('required_contracts', ()))
     skipped_contracts = tuple(expected.get('skipped_contracts', ()))
-    for key in ALL_SMOKES + contracts + skipped_contracts + ('owned_cleanup',):
+    reproduced = tuple(expected.get('reproduced_state', ()))
+    skipped_state = tuple(expected.get('skipped_state', ()))
+    succeeded = required | set(contracts) | set(reproduced) | {'owned_cleanup'}
+    checked = ALL_SMOKES + contracts + skipped_contracts + reproduced + skipped_state + ('owned_cleanup',)
+    for key in checked:
         step = steps.get(key)
-        wanted = 'success' if key == 'owned_cleanup' or key in required or key in contracts else 'skipped'
+        wanted = 'success' if key in succeeded else 'skipped'
         if (not isinstance(step, dict) or step.get('outcome') != wanted
                 or step.get('conclusion') != wanted):
             raise ProfileBlocked('A required execution, planned skip or owned cleanup differs.')

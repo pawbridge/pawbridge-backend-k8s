@@ -49,6 +49,11 @@ def shard_steps(mode, shard):
         contracts_ran = shard == profile.CONTRACT_SHARD
         for key in profile.FULL_CONTRACTS:
             result[key] = outcome('success' if contracts_ran else 'skipped')
+    reproduced, skipped = profile.state_steps(shard)
+    for key in reproduced:
+        result[key] = outcome('success')
+    for key in skipped:
+        result[key] = outcome('skipped')
     result['owned_cleanup'] = outcome('success')
     return result
 
@@ -204,6 +209,28 @@ class ContractProfileTest(unittest.TestCase):
         actual['pg_auth_sessions'] = outcome('skipped')
         with self.assertRaises(profile.ProfileBlocked):
             profile.audit_execution(contract_plan, context(), PATHS, mode, JAR, actual, profile.CONTRACT_SHARD)
+
+    def test_given_state_leaving_smoke__when_a_later_shard_skips_it__then_require_its_reproduction(self):
+        self.assertEqual({'jar_f4': 'shape_f4'}, profile.STATE_STEPS)
+        self.assertEqual(([], ['shape_f4']), profile.state_steps(1))
+        for shard in (2, 3, 4):
+            with self.subTest(shard=shard):
+                self.assertEqual((['shape_f4'], []), profile.state_steps(shard))
+                plan = profile.make_plan(context(), PATHS, profile.FULL, JAR, shard)
+                self.assertEqual(['shape_f4'], plan['reproduced_state'])
+                for state in (outcome('skipped'), outcome('failure'), None):
+                    actual = shard_steps(profile.FULL, shard)
+                    if state is None:
+                        del actual['shape_f4']
+                    else:
+                        actual['shape_f4'] = state
+                    with self.subTest(state=state), self.assertRaises(profile.ProfileBlocked):
+                        profile.audit_execution(plan, context(), PATHS, profile.FULL, JAR, actual, shard)
+        plan = profile.make_plan(context(), PATHS, profile.FULL, JAR, 1)
+        actual = shard_steps(profile.FULL, 1)
+        actual['shape_f4'] = outcome('success')
+        with self.assertRaises(profile.ProfileBlocked):
+            profile.audit_execution(plan, context(), PATHS, profile.FULL, JAR, actual, 1)
 
     def test_given_shard_argument__when_cli_plans__then_write_the_shard_plan(self):
         with patch.object(profile, 'runtime_context', return_value=(context(), PATHS)), \

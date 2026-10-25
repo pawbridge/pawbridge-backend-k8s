@@ -614,6 +614,11 @@ jobs:
         if: ${{ matrix.shard == 1 }}
         run: python3 scripts/f4_ci.py smoke
 
+      - name: Reproduce the F4 smoke support tables where a later shard skips that smoke
+        id: shape_f4
+        if: ${{ matrix.shard >= 2 }}
+        run: python3 scripts/f4_ci.py prepare-shape
+
       - name: Verify packaged owner PUT, SDK replacement and failure recovery
         id: jar_f5
         if: ${{ matrix.shard == 1 }}
