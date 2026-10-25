@@ -11,9 +11,6 @@ dependencies {
     implementation 'org.hibernate.orm:hibernate-core'
     implementation 'org.postgresql:postgresql'
     runtimeOnly 'org.springframework:spring-aspects'
-    compileOnly 'org.projectlombok:lombok'
-    annotationProcessor platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
-    annotationProcessor 'org.projectlombok:lombok'
     implementation 'com.fasterxml.jackson.core:jackson-annotations'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'jakarta.validation:jakarta.validation-api'
