@@ -27,7 +27,9 @@ interface StoreMemberReads {
     class Request(
         private val page: Int,
         private val size: Int,
-        sort: List<Order>,
+        // Nullable so that a null list reaches the page/size check first, like the Java compact constructor
+        // (which then failed in List.copyOf with an NPE).
+        sort: List<Order>?,
     ) {
         private val sort: List<Order>
 
@@ -35,7 +37,7 @@ interface StoreMemberReads {
             if (page < 0 || size < 1) {
                 throw IllegalArgumentException("Page must be non-negative and size positive")
             }
-            this.sort = java.util.List.copyOf(sort)
+            this.sort = java.util.List.copyOf(sort!!)
         }
 
         fun page(): Int = page
