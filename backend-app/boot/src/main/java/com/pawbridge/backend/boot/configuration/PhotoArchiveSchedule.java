@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 
 /** One owner, cooperative stop before dependent HTTP/S3 clients are destroyed. */
-final class PhotoArchiveSchedule implements SmartLifecycle {
+public final class PhotoArchiveSchedule implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(PhotoArchiveSchedule.class);
     private final PhotoArchiveWorker worker;
     private final PhotoArchiveProperties properties;

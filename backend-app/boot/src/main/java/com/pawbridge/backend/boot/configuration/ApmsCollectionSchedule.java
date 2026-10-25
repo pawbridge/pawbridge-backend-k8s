@@ -13,7 +13,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 
 /** One schedule owner; stop waits for the synchronous runner and its lock release. */
-final class ApmsCollectionSchedule implements SmartLifecycle {
+public final class ApmsCollectionSchedule implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(ApmsCollectionSchedule.class);
     private final ApmsBatchRunner runner;
     private final CronTrigger trigger;
