@@ -8,11 +8,10 @@ import com.pawbridge.backend.store.internal.wishlist.web.WishlistCommandExceptio
 import com.zaxxer.hikari.HikariDataSource
 import io.mockk.justRun
 import io.mockk.mockk
-import io.mockk.mockkConstructor
-import io.mockk.unmockkConstructor
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.mockConstruction
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
@@ -60,11 +59,12 @@ class StoreWishlistConfigurationTest {
     fun `명시적 플래그가 있을 때__조립하고 닫으면__자체 풀과 클라이언트와 연결 없이 공유 풀과 시스템 시계를 묶는다`() {
         // given
         val shared = mockk<HikariDataSource>()
-        mockkConstructor(HikariDataSource::class)
 
         justRun { shared.close() }
 
-        try {
+        // MockK cannot count constructor calls, so this test keeps Mockito's mockConstruction
+        // to prove that the configuration never builds its own HikariDataSource.
+        mockConstruction(HikariDataSource::class.java).use { constructions ->
             // when
             ApplicationContextRunner().withUserConfiguration(StoreWishlistConfiguration::class.java)
                 .withBean("storeWishlistWriteDataSource", HikariDataSource::class.java, Supplier { shared })
@@ -102,14 +102,9 @@ class StoreWishlistConfigurationTest {
                 }
 
             // then
-            verify(exactly = 0) { anyConstructed<HikariDataSource>().close() }
-            verify(exactly = 0) { anyConstructed<HikariDataSource>().connection }
-            verify(exactly = 0) { anyConstructed<HikariDataSource>().username = any() }
-            verify(exactly = 0) { anyConstructed<HikariDataSource>().password = any() }
+            assertThat(constructions.constructed()).isEmpty()
             verify(exactly = 0) { shared.connection }
             verify(exactly = 0) { shared.getConnection(any(), any()) }
-        } finally {
-            unmockkConstructor(HikariDataSource::class)
         }
     }
 }
