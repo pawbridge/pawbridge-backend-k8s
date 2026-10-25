@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.user.internal.adminupdate.application.AdminUserUpdate
 import com.pawbridge.backend.user.internal.adminupdate.application.AdminUserUpdate.Changes
@@ -11,6 +12,10 @@ import com.pawbridge.backend.user.internal.adminupdate.web.AdminUserUpdateExcept
 import com.pawbridge.backend.user.internal.nickname.application.NicknameDuplicateException
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameController
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -18,10 +23,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.NullSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.beans.factory.annotation.Autowired
@@ -31,7 +32,6 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
@@ -58,12 +58,16 @@ class AdminUserUpdateHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: AdminUserUpdate
 
     @Test
-    fun given__signed_admin_and_numeric_nickname__when__updating_another_target__then__bind_only_path_and_original_fields_and_envelope() {
-        mvc.perform(
+    fun `서명된 관리자와 숫자 닉네임__다른 대상을 수정하면__경로와 원래 필드만 바인딩하고 원래 봉투를 돌려준다`() {
+        // given
+        justRun { members.update(any(), any()) }
+
+        // when
+        val result = mvc.perform(
             put(PATH + Long.MAX_VALUE)
                 .header("Authorization", admin())
                 .header("X-User-Id", "9")
@@ -72,62 +76,88 @@ class AdminUserUpdateHttpTest {
                 .contentType("application/json")
                 .content("{\"nickname\":\"123\",\"role\":\"ROLE_ADMIN\",\"careRegNo\":\"A\",\"userId\":9}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"회원 정보가 수정되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(members).update(Long.MAX_VALUE, Changes("123", Role.ROLE_ADMIN, "A"))
-        verifyNoMoreInteractions(members)
+        verify(exactly = 1) { members.update(Long.MAX_VALUE, Changes("123", Role.ROLE_ADMIN, "A")) }
+        confirmVerified(members)
         cleared()
     }
 
     @Test
-    fun given__null_patch_fields__when__admin_updates__then__preserve_optional_source_request_without_new_required_fields() {
-        mvc.perform(put(PATH + 0).header("Authorization", admin()).contentType("application/json").content("{}"))
-            .andExpect(status().isOk())
-        verify(members).update(0, Changes(null, null, null))
-        verifyNoMoreInteractions(members)
+    fun `null 수정 필드__관리자가 수정하면__새 필수 필드 없이 원본의 선택 요청을 유지한다`() {
+        // given
+        justRun { members.update(any(), any()) }
+
+        // when
+        val result = mvc.perform(put(PATH + 0).header("Authorization", admin()).contentType("application/json").content("{}"))
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { members.update(0, Changes(null, null, null)) }
+        confirmVerified(members)
         cleared()
     }
 
     @Test
-    fun given__signed_user_with_spoofed_admin_and_bad_body__when__updating__then__authorize_before_binding_or_business() {
-        mvc.perform(
-            put(PATH + "bad")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN")
-                .contentType("application/json")
-                .content("bad"),
-        )
+    fun `위조 관리자 헤더를 단 서명된 사용자와 잘못된 본문__수정하면__바인딩이나 업무 처리 전에 권한을 거부한다`() {
+        // given
+        val request = put(PATH + "bad")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Role", "ROLE_ADMIN")
+            .contentType("application/json")
+            .content("bad")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(members)
+        confirmVerified(members)
         cleared()
     }
 
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = ["Bearer invalid"])
-    fun given__missing_or_invalid_token__when__updating_malformed_input__then__reject_before_binding(token: String?) {
+    fun `없거나 잘못된 토큰__잘못된 입력으로 수정하면__바인딩 전에 거부한다`(token: String?) {
+        // given
         val request = put(PATH + "bad").header("X-User-Role", "ROLE_ADMIN").contentType("application/json").content("bad")
         if (token != null) {
             request.header("Authorization", token)
         }
-        mvc.perform(request).andExpect(status().isUnauthorized())
-        verifyNoInteractions(members)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(members)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", " ", "x", "12345678901", "emoji🐾"])
-    fun given__nickname_outside_admin_specific_pattern__when__validating__then__return_original_400_before_business(
+    fun `관리자 전용 패턴을 벗어난 닉네임__검증하면__업무 처리 전에 원래 400을 돌려준다`(
         nickname: String,
     ) {
+        // given
         val json = ObjectMapper().writeValueAsString(mapOf("nickname" to nickname))
-        mvc.perform(put(PATH + 8).header("Authorization", admin()).contentType("application/json").content(json))
+
+        // when
+        val result = mvc.perform(put(PATH + 8).header("Authorization", admin()).contentType("application/json").content(json))
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -135,14 +165,21 @@ class AdminUserUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(members)
+        confirmVerified(members)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{", "{\"role\":\"role_user\"}", "{\"role\":\"ROLE_UNKNOWN\"}"])
-    fun given__malformed_json_or_unknown_role__when__reading_body__then__return_original_unreadable_400(body: String) {
-        mvc.perform(put(PATH + 8).header("Authorization", admin()).contentType("application/json").content(body))
+    fun `깨진 JSON 또는 알 수 없는 역할__본문을 읽으면__원래 읽을 수 없음 400을 돌려준다`(body: String) {
+        // given
+        val request = put(PATH + 8).header("Authorization", admin()).contentType("application/json").content(body)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -150,19 +187,25 @@ class AdminUserUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(members)
+        confirmVerified(members)
         cleared()
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__missing_approval_duplicate_database_or_commit_failure__when__handling__then__preserve_original_status_and_hide_private_details(
+    fun `승인 누락 중복 DB 또는 커밋 실패__처리하면__원래 상태를 유지하고 내부 정보를 숨긴다`(
         failure: RuntimeException,
         code: Int,
         message: String,
     ) {
-        doThrow(failure).`when`(members).update(8, Changes(null, null, null))
-        mvc.perform(put(PATH + 8).header("Authorization", admin()).contentType("application/json").content("{}"))
+        // given
+        every { members.update(any(), any()) } throws failure
+
+        // when
+        val result = mvc.perform(put(PATH + 8).header("Authorization", admin()).contentType("application/json").content("{}"))
+
+        // then
+        result
             .andExpect(status().`is`(code))
             .andExpect(header().string("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate"))
             .andExpect(
@@ -171,32 +214,45 @@ class AdminUserUpdateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(members).update(8, Changes(null, null, null))
-        verifyNoMoreInteractions(members)
+        verify(exactly = 1) { members.update(8, Changes(null, null, null)) }
+        confirmVerified(members)
         cleared()
     }
 
     @Test
-    fun given__admin_with_bad_path_long__when__binding__then__retain_original_runtime_500_before_business() {
-        mvc.perform(put(PATH + "bad").header("Authorization", admin()).contentType("application/json").content("{}"))
+    fun `관리자와 잘못된 경로 Long__바인딩하면__업무 처리 전에 원래 런타임 500을 유지한다`() {
+        // given
+        val request = put(PATH + "bad").header("Authorization", admin()).contentType("application/json").content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(
                 content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(members)
+        confirmVerified(members)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PUT /api/v1/admin/users/8/extra", "PUT /api/v1/admin/users", "POST /api/v1/admin/users/8"])
-    fun given__an_unported_neighbor_or_method__when__admin_requests__then__keep_default_deny(wire: String) {
+    fun `이식되지 않은 이웃 경로나 메서드__관리자가 요청하면__기본 거부를 유지한다`(wire: String) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))
+
+        // when
+        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(members)
+        confirmVerified(members)
         cleared()
     }
 

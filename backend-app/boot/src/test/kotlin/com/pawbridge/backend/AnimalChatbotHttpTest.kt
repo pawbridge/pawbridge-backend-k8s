@@ -1,14 +1,16 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.dto.ChatbotMessageRequest
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.dto.ChatbotMessageResponse
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.service.ChatbotService
 import com.pawbridge.backend.animal.internal.chatbot.web.ChatbotController
 import com.pawbridge.backend.animal.internal.chatbot.web.ChatbotExceptionHandler
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.eqValue
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.assertj.core.api.Assertions.assertThat
@@ -16,18 +18,12 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -52,31 +48,31 @@ class AnimalChatbotHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var chatbot: ChatbotService
 
     @ParameterizedTest
     @ValueSource(strings = ["anonymous", "unrelated-invalid-bearer"])
-    fun given__the_original_public_route__when__posting_without_a_member_identity__then__return_the_bare_chatbot_response(
+    fun `원래 공개 경로__회원 신원 없이 게시하면__순수 챗봇 응답을 돌려준다`(
         authorization: String,
     ) {
+        // given
         val input = ChatbotMessageRequest("not-a-uuid", "입양 문의")
-        whenever(
-            chatbot.createMessage(
-                eq(41L),
-                eqValue(input),
-                anyNonNull<HttpServletRequest>(),
-                anyNonNull<HttpServletResponse>(),
-            ),
-        )
-            .thenReturn(ChatbotMessageResponse("owned-session", "안내 답변", "안전 주의", "synthetic"))
         val command = command("POST", "/api/v1/animals/41/chat/messages")
             .header("X-User-Id", "99")
             .content(mapper.writeValueAsBytes(input))
         if (authorization == "unrelated-invalid-bearer") {
             command.header("Authorization", "Bearer synthetic-invalid-token")
         }
-        val json = mapper.readTree(mvc.perform(command).andExpect(status().isOk()).andReturn().response.contentAsByteArray)
+
+        every { chatbot.createMessage(any(), any(), any(), any()) } returns
+            ChatbotMessageResponse("owned-session", "안내 답변", "안전 주의", "synthetic")
+
+        // when
+        val response = mvc.perform(command).andExpect(status().isOk()).andReturn().response
+
+        // then
+        val json = mapper.readTree(response.contentAsByteArray)
         assertThat(json.size()).isEqualTo(4)
         assertThat(json.path("sessionId").asText()).isEqualTo("owned-session")
         assertThat(json.path("answer").asText()).isEqualTo("안내 답변")
@@ -84,40 +80,41 @@ class AnimalChatbotHttpTest {
         assertThat(json.path("provider").asText()).isEqualTo("synthetic")
         assertThat(json.has("data")).isFalse()
         assertThat(json.has("code")).isFalse()
-        verify(chatbot).createMessage(
-            eq(41L),
-            eqValue(input),
-            anyNonNull<HttpServletRequest>(),
-            anyNonNull<HttpServletResponse>(),
-        )
-        verifyNoMoreInteractions(chatbot)
+        verify(exactly = 1) { chatbot.createMessage(41L, input, any(), any()) }
+        confirmVerified(chatbot)
     }
 
     @Test
-    fun given__an_invalid_original_question__when__posting_anonymously__then__return_the_scoped_validation_envelope_before_business() {
-        val json = mapper.readTree(
-            mvc.perform(command("POST", "/api/v1/animals/41/chat/messages").content("{\"question\":\"   \"}"))
-                .andExpect(status().isBadRequest())
-                .andReturn().response.contentAsByteArray,
-        )
+    fun `잘못된 원래 질문__익명으로 게시하면__업무 처리 전에 범위 지정 검증 봉투를 돌려준다`() {
+        // given
+        val request = command("POST", "/api/v1/animals/41/chat/messages").content("{\"question\":\"   \"}")
+
+        // when
+        val response = mvc.perform(request).andExpect(status().isBadRequest()).andReturn().response
+
+        // then
+        val json = mapper.readTree(response.contentAsByteArray)
         assertThat(json.size()).isEqualTo(3)
         assertThat(json.path("code").asInt()).isEqualTo(400)
         assertThat(json.path("message").asText()).isEqualTo("question: question must not be blank")
         assertThat(json.get("data").isNull()).isTrue()
-        verifyNoInteractions(chatbot)
+        confirmVerified(chatbot)
     }
 
     @Test
-    fun given__malformed_json__when__posting_anonymously__then__preserve_the_scoped_body_error_before_business() {
-        val json = mapper.readTree(
-            mvc.perform(command("POST", "/api/v1/animals/41/chat/messages").content("{broken"))
-                .andExpect(status().isBadRequest())
-                .andReturn().response.contentAsByteArray,
-        )
+    fun `깨진 JSON__익명으로 게시하면__업무 처리 전에 범위 지정 본문 오류를 유지한다`() {
+        // given
+        val request = command("POST", "/api/v1/animals/41/chat/messages").content("{broken")
+
+        // when
+        val response = mvc.perform(request).andExpect(status().isBadRequest()).andReturn().response
+
+        // then
+        val json = mapper.readTree(response.contentAsByteArray)
         assertThat(json.path("code").asInt()).isEqualTo(400)
         assertThat(json.path("message").asText()).isEqualTo("요청 본문 형식이 올바르지 않습니다.")
         assertThat(json.get("data").isNull()).isTrue()
-        verifyNoInteractions(chatbot)
+        confirmVerified(chatbot)
     }
 
     @ParameterizedTest
@@ -130,16 +127,21 @@ class AnimalChatbotHttpTest {
         "POST,/api/v1/animals/41/chat/message",
         "POST,/api/v1/animals/41/chat/messages/extra",
     )
-    fun given__a_verified_member__when__using_a_noncanonical_method_or_alias__then__default_deny_before_chatbot(
+    fun `검증된 회원__정식이 아닌 메서드나 별칭을 쓰면__챗봇 전에 기본 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(
-            command(method, path)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .content("{\"question\":\"입양 문의\"}"),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(chatbot)
+        // given
+        val request = command(method, path)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .content("{\"question\":\"입양 문의\"}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(chatbot)
     }
 
     companion object {
@@ -165,16 +167,21 @@ class AnimalChatbotDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var chatbot: ChatbotService
 
     @Test
-    fun given__the_default_disabled_chatbot__when__posting_the_canonical_route__then__deny_before_business() {
-        mvc.perform(
-            AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
-                .content("{\"question\":\"입양 문의\"}"),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(chatbot)
+    fun `챗봇 기본 비활성__정식 경로로 게시하면__업무 처리 전에 거부한다`() {
+        // given
+        val request = AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
+            .content("{\"question\":\"입양 문의\"}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(chatbot)
     }
 }
 
@@ -194,16 +201,21 @@ class AnimalChatbotAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var chatbot: ChatbotService
 
     @Test
-    fun given__a_noncanonical_enable_flag__when__posting_the_canonical_route__then__deny_before_business() {
-        mvc.perform(
-            AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
-                .content("{\"question\":\"입양 문의\"}"),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(chatbot)
+    fun `정식이 아닌 활성화 플래그__정식 경로로 게시하면__업무 처리 전에 거부한다`() {
+        // given
+        val request = AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
+            .content("{\"question\":\"입양 문의\"}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(chatbot)
     }
 }
 
@@ -223,15 +235,20 @@ class AnimalChatbotOtherBackendHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var chatbot: ChatbotService
 
     @Test
-    fun given__a_different_query_backend__when__posting_the_canonical_route__then__deny_before_business() {
-        mvc.perform(
-            AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
-                .content("{\"question\":\"입양 문의\"}"),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(chatbot)
+    fun `다른 조회 백엔드__정식 경로로 게시하면__업무 처리 전에 거부한다`() {
+        // given
+        val request = AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
+            .content("{\"question\":\"입양 문의\"}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(chatbot)
     }
 }

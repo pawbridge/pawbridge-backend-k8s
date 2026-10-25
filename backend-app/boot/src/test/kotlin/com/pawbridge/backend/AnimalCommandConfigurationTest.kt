@@ -19,14 +19,15 @@ import com.pawbridge.backend.boot.configuration.AnimalCommandConfiguration
 import com.pawbridge.backend.boot.configuration.AnimalDiscoveryConfiguration
 import com.pawbridge.backend.boot.configuration.AnimalRecommendationsConfiguration
 import com.pawbridge.backend.boot.configuration.AnimalSearchConfiguration
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -44,14 +45,18 @@ import javax.sql.DataSource
 class AnimalCommandConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on", "1", "unknown"])
-    fun given__commands_not_explicitly_true__when__assembling_without_database_inputs__then__create_no_command_or_search_or_auditing_beans(
+    fun `명시적 true가 아닌 명령 플래그__DB 입력 없이 조립하면__명령 검색 감사 빈을 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = runner()
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.animal-commands.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(EntityManagerFactory::class.java)
                 .doesNotHaveBean(JpaTransactionManager::class.java)
@@ -65,81 +70,108 @@ class AnimalCommandConfigurationTest {
     }
 
     @Test
-    fun given__commands_enabled__when__assembling__then__use_one_writer_unit_selected_repositories_and_bounded_service_without_database_access() {
-        val writer = mock(DataSource::class.java)
-        val reader = mock(DataSource::class.java)
+    fun `명령 활성화__조립하면__DB 접근 없이 쓰기 단위 하나와 선택된 저장소와 제한된 서비스를 쓴다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val reader = mockk<DataSource>()
+        excludeRecords {
+            writer.hashCode()
+            writer.toString()
+            writer.equals(any())
+            reader.hashCode()
+            reader.toString()
+            reader.equals(any())
+        }
         val owned = AtomicReference<KoreanSearchAnalyzer>()
         val unit = AtomicReference<EntityManagerFactory>()
-        writerInputs(writer)
+        val runner = writerInputs(writer)
             .withBean("dataSource", DataSource::class.java, Supplier { reader })
             .withPropertyValues("pawbridge.animal-commands.enabled=TRUE")
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                val factory = context.getBean(
-                    "&animalCommandEntityManagerFactory",
-                    LocalContainerEntityManagerFactoryBean::class.java,
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasNotFailed()
+            val factory = context.getBean(
+                "&animalCommandEntityManagerFactory",
+                LocalContainerEntityManagerFactoryBean::class.java,
+            )
+            val emf = context.getBean("animalCommandEntityManagerFactory", EntityManagerFactory::class.java)
+            unit.set(emf)
+            assertThat(factory.dataSource).isSameAs(writer)
+            assertThat(factory.persistenceUnitInfo!!.managedClassNames).containsExactlyInAnyOrder(
+                Animal::class.java.name,
+                Shelter::class.java.name,
+                BaseTimeEntity::class.java.name,
+            )
+            assertThat(factory.jpaPropertyMap)
+                .containsEntry("hibernate.boot.allow_jdbc_metadata_access", false)
+                .containsEntry("hibernate.hbm2ddl.auto", "none")
+                .containsEntry("jakarta.persistence.schema-generation.database.action", "none")
+                .containsEntry("hibernate.default_schema", "pawbridge_animal")
+                .containsEntry("hibernate.jdbc.time_zone", "UTC")
+                .containsEntry(
+                    "hibernate.physical_naming_strategy",
+                    "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy",
                 )
-                val emf = context.getBean("animalCommandEntityManagerFactory", EntityManagerFactory::class.java)
-                unit.set(emf)
-                assertThat(factory.dataSource).isSameAs(writer)
-                assertThat(factory.persistenceUnitInfo!!.managedClassNames).containsExactlyInAnyOrder(
-                    Animal::class.java.name,
-                    Shelter::class.java.name,
-                    BaseTimeEntity::class.java.name,
-                )
-                assertThat(factory.jpaPropertyMap)
-                    .containsEntry("hibernate.boot.allow_jdbc_metadata_access", false)
-                    .containsEntry("hibernate.hbm2ddl.auto", "none")
-                    .containsEntry("jakarta.persistence.schema-generation.database.action", "none")
-                    .containsEntry("hibernate.default_schema", "pawbridge_animal")
-                    .containsEntry("hibernate.jdbc.time_zone", "UTC")
-                    .containsEntry(
-                        "hibernate.physical_naming_strategy",
-                        "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy",
-                    )
-                assertThat(context.getBeansOfType(EntityManagerFactory::class.java)).hasSize(1)
-                assertThat(context.getBeansOfType(AnimalRepository::class.java)).hasSize(1)
-                assertThat(context.getBeansOfType(ShelterRepository::class.java)).hasSize(1)
-                val manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
-                assertThat(manager.dataSource).isSameAs(writer)
-                assertThat(manager.entityManagerFactory).isSameAs(emf)
-                assertThat(manager.defaultTimeout).isEqualTo(15)
-                val service = context.getBean(AnimalCommandService::class.java)
-                val writes = ReflectionTestUtils.getField(service, "writes") as TransactionTemplate
-                assertThat(writes.transactionManager).isSameAs(manager)
-                assertThat(writes.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-                assertThat(writes.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED)
-                assertThat(writes.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
-                assertThat(writes.isReadOnly).isFalse()
-                val actorJdbc = ReflectionTestUtils.getField(context.getBean(AnimalCommandActors::class.java), "jdbc") as JdbcTemplate
-                assertThat(actorJdbc.dataSource).isSameAs(writer)
-                assertThat(context.getBean(SearchDocumentWriter::class.java).dataSource()).isSameAs(writer)
-                owned.set(context.getBean(KoreanSearchAnalyzer::class.java))
-                assertThat(ReflectionTestUtils.getField(context.getBean(SearchDocumentWriter::class.java), "analyzer"))
-                    .isSameAs(owned.get())
-                assertThat(context)
-                    .hasSingleBean(AnimalCommandController::class.java)
-                    .hasSingleBean(AnimalCommandExceptionHandler::class.java)
-                    .doesNotHaveBean(AnimalDiscovery::class.java)
-                    .doesNotHaveBean(AnimalDiscoveryController::class.java)
-                    .doesNotHaveBean(AnimalRecommendations::class.java)
-                    .hasBean("jpaAuditingHandler")
-                assertThat(context.getBeansOfType(KoreanSearchAnalyzer::class.java)).hasSize(1)
-                verifyNoInteractions(writer, reader)
-            }
+            assertThat(context.getBeansOfType(EntityManagerFactory::class.java)).hasSize(1)
+            assertThat(context.getBeansOfType(AnimalRepository::class.java)).hasSize(1)
+            assertThat(context.getBeansOfType(ShelterRepository::class.java)).hasSize(1)
+            val manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
+            assertThat(manager.dataSource).isSameAs(writer)
+            assertThat(manager.entityManagerFactory).isSameAs(emf)
+            assertThat(manager.defaultTimeout).isEqualTo(15)
+            val service = context.getBean(AnimalCommandService::class.java)
+            val writes = ReflectionTestUtils.getField(service, "writes") as TransactionTemplate
+            assertThat(writes.transactionManager).isSameAs(manager)
+            assertThat(writes.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
+            assertThat(writes.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED)
+            assertThat(writes.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
+            assertThat(writes.isReadOnly).isFalse()
+            val actorJdbc = ReflectionTestUtils.getField(context.getBean(AnimalCommandActors::class.java), "jdbc") as JdbcTemplate
+            assertThat(actorJdbc.dataSource).isSameAs(writer)
+            assertThat(context.getBean(SearchDocumentWriter::class.java).dataSource()).isSameAs(writer)
+            owned.set(context.getBean(KoreanSearchAnalyzer::class.java))
+            assertThat(ReflectionTestUtils.getField(context.getBean(SearchDocumentWriter::class.java), "analyzer"))
+                .isSameAs(owned.get())
+            assertThat(context)
+                .hasSingleBean(AnimalCommandController::class.java)
+                .hasSingleBean(AnimalCommandExceptionHandler::class.java)
+                .doesNotHaveBean(AnimalDiscovery::class.java)
+                .doesNotHaveBean(AnimalDiscoveryController::class.java)
+                .doesNotHaveBean(AnimalRecommendations::class.java)
+                .hasBean("jpaAuditingHandler")
+            assertThat(context.getBeansOfType(KoreanSearchAnalyzer::class.java)).hasSize(1)
+            confirmVerified(writer, reader)
+        }
+
+        // then
         assertThat(unit.get().isOpen).isFalse()
         assertThatThrownBy { owned.get().tokens("말티즈") }.isInstanceOf(IllegalStateException::class.java)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["discovery", "recommendations", "both"])
-    fun given__commands_and_reads_enabled__when__assembling__then__share_one_analyzer_and_keep_reader_and_writer_managers_separate(
+    fun `명령과 조회 활성화__조립하면__분석기를 하나로 공유하고 읽기 쓰기 관리자를 분리한다`(
         mode: String,
     ) {
-        val writer = mock(DataSource::class.java)
-        val reader = mock(DataSource::class.java)
-        val readerManager = mock(PlatformTransactionManager::class.java)
+        // given
+        val writer = mockk<DataSource>()
+        val reader = mockk<DataSource>()
+        val readerManager = mockk<PlatformTransactionManager>()
+        excludeRecords {
+            writer.hashCode()
+            writer.toString()
+            writer.equals(any())
+            reader.hashCode()
+            reader.toString()
+            reader.equals(any())
+            readerManager.hashCode()
+            readerManager.toString()
+            readerManager.equals(any())
+        }
         val owned = AtomicReference<KoreanSearchAnalyzer>()
+
         var runner = writerInputs(writer)
             .withBean("dataSource", DataSource::class.java, Supplier { reader })
             .withBean("transactionManager", PlatformTransactionManager::class.java, Supplier { readerManager })
@@ -153,7 +185,10 @@ class AnimalCommandConfigurationTest {
         if (mode != "discovery") {
             runner = runner.withPropertyValues("pawbridge.animal-recommendations.enabled=true")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(KoreanSearchAnalyzer::class.java)).hasSize(1)
             owned.set(context.getBean(KoreanSearchAnalyzer::class.java))
@@ -168,38 +203,59 @@ class AnimalCommandConfigurationTest {
                 context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java).dataSource,
             ).isSameAs(writer)
             assertThat(context.containsBean("animalDiscoveryController")).isEqualTo(mode != "recommendations")
-            verifyNoInteractions(writer, reader, readerManager)
+            confirmVerified(writer, reader, readerManager)
         }
         assertThatThrownBy { owned.get().tokens("말티즈") }.isInstanceOf(IllegalStateException::class.java)
     }
 
     @Test
-    fun given__actor_jdbc_uses_another_source__when__commands_enabled__then__fail_before_opening_a_database_connection() {
-        val writer = mock(DataSource::class.java)
-        val other = mock(DataSource::class.java)
-        runner()
+    fun `다른 소스를 쓰는 행위자 JDBC__명령을 활성화하면__DB 연결을 열기 전에 실패한다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val other = mockk<DataSource>()
+        excludeRecords {
+            writer.hashCode()
+            writer.toString()
+            writer.equals(any())
+            other.hashCode()
+            other.toString()
+            other.equals(any())
+        }
+        val runner = runner()
             .withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(other) })
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .withPropertyValues("pawbridge.animal-commands.enabled=true")
-            .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasRootCauseMessage("Animal actors must use the same writer DataSource")
-                verifyNoInteractions(writer, other)
-            }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasFailed()
+            assertThat(context.startupFailure).hasRootCauseMessage("Animal actors must use the same writer DataSource")
+            confirmVerified(writer, other)
+        }
     }
 
     @Test
-    fun given__only_reader_inputs__when__commands_enabled__then__fail_instead_of_using_the_reader() {
-        val reader = mock(DataSource::class.java)
-        runner()
+    fun `읽기 입력만 있음__명령을 활성화하면__읽기 소스를 쓰지 않고 실패한다`() {
+        // given
+        val reader = mockk<DataSource>()
+        excludeRecords {
+            reader.hashCode()
+            reader.toString()
+            reader.equals(any())
+        }
+        val runner = runner()
             .withBean("dataSource", DataSource::class.java, Supplier { reader })
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .withPropertyValues("pawbridge.animal-commands.enabled=true")
-            .run { context ->
-                assertThat(context).hasFailed()
-                verifyNoInteractions(reader)
-            }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasFailed()
+            confirmVerified(reader)
+        }
     }
 
     companion object {

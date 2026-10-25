@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.AdminPostStatisticsQuery
 import com.pawbridge.backend.community.internal.post.application.AdminPostStatisticsQuery.BoardTypeStats
@@ -7,14 +8,13 @@ import com.pawbridge.backend.community.internal.post.application.AdminPostStatis
 import com.pawbridge.backend.community.internal.post.application.AdminPostStatisticsQuery.PostPeriodStatsResponse
 import com.pawbridge.backend.community.internal.post.web.AdminPostStatisticsController
 import com.pawbridge.backend.community.internal.post.web.AdminPostStatisticsExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -23,7 +23,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -51,18 +50,24 @@ class AdminPostStatisticsHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var statistics: AdminPostStatisticsQuery
 
     @Test
-    fun given__admin_and_long_today_count__when__reading__then__return_the_original_long_envelope_and_ignore_identity_headers() {
-        whenever(statistics.today()).thenReturn(Long.MAX_VALUE)
-        mvc.perform(
+    fun `관리자와 Long 오늘 건수__조회하면__원래 Long 봉투를 돌려주고 신원 헤더를 무시한다`() {
+        // given
+        every { statistics.today() } returns Long.MAX_VALUE
+
+        // when
+        val result = mvc.perform(
             get("$ROOT/today")
                 .header("Authorization", admin())
                 .header("X-User-Role", "ROLE_USER")
                 .header("X-User-Id", "999"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -72,28 +77,32 @@ class AdminPostStatisticsHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(statistics).today()
-        verifyNoMoreInteractions(statistics)
+        verify(exactly = 1) { statistics.today() }
+        confirmVerified(statistics)
         cleared()
     }
 
     @Test
-    fun given__admin_and_sparse_period_projection__when__reading__then__return_only_original_fields_without_filling_or_sorting() {
-        whenever(statistics.period(DAY.minusDays(2), DAY)).thenReturn(
-            PostPeriodStatsResponse(
-                DAY.minusDays(2),
-                DAY,
-                listOf(DailyPostStats(DAY.minusDays(2), Long.MAX_VALUE), DailyPostStats(DAY, 2)),
-                3,
-                listOf(BoardTypeStats("REPORT", 2), BoardTypeStats("ADOPTION", Long.MAX_VALUE)),
-            ),
+    fun `관리자와 성긴 기간 집계__조회하면__채우기나 정렬 없이 원래 필드만 돌려준다`() {
+        // given
+        every { statistics.period(any(), any()) } returns PostPeriodStatsResponse(
+            DAY.minusDays(2),
+            DAY,
+            listOf(DailyPostStats(DAY.minusDays(2), Long.MAX_VALUE), DailyPostStats(DAY, 2)),
+            3,
+            listOf(BoardTypeStats("REPORT", 2), BoardTypeStats("ADOPTION", Long.MAX_VALUE)),
         )
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             get("$ROOT/period")
                 .param("startDate", "2024-02-28")
                 .param("endDate", "2024-03-01")
                 .header("Authorization", admin()),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -107,53 +116,65 @@ class AdminPostStatisticsHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(statistics).period(DAY.minusDays(2), DAY)
-        verifyNoMoreInteractions(statistics)
+        verify(exactly = 1) { statistics.period(DAY.minusDays(2), DAY) }
+        confirmVerified(statistics)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["/today", "/period"])
-    fun given__user_token_and_forged_admin_header__when__requesting_invalid_dates__then__deny_before_binding_or_query(
+    fun `사용자 토큰과 위조 관리자 헤더__잘못된 날짜로 요청하면__바인딩이나 조회 전에 거부한다`(
         suffix: String,
     ) {
-        mvc.perform(
-            get(ROOT + suffix)
-                .param("startDate", "bad")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN"),
-        )
+        // given
+        val request = get(ROOT + suffix)
+            .param("startDate", "bad")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Role", "ROLE_ADMIN")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(statistics)
+        confirmVerified(statistics)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "invalid"])
-    fun given__missing_or_invalid_bearer__when__requesting_bad_dates__then__authenticate_before_binding(token: String) {
+    fun `없거나 잘못된 Bearer__잘못된 날짜로 요청하면__바인딩 전에 인증한다`(token: String) {
+        // given
         val request = get("$ROOT/period").param("startDate", "bad").header("X-User-Role", "ROLE_ADMIN")
         if (token == "invalid") {
             request.header("Authorization", "Bearer invalid")
         }
         val message = if (token == "missing") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(statistics)
+        confirmVerified(statistics)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["startDate", "endDate", "malformed"])
-    fun given__missing_or_malformed_date__when__binding__then__keep_the_distinct_original_400_bodies_without_query(
+    fun `누락되었거나 잘못된 날짜__바인딩하면__조회 없이 서로 다른 원래 400 본문을 유지한다`(
         defect: String,
     ) {
+        // given
         val request = get("$ROOT/period").header("Authorization", admin())
         if (defect != "startDate") {
             request.param("startDate", if (defect == "malformed") "2024-02-30" else DAY.toString())
@@ -161,10 +182,14 @@ class AdminPostStatisticsHttpTest {
         if (defect != "endDate") {
             request.param("endDate", DAY.toString())
         }
+
+        // when
         val result = mvc.perform(request)
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
+
+        // then
         if (defect == "malformed") {
             result.andExpect(content().string(""))
         } else {
@@ -175,67 +200,87 @@ class AdminPostStatisticsHttpTest {
                 ),
             )
         }
-        verifyNoInteractions(statistics)
+        confirmVerified(statistics)
         cleared()
     }
 
     @Test
-    fun given__business_rejected_range__when__admin_reads__then__return_original_reason_in_envelope() {
+    fun `업무 규칙이 거부한 기간__관리자가 조회하면__원래 사유를 봉투에 담아 돌려준다`() {
+        // given
         val reason = "오늘까지 최대 366일의 올바른 조회 기간이 필요합니다."
-        whenever(statistics.period(DAY, DAY.minusDays(1))).thenThrow(ResponseStatusException(HttpStatus.BAD_REQUEST, reason))
-        mvc.perform(
+
+        every { statistics.period(any(), any()) } throws ResponseStatusException(HttpStatus.BAD_REQUEST, reason)
+
+        // when
+        val result = mvc.perform(
             get("$ROOT/period")
                 .param("startDate", DAY.toString())
                 .param("endDate", DAY.minusDays(1).toString())
                 .header("Authorization", admin()),
         )
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"" + reason + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(statistics).period(DAY, DAY.minusDays(1))
-        verifyNoMoreInteractions(statistics)
+        verify(exactly = 1) { statistics.period(DAY, DAY.minusDays(1)) }
+        confirmVerified(statistics)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["dao", "commit", "runtime"])
-    fun given__query_commit_or_runtime_failure__when__admin_reads__then__retain_safe_500_without_retry_or_private_details(
+    fun `조회 커밋 또는 런타임 실패__관리자가 조회하면__재시도와 내부 정보 없이 안전한 500을 유지한다`(
         phase: String,
     ) {
+        // given
         val failure: RuntimeException = when (phase) {
             "dao" -> DataAccessResourceFailureException("private-sql")
             "commit" -> TransactionSystemException("private-commit")
             else -> IllegalStateException("private-runtime")
         }
-        whenever(statistics.period(DAY, DAY)).thenThrow(failure)
-        mvc.perform(
+
+        every { statistics.period(any(), any()) } throws failure
+
+        // when
+        val result = mvc.perform(
             get("$ROOT/period")
                 .param("startDate", DAY.toString())
                 .param("endDate", DAY.toString())
                 .header("Authorization", admin()),
         )
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(statistics).period(DAY, DAY)
-        verifyNoMoreInteractions(statistics)
+        verify(exactly = 1) { statistics.period(DAY, DAY) }
+        confirmVerified(statistics)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["GET /api/v1/admin/posts/stats/period/extra", "POST /api/v1/admin/posts/stats/today"])
-    fun given__an_unported_neighbor_or_method__when__admin_requests__then__keep_default_denial(wire: String) {
+    fun `이식되지 않은 이웃 경로나 메서드__관리자가 요청하면__기본 거부를 유지한다`(wire: String) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))
+
+        // when
+        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(statistics)
+        confirmVerified(statistics)
         cleared()
     }
 
