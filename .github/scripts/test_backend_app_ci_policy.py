@@ -229,6 +229,36 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('        if: always()', cleanup)
         self.assertNotRegex(check, r'--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)')
 
+    def test_given_candidate_build__when_running__then_use_the_runner_cpus_without_skipping_any_task(self):
+        package = self.job('package')
+        self.assertIn('bash ./gradlew projects check :boot:bootJar --max-workers=4 -Dorg.gradle.parallel=true\n', package)
+        self.assertIn('bash ./gradlew :boot:compileCompatibilityTestJava --max-workers=4 -Dorg.gradle.parallel=true\n', package)
+        self.assertNotIn('--max-workers=1', package)
+        self.assertNotIn('-Dorg.gradle.parallel=false', package)
+        self.assertNotRegex(package, r'--build-cache|--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)')
+        gradle_properties = (ROOT / 'backend-app/gradle.properties').read_text()
+        self.assertNotIn('org.gradle.caching', gradle_properties)
+        self.assertIn('org.gradle.jvmargs=-Xmx3g', gradle_properties)
+        self.assertIn('kotlin.daemon.jvmargs=-Xmx2g', gradle_properties)
+
+    def test_given_database_contracts__when_running__then_keep_their_gradle_tasks_serial(self):
+        check = self.job('check')
+        self.assertIn('--no-daemon --max-workers=1 -Dorg.gradle.parallel=false', check)
+        boot = (ROOT / 'backend-app/boot/build.gradle').read_text()
+        self.assertGreaterEqual(boot.count("systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'"), 3)
+
+    def test_given_gradle_dependency_cache__when_running__then_only_dev_pushes_write_and_build_outputs_are_not_cached(self):
+        package = self.job('package')
+        setup = package.split('uses: gradle/actions/setup-gradle@', 1)[1].split('      - name:', 1)[0]
+        self.assertIn("cache-read-only: ${{ github.event_name == 'pull_request' }}", setup)
+        self.assertNotIn('cache-disabled', setup)
+        self.assertNotIn('cache-write-only', setup)
+        self.assertIn('validate-wrappers: true', setup)
+        self.assertLess(package.index('name: Isolate Gradle state on the hosted runner'),
+                        package.index('uses: gradle/actions/setup-gradle@'))
+        self.assertIn('$RUNNER_TEMP/pawbridge-backend-app-gradle', package)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', package)
+
     def test_given_removed_old_service_sources__when_packaging__then_compile_and_check_out_only_the_application(self):
         build = (ROOT / 'backend-app/boot/build.gradle').read_text()
         self.assertNotIn("tasks.named('compileTestJava', JavaCompile)", build)

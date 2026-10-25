@@ -156,7 +156,11 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           validate-wrappers: true
-          cache-disabled: true
+          # Only downloaded dependencies and the Gradle distribution are cached, under the isolated
+          # GRADLE_USER_HOME above. The Gradle build cache stays off (org.gradle.caching is unset),
+          # so every test, architecture and bootJar task still executes against this checkout.
+          # Pull requests only read the cache; pushes to dev are the only writers.
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
           dependency-graph: disabled
           build-scan-publish: false
           add-job-summary-as-pr-comment: never
@@ -179,14 +183,14 @@ jobs:
             printf 'jdk_version=%s\n' "$JDK_VERSION"
             java -version 2>&1
           } | tee build/ci/runtime-metadata.txt
-          bash ./gradlew --version --no-daemon --max-workers=1 -Dorg.gradle.parallel=false | tee build/ci/gradle-version.txt
+          bash ./gradlew --version | tee build/ci/gradle-version.txt
           grep -Fx 'Gradle 8.14.3' build/ci/gradle-version.txt
 
       - name: Check modules, boundaries, unit tests and executable JAR
-        run: bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+        run: bash ./gradlew projects check :boot:bootJar --max-workers=4 -Dorg.gradle.parallel=true
 
       - name: Compile the PostgreSQL compatibility test without running it
-        run: bash ./gradlew :boot:compileCompatibilityTestJava --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+        run: bash ./gradlew :boot:compileCompatibilityTestJava --max-workers=4 -Dorg.gradle.parallel=true
 
       - name: Bind the candidate JAR to this checked source
         id: package
