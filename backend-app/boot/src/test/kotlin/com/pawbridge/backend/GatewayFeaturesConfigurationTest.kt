@@ -16,8 +16,13 @@ class GatewayFeaturesConfigurationTest {
     private val runner = ApplicationContextRunner().withUserConfiguration(GatewayFeaturesConfiguration::class.java)
 
     @Test
-    fun given__defaults__when__starting__then__only_the_temporary_rewrite_is_registered_ahead_of_security() {
+    fun `기본 설정일 때__기동하면__임시 재작성 필터만 보안보다 앞에 등록된다`() {
+        // given
+        // 클래스의 runner는 설정 클래스만 올린 기본 상태다
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasBean("legacyApiPathFilter")
             val registration = context.getBean("legacyApiPathFilter") as FilterRegistrationBean<*>
             assertThat(registration.filter).isInstanceOf(LegacyApiPathFilter::class.java)
@@ -27,14 +32,25 @@ class GatewayFeaturesConfigurationTest {
     }
 
     @Test
-    fun given__rewrite_disabled__when__starting__then__no_rewrite_filter() {
-        runner.withPropertyValues("pawbridge.legacy-api-paths.enabled=false")
-            .run { context -> assertThat(context).doesNotHaveBean("legacyApiPathFilter") }
+    fun `재작성을 껐을 때__기동하면__재작성 필터가 없다`() {
+        // given
+        val disabled = runner.withPropertyValues("pawbridge.legacy-api-paths.enabled=false")
+
+        // when
+        disabled.run { context ->
+            // then
+            assertThat(context).doesNotHaveBean("legacyApiPathFilter")
+        }
     }
 
     @Test
-    fun given__lost_search_enabled__when__starting__then__limits_follow_security_with_gateway_defaults() {
-        runner.withPropertyValues("pawbridge.animal-lost-search.enabled=true").run { context ->
+    fun `분실 검색을 켰을 때__기동하면__한도 필터가 보안 뒤에서 게이트웨이 기본값으로 동작한다`() {
+        // given
+        val enabled = runner.withPropertyValues("pawbridge.animal-lost-search.enabled=true")
+
+        // when
+        enabled.run { context ->
+            // then
             val registration = context.getBean("lostSearchLimitsFilter") as FilterRegistrationBean<*>
             assertThat(registration.filter).isInstanceOf(LostSearchLimitsFilter::class.java)
             assertThat(registration.order).isGreaterThan(-100)
@@ -47,14 +63,19 @@ class GatewayFeaturesConfigurationTest {
     }
 
     @Test
-    fun given__lost_search_properties__when__starting__then__override_the_defaults() {
-        runner.withPropertyValues(
+    fun `분실 검색 속성을 줬을 때__기동하면__기본값을 덮어쓴다`() {
+        // given
+        val overridden = runner.withPropertyValues(
             "pawbridge.animal-lost-search.enabled=true",
             "lost-search.max-request-bytes=100",
             "lost-search.max-concurrent=5",
             "lost-search.requests-per-minute=7",
             "lost-search.timeout-seconds=9",
-        ).run { context ->
+        )
+
+        // when
+        overridden.run { context ->
+            // then
             val filter = (context.getBean("lostSearchLimitsFilter") as FilterRegistrationBean<*>).filter
             assertThat(ReflectionTestUtils.getField(filter, "maxBytes")).isEqualTo(100)
             assertThat(ReflectionTestUtils.getField(filter, "requestsPerMinute")).isEqualTo(7)
@@ -63,9 +84,14 @@ class GatewayFeaturesConfigurationTest {
     }
 
     @Test
-    fun given__runtime_properties__when__reading__then__expose_only_health_info_and_prometheus_on_a_separate_loopback_port_and_keep_the_rewrite_on() {
+    fun `런타임 속성일 때__읽으면__health info prometheus만 루프백 별도 포트로 노출하고 재작성을 켜 둔다`() {
+        // given
         val properties = Properties()
+
+        // when
         javaClass.getResourceAsStream("/application.properties").use { input -> properties.load(input) }
+
+        // then
         assertThat(properties.getProperty("management.endpoints.web.exposure.include")).isEqualTo("health,info,prometheus")
         assertThat(properties.getProperty("management.server.port")).isEqualTo("\${PAWBRIDGE_MANAGEMENT_PORT:9464}")
         assertThat(properties.getProperty("management.server.address"))
@@ -78,8 +104,15 @@ class GatewayFeaturesConfigurationTest {
     }
 
     @Test
-    fun given__default_origins__when__reading__then__match_the_original_gateway_list() {
-        assertThat(GatewayCors.DEFAULT_ORIGIN_PATTERNS.split(",")).containsExactly(
+    fun `기본 출처일 때__읽으면__원래 게이트웨이 목록과 같다`() {
+        // given
+        val origins = GatewayCors.DEFAULT_ORIGIN_PATTERNS
+
+        // when
+        val split = origins.split(",")
+
+        // then
+        assertThat(split).containsExactly(
             "http://localhost:3000",
             "http://127.0.0.1:3000",
             "http://localhost:5173",

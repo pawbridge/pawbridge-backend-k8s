@@ -5,11 +5,12 @@ import com.pawbridge.backend.user.internal.login.application.LocalLogin
 import com.pawbridge.backend.user.internal.login.web.LocalLoginFilter
 import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens
+import io.mockk.justRun
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.context.annotation.Configuration
@@ -28,14 +29,32 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.util.function.Supplier
 
 class LocalLoginConfigurationTest {
+    // Spring runs the InitializingBean callback when it registers these as beans, so a strict mock must accept it.
+    private fun jdbcTemplate(): JdbcTemplate {
+        val bean = mockk<JdbcTemplate>()
+        justRun { bean.afterPropertiesSet() }
+        return bean
+    }
+
+    // Spring runs the InitializingBean callback when it registers these as beans, so a strict mock must accept it.
+    private fun transactionManager(): JdbcTransactionManager {
+        val bean = mockk<JdbcTransactionManager>()
+        justRun { bean.afterPropertiesSet() }
+        return bean
+    }
+
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false"])
-    fun given__local_login_off__when__assembling_without_inputs__then__register_no_login_or_chain(flag: String) {
+    fun `로컬 로그인이 꺼졌을 때__입력 없이 조립하면__로그인과 체인을 등록하지 않는다`(flag: String) {
+        // given
         var runner = ApplicationContextRunner().withUserConfiguration(LocalLoginConfiguration::class.java)
         if (flag == "false") {
             runner = runner.withPropertyValues("pawbridge.auth.local-enabled=false")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(LocalLogin::class.java)
                 .doesNotHaveBean(SecurityFilterChain::class.java)
@@ -44,23 +63,40 @@ class LocalLoginConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["jdbc", "manager", "tokens", "sessions"])
-    fun given__enabled_without_a_required_shared_input__when__assembling__then__fail_instead_of_creating_a_replacement(
+    fun `켜졌지만 공유 입력 하나가 없을 때__조립하면__대체물을 만들지 않고 실패한다`(
         missing: String,
     ) {
-        inputs(missing).run { context -> assertThat(context).hasFailed() }
+        // given
+        val runner = inputs(missing)
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasFailed()
+        }
     }
 
     @Test
-    fun given__local_login_enabled_without_explicit_session_flag__when__assembling__then__fail_before_authentication() {
-        inputs("").withPropertyValues("pawbridge.auth.sessions-enabled=false").run { context ->
+    fun `세션 플래그를 명시적으로 켜지 않았을 때__로컬 로그인을 켜고 조립하면__인증 전에 실패한다`() {
+        // given
+        val runner = inputs("").withPropertyValues("pawbridge.auth.sessions-enabled=false")
+
+        // when
+        runner.run { context ->
+            // then
             assertThat(context).hasFailed()
             assertThat(context.startupFailure).hasStackTraceContaining("Local login requires explicitly enabled auth sessions")
         }
     }
 
     @Test
-    fun given__enabled_shared_inputs__when__assembling__then__reuse_writer_and_issuer_with_one_exact_path_filter_and_no_global_authentication_beans() {
-        inputs("").run { context ->
+    fun `공유 입력이 모두 있을 때__조립하면__작성기와 발급기를 재사용하고 경로 필터를 하나만 두며 전역 인증 빈은 없다`() {
+        // given
+        val runner = inputs("")
+
+        // when
+        runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             val login = context.getBean(LocalLogin::class.java)
             assertThat(ReflectionTestUtils.getField(login, "jdbc")).isSameAs(context.getBean("writeJdbc"))
@@ -93,20 +129,20 @@ class LocalLoginConfigurationTest {
             .withUserConfiguration(LocalLoginConfiguration::class.java, SecurityInputs::class.java)
             .withPropertyValues("pawbridge.auth.local-enabled=true", "pawbridge.auth.sessions-enabled=true")
         if (missing != "jdbc") {
-            runner = runner.withBean("writeJdbc", JdbcTemplate::class.java, Supplier { mock(JdbcTemplate::class.java) })
+            runner = runner.withBean("writeJdbc", JdbcTemplate::class.java, Supplier { jdbcTemplate() })
         }
         if (missing != "manager") {
             runner = runner.withBean(
                 "writeTransactionManager",
                 JdbcTransactionManager::class.java,
-                Supplier { mock(JdbcTransactionManager::class.java) },
+                Supplier { transactionManager() },
             )
         }
         if (missing != "tokens") {
-            runner = runner.withBean(JwtSessionTokens::class.java, Supplier { mock(JwtSessionTokens::class.java) })
+            runner = runner.withBean(JwtSessionTokens::class.java, Supplier { mockk<JwtSessionTokens>() })
         }
         if (missing != "sessions") {
-            runner = runner.withBean(JdbcAuthSessionStore::class.java, Supplier { mock(JdbcAuthSessionStore::class.java) })
+            runner = runner.withBean(JdbcAuthSessionStore::class.java, Supplier { mockk<JdbcAuthSessionStore>() })
         }
         return runner
     }

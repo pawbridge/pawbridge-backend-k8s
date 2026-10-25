@@ -3,25 +3,23 @@ package com.pawbridge.backend
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.boot.configuration.LocalLoginConfiguration
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
-import com.pawbridge.backend.support.anyNonNull
 import com.pawbridge.backend.user.internal.login.application.LocalLogin
 import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken
 import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens
+import com.ninjasquad.springmockk.MockkBean
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
@@ -37,7 +35,6 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -72,25 +69,28 @@ class LocalLoginHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var login: LocalLogin
 
     @ParameterizedTest
     @ValueSource(strings = ["POST", "GET"])
-    fun given__valid_credentials_and_forged_identity__when__original_exact_login__then__real_bcrypt_access_in_body_and_refresh_only_in_cookie(
+    fun `유효한 자격 증명과 위조 신원 헤더일 때__정확한 경로로 로그인하면__접근 토큰은 본문에 갱신 토큰은 쿠키에만 담긴다`(
         method: String,
     ) {
+        // given
         val role = if (method == "POST") "ROLE_USER" else "ROLE_SHELTER"
         val care: String? = if (method == "POST") null else "synthetic-care"
         val account = account(HASH, role, care)
-        whenever(login.findByEmail("MiXeD@example.invalid")).thenReturn(Optional.of(account))
-        whenever(login.complete(account)).thenAnswer {
+
+        every { login.findByEmail(any()) } returns Optional.of(account)
+        every { login.complete(any()) } answers {
             LocalLogin.CompletedLogin(
                 TOKENS.access(JwtSessionTokens.UserClaims(7, account.email, account.name, role, care)),
                 IssuedRefreshToken(REFRESH, 1_209_600),
             )
         }
 
+        // when
         val result = mvc.perform(
             request(HttpMethod.valueOf(method), "/api/v1/auth/login")
                 .contentType("application/json")
@@ -111,6 +111,7 @@ class LocalLoginHttpTest {
             .andExpect(jsonPath("$.data.refreshToken").doesNotExist())
             .andReturn()
 
+        // then
         val data = ObjectMapper().readTree(result.response.contentAsString).path("data")
         assertThat(data.size()).isEqualTo(6)
         if (care == null) {
@@ -130,22 +131,21 @@ class LocalLoginHttpTest {
             .doesNotContain("Domain=")
         assertThat(result.response.getHeaders("Set-Cookie")).hasSize(1)
         assertThat(result.request.getSession(false)).isNull()
-        verify(login).findByEmail("MiXeD@example.invalid")
-        verify(login).complete(account)
-        verifyNoMoreInteractions(login)
+        verify(exactly = 1) { login.findByEmail("MiXeD@example.invalid") }
+        verify(exactly = 1) { login.complete(account) }
+        confirmVerified(login)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "wrong", "oauth-placeholder", "null-stored", "missing-password"])
-    fun given__unknown_or_bad_credentials__when__login__then__same_hidden401_and_no_token_storage(kind: String) {
+    fun `없거나 틀린 자격 증명일 때__로그인하면__같은 숨김 401을 돌려주고 토큰을 저장하지 않는다`(kind: String) {
+        // given
         val stored = when (kind) {
             "oauth-placeholder" -> "OAuth2"
             "null-stored" -> null
             else -> HASH
         }
         val account = account(stored, "ROLE_USER", null)
-        whenever(login.findByEmail("synthetic@example.invalid"))
-            .thenReturn(if (kind == "missing") Optional.empty() else Optional.of(account))
         val input = when (kind) {
             "wrong" -> "wrong-synthetic-password"
             "missing-password" -> null
@@ -155,7 +155,14 @@ class LocalLoginHttpTest {
         if (input != null) {
             body.put("password", input)
         }
-        mvc.perform(post("/api/v1/auth/login").contentType("application/json").content(body.toString()))
+
+        every { login.findByEmail(any()) } returns if (kind == "missing") Optional.empty() else Optional.of(account)
+
+        // when
+        val result = mvc.perform(post("/api/v1/auth/login").contentType("application/json").content(body.toString()))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -163,52 +170,66 @@ class LocalLoginHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(login, never()).complete(anyNonNull<LocalLogin.Account>())
+        verify(exactly = 0) { login.complete(any()) }
     }
 
     @Test
-    fun given__email_not_mvc_validated__when__original_filter_login__then__do_not_add_an_email_policy() {
+    fun `이메일을 MVC에서 검증하지 않을 때__원래 필터로 로그인하면__이메일 정책을 더하지 않는다`() {
+        // given
         val account = account(HASH, "ROLE_USER", null)
-        whenever(login.findByEmail("not-email")).thenReturn(Optional.of(account))
-        whenever(login.complete(account)).thenReturn(
-            LocalLogin.CompletedLogin("synthetic-access", IssuedRefreshToken(REFRESH, 60)),
-        )
 
-        mvc.perform(
+        every { login.findByEmail(any()) } returns Optional.of(account)
+        every { login.complete(any()) } returns
+            LocalLogin.CompletedLogin("synthetic-access", IssuedRefreshToken(REFRESH, 60))
+
+        // when
+        val result = mvc.perform(
             post("/api/v1/auth/login")
                 .contentType("application/json")
                 .content("{\"email\":\"not-email\",\"password\":\"" + PASSWORD + "\"}"),
         )
-            .andExpect(status().isOk())
 
-        verify(login).complete(account)
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { login.findByEmail("not-email") }
+        verify(exactly = 1) { login.complete(account) }
     }
 
     @Test
-    fun given__account_lookup_failure__when__dao_authentication__then__original_generic401_without_private_cause_in_logs(
+    fun `계정 조회가 실패했을 때__DAO 인증하면__로그에 내부 원인 없이 원래의 일반 401을 돌려준다`(
         output: CapturedOutput,
     ) {
-        whenever(login.findByEmail(anyString())).thenThrow(DataAccessResourceFailureException(PRIVATE))
-        mvc.perform(
+        // given
+        every { login.findByEmail(any()) } throws DataAccessResourceFailureException(PRIVATE)
+
+        // when
+        val result = mvc.perform(
             post("/api/v1/auth/login")
                 .contentType("application/json")
                 .content("{\"email\":\"synthetic@example.invalid\",\"password\":\"" + PASSWORD + "\"}"),
         )
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"인증에 실패했습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(login, never()).complete(anyNonNull<LocalLogin.Account>())
+        verify(exactly = 0) { login.complete(any()) }
         assertThat(output.all).doesNotContain(PRIVATE, PASSWORD, HASH)
     }
 
     @Test
-    fun given__refresh_storage_failure_after_valid_password__when__login__then__propagate_original_failure_without_tokens_or_private_cause(
+    fun `유효한 비밀번호 뒤 갱신 토큰 저장이 실패했을 때__로그인하면__토큰이나 내부 원인 없이 원래 실패를 전파한다`(
         output: CapturedOutput,
     ) {
+        // given
         val account = account(HASH, "ROLE_USER", null)
-        whenever(login.findByEmail(anyString())).thenReturn(Optional.of(account))
-        whenever(login.complete(account)).thenThrow(DataAccessResourceFailureException(PRIVATE))
+
+        every { login.findByEmail(any()) } returns Optional.of(account)
+        every { login.complete(any()) } throws DataAccessResourceFailureException(PRIVATE)
+
+        // when
         val failure = catchThrowable {
             mvc.perform(
                 post("/api/v1/auth/login")
@@ -216,32 +237,44 @@ class LocalLoginHttpTest {
                     .content("{\"email\":\"synthetic@example.invalid\",\"password\":\"" + PASSWORD + "\"}"),
             )
         }
+
+        // then
         assertThat(failure).isNotNull()
         assertThat(trace(failure)).doesNotContain(PRIVATE, PASSWORD, HASH)
         assertThat(output.all).doesNotContain(PRIVATE, PASSWORD, HASH)
+        verify(exactly = 1) { login.complete(account) }
     }
 
     @Test
-    fun given__malformed_json_with_private_input__when__login__then__original_filter_exception_without_body_cause(
+    fun `내부 입력이 든 잘못된 JSON일 때__로그인하면__본문 원인 없이 원래 필터 예외가 난다`(
         output: CapturedOutput,
     ) {
-        val failure = catchThrowable {
-            mvc.perform(
-                post("/api/v1/auth/login").contentType("application/json").content("{\"password\":\"" + PRIVATE + "\""),
-            )
-        }
+        // given
+        val request = post("/api/v1/auth/login").contentType("application/json").content("{\"password\":\"" + PRIVATE + "\"")
+
+        // when
+        val failure = catchThrowable { mvc.perform(request) }
+
+        // then
         assertThat(failure).isNotNull()
         assertThat(trace(failure)).doesNotContain(PRIVATE)
         assertThat(output.all).doesNotContain(PRIVATE)
-        verifyNoInteractions(login)
+        confirmVerified(login)
     }
 
     // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
     @ParameterizedTest
     @ValueSource(strings = ["/api/v1/auth/login/extra", "/api/v1/auth/login/", "/api/auth/login"])
-    fun given__neighboring_route__when__requesting__then__no_login_or_policy_widening(path: String) {
-        mvc.perform(post(path).contentType("application/json").content("{}")).andExpect(status().isForbidden())
-        verifyNoInteractions(login)
+    fun `인접 경로일 때__요청하면__로그인이나 정책 확장 없이 거절한다`(path: String) {
+        // given
+        val request = post(path).contentType("application/json").content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(login)
     }
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -251,14 +284,23 @@ class LocalLoginHttpTest {
 
         @Bean
         fun authSessionStore(): JdbcAuthSessionStore {
-            return mock(JdbcAuthSessionStore::class.java)
+            return mockk<JdbcAuthSessionStore>()
         }
 
+        // Spring runs the InitializingBean callback when it registers these as beans, so a strict mock must accept it.
         @Bean("writeJdbc")
-        fun jdbc(): JdbcTemplate = mock(JdbcTemplate::class.java)
+        fun jdbc(): JdbcTemplate {
+            val jdbc = mockk<JdbcTemplate>()
+            justRun { jdbc.afterPropertiesSet() }
+            return jdbc
+        }
 
         @Bean("writeTransactionManager")
-        fun manager(): JdbcTransactionManager = mock(JdbcTransactionManager::class.java)
+        fun manager(): JdbcTransactionManager {
+            val manager = mockk<JdbcTransactionManager>()
+            justRun { manager.afterPropertiesSet() }
+            return manager
+        }
     }
 
     companion object {
@@ -289,18 +331,22 @@ class LocalLoginDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var login: LocalLogin
 
     @Test
-    fun given__local_login_default_off__when__credentials_and_identity_are_supplied__then__existing403_without_authentication() {
-        mvc.perform(
-            post("/api/v1/auth/login")
-                .contentType("application/json")
-                .content("{\"email\":\"synthetic@example.invalid\",\"password\":\"synthetic-password\"}")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(login)
+    fun `로컬 로그인이 기본으로 꺼졌을 때__자격 증명과 신원이 주어지면__인증 없이 기존 403을 돌려준다`() {
+        // given
+        val request = post("/api/v1/auth/login")
+            .contentType("application/json")
+            .content("{\"email\":\"synthetic@example.invalid\",\"password\":\"synthetic-password\"}")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(login)
     }
 }

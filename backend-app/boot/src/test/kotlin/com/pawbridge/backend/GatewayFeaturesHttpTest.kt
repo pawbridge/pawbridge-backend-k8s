@@ -95,40 +95,64 @@ class GatewayFeaturesHttpTest {
 
     @ParameterizedTest
     @CsvSource("/api/v1/posts", "/api/posts", "/api/v1/products/3", "/api/v1/animals/lost-candidates")
-    fun given__browser_preflight__when__no_token__then__pass_security_with_cors_headers(path: String) {
-        mvc.perform(
-            options(path)
-                .header("Origin", "https://www.pawbridge.kr")
-                .header("Access-Control-Request-Method", "POST")
-                .header("Access-Control-Request-Headers", "authorization,content-type"),
-        )
+    fun `브라우저 사전 요청일 때__토큰 없이 보내면__CORS 헤더와 함께 보안을 통과한다`(path: String) {
+        // given
+        val preflight = options(path)
+            .header("Origin", "https://www.pawbridge.kr")
+            .header("Access-Control-Request-Method", "POST")
+            .header("Access-Control-Request-Headers", "authorization,content-type")
+
+        // when
+        val result = mvc.perform(preflight)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Access-Control-Allow-Origin", "https://www.pawbridge.kr"))
             .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
     }
 
     @Test
-    fun given__foreign_origin__when__preflight__then__reject() {
-        mvc.perform(
-            options("/api/v1/posts")
-                .header("Origin", "https://evil.example")
-                .header("Access-Control-Request-Method", "POST"),
-        )
+    fun `허용되지 않은 출처일 때__사전 요청하면__거절한다`() {
+        // given
+        val preflight = options("/api/v1/posts")
+            .header("Origin", "https://evil.example")
+            .header("Access-Control-Request-Method", "POST")
+
+        // when
+        val result = mvc.perform(preflight)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().doesNotExist("Access-Control-Allow-Origin"))
     }
 
     @Test
-    fun given__security_denial__when__allowed_origin_requests__then__the_error_still_carries_cors_headers() {
-        mvc.perform(request(HttpMethod.GET, "/api/v1/posts/anything").header("Origin", "https://pawbridge.kr"))
+    fun `보안이 거부했을 때__허용된 출처가 요청하면__오류에도 CORS 헤더가 실린다`() {
+        // given
+        val request = request(HttpMethod.GET, "/api/v1/posts/anything").header("Origin", "https://pawbridge.kr")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Access-Control-Allow-Origin", "https://pawbridge.kr"))
             .andExpect(header().string("Access-Control-Expose-Headers", "Retry-After, Authorization"))
     }
 
     @Test
-    fun given__foreign_origin__when__actual_public_request__then__keep_the_normal_response_without_cors_headers() {
-        mvc.perform(get("/api/v1/animals").header("Origin", "https://foreign.invalid"))
+    fun `허용되지 않은 출처일 때__공개 요청을 실제로 보내면__CORS 헤더 없이 정상 응답을 유지한다`() {
+        // given
+        val request = get("/api/v1/animals").header("Origin", "https://foreign.invalid")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string("animals"))
             .andExpect(header().doesNotExist("Access-Control-Allow-Origin"))
@@ -137,28 +161,52 @@ class GatewayFeaturesHttpTest {
     // ---- legacy paths evaluated by Security and MVC as /api/v1 ----
 
     @Test
-    fun given__old_public_path__when__requested__then__security_and_mvc_use_the_v1_path() {
-        mvc.perform(get("/api/animals")).andExpect(status().isOk()).andExpect(content().string("animals"))
-        mvc.perform(get("/api/v1/animals")).andExpect(status().isOk()).andExpect(content().string("animals"))
+    fun `옛 공개 경로일 때__요청하면__보안과 MVC가 v1 경로를 쓴다`() {
+        // given
+        // 옛 경로와 v1 경로를 모두 요청한다
+
+        // when
+        val old = mvc.perform(get("/api/animals"))
+        val v1 = mvc.perform(get("/api/v1/animals"))
+
+        // then
+        old.andExpect(status().isOk()).andExpect(content().string("animals"))
+        v1.andExpect(status().isOk()).andExpect(content().string("animals"))
     }
 
     @Test
-    fun given__old_protected_path__when__requested__then__the_v1_authentication_rule_applies() {
+    fun `옛 보호 경로일 때__요청하면__v1 인증 규칙이 적용된다`() {
+        // given
         val token = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
-        mvc.perform(get("/api/users/me/cart")).andExpect(status().isUnauthorized())
-        mvc.perform(get("/api/v1/users/me/cart")).andExpect(status().isUnauthorized())
-        mvc.perform(get("/api/users/me/cart").header("Authorization", token))
+
+        // when
+        val oldWithoutToken = mvc.perform(get("/api/users/me/cart"))
+        val v1WithoutToken = mvc.perform(get("/api/v1/users/me/cart"))
+        val oldWithToken = mvc.perform(get("/api/users/me/cart").header("Authorization", token))
+
+        // then
+        oldWithoutToken.andExpect(status().isUnauthorized())
+        v1WithoutToken.andExpect(status().isUnauthorized())
+        oldWithToken
             .andExpect(status().isOk())
             .andExpect(content().string("cart"))
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["/api/payments/confirm", "/api/v1/payments/confirm"])
-    fun given__payment_confirmation__when__requested__then__authentication_is_required_on_both_spellings(path: String) {
+    fun `결제 확인일 때__요청하면__두 표기 모두 인증이 필요하다`(path: String) {
+        // given
         val token = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
-        mvc.perform(post(path)).andExpect(status().isUnauthorized())
-        mvc.perform(post(path).header("Authorization", "Bearer synthetic-invalid-token")).andExpect(status().isUnauthorized())
-        mvc.perform(post(path).header("Authorization", token)).andExpect(status().isOk()).andExpect(content().string("confirmed"))
+
+        // when
+        val withoutToken = mvc.perform(post(path))
+        val invalidToken = mvc.perform(post(path).header("Authorization", "Bearer synthetic-invalid-token"))
+        val validToken = mvc.perform(post(path).header("Authorization", token))
+
+        // then
+        withoutToken.andExpect(status().isUnauthorized())
+        invalidToken.andExpect(status().isUnauthorized())
+        validToken.andExpect(status().isOk()).andExpect(content().string("confirmed"))
     }
 
     @ParameterizedTest
@@ -171,14 +219,28 @@ class GatewayFeaturesHttpTest {
         "GET,/api/payments/unknown",
         "GET,/api/unknown",
     )
-    fun given__path_the_gateway_never_routed__when__requested__then__stay_denied(method: String, path: String) {
-        mvc.perform(request(HttpMethod.valueOf(method), path)).andExpect(status().isForbidden())
+    fun `게이트웨이가 라우팅하지 않던 경로일 때__요청하면__계속 거부된다`(method: String, path: String) {
+        // given
+        val request = request(HttpMethod.valueOf(method), path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
     }
 
     @ParameterizedTest
     @CsvSource("/api/users/internal/5/nickname", "/api/v1/users/internal/5/nickname")
-    fun given__internal_user_path__when__requested__then__404_before_security(path: String) {
-        mvc.perform(get(path))
+    fun `내부 사용자 경로일 때__요청하면__보안 전에 404를 돌려준다`(path: String) {
+        // given
+        val request = get(path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(content().json("{\"code\":404,\"message\":\"유효하지 않은 엔드포인트입니다.\",\"data\":null}"))
     }
@@ -186,15 +248,20 @@ class GatewayFeaturesHttpTest {
     // ---- health ----
 
     @Test
-    fun given__actuator__when__requested_anonymously__then__only_get_health_is_permitted() {
-        for (path in arrayOf("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness")) {
-            // No actuator endpoints exist in this slice: permitted means "not 403" (MVC answers 404).
-            assertThat(mvc.perform(get(path)).andReturn().response.status).`as`(path).isNotEqualTo(403)
-        }
+    fun `액추에이터일 때__익명으로 요청하면__GET health만 허용된다`() {
+        // given
+        val permitted = arrayOf("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness")
         val denied = arrayOf(
             "/actuator", "/actuator/info", "/actuator/env", "/actuator/prometheus", "/actuator/metrics",
             "/actuator/beans", "/actuator/heapdump", "/actuator/health-x",
         )
+
+        // when
+        // then
+        for (path in permitted) {
+            // No actuator endpoints exist in this slice: permitted means "not 403" (MVC answers 404).
+            assertThat(mvc.perform(get(path)).andReturn().response.status).`as`(path).isNotEqualTo(403)
+        }
         for (path in denied) {
             mvc.perform(get(path)).andExpect(status().isForbidden())
         }
@@ -204,27 +271,43 @@ class GatewayFeaturesHttpTest {
     // ---- lost-candidates limits end to end ----
 
     @Test
-    fun given__small_multipart__when__searching__then__client_headers_never_reach_the_handler() {
-        mvc.perform(
-            post("/api/v1/animals/lost-candidates")
-                .contentType("multipart/form-data; boundary=x")
-                .content("x")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Id", "99")
-                .header("X-Internal-Api-Key", "forged"),
-        )
+    fun `작은 멀티파트일 때__검색하면__클라이언트 헤더가 핸들러에 닿지 않는다`() {
+        // given
+        val request = post("/api/v1/animals/lost-candidates")
+            .contentType("multipart/form-data; boundary=x")
+            .content("x")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Id", "99")
+            .header("X-Internal-Api-Key", "forged")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string("clean"))
     }
 
     @Test
-    fun given__oversized_or_wrong_type__when__searching__then__gateway_style_errors() {
-        mvc.perform(
-            post("/api/v1/animals/lost-candidates").contentType("multipart/form-data; boundary=x").content(ByteArray(1025)),
-        )
+    fun `크기를 넘었거나 형식이 틀렸을 때__검색하면__게이트웨이 방식의 오류를 돌려준다`() {
+        // given
+        val oversized = post("/api/v1/animals/lost-candidates")
+            .contentType("multipart/form-data; boundary=x")
+            .content(ByteArray(1025))
+        val wrongType = post("/api/v1/animals/lost-candidates")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}")
+
+        // when
+        val oversizedResult = mvc.perform(oversized)
+        val wrongTypeResult = mvc.perform(wrongType)
+
+        // then
+        oversizedResult
             .andExpect(status().isPayloadTooLarge())
             .andExpect(content().json("{\"message\":\"사진 크기 제한을 초과했습니다\"}"))
-        mvc.perform(post("/api/v1/animals/lost-candidates").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        wrongTypeResult
             .andExpect(status().isUnsupportedMediaType())
             .andExpect(content().json("{\"message\":\"사진 업로드 형식을 확인해 주세요\"}"))
     }

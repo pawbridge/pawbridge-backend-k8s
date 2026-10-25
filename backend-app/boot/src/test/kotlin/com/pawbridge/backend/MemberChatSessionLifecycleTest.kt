@@ -3,18 +3,14 @@ package com.pawbridge.backend
 import com.pawbridge.backend.community.internal.chat.application.MemberChat
 import com.pawbridge.backend.community.internal.chat.infrastructure.MemberChatTickets
 import com.pawbridge.backend.community.internal.chat.web.MemberChatSessions
-import com.pawbridge.backend.support.anyNonNull
+import io.mockk.clearMocks
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.anyList
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.clearInvocations
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.stubbing.Answer
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.RedisScript
@@ -24,43 +20,36 @@ import java.time.Clock
 
 class MemberChatSessionLifecycleTest {
     @Test
-    fun given__authenticated_and_pending_sockets__when__destroying_twice__then__close_each_once_without_member_or_redis_io() {
-        val redis = mock(StringRedisTemplate::class.java)
-
-        @Suppress("UNCHECKED_CAST")
-        val chat = mock(ObjectProvider::class.java) as ObjectProvider<MemberChat>
+    fun `인증된 소켓과 대기 중 소켓이 있을 때__두 번 파기하면__회원이나 Redis 접근 없이 소켓마다 한 번만 닫는다`() {
+        // given
+        val redis = mockk<StringRedisTemplate>()
+        val chat = mockk<ObjectProvider<MemberChat>>()
         val sessions = MemberChatSessions(redis, chat, Clock.systemUTC(), "synthetic-test")
-        val first = mock(WebSocketSession::class.java)
-        whenever(first.id).thenReturn("first")
-        whenever(first.isOpen).thenReturn(true)
-        val second = mock(WebSocketSession::class.java)
-        whenever(second.id).thenReturn("second")
+        val first = mockk<WebSocketSession>()
+        val second = mockk<WebSocketSession>()
+
+        every { first.id } returns "first"
+        every { first.isOpen } returns true
+        every { second.id } returns "second"
+        every { redis.execute(any<RedisScript<Any>>(), any<List<String>>(), any<String>(), any<String>(), any<String>()) } returns 1L
+        every { first.close(CloseStatus.POLICY_VIOLATION) } answers { sessions.removed("first") }
+        justRun { second.close(CloseStatus.POLICY_VIOLATION) }
+
         assertThat(sessions.open(first)).isTrue()
         assertThat(sessions.open(second)).isTrue()
-        whenever(
-            redis.execute(
-                anyNonNull<RedisScript<Any>>(),
-                anyList(),
-                anyString(),
-                anyString(),
-                anyString(),
-            ),
-        ).thenReturn(1L)
         sessions.authenticate("first", MemberChatTickets.Identity(7, Long.MAX_VALUE))
-        clearInvocations(redis)
-        doAnswer(
-            Answer<Any?> {
-                sessions.removed("first")
-                null
-            },
-        ).`when`(first).close(CloseStatus.POLICY_VIOLATION)
+        clearMocks(redis, answers = false)
+
+        // when
         sessions.destroy()
         sessions.destroy()
         // A delayed transport-disconnect callback must also see the already detached connection.
         sessions.removed("first")
         sessions.removed("second")
-        verify(first).close(CloseStatus.POLICY_VIOLATION)
-        verify(second).close(CloseStatus.POLICY_VIOLATION)
-        verifyNoInteractions(redis, chat)
+
+        // then
+        verify(exactly = 1) { first.close(CloseStatus.POLICY_VIOLATION) }
+        verify(exactly = 1) { second.close(CloseStatus.POLICY_VIOLATION) }
+        confirmVerified(redis, chat)
     }
 }
