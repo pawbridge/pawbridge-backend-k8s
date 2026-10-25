@@ -7,14 +7,13 @@ import com.pawbridge.backend.store.internal.catalogwrite.web.CategoryUpdateReque
 import com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model.Category
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.AbstractPlatformTransactionManager
@@ -25,7 +24,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.util.Optional
 
 class JpaCatalogCategoriesTest {
-    private val categories: CategoryRepository = mock(CategoryRepository::class.java)
+    private val categories = mockk<CategoryRepository>()
     private val manager = Writer()
     private val subject = JpaCatalogCategories(categories, TransactionTemplate(manager))
     private val mapper = ObjectMapper()
@@ -37,153 +36,209 @@ class JpaCatalogCategoriesTest {
     }
 
     @Test
-    fun givenParentId__whenCreating__thenSaveUnderParentAndReturnOriginalShapeInsideWriter() {
+    fun `부모 id가 있을 때__생성하면__부모 아래에 저장하고 쓰기 트랜잭션 안에서 원래 모양을 돌려준다`() {
+        // given
         val parent = category(1L, "food", null)
-        `when`(categories.findById(1L)).thenReturn(Optional.of(parent))
-        `when`(categories.save(any(Category::class.java))).thenAnswer { call ->
+        val request = mapper.readValue(
+            "{\"name\":\"dry\",\"description\":\"dry food\",\"parentId\":1}",
+            CategoryCreateRequest::class.java,
+        )
+
+        every { categories.findById(any()) } returns Optional.of(parent)
+        every { categories.save(any()) } answers {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
-            val saved = call.getArgument<Category>(0)
+            val saved = firstArg<Category>()
             ReflectionTestUtils.setField(saved, "id", 2L)
             saved
         }
 
-        val result = subject.createCategory(
-            mapper.readValue("{\"name\":\"dry\",\"description\":\"dry food\",\"parentId\":1}", CategoryCreateRequest::class.java),
-        )
+        // when
+        val result = subject.createCategory(request)
 
+        // then
         assertThat(result.id).isEqualTo(2L)
         assertThat(result.name).isEqualTo("dry")
         assertThat(result.description).isEqualTo("dry food")
         assertThat(result.parentId).isEqualTo(1L)
         assertThat(result.children).isEmpty()
         assertThat(manager.commits).isEqualTo(1)
+        verify(exactly = 1) { categories.findById(1L) }
     }
 
     @Test
-    fun givenNoParent__whenCreating__thenSaveRootWithoutParentLookup() {
-        `when`(categories.save(any(Category::class.java))).thenAnswer { call ->
-            val saved = call.getArgument<Category>(0)
+    fun `부모가 없을 때__생성하면__부모 조회 없이 루트로 저장한다`() {
+        // given
+        val request = mapper.readValue("{\"name\":\"toy\"}", CategoryCreateRequest::class.java)
+
+        every { categories.save(any()) } answers {
+            val saved = firstArg<Category>()
             ReflectionTestUtils.setField(saved, "id", 3L)
             saved
         }
 
-        val result = subject.createCategory(mapper.readValue("{\"name\":\"toy\"}", CategoryCreateRequest::class.java))
+        // when
+        val result = subject.createCategory(request)
 
+        // then
         assertThat(result.parentId).isNull()
-        verify(categories, never()).findById(any(Long::class.javaObjectType))
+        verify(exactly = 0) { categories.findById(any<Long>()) }
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenMissingParent__whenCreating__thenRejectAsInputBeforeSaving() {
-        `when`(categories.findById(9L)).thenReturn(Optional.empty())
+    fun `부모가 없는 id일 때__생성하면__저장 전에 입력 오류로 거부한다`() {
+        // given
         val request = mapper.readValue("{\"name\":\"dry\",\"parentId\":9}", CategoryCreateRequest::class.java)
 
-        assertThatThrownBy { subject.createCategory(request) }.isInstanceOf(IllegalArgumentException::class.java)
+        every { categories.findById(any()) } returns Optional.empty()
 
-        verify(categories, never()).save(any(Category::class.java))
+        // when
+        val thrown = assertThatThrownBy { subject.createCategory(request) }
+
+        // then
+        thrown.isInstanceOf(IllegalArgumentException::class.java)
+        verify(exactly = 1) { categories.findById(9L) }
+        verify(exactly = 0) { categories.save(any()) }
         assertThat(manager.rollbacks).isEqualTo(1)
     }
 
     @Test
-    fun givenBlankNameNullDescriptionAndNoParent__whenUpdating__thenKeepNameButClearDescriptionAndMoveToRoot() {
+    fun `이름이 공백이고 설명과 부모가 없을 때__수정하면__이름은 유지하고 설명은 지우고 루트로 옮긴다`() {
+        // given
         val parent = category(1L, "food", null)
         val child = category(2L, "dry", parent)
-        `when`(categories.findById(2L)).thenReturn(Optional.of(child))
+        val request = mapper.readValue("{\"name\":\" \"}", CategoryUpdateRequest::class.java)
 
-        val result = subject.updateCategory(2L, mapper.readValue("{\"name\":\" \"}", CategoryUpdateRequest::class.java))
+        every { categories.findById(any()) } returns Optional.of(child)
 
+        // when
+        val result = subject.updateCategory(2L, request)
+
+        // then
         assertThat(result.name).isEqualTo("dry")
         assertThat(result.description).isNull()
         assertThat(result.parentId).isNull()
         assertThat(child.parent).isNull()
         assertThat(manager.commits).isEqualTo(1)
+        verify(exactly = 1) { categories.findById(2L) }
     }
 
     @Test
-    fun givenNewParent__whenUpdating__thenApplyNameDescriptionAndParent() {
+    fun `새 부모가 있을 때__수정하면__이름과 설명과 부모를 적용한다`() {
+        // given
         val target = category(2L, "dry", null)
         val parent = category(1L, "food", null)
-        `when`(categories.findById(2L)).thenReturn(Optional.of(target))
-        `when`(categories.findById(1L)).thenReturn(Optional.of(parent))
-
-        val result = subject.updateCategory(
-            2L,
-            mapper.readValue(
-                "{\"name\":\"wet\",\"description\":\"wet food\",\"parentId\":1}",
-                CategoryUpdateRequest::class.java,
-            ),
+        val request = mapper.readValue(
+            "{\"name\":\"wet\",\"description\":\"wet food\",\"parentId\":1}",
+            CategoryUpdateRequest::class.java,
         )
 
+        every { categories.findById(2L) } returns Optional.of(target)
+        every { categories.findById(1L) } returns Optional.of(parent)
+
+        // when
+        val result = subject.updateCategory(2L, request)
+
+        // then
         assertThat(result.name).isEqualTo("wet")
         assertThat(result.description).isEqualTo("wet food")
         assertThat(result.parentId).isEqualTo(1L)
     }
 
     @Test
-    fun givenSelfOrDescendantParent__whenUpdating__thenRejectAsInputWithoutChanges() {
+    fun `부모가 자기 자신이거나 자손일 때__수정하면__변경 없이 입력 오류로 거부한다`() {
+        // given
         val root = category(1L, "food", null)
         val child = category(2L, "dry", root)
         val grandchild = category(3L, "kibble", child)
         root.children.add(child)
         child.children.add(grandchild)
-        `when`(categories.findById(1L)).thenReturn(Optional.of(root))
-        `when`(categories.findById(3L)).thenReturn(Optional.of(grandchild))
         val self = mapper.readValue("{\"name\":\"x\",\"parentId\":1}", CategoryUpdateRequest::class.java)
         val descendant = mapper.readValue("{\"name\":\"x\",\"parentId\":3}", CategoryUpdateRequest::class.java)
 
-        assertThatThrownBy { subject.updateCategory(1L, self) }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { subject.updateCategory(1L, descendant) }.isInstanceOf(IllegalArgumentException::class.java)
+        every { categories.findById(1L) } returns Optional.of(root)
+        every { categories.findById(3L) } returns Optional.of(grandchild)
 
+        // when
+        val selfThrown = assertThatThrownBy { subject.updateCategory(1L, self) }
+        val descendantThrown = assertThatThrownBy { subject.updateCategory(1L, descendant) }
+
+        // then
+        selfThrown.isInstanceOf(IllegalArgumentException::class.java)
+        descendantThrown.isInstanceOf(IllegalArgumentException::class.java)
         assertThat(root.name).isEqualTo("food")
         assertThat(root.parent).isNull()
         assertThat(manager.rollbacks).isEqualTo(2)
     }
 
     @Test
-    fun givenMissingCategory__whenUpdatingOrDeleting__thenRejectAsInput() {
-        `when`(categories.findById(9L)).thenReturn(Optional.empty())
+    fun `카테고리가 없을 때__수정하거나 삭제하면__입력 오류로 거부한다`() {
+        // given
         val request = mapper.readValue("{\"name\":\"x\"}", CategoryUpdateRequest::class.java)
 
-        assertThatThrownBy { subject.updateCategory(9L, request) }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { subject.deleteCategory(9L) }.isInstanceOf(IllegalArgumentException::class.java)
+        every { categories.findById(any()) } returns Optional.empty()
 
-        verify(categories, never()).delete(any(Category::class.java))
+        // when
+        val updateThrown = assertThatThrownBy { subject.updateCategory(9L, request) }
+        val deleteThrown = assertThatThrownBy { subject.deleteCategory(9L) }
+
+        // then
+        updateThrown.isInstanceOf(IllegalArgumentException::class.java)
+        deleteThrown.isInstanceOf(IllegalArgumentException::class.java)
+        verify(exactly = 2) { categories.findById(9L) }
+        verify(exactly = 0) { categories.delete(any()) }
         assertThat(manager.rollbacks).isEqualTo(2)
     }
 
     @Test
-    fun givenChildCategory__whenDeletingParent__thenRefuseWithOriginalStateFailure() {
+    fun `자식 카테고리가 있을 때__부모를 삭제하면__원래의 상태 오류로 거부한다`() {
+        // given
         val root = category(1L, "food", null)
         root.children.add(category(2L, "dry", root))
-        `when`(categories.findById(1L)).thenReturn(Optional.of(root))
 
-        assertThatThrownBy { subject.deleteCategory(1L) }.isInstanceOf(IllegalStateException::class.java)
+        every { categories.findById(any()) } returns Optional.of(root)
 
-        verify(categories, never()).delete(any(Category::class.java))
+        // when
+        val thrown = assertThatThrownBy { subject.deleteCategory(1L) }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
+        verify(exactly = 1) { categories.findById(1L) }
+        verify(exactly = 0) { categories.delete(any()) }
         assertThat(manager.rollbacks).isEqualTo(1)
     }
 
     @Test
-    fun givenLeafCategory__whenDeleting__thenKeepOriginalPhysicalDelete() {
+    fun `잎 카테고리일 때__삭제하면__원래의 물리 삭제를 유지한다`() {
+        // given
         val leaf = category(2L, "dry", null)
-        `when`(categories.findById(2L)).thenReturn(Optional.of(leaf))
 
+        every { categories.findById(any()) } returns Optional.of(leaf)
+        justRun { categories.delete(any()) }
+
+        // when
         subject.deleteCategory(2L)
 
-        verify(categories).delete(leaf)
+        // then
+        verify(exactly = 1) { categories.findById(2L) }
+        verify(exactly = 1) { categories.delete(leaf) }
         assertThat(manager.commits).isEqualTo(1)
     }
 
     @Test
-    fun givenNoActiveWriter__whenCallingWithoutTransaction__thenRefuseBeforeRepositoryAccess() {
+    fun `활성 쓰기 트랜잭션이 없을 때__트랜잭션 없이 호출하면__저장소 접근 전에 거부한다`() {
+        // given
         val outside = JpaCatalogCategories(categories, TransactionOperations.withoutTransaction())
         val request = mapper.readValue("{\"name\":\"dry\"}", CategoryCreateRequest::class.java)
 
-        assertThatThrownBy { outside.createCategory(request) }.isInstanceOf(IllegalStateException::class.java)
-        assertThatThrownBy { outside.deleteCategory(2L) }.isInstanceOf(IllegalStateException::class.java)
+        // when
+        val createThrown = assertThatThrownBy { outside.createCategory(request) }
+        val deleteThrown = assertThatThrownBy { outside.deleteCategory(2L) }
 
-        verifyNoInteractions(categories)
+        // then
+        createThrown.isInstanceOf(IllegalStateException::class.java)
+        deleteThrown.isInstanceOf(IllegalStateException::class.java)
+        confirmVerified(categories)
     }
 
     private class Writer : AbstractPlatformTransactionManager() {
