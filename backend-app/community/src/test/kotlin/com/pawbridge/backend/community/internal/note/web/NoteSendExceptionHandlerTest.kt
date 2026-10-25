@@ -15,7 +15,8 @@ import java.sql.SQLException
 
 class NoteSendExceptionHandlerTest {
     @Test
-    fun given__private_runtime_causes_and_suppressed_text__when__handling__then__return_generic_no_store_503_and_log_only_type_without_throwable() {
+    fun `비공개 원인과 억제 예외 문구가 있을 때__처리하면__캐시 금지 일반 503을 돌려주고 예외 형식만 로그에 남긴다`() {
+        // given
         val failure = IllegalStateException("Bearer private-token body hash", SQLException("private SQL"))
         failure.addSuppressed(IllegalArgumentException("private nickname"))
         val logger = LoggerFactory.getLogger(NoteSendExceptionHandler::class.java) as Logger
@@ -23,8 +24,10 @@ class NoteSendExceptionHandlerTest {
         appender.start()
         logger.addAppender(appender)
         try {
+            // when
             val response = NoteSendExceptionHandler().unexpectedFailure(failure)
 
+            // then
             assertEquals(503, response.statusCode.value())
             assertEquals("no-store", response.headers.cacheControl)
             assertNull(response.headers.getFirst("Set-Cookie"))
@@ -42,17 +45,20 @@ class NoteSendExceptionHandlerTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["MEMBER", "STORAGE"])
-    fun given__typed_member_or_dao_failure__when__responding__then__keep_distinct_fixed_no_store_503_without_any_log(
+    fun `회원 또는 저장소 형식의 실패일 때__응답하면__구분되는 고정 캐시 금지 503을 돌려주고 로그는 남기지 않는다`(
         source: String,
     ) {
+        // given
         val logger = LoggerFactory.getLogger(NoteSendExceptionHandler::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
+            // when
             val handler = NoteSendExceptionHandler()
             val response = if (source == "MEMBER") handler.memberUnavailable() else handler.storageUnavailable()
 
+            // then
             assertEquals(503, response.statusCode.value())
             assertEquals("no-store", response.headers.cacheControl)
             assertNull(response.headers.getFirst("Set-Cookie"))

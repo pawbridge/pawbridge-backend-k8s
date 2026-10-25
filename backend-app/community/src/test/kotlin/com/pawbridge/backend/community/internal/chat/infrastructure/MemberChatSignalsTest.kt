@@ -3,16 +3,13 @@ package com.pawbridge.backend.community.internal.chat.infrastructure
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.community.internal.chat.application.MemberChatModels
 import com.pawbridge.backend.community.internal.chat.web.MemberChatSessions
+import com.pawbridge.backend.community.support.TestFaker
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.anyMap
-import org.mockito.ArgumentMatchers.argThat
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.data.redis.connection.DefaultMessage
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor
@@ -21,53 +18,68 @@ import org.springframework.messaging.simp.user.SimpSession
 import org.springframework.messaging.simp.user.SimpUser
 import org.springframework.messaging.simp.user.SimpUserRegistry
 import java.util.LinkedHashSet
-import java.util.UUID
 
 class MemberChatSignalsTest {
-    private val messaging = mock(SimpMessagingTemplate::class.java)
-    private val registry = mock(SimpUserRegistry::class.java)
+    private val messaging = mockk<SimpMessagingTemplate>()
+    private val registry = mockk<SimpUserRegistry>()
     private val mapper = ObjectMapper()
     private val signals = MemberChatSignals(
-        mock(StringRedisTemplate::class.java),
+        mockk<StringRedisTemplate>(),
         messaging,
-        mock(MemberChatSessions::class.java),
+        mockk<MemberChatSessions>(),
         mapper,
         registry,
         "synthetic-test",
     )
 
     @Test
-    fun givenTwoOwnConnectionsAndFirstSendFailure_whenMessageSignalArrives_thenDeliverToOtherConnection() {
-        val first = mock(SimpSession::class.java)
-        whenever(first.id).thenReturn("first-session")
-        val second = mock(SimpSession::class.java)
-        whenever(second.id).thenReturn("second-session")
-        val member = mock(SimpUser::class.java)
-        whenever(member.sessions).thenReturn(LinkedHashSet(listOf(first, second)))
-        whenever(registry.getUser("7")).thenReturn(member)
-        val signal = MemberChatModels.Signal(7, "MESSAGE", UUID.randomUUID(), 3)
-        doThrow(IllegalStateException("synthetic send failure")).`when`(messaging)
-            .convertAndSendToUser(eq("first-session"), eq("/queue/chat"), eq(signal), anyMap())
+    fun `내 연결이 둘이고 첫 전송이 실패할 때__메시지 신호가 도착하면__다른 연결로 전달한다`() {
+        // given
+        val first = mockk<SimpSession>()
+        val second = mockk<SimpSession>()
+        val member = mockk<SimpUser>()
+        val signal = MemberChatModels.Signal(7, "MESSAGE", TestFaker.uuid(), 3)
 
+        every { first.id } returns "first-session"
+        every { second.id } returns "second-session"
+        every { member.sessions } returns LinkedHashSet(listOf(first, second))
+        every { registry.getUser(any<String>()) } returns member
+        every {
+            messaging.convertAndSendToUser("first-session", "/queue/chat", signal, any<Map<String, Any>>())
+        } throws IllegalStateException("synthetic send failure")
+        justRun {
+            messaging.convertAndSendToUser("second-session", "/queue/chat", signal, any<Map<String, Any>>())
+        }
+
+        // when
         signals.onMessage(DefaultMessage(ByteArray(0), mapper.writeValueAsBytes(signal)), null)
 
-        verify(messaging).convertAndSendToUser(eq("first-session"), eq("/queue/chat"), eq(signal), anyMap())
-        verify(messaging).convertAndSendToUser(
-            eq("second-session"),
-            eq("/queue/chat"),
-            eq(signal),
-            argThat<Map<String, Any>> { headers -> "second-session" == SimpMessageHeaderAccessor.getSessionId(headers) },
-        )
+        // then
+        verify(exactly = 1) {
+            messaging.convertAndSendToUser("first-session", "/queue/chat", signal, any<Map<String, Any>>())
+        }
+        verify(exactly = 1) {
+            messaging.convertAndSendToUser(
+                "second-session",
+                "/queue/chat",
+                signal,
+                match<Map<String, Any>> { headers -> "second-session" == SimpMessageHeaderAccessor.getSessionId(headers) },
+            )
+        }
     }
 
     @Test
-    fun givenMemberWithoutLocalConnections_whenMessageSignalArrives_thenDoNotForwardToOtherMembers() {
-        val signal = MemberChatModels.Signal(7, "MESSAGE", UUID.randomUUID(), 3)
+    fun `회원에게 로컬 연결이 없을 때__메시지 신호가 도착하면__다른 회원에게 전달하지 않는다`() {
+        // given
+        val signal = MemberChatModels.Signal(7, "MESSAGE", TestFaker.uuid(), 3)
 
+        every { registry.getUser(any<String>()) } returns null
+
+        // when
         signals.onMessage(DefaultMessage(ByteArray(0), mapper.writeValueAsBytes(signal)), null)
 
-        verify(registry).getUser("7")
-        verifyNoMoreInteractions(registry)
-        verifyNoInteractions(messaging)
+        // then
+        verify(exactly = 1) { registry.getUser("7") }
+        confirmVerified(registry, messaging)
     }
 }

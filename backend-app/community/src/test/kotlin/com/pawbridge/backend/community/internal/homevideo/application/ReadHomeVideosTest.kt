@@ -1,11 +1,10 @@
 package com.pawbridge.backend.community.internal.homevideo.application
 
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -13,9 +12,10 @@ import java.util.UUID
 
 class ReadHomeVideosTest {
     @Test
-    fun given__changing_clock__when__reading__then__subtract_exact_twenty_nine_days_once_before_calling_reader() {
-        val clock = mock(Clock::class.java)
-        val reader = mock(HomeVideoReader::class.java)
+    fun `시계가 계속 바뀔 때__읽으면__리더를 부르기 전에 정확히 29일을 한 번만 뺀다`() {
+        // given
+        val clock = mockk<Clock>()
+        val reader = mockk<HomeVideoReader>()
         val now = Instant.parse("2026-10-19T15:00:00.123456789Z")
         val cutoff = now.minus(Duration.ofDays(29))
         val expected = listOf(
@@ -33,14 +33,18 @@ class ReadHomeVideosTest {
                 now,
             ),
         )
-        whenever(clock.instant()).thenReturn(now, now.plusSeconds(1))
-        whenever(reader.read(cutoff)).thenReturn(expected)
 
-        assertEquals(expected, ReadHomeVideos(reader, clock).read())
+        every { clock.instant() } returnsMany listOf(now, now.plusSeconds(1))
+        every { reader.read(any()) } returns expected
 
-        val calls = inOrder(clock, reader)
-        calls.verify(clock).instant()
-        calls.verify(reader).read(cutoff)
-        verifyNoMoreInteractions(clock, reader)
+        // when
+        val result = ReadHomeVideos(reader, clock).read()
+
+        // then
+        assertEquals(expected, result)
+        verifySequence {
+            clock.instant()
+            reader.read(cutoff)
+        }
     }
 }
