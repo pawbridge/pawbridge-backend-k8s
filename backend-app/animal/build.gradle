@@ -32,8 +32,6 @@ dependencies {
     testImplementation 'org.springframework:spring-test'
     testImplementation 'org.hamcrest:hamcrest'
     testImplementation 'com.fasterxml.jackson.core:jackson-databind'
-    testImplementation 'org.mockito:mockito-core'
-    testImplementation 'org.mockito:mockito-junit-jupiter'
     testImplementation 'org.assertj:assertj-core'
     testImplementation 'ch.qos.logback:logback-classic'
     testRuntimeOnly 'org.hibernate.validator:hibernate-validator'
