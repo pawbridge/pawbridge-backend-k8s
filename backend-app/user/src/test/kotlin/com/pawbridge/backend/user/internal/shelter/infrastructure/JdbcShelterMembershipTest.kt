@@ -6,6 +6,10 @@ import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership.Shelter
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership.Status
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembershipRejectedException
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -15,12 +19,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -31,9 +29,10 @@ import org.springframework.transaction.support.AbstractPlatformTransactionManage
 import org.springframework.transaction.support.DefaultTransactionStatus
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Proxy
 import java.sql.PreparedStatement
 import java.sql.ResultSet
-import java.sql.SQLException
 import java.sql.Timestamp
 import java.time.Clock
 import java.time.Instant
@@ -47,39 +46,53 @@ import java.util.function.Supplier
 class JdbcShelterMembershipTest {
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__a_current_role__when__submitting__then__lock_before_role_pending_text_and_insert(role: String) {
+    fun `현재 역할이 주어졌을 때__신청을 제출하면__행 잠금 뒤에 역할과 대기 건수와 문구를 확인해 일반 회원만 삽입한다`(role: String) {
+        // given
         val f = Fixture()
         f.jdbc.actorRole = role
+
         if (role == "ROLE_USER") {
+            // when
             val result = f.service.submit(7, "  보호소  ")
+
+            // then
             assertEquals("보호소", result.shelterName)
             assertEquals(Status.PENDING, result.status)
             assertEquals(91L, result.id)
             assertEquals(listOf("begin", "actor-lock", "count", "now", "insert", "commit", "cleanup"), f.events)
             assertEquals(1, f.nowCalls)
         } else {
+            // when
             assertReason("FORBIDDEN") { f.service.submit(7, " ") }
+
+            // then
             assertEquals(listOf("begin", "actor-lock", "rollback", "cleanup"), f.events)
         }
     }
 
     @Test
-    fun given__a_pending_request__when__submitting_invalid_text__then__preserve_conflict_before_text_validation() {
+    fun `대기 중인 신청이 있을 때__잘못된 문구로 제출하면__문구 검증보다 먼저 충돌로 거부한다`() {
+        // given
         val f = Fixture()
         f.jdbc.pending = 1
 
+        // when
         assertReason("CONFLICT") { f.service.submit(7, " ") }
 
+        // then
         assertEquals(0, f.nowCalls)
         assertFalse(f.events.contains("insert"))
     }
 
     @Test
-    fun given__a_pending_applicant__when__approving__then__lock_user_before_refreshed_application_and_call_animal_inside_the_same_transaction() {
+    fun `대기 중인 신청자일 때__승인하면__신청 갱신 전에 회원을 잠그고 같은 트랜잭션 안에서 동물 모듈을 호출한다`() {
+        // given
         val f = Fixture()
 
+        // when
         val result = f.service.approve(1, 91, " reg ", " 승인 사유 ")
 
+        // then
         assertEquals(Status.APPROVED, result.application!!.status)
         assertNull(result.application!!.reason)
         assertEquals("승인 사유", result.reviewNote)
@@ -99,16 +112,19 @@ class JdbcShelterMembershipTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["processed", "role", "missing", "vanished"])
-    fun given__a_refreshed_state_or_missing_applicant__when__approving__then__stop_before_animal_and_any_write(state: String) {
+    fun `갱신된 상태가 처리됨이거나 역할이 달라졌거나 신청자가 없을 때__승인하면__동물 호출과 모든 쓰기 전에 멈춘다`(state: String) {
+        // given
         val f = Fixture()
         f.jdbc.state = state
 
+        // when
         if (state == "vanished") {
             assertThrows(OptimisticLockingFailureException::class.java) { f.service.approve(1, 91, "reg", "note") }
         } else {
             assertReason(if (state == "missing") "NOT_FOUND" else "CONFLICT") { f.service.approve(1, 91, "reg", "note") }
         }
 
+        // then
         assertFalse(f.events.contains("animal"))
         assertTrue(f.jdbc.writes.isEmpty())
         assertTrue(f.events.contains("rollback"))
@@ -116,30 +132,36 @@ class JdbcShelterMembershipTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["404", "runtime", "null", "wrong"])
-    fun given__animal_failure_or_invalid_identity__when__approving__then__return_only_original_business_failure_without_writes(
+    fun `동물 모듈이 실패하거나 신원이 잘못됐을 때__승인하면__쓰기 없이 원래 비즈니스 실패만 돌려준다`(
         phase: String,
     ) {
+        // given
         val f = Fixture()
         f.animal = phase
 
+        // when
         assertReason(if (phase == "404") "SHELTER_NOT_FOUND" else "SHELTER_UNAVAILABLE") {
             f.service.approve(1, 91, "reg", "note")
         }
 
+        // then
         assertTrue(f.jdbc.writes.isEmpty())
         assertEquals(0, f.nowCalls)
     }
 
     @Test
-    fun given__a_pending_request__when__rejecting__then__validate_reason_after_locks_and_leave_user_role_untouched() {
+    fun `대기 중인 신청일 때__반려하면__잠금 뒤에 사유를 검증하고 사용자 역할은 건드리지 않는다`() {
+        // given
         val invalid = Fixture()
-        assertReason("INVALID") { invalid.service.reject(1, 91, " ") }
-        assertTrue(invalid.events.contains("application-lock"))
-        assertTrue(invalid.jdbc.writes.isEmpty())
         val f = Fixture()
 
+        // when
+        assertReason("INVALID") { invalid.service.reject(1, 91, " ") }
         val result = f.service.reject(1, 91, " 이유 ")
 
+        // then
+        assertTrue(invalid.events.contains("application-lock"))
+        assertTrue(invalid.jdbc.writes.isEmpty())
         assertEquals("이유", result.application!!.reason)
         assertEquals(Status.REJECTED, result.application!!.status)
         assertEquals(1, f.jdbc.writes.size)
@@ -148,51 +170,67 @@ class JdbcShelterMembershipTest {
     }
 
     @Test
-    fun given__a_changed_database_admin_role__when__calling_admin_operations__then__reject_before_target_or_input_queries() {
+    fun `데이터베이스의 관리자 역할이 바뀌었을 때__관리자 작업을 호출하면__대상이나 입력 조회 전에 거부한다`() {
+        // given
         val f = Fixture()
         f.jdbc.actorRole = "ROLE_USER"
 
+        // when
         assertReason("FORBIDDEN") { f.service.approve(7, 91, " ", " ") }
 
+        // then
         assertEquals(listOf("begin", "actor", "rollback", "cleanup"), f.events)
     }
 
     @Test
-    fun given__an_own_page_for_any_existing_role__when__listing__then__authenticate_before_page_validation_and_map_without_admin_requirement() {
+    fun `어떤 기존 역할이든 본인 페이지일 때__목록을 조회하면__페이지 검증 전에 인증하고 관리자 요구 없이 매핑한다`() {
+        // given
+        val missing = Fixture()
+        missing.jdbc.actorMissing = true
+
+        // when
         for (role in listOf("ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER")) {
             val f = Fixture()
             f.jdbc.actorRole = role
             val result = f.service.mine(7, 0, 20)
+
+            // then
             assertEquals(1L, result.total)
             assertEquals(1, result.content.size)
             assertEquals(listOf("begin", "actor", "application-page", "commit", "cleanup"), f.events)
         }
-        val missing = Fixture()
-        missing.jdbc.actorMissing = true
-
         assertReason("TOKEN_INVALID") { missing.service.mine(7, -1, 0) }
     }
 
     @Test
-    fun given__an_admin_page_and_members__when__enriching__then__keep_one_user_batch_and_each_members_latest_approval_lookup() {
+    fun `관리자 페이지와 회원 목록일 때__보강하면__사용자 배치 조회는 한 번이고 회원별 최근 승인 조회를 유지한다`() {
+        // given
         val f = Fixture()
-        assertEquals("신청자", f.service.list(1, null, 0, 20).content.first().applicantName)
-        assertEquals(1, Collections.frequency(f.events, "user-batch"))
         val member = Fixture()
 
+        // when
+        val applicantName = f.service.list(1, null, 0, 20).content.first().applicantName
         val result = member.service.members(1, " reg ", 0, 20)
 
+        // then
+        assertEquals("신청자", applicantName)
+        assertEquals(1, Collections.frequency(f.events, "user-batch"))
         assertEquals(91L, result.content.first().approvalApplicationId)
         assertEquals(1, Collections.frequency(member.events, "latest-approval"))
     }
 
     @Test
-    fun given__a_seoul_day_and_sparse_rows__when__reading_statistics__then__use_repeatable_read_and_preserve_previous_day_current_pending_and_query_order() {
+    fun `서울 날짜와 듬성한 행일 때__통계를 읽으면__반복 가능 읽기를 쓰고 전날 건수와 현재 대기와 쿼리 순서를 유지한다`() {
+        // given
         val f = Fixture()
+        val accepted = Fixture()
         val day = LocalDate.parse("2026-10-20")
 
+        // when
         val result = f.service.statistics(1, day, day)
+        accepted.service.statistics(1, day.minusDays(365), day)
 
+        // then
         assertEquals(2L, result.previousDayCount)
         assertEquals(listOf(Daily(day, 3)), result.daily)
         assertEquals(4L, result.approvedCount)
@@ -200,13 +238,12 @@ class JdbcShelterMembershipTest {
         assertEquals(listOf("begin", "actor", "daily", "reviews", "count", "commit", "cleanup"), f.events)
         assertTrue(f.manager.readOnly)
         assertEquals(TransactionDefinition.ISOLATION_REPEATABLE_READ, f.manager.isolation)
-        val accepted = Fixture()
-        accepted.service.statistics(1, day.minusDays(365), day)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["366", "future", "reverse", "null"])
-    fun given__invalid_statistics_dates__when__querying__then__reject_after_current_admin_before_aggregate_sql(mode: String) {
+    fun `잘못된 통계 날짜일 때__조회하면__현재 관리자 확인 뒤 집계 SQL 전에 거부한다`(mode: String) {
+        // given
         val f = Fixture()
         val day = LocalDate.parse("2026-10-20")
         var start: LocalDate? = day
@@ -220,14 +257,17 @@ class JdbcShelterMembershipTest {
         val from = start
         val to = end
 
+        // when
         assertReason("INVALID_INPUT") { f.service.statistics(1, from, to) }
 
+        // then
         assertEquals(listOf("begin", "actor", "rollback", "cleanup"), f.events)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["second-write", "commit"])
-    fun given__a_late_write_or_commit_failure__when__approving__then__propagate_without_a_partial_response_or_retry(phase: String) {
+    fun `뒤늦은 쓰기나 커밋이 실패할 때__승인하면__부분 응답이나 재시도 없이 그대로 전파한다`(phase: String) {
+        // given
         val f = Fixture()
         val failure: RuntimeException = TransactionSystemException("synthetic-private")
         if (phase == "commit") {
@@ -236,24 +276,32 @@ class JdbcShelterMembershipTest {
             f.jdbc.failure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { f.service.approve(1, 91, "reg", "note") })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { f.service.approve(1, 91, "reg", "note") }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, Collections.frequency(f.events, "begin"))
         assertEquals("cleanup", f.events.last())
     }
 
     @Test
-    fun given__local_microseconds__when__binding_a_timestamp__then__use_utc_calendar_without_reading_unneeded_user_columns() {
+    fun `로컬 마이크로초 시각일 때__타임스탬프를 바인딩하면__불필요한 사용자 컬럼을 읽지 않고 UTC 캘린더를 쓴다`() {
+        // given
         val f = Fixture()
         f.service.submit(7, "이름")
         val timestamp = f.jdbc.insertArgs!![2] as SqlValue
-        val statement = mock(PreparedStatement::class.java)
+        val statement = mockk<PreparedStatement>()
 
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+
+        // when
         timestamp.setValue(statement, 1)
 
-        val calendar = ArgumentCaptor.forClass(Calendar::class.java)
-        verify(statement).setTimestamp(eq(1), eq(Timestamp.valueOf(NOW)), calendar.capture())
-        assertEquals("UTC", calendar.value.timeZone.id)
+        // then
+        val calendar = slot<Calendar>()
+        verify(exactly = 1) { statement.setTimestamp(1, Timestamp.valueOf(NOW), capture(calendar)) }
+        assertEquals("UTC", calendar.captured.timeZone.id)
     }
 
     private fun assertReason(reason: String, action: () -> Unit) {
@@ -311,67 +359,72 @@ class JdbcShelterMembershipTest {
         var insertArgs: Array<Any?>? = null
 
         override fun <T> query(sql: String, rowMapper: RowMapper<T>, vararg args: Any?): MutableList<T> {
-            try {
-                val rs = mock(ResultSet::class.java)
-                if (sql.contains("FROM pawbridge_user.users")) {
-                    val actor = !sql.contains(" IN (") && !sql.contains("care_reg_no=?") && (args[0] as Number).toLong() != 8L
-                    if (sql.contains(" IN (")) {
-                        events.add("user-batch")
-                    } else if (sql.contains("care_reg_no=?")) {
-                        events.add("members")
-                    } else {
-                        events.add(if (actor) (if (sql.contains("FOR UPDATE")) "actor-lock" else "actor") else "applicant-lock")
-                    }
-                    if ((actor && actorMissing) || (!actor && state == "missing")) {
-                        return ArrayList()
-                    }
-                    `when`(rs.getLong("user_id")).thenReturn(if (actor) (args[0] as Number).toLong() else 8L)
-                    `when`(rs.getString("name")).thenReturn("신청자")
-                    `when`(rs.getString("email")).thenReturn("fixture@example.invalid")
-                    `when`(rs.getString("role")).thenReturn(
-                        if (actor) {
-                            if ((args[0] as Number).toLong() == 1L) "ROLE_ADMIN" else actorRole
-                        } else {
-                            if (state == "role") "ROLE_SHELTER" else "ROLE_USER"
-                        },
-                    )
-                } else if (sql.contains("requested_date")) {
-                    events.add("daily")
-                    val result = ArrayList<T>()
-                    for (day in 19..20) {
-                        `when`(rs.getObject("requested_date", LocalDate::class.java)).thenReturn(LocalDate.of(2026, 10, day))
-                        `when`(rs.getLong("requested_count")).thenReturn(if (day == 19) 2L else 3L)
-                        result.add(rowMapper.mapRow(rs, result.size)!!)
-                    }
-                    return result
-                } else if (sql.contains("review_count")) {
-                    events.add("reviews")
-                    val result = ArrayList<T>()
-                    for (status in listOf("APPROVED", "REJECTED")) {
-                        `when`(rs.getString("status")).thenReturn(status)
-                        `when`(rs.getLong("review_count")).thenReturn(if (status == "APPROVED") 4L else 5L)
-                        result.add(rowMapper.mapRow(rs, result.size)!!)
-                    }
-                    return result
-                } else if (sql.startsWith("SELECT id FROM")) {
-                    events.add("latest-approval")
-                    `when`(rs.getLong("id")).thenReturn(91L)
+            if (sql.contains("FROM pawbridge_user.users")) {
+                val actor = !sql.contains(" IN (") && !sql.contains("care_reg_no=?") && (args[0] as Number).toLong() != 8L
+                if (sql.contains(" IN (")) {
+                    events.add("user-batch")
+                } else if (sql.contains("care_reg_no=?")) {
+                    events.add("members")
                 } else {
-                    val lock = sql.contains("FOR UPDATE")
-                    events.add(if (sql.contains("LIMIT")) "application-page" else if (lock) "application-lock" else "application")
-                    if (lock && state == "vanished") {
-                        return ArrayList()
-                    }
-                    `when`(rs.getLong("id")).thenReturn(91L)
-                    `when`(rs.getLong("user_id")).thenReturn(8L)
-                    `when`(rs.getString("shelter_name")).thenReturn("보호소")
-                    `when`(rs.getString("status")).thenReturn(if (lock && state == "processed") "REJECTED" else "PENDING")
-                    `when`(rs.getTimestamp(eq("requested_at"), any(Calendar::class.java))).thenReturn(Timestamp.valueOf(NOW))
+                    events.add(if (actor) (if (sql.contains("FOR UPDATE")) "actor-lock" else "actor") else "applicant-lock")
                 }
-                return arrayListOf(rowMapper.mapRow(rs, 0)!!)
-            } catch (e: SQLException) {
-                throw IllegalStateException(e)
+                if ((actor && actorMissing) || (!actor && state == "missing")) {
+                    return ArrayList()
+                }
+                val role = if (actor) {
+                    if ((args[0] as Number).toLong() == 1L) "ROLE_ADMIN" else actorRole
+                } else {
+                    if (state == "role") "ROLE_SHELTER" else "ROLE_USER"
+                }
+                val user = row(
+                    "user_id" to (if (actor) (args[0] as Number).toLong() else 8L),
+                    "name" to "신청자",
+                    "email" to "fixture@example.invalid",
+                    "role" to role,
+                )
+                return arrayListOf(rowMapper.mapRow(user, 0)!!)
             }
+            if (sql.contains("requested_date")) {
+                events.add("daily")
+                val result = ArrayList<T>()
+                for (day in 19..20) {
+                    val daily = row(
+                        "requested_date" to LocalDate.of(2026, 10, day),
+                        "requested_count" to (if (day == 19) 2L else 3L),
+                    )
+                    result.add(rowMapper.mapRow(daily, result.size)!!)
+                }
+                return result
+            }
+            if (sql.contains("review_count")) {
+                events.add("reviews")
+                val result = ArrayList<T>()
+                for (status in listOf("APPROVED", "REJECTED")) {
+                    val review = row(
+                        "status" to status,
+                        "review_count" to (if (status == "APPROVED") 4L else 5L),
+                    )
+                    result.add(rowMapper.mapRow(review, result.size)!!)
+                }
+                return result
+            }
+            if (sql.startsWith("SELECT id FROM")) {
+                events.add("latest-approval")
+                return arrayListOf(rowMapper.mapRow(row("id" to 91L), 0)!!)
+            }
+            val lock = sql.contains("FOR UPDATE")
+            events.add(if (sql.contains("LIMIT")) "application-page" else if (lock) "application-lock" else "application")
+            if (lock && state == "vanished") {
+                return ArrayList()
+            }
+            val application = row(
+                "id" to 91L,
+                "user_id" to 8L,
+                "shelter_name" to "보호소",
+                "status" to (if (lock && state == "processed") "REJECTED" else "PENDING"),
+                "requested_at" to Timestamp.valueOf(NOW),
+            )
+            return arrayListOf(rowMapper.mapRow(application, 0)!!)
         }
 
         override fun <T> queryForObject(sql: String, requiredType: Class<T>, vararg args: Any?): T? {
@@ -427,6 +480,32 @@ class JdbcShelterMembershipTest {
     }
 
     companion object {
+        /**
+         * In-memory ResultSet answering typed getters by column label; unknown columns read as null, 0 or false
+         * like the permissive row the first-stage test used.
+         */
+        private fun row(vararg cells: Pair<String, Any?>): ResultSet {
+            val values = mapOf(*cells)
+            val handler = InvocationHandler { _, method, args ->
+                val value = if (method.name.startsWith("get") && args != null && args[0] is String) {
+                    values[args[0] as String]
+                } else {
+                    null
+                }
+                when {
+                    method.returnType == java.lang.Long.TYPE -> (value as Number?)?.toLong() ?: 0L
+                    method.returnType == Integer.TYPE -> (value as Number?)?.toInt() ?: 0
+                    method.returnType == java.lang.Boolean.TYPE -> (value as Boolean?) ?: false
+                    else -> value
+                }
+            }
+            return Proxy.newProxyInstance(
+                ResultSet::class.java.classLoader,
+                arrayOf<Class<*>>(ResultSet::class.java),
+                handler,
+            ) as ResultSet
+        }
+
         private val NOW: LocalDateTime = LocalDateTime.parse("2026-10-20T01:02:03.123456")
     }
 }

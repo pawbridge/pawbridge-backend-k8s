@@ -1,6 +1,5 @@
 package com.pawbridge.backend.user.internal
 
-import com.pawbridge.backend.user.anyNonNull
 import com.pawbridge.backend.user.internal.adminupdate.application.AdminUserUpdate
 import com.pawbridge.backend.user.internal.adminupdate.web.AdminUserUpdateController
 import com.pawbridge.backend.user.internal.adminupdate.web.AdminUserUpdateExceptionHandler
@@ -10,17 +9,19 @@ import com.pawbridge.backend.user.internal.deletion.web.AdminUserDeletionExcepti
 import com.pawbridge.backend.user.internal.favorite.application.FavoriteStatusQuery
 import com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusController
 import com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusExceptionHandler
+import com.pawbridge.backend.user.internal.profile.application.UserProfile
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.profile.web.AdminUserDetailController
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.core.MethodParameter
 import org.springframework.http.MediaType
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -50,10 +51,10 @@ import java.nio.charset.StandardCharsets
  * servlet container, the security filter chain or error dispatch.
  */
 class UserPathVariableRegressionTest {
-    private val update: AdminUserUpdate = mock(AdminUserUpdate::class.java)
-    private val deletion: UserDeletion = mock(UserDeletion::class.java)
-    private val favorites: FavoriteStatusQuery = mock(FavoriteStatusQuery::class.java)
-    private val profiles: UserProfileQuery = mock(UserProfileQuery::class.java)
+    private val update: AdminUserUpdate = mockk<AdminUserUpdate>()
+    private val deletion: UserDeletion = mockk<UserDeletion>()
+    private val favorites: FavoriteStatusQuery = mockk<FavoriteStatusQuery>()
+    private val profiles: UserProfileQuery = mockk<UserProfileQuery>()
 
     private lateinit var updateMvc: MockMvc
     private lateinit var deletionMvc: MockMvc
@@ -84,77 +85,115 @@ class UserPathVariableRegressionTest {
     // AdminUserUpdateController
 
     @Test
-    fun givenBlankUserId__whenAdminUpdatingUser__thenFailAsMissingPathVariableWithoutCallingService() {
-        val result = updateMvc.perform(
-            put("/api/v1/admin/users/{userId}", BLANK_SEGMENT)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(UPDATE_BODY),
-        ).andReturn()
+    fun `사용자 아이디가 공백일 때__관리자가 사용자를 수정하면__서비스를 호출하지 않고 경로 변수 누락으로 실패한다`() {
+        // given
+        val request = put("/api/v1/admin/users/{userId}", BLANK_SEGMENT)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(UPDATE_BODY)
 
+        // when
+        val result = updateMvc.perform(request).andReturn()
+
+        // then
         assertJavaOriginalMissingPathVariable(result)
-        verifyNoInteractions(update)
+        confirmVerified(update)
     }
 
     @Test
-    fun givenNumericUserId__whenAdminUpdatingUser__thenPassTheIdToService() {
+    fun `숫자 사용자 아이디일 때__관리자가 사용자를 수정하면__아이디를 서비스에 그대로 넘긴다`() {
+        // given
+        justRun { update.update(any(), any()) }
+
+        // when
         updateMvc.perform(
             put("/api/v1/admin/users/{userId}", ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(UPDATE_BODY),
         )
 
-        verify(update).update(eq(ID), anyNonNull<AdminUserUpdate.Changes>())
+        // then
+        verify(exactly = 1) { update.update(ID, any()) }
     }
 
     // AdminUserDeletionController
 
     @Test
-    fun givenBlankUserId__whenAdminDeletingUser__thenFailAsMissingPathVariableWithoutCallingService() {
-        val result = deletionMvc.perform(delete("/api/v1/admin/users/{userId}", BLANK_SEGMENT)).andReturn()
+    fun `사용자 아이디가 공백일 때__관리자가 사용자를 삭제하면__서비스를 호출하지 않고 경로 변수 누락으로 실패한다`() {
+        // given
+        val request = delete("/api/v1/admin/users/{userId}", BLANK_SEGMENT)
 
+        // when
+        val result = deletionMvc.perform(request).andReturn()
+
+        // then
         assertJavaOriginalMissingPathVariable(result)
-        verifyNoInteractions(deletion)
+        confirmVerified(deletion)
     }
 
     @Test
-    fun givenNumericUserId__whenAdminDeletingUser__thenPassTheIdToService() {
+    fun `숫자 사용자 아이디일 때__관리자가 사용자를 삭제하면__아이디를 서비스에 그대로 넘긴다`() {
+        // given
+        justRun { deletion.delete(any()) }
+
+        // when
         deletionMvc.perform(delete("/api/v1/admin/users/{userId}", ID))
 
-        verify(deletion).delete(ID)
+        // then
+        verify(exactly = 1) { deletion.delete(ID) }
     }
 
     // FavoriteStatusController
 
     @Test
-    fun givenBlankAnimalId__whenCheckingFavorite__thenFailAsMissingPathVariableWithoutCallingService() {
-        val result = favoriteMvc.perform(get("/api/v1/favorites/{animalId}/check", BLANK_SEGMENT)).andReturn()
+    fun `동물 아이디가 공백일 때__즐겨찾기를 확인하면__서비스를 호출하지 않고 경로 변수 누락으로 실패한다`() {
+        // given
+        val request = get("/api/v1/favorites/{animalId}/check", BLANK_SEGMENT)
 
+        // when
+        val result = favoriteMvc.perform(request).andReturn()
+
+        // then
         assertJavaOriginalMissingPathVariable(result)
-        verifyNoInteractions(favorites)
+        confirmVerified(favorites)
     }
 
     @Test
-    fun givenNumericAnimalId__whenCheckingFavorite__thenPassThePrincipalAndTheIdToService() {
+    fun `숫자 동물 아이디일 때__즐겨찾기를 확인하면__주체와 아이디를 서비스에 넘긴다`() {
+        // given
+        every { favorites.isFavorite(any(), any()) } returns false
+
+        // when
         favoriteMvc.perform(get("/api/v1/favorites/{animalId}/check", ID))
 
-        verify(favorites).isFavorite(PRINCIPAL_ID, ID)
+        // then
+        verify(exactly = 1) { favorites.isFavorite(PRINCIPAL_ID, ID) }
     }
 
     // AdminUserDetailController
 
     @Test
-    fun givenBlankUserId__whenAdminGettingUserDetail__thenFailAsMissingPathVariableWithoutCallingService() {
-        val result = detailMvc.perform(get("/api/v1/admin/users/{userId}", BLANK_SEGMENT)).andReturn()
+    fun `사용자 아이디가 공백일 때__관리자가 사용자 상세를 조회하면__서비스를 호출하지 않고 경로 변수 누락으로 실패한다`() {
+        // given
+        val request = get("/api/v1/admin/users/{userId}", BLANK_SEGMENT)
 
+        // when
+        val result = detailMvc.perform(request).andReturn()
+
+        // then
         assertJavaOriginalMissingPathVariable(result)
-        verifyNoInteractions(profiles)
+        confirmVerified(profiles)
     }
 
     @Test
-    fun givenNumericUserId__whenAdminGettingUserDetail__thenPassTheIdToService() {
+    fun `숫자 사용자 아이디일 때__관리자가 사용자 상세를 조회하면__아이디를 서비스에 그대로 넘긴다`() {
+        // given
+        every { profiles.require(any()) } returns UserProfile(ID, "member@fixture.invalid", "회원", "닉네임", "LOCAL", "ROLE_USER", null)
+
+        // when
         detailMvc.perform(get("/api/v1/admin/users/{userId}", ID))
 
-        verify(profiles).require(ID)
+        // then
+        verify(exactly = 1) { profiles.require(ID) }
     }
 
     // helpers

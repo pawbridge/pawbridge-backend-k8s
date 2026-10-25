@@ -2,10 +2,14 @@ package com.pawbridge.backend.user.internal.storemypage.infrastructure
 
 import com.pawbridge.backend.store.api.StoreMemberReadUnavailableException
 import com.pawbridge.backend.store.api.StoreMemberReads
-import com.pawbridge.backend.user.anyNonNull
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
+import com.pawbridge.backend.user.internal.profile.application.UserProfile
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -18,12 +22,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.core.MethodParameter
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
@@ -35,97 +33,131 @@ import org.springframework.transaction.support.TransactionOperations
 import org.springframework.web.context.request.NativeWebRequest
 import java.time.LocalDateTime
 import java.util.Optional
-import java.util.function.Supplier
 import java.util.stream.Stream
 
 class ModuleStoreMyPageTest {
     @ParameterizedTest
     @ValueSource(strings = ["wishlists", "orders", "cart"])
-    fun given__the_current_member__when__reading_each_store_result__then__finish_user_transaction_before_calling_store_with_that_id(
+    fun `현재 회원이 있을 때__위시리스트와 주문과 장바구니를 읽으면__사용자 트랜잭션을 끝낸 뒤 그 회원 번호로 스토어를 호출한다`(
         operation: String,
     ) {
+        // given
         val events = ArrayList<String>()
         val read = Read(events)
-        val profiles = mock(UserProfileQuery::class.java)
-        val store = mock(StoreMemberReads::class.java)
-        `when`(profiles.require(7L)).thenAnswer {
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
+
+        every { profiles.require(any()) } answers {
             assertTrue(read.active)
             events.add("member")
-            null
+            member()
         }
-        storeAnswer(store, operation, Supplier {
-            assertFalse(read.active)
-            events.add("store")
-            empty(operation)
-        })
+        when (operation) {
+            "wishlists" -> every { store.wishlists(any(), any()) } answers {
+                assertFalse(read.active)
+                events.add("store")
+                StoreMemberReads.Page(listOf(), 0, 20, 0, listOf())
+            }
+            "orders" -> every { store.orders(any(), any()) } answers {
+                assertFalse(read.active)
+                events.add("store")
+                StoreMemberReads.Page(listOf(), 0, 20, 0, listOf())
+            }
+            else -> every { store.cart(any()) } answers {
+                assertFalse(read.active)
+                events.add("store")
+                Optional.empty()
+            }
+        }
 
+        // when
         call(ModuleStoreMyPage(profiles, read, store), operation)
 
+        // then
         assertEquals(listOf("begin", "member", "commit", "end", "store"), events)
-        verify(profiles).require(7L)
+        verify(exactly = 1) { profiles.require(7L) }
         when (operation) {
-            "wishlists" -> verify(store).wishlists(7L, StoreMemberReads.Request(0, 20, SORT))
-            "orders" -> verify(store).orders(7L, StoreMemberReads.Request(0, 20, SORT))
-            else -> verify(store).cart(7L)
+            "wishlists" -> verify(exactly = 1) { store.wishlists(7L, StoreMemberReads.Request(0, 20, SORT)) }
+            "orders" -> verify(exactly = 1) { store.orders(7L, StoreMemberReads.Request(0, 20, SORT)) }
+            else -> verify(exactly = 1) { store.cart(7L) }
         }
-        verifyNoMoreInteractions(store)
+        confirmVerified(store)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["wishlists", "orders", "cart"])
-    fun given__a_missing_current_member__when__reading__then__preserve_user_failure_without_store_call(operation: String) {
-        val profiles = mock(UserProfileQuery::class.java)
-        val store = mock(StoreMemberReads::class.java)
+    fun `현재 회원이 없을 때__읽으면__스토어를 호출하지 않고 사용자 실패를 그대로 전달한다`(operation: String) {
+        // given
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
         val failure = UserNotFoundException()
-        `when`(profiles.require(7L)).thenThrow(failure)
 
-        assertSame(
-            failure,
-            assertThrows(UserNotFoundException::class.java) {
-                call(ModuleStoreMyPage(profiles, Read(ArrayList()), store), operation)
-            },
-        )
+        every { profiles.require(any()) } throws failure
 
-        verifyNoInteractions(store)
+        // when
+        val thrown = assertThrows(UserNotFoundException::class.java) {
+            call(ModuleStoreMyPage(profiles, Read(ArrayList()), store), operation)
+        }
+
+        // then
+        assertSame(failure, thrown)
+        confirmVerified(store)
     }
 
     @ParameterizedTest
     @CsvSource("begin,cart", "commit,orders")
-    fun given__a_user_transaction_failure__when__reading__then__propagate_it_before_any_store_work(phase: String, operation: String) {
-        val profiles = mock(UserProfileQuery::class.java)
-        val store = mock(StoreMemberReads::class.java)
+    fun `사용자 트랜잭션이 실패할 때__읽으면__스토어 작업 전에 그대로 전파한다`(phase: String, operation: String) {
+        // given
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
         val read = Read(ArrayList())
         val failure = IllegalStateException("synthetic user transaction failure")
         read.failure = failure
         read.phase = phase
 
-        assertSame(
-            failure,
-            assertThrows(IllegalStateException::class.java) { call(ModuleStoreMyPage(profiles, read, store), operation) },
-        )
-
-        if (phase == "begin") {
-            verifyNoInteractions(profiles)
-        } else {
-            verify(profiles).require(7L)
+        if (phase == "commit") {
+            every { profiles.require(any()) } returns member()
         }
-        verifyNoInteractions(store)
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            call(ModuleStoreMyPage(profiles, read, store), operation)
+        }
+
+        // then
+        assertSame(failure, thrown)
+        if (phase == "begin") {
+            confirmVerified(profiles)
+        } else {
+            verify(exactly = 1) { profiles.require(7L) }
+        }
+        confirmVerified(store)
         assertFalse(read.active)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["wishlists", "orders", "cart"])
-    fun given__store_is_unavailable__when__reading__then__keep_fixed_user_failure_without_treating_it_as_missing_user(
+    fun `스토어를 쓸 수 없을 때__읽으면__없는 회원으로 취급하지 않고 고정된 사용자 실패를 유지한다`(
         operation: String,
     ) {
+        // given
         val failure = StoreMemberReadUnavailableException(IllegalStateException("synthetic-private-store-detail"))
-        val store = mock(StoreMemberReads::class.java)
-        storeAnswer(store, operation, Supplier { throw failure })
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
 
-        val caught = assertThrows(IllegalStateException::class.java) {
-            call(ModuleStoreMyPage(unusedProfiles(), Read(ArrayList()), store), operation)
+        every { profiles.require(any()) } returns member()
+        when (operation) {
+            "wishlists" -> every { store.wishlists(any(), any()) } throws failure
+            "orders" -> every { store.orders(any(), any()) } throws failure
+            else -> every { store.cart(any()) } throws failure
         }
 
+        // when
+        val caught = assertThrows(IllegalStateException::class.java) {
+            call(ModuleStoreMyPage(profiles, Read(ArrayList()), store), operation)
+        }
+
+        // then
         assertEquals(
             if (operation == "wishlists") {
                 "Store wishlist lookup failed"
@@ -141,106 +173,133 @@ class ModuleStoreMyPageTest {
     }
 
     @Test
-    fun given__full_store_projections__when__mapping__then__keep_only_existing_user_fields_nulls_precision_and_long_values() {
-        val store = mock(StoreMemberReads::class.java)
+    fun `스토어 투영이 모든 필드를 가질 때__매핑하면__기존 사용자 필드와 null과 정밀도와 긴 값만 유지한다`() {
+        // given
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
         val time = LocalDateTime.of(2026, 10, 20, 1, 2, 3, 123456000)
         val wish = StoreMemberReads.Wishlist(
             1L, 99L, "not-in-user-subset", 2L, "상품", null, null, "DELETED", Long.MAX_VALUE, mutableMapOf<String?, String?>("색" to "보라"), null, null, time,
         )
-        `when`(store.wishlists(7L, StoreMemberReads.Request(0, 20, SORT)))
-            .thenReturn(StoreMemberReads.Page(listOf(wish), 0, 20, 1, SORT))
         val item = StoreMemberReads.OrderItem(3L, 4L, null, "snapshot", Long.MAX_VALUE, null)
-        `when`(store.orders(7L, StoreMemberReads.Request(0, 20, SORT))).thenReturn(
-            StoreMemberReads.Page(
-                listOf(StoreMemberReads.Purchase(5L, "order", Long.MAX_VALUE, "CANCELLED", null, null, mutableListOf(item), null)),
-                0,
-                20,
-                1,
-                SORT,
-            ),
-        )
         val cartItem = StoreMemberReads.CartItem(6L, 4L, null, null, 0L, 2, 0L)
-        `when`(store.cart(7L)).thenReturn(Optional.of(StoreMemberReads.Cart(8L, 7L, mutableListOf(cartItem), time)))
-        val pages = ModuleStoreMyPage(unusedProfiles(), Read(ArrayList()), store)
+        val pages = ModuleStoreMyPage(profiles, Read(ArrayList()), store)
 
-        assertEquals(
-            StoreMyPage.Wishlist(1L, 2L, "상품", null, null, "DELETED", null, null, time),
-            pages.wishlists(7L, DEFAULT).content!!.first(),
+        every { profiles.require(any()) } returns member()
+        every { store.wishlists(any(), any()) } returns StoreMemberReads.Page(listOf(wish), 0, 20, 1, SORT)
+        every { store.orders(any(), any()) } returns StoreMemberReads.Page(
+            listOf(StoreMemberReads.Purchase(5L, "order", Long.MAX_VALUE, "CANCELLED", null, null, mutableListOf(item), null)),
+            0,
+            20,
+            1,
+            SORT,
         )
+        every { store.cart(any()) } returns Optional.of(StoreMemberReads.Cart(8L, 7L, mutableListOf(cartItem), time))
+
+        // when
+        val wishlist = pages.wishlists(7L, DEFAULT).content!!.first()
+        val purchase = pages.orders(7L, DEFAULT).content!!.first()
+        val cart = pages.cart(7L)
+
+        // then
+        assertEquals(StoreMyPage.Wishlist(1L, 2L, "상품", null, null, "DELETED", null, null, time), wishlist)
         assertEquals(
             StoreMyPage.Purchase(
                 5L, "order", Long.MAX_VALUE, "CANCELLED", null, null,
                 listOf(StoreMyPage.OrderItem(3L, 4L, null, "snapshot", Long.MAX_VALUE, null)), null,
             ),
-            pages.orders(7L, DEFAULT).content!!.first(),
+            purchase,
         )
         assertEquals(
             StoreMyPage.Cart(8L, 7L, listOf(StoreMyPage.CartItem(6L, 4L, null, null, 0L, 2, 0L)), time),
-            pages.cart(7L),
+            cart,
         )
+        verify(exactly = 1) { store.wishlists(7L, StoreMemberReads.Request(0, 20, SORT)) }
+        verify(exactly = 1) { store.orders(7L, StoreMemberReads.Request(0, 20, SORT)) }
+        verify(exactly = 1) { store.cart(7L) }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__an_absent_or_present_empty_cart__when__mapping__then__preserve_null_204_versus_a_nonnull_empty_cart(present: Boolean) {
-        val store = mock(StoreMemberReads::class.java)
-        `when`(store.cart(7L)).thenReturn(
-            if (present) Optional.of(StoreMemberReads.Cart(8L, 7L, mutableListOf(), null)) else Optional.empty(),
-        )
+    fun `장바구니가 없거나 비어 있을 때__매핑하면__null 204와 null이 아닌 빈 장바구니를 구분해 보존한다`(present: Boolean) {
+        // given
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
 
-        val result = ModuleStoreMyPage(unusedProfiles(), Read(ArrayList()), store).cart(7L)
+        every { profiles.require(any()) } returns member()
+        every { store.cart(any()) } returns
+            if (present) Optional.of(StoreMemberReads.Cart(8L, 7L, mutableListOf(), null)) else Optional.empty()
 
+        // when
+        val result = ModuleStoreMyPage(profiles, Read(ArrayList()), store).cart(7L)
+
+        // then
         if (present) {
             assertEquals(StoreMyPage.Cart(8L, 7L, listOf(), null), result)
         } else {
             assertNull(result)
         }
+        verify(exactly = 1) { store.cart(7L) }
     }
 
     @Test
-    fun given__configured_store_feign_array_sort_and_page_metadata__when__mapping__then__keep_array_branch_orders_and_pageimpl_total_adjustment() {
+    fun `스토어 feign 배열 정렬과 페이지 메타데이터가 설정돼 있을 때__매핑하면__배열 분기와 정렬 순서와 PageImpl 총계 보정을 유지한다`() {
+        // given
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
         val rich = listOf(StoreMemberReads.Order("sku.product.name", true, true))
-        val store = mock(StoreMemberReads::class.java)
         val item = StoreMemberReads.Wishlist(1L, 2L, "sku", 3L, null, null, null, null, 4L, mutableMapOf(), null, null, null)
-        `when`(store.wishlists(7L, StoreMemberReads.Request(0, 20, SORT)))
-            .thenReturn(StoreMemberReads.Page(listOf(item), 2, 7, 14, rich))
-        val pages = ModuleStoreMyPage(unusedProfiles(), Read(ArrayList()), store)
+        val pages = ModuleStoreMyPage(profiles, Read(ArrayList()), store)
 
+        every { profiles.require(any()) } returns member()
+        every { store.wishlists(any(), any()) } returnsMany listOf(
+            StoreMemberReads.Page(listOf(item), 2, 7, 14, rich),
+            StoreMemberReads.Page(listOf(item), 2, 7, 2147483650L, rich),
+        )
+
+        // when
         val page = pages.wishlists(7L, DEFAULT)
+        val largeTotal = pages.wishlists(7L, DEFAULT)
 
+        // then
         assertEquals(2, page.number)
         assertEquals(7, page.size)
         assertEquals(15L, page.totalElements)
         assertEquals(listOf(StoreMyPage.Order("sku.product.name", true, true, "NATIVE")), page.sort)
-        `when`(store.wishlists(7L, StoreMemberReads.Request(0, 20, SORT)))
-            .thenReturn(StoreMemberReads.Page(listOf(item), 2, 7, 2147483650L, rich))
-        assertEquals(2147483650L, pages.wishlists(7L, DEFAULT).totalElements)
+        assertEquals(2147483650L, largeTotal.totalElements)
+        verify(exactly = 2) { store.wishlists(7L, StoreMemberReads.Request(0, 20, SORT)) }
     }
 
     @ParameterizedTest
     @MethodSource("requests")
-    fun given__the_existing_single_flattened_sort_parameter__when__converting__then__match_actual_store_spring_pageable_including_lost_direction_boundaries(
+    fun `기존 단일 평탄화 정렬 파라미터일 때__변환하면__경계에서 방향이 사라지는 경우까지 실제 스토어 스프링 pageable과 일치한다`(
         source: StoreMyPage.Request,
     ) {
-        val web = mock(NativeWebRequest::class.java)
-        `when`(web.getParameter("page")).thenReturn(Integer.toString(source.page))
-        `when`(web.getParameter("size")).thenReturn(Integer.toString(source.size))
-        `when`(web.getParameterValues("sort")).thenReturn(if (source.sort == null) null else arrayOf(source.sort!!))
+        // given
+        val web = mockk<NativeWebRequest>()
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
         val parameter = MethodParameter(
             ModuleStoreMyPageTest::class.java.getDeclaredMethod("storeEndpoint", Pageable::class.java),
             0,
         )
+
+        every { web.getParameter("page") } returns Integer.toString(source.page)
+        every { web.getParameter("size") } returns Integer.toString(source.size)
+        every { web.getParameterValues("sort") } returns if (source.sort == null) null else arrayOf(source.sort!!)
+        every { profiles.require(any()) } returns member()
+        every { store.orders(any(), any()) } returns StoreMemberReads.Page(listOf(), 0, 20, 0, listOf())
+
         val expected: Pageable = PageableHandlerMethodArgumentResolver().resolveArgument(parameter, null, web, null)
-        val store = mock(StoreMemberReads::class.java)
-        `when`(store.orders(anyLong(), anyNonNull<StoreMemberReads.Request>()))
-            .thenReturn(StoreMemberReads.Page(listOf(), 0, 20, 0, listOf()))
 
-        ModuleStoreMyPage(unusedProfiles(), Read(ArrayList()), store).orders(7L, source)
+        // when
+        ModuleStoreMyPage(profiles, Read(ArrayList()), store).orders(7L, source)
 
+        // then
         val orders = expected.sort.stream()
             .map { order -> StoreMemberReads.Order(order.property, order.isAscending, order.isIgnoreCase) }
             .toList()
-        verify(store).orders(7L, StoreMemberReads.Request(expected.pageNumber, expected.pageSize, orders))
+        verify(exactly = 1) { store.orders(7L, StoreMemberReads.Request(expected.pageNumber, expected.pageSize, orders)) }
         if ("id,desc,createdAt,asc" == source.sort) {
             assertEquals(
                 listOf(
@@ -255,11 +314,18 @@ class ModuleStoreMyPageTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["null-page", "null-cart-items"])
-    fun given__malformed_module_data__when__mapping__then__fail_instead_of_fabricating_empty_state(defect: String) {
-        val store = mock(StoreMemberReads::class.java)
-        `when`(store.cart(7L)).thenReturn(Optional.of(StoreMemberReads.Cart(8L, 7L, null, null)))
-        val pages = ModuleStoreMyPage(unusedProfiles(), Read(ArrayList()), store)
+    fun `모듈 데이터가 잘못됐을 때__매핑하면__빈 상태를 꾸며내지 않고 실패한다`(defect: String) {
+        // given
+        val profiles = mockk<UserProfileQuery>()
+        val store = mockk<StoreMemberReads>()
+        val pages = ModuleStoreMyPage(profiles, Read(ArrayList()), store)
 
+        every { profiles.require(any()) } returns member()
+        // The module contract is non-null, so a null page can only be simulated by returning null from the mock.
+        every { store.orders(any(), any()) } returns nullValue()
+        every { store.cart(any()) } returns Optional.of(StoreMemberReads.Cart(8L, 7L, null, null))
+
+        // when
         assertThrows(IllegalStateException::class.java) {
             if (defect == "null-page") {
                 pages.orders(7L, DEFAULT)
@@ -275,9 +341,14 @@ class ModuleStoreMyPageTest {
     ) {
     }
 
-    /** The Java test passed a lambda returning null; the member lookup result is never used by these tests. */
-    private fun unusedProfiles(): UserProfileQuery {
-        return mock(UserProfileQuery::class.java)
+    /** The member lookup result is never used by these tests; any valid profile will do. */
+    private fun member(): UserProfile {
+        return UserProfile(7L, "member@fixture.invalid", "회원", "닉네임", "LOCAL", "ROLE_USER", null)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> nullValue(): T {
+        return null as T
     }
 
     private fun call(pages: ModuleStoreMyPage, operation: String): Any? {
@@ -285,20 +356,6 @@ class ModuleStoreMyPageTest {
             "wishlists" -> pages.wishlists(7L, DEFAULT)
             "orders" -> pages.orders(7L, DEFAULT)
             else -> pages.cart(7L)
-        }
-    }
-
-    private fun empty(operation: String): Any {
-        return if (operation == "cart") Optional.empty<Any>() else StoreMemberReads.Page(listOf<Any>(), 0, 20, 0, listOf())
-    }
-
-    private fun storeAnswer(store: StoreMemberReads, operation: String, answer: Supplier<Any?>) {
-        when (operation) {
-            "wishlists" -> `when`(store.wishlists(anyLong(), anyNonNull<StoreMemberReads.Request>()))
-                .thenAnswer { answer.get() }
-            "orders" -> `when`(store.orders(anyLong(), anyNonNull<StoreMemberReads.Request>()))
-                .thenAnswer { answer.get() }
-            else -> `when`(store.cart(anyLong())).thenAnswer { answer.get() }
         }
     }
 

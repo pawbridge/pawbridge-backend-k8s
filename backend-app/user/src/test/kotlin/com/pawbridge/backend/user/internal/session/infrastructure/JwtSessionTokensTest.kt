@@ -10,20 +10,24 @@ import javax.crypto.SecretKey
 
 class JwtSessionTokensTest {
     @Test
-    fun given__existing_claims_and_same_key__when__issuing__then__keep_roles_care_and_original_jwt_shapes_without_nonce() {
+    fun `기존 클레임과 같은 서명 키일 때__액세스 토큰을 발급하면__nonce 없이 역할과 보호소 등록번호를 담고 공백 등록번호는 생략한다`() {
+        // given
         val tokens = JwtSessionTokens(KEY, 600_000)
+
+        // when
         val claims = Jwts.parser().verifyWith(KEY).build().parseSignedClaims(
             tokens.access(JwtSessionTokens.UserClaims(7, "synthetic@fixture.invalid", "Synthetic", "ROLE_USER", "CARE")),
         ).payload
+        val blank = Jwts.parser().verifyWith(KEY).build().parseSignedClaims(
+            tokens.access(JwtSessionTokens.UserClaims(7, "synthetic@fixture.invalid", "Synthetic", "ROLE_SHELTER", " ")),
+        ).payload
 
+        // then
         assertEquals(setOf("sub", "userId", "name", "role", "careRegNo", "iat", "exp"), claims.keys)
         assertEquals(7L, claims.get("userId", Long::class.javaObjectType))
         assertEquals("ROLE_USER", claims.get("role", String::class.java))
         assertEquals("CARE", claims.get("careRegNo", String::class.java))
         assertEquals(600_000L, claims.expiration.time - claims.issuedAt.time)
-        val blank = Jwts.parser().verifyWith(KEY).build().parseSignedClaims(
-            tokens.access(JwtSessionTokens.UserClaims(7, "synthetic@fixture.invalid", "Synthetic", "ROLE_SHELTER", " ")),
-        ).payload
         assertFalse(blank.containsKey("careRegNo"))
     }
 
