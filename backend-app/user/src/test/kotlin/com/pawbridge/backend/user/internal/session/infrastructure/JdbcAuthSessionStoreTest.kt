@@ -6,14 +6,13 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.dao.IncorrectResultSizeDataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Proxy
 import java.security.SecureRandom
 import java.sql.ResultSet
-import java.sql.SQLException
 import java.time.Duration
 
 /**
@@ -22,14 +21,17 @@ import java.time.Duration
  */
 class JdbcAuthSessionStoreTest {
     @Test
-    fun given__a_login__when__creating__then__lock_the_user_store_only_the_hash_and_keep_the_five_most_recent_sessions() {
+    fun `로그인할 때__세션을 만들면__사용자를 잠그고 해시만 저장하며 최근 세션 다섯 개만 유지한다`() {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.maxAge = 1_209_600L
         val tokens = RefreshTokens(FixedRandom())
         val store = JdbcAuthSessionStore(jdbc, POLICY, tokens)
 
+        // when
         val issued = store.create(7)
 
+        // then
         assertTrue(RefreshTokens.wellFormed(issued.value))
         assertEquals(1_209_600L, issued.maxAgeSeconds)
         assertEquals(
@@ -54,9 +56,11 @@ class JdbcAuthSessionStoreTest {
     }
 
     @Test
-    fun given__the_sixth_login__when__creating__then__revoke_active_sessions_beyond_the_five_most_recently_used() {
+    fun `여섯 번째 로그인일 때__세션을 만들면__최근 사용한 다섯 개를 넘는 활성 세션을 폐기하는 SQL을 쓴다`() {
+        // when
         val sql = JdbcAuthSessionStore.REVOKE_OLDEST_ACTIVE
 
+        // then
         assertTrue(sql.contains("SET revoked_at = CURRENT_TIMESTAMP"))
         assertTrue(sql.contains("WHERE user_id = ?"))
         assertTrue(sql.contains("AND revoked_at IS NULL"))
@@ -67,24 +71,30 @@ class JdbcAuthSessionStoreTest {
     }
 
     @Test
-    fun given__a_deleted_user__when__creating__then__fail_before_inserting_a_session() {
+    fun `삭제된 사용자일 때__세션을 만들면__세션을 삽입하기 전에 실패한다`() {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.userPresent = false
         val store = JdbcAuthSessionStore(jdbc, POLICY, RefreshTokens(FixedRandom()))
 
+        // when
         assertThrows(IncorrectResultSizeDataAccessException::class.java) { store.create(7) }
 
+        // then
         assertEquals(listOf(JdbcAuthSessionStore.LOCK_USER), jdbc.statements)
     }
 
     @Test
-    fun given__a_presented_hash__when__rotating__then__move_an_active_session_to_the_next_hash_and_record_the_retired_one() {
+    fun `제시된 해시가 있을 때__회전하면__활성 세션을 다음 해시로 옮기고 폐기된 해시를 기록한다`() {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.rotationRows = 1
         val store = JdbcAuthSessionStore(jdbc, POLICY, RefreshTokens())
 
+        // when
         val rotation = store.rotate(PRESENTED_HASH, NEXT_HASH).orElseThrow()
 
+        // then
         assertEquals(31L, rotation.sessionId)
         assertEquals(7L, rotation.userId)
         assertEquals(1_209_600L, rotation.maxAgeSeconds)
@@ -106,23 +116,30 @@ class JdbcAuthSessionStoreTest {
     }
 
     @Test
-    fun given__no_matching_active_session__when__rotating__then__return_empty_without_recording_history() {
+    fun `일치하는 활성 세션이 없을 때__회전하면__이력을 기록하지 않고 빈 값을 돌려준다`() {
+        // given
         val jdbc = RecordingJdbc()
         val store = JdbcAuthSessionStore(jdbc, POLICY, RefreshTokens())
 
-        assertTrue(store.rotate(PRESENTED_HASH, NEXT_HASH).isEmpty)
+        // when
+        val rotation = store.rotate(PRESENTED_HASH, NEXT_HASH)
 
+        // then
+        assertTrue(rotation.isEmpty)
         assertEquals(listOf(JdbcAuthSessionStore.ROTATE), jdbc.statements)
     }
 
     @Test
-    fun given__a_retired_hash__when__looking_it_up__then__bind_the_sixty_second_grace_window_and_map_the_flags() {
+    fun `폐기된 해시가 있을 때__조회하면__60초 유예 구간을 바인딩하고 플래그를 그대로 매핑한다`() {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.retiredRows = 1
         val store = JdbcAuthSessionStore(jdbc, POLICY, RefreshTokens())
 
+        // when
         val retired = store.findRetired(PRESENTED_HASH).orElseThrow()
 
+        // then
         assertEquals(31L, retired.sessionId)
         assertEquals(7L, retired.userId)
         assertTrue(retired.withinGrace)
@@ -135,14 +152,17 @@ class JdbcAuthSessionStoreTest {
     }
 
     @Test
-    fun given__an_unused_successor__when__recovering_a_lost_response__then__lock_it_and_retire_it_through_a_normal_rotation() {
+    fun `후속 토큰이 쓰이지 않았을 때__잃어버린 응답을 복구하면__후속 토큰을 잠그고 일반 회전으로 폐기한다`() {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.successorRows = 1
         jdbc.rotationRows = 1
         val store = JdbcAuthSessionStore(jdbc, POLICY, RefreshTokens())
 
+        // when
         val rotation = store.rotateUnusedSuccessor(31, PRESENTED_HASH, NEXT_HASH).orElseThrow()
 
+        // then
         assertEquals(31L, rotation.sessionId)
         assertEquals(
             listOf(
@@ -162,25 +182,32 @@ class JdbcAuthSessionStoreTest {
     }
 
     @Test
-    fun given__the_session_already_moved_on__when__recovering_a_lost_response__then__return_empty_without_writing() {
+    fun `세션이 이미 다음 토큰으로 넘어갔을 때__잃어버린 응답을 복구하면__쓰기 없이 빈 값을 돌려준다`() {
+        // given
         val jdbc = RecordingJdbc()
         val store = JdbcAuthSessionStore(jdbc, POLICY, RefreshTokens())
 
-        assertTrue(store.rotateUnusedSuccessor(31, PRESENTED_HASH, NEXT_HASH).isEmpty)
+        // when
+        val rotation = store.rotateUnusedSuccessor(31, PRESENTED_HASH, NEXT_HASH)
 
+        // then
+        assertTrue(rotation.isEmpty)
         assertEquals(listOf(JdbcAuthSessionStore.LOCK_UNUSED_SUCCESSOR), jdbc.statements)
     }
 
     @Test
-    fun given__revocations_and_cleanup__when__writing__then__use_the_expected_statements_and_bindings() {
+    fun `폐기와 정리를 요청할 때__쓰면__예상한 SQL과 바인딩을 사용한다`() {
+        // given
         val jdbc = RecordingJdbc()
         val store = JdbcAuthSessionStore(jdbc, POLICY, RefreshTokens())
 
+        // when
         store.revoke(31)
         store.revokeByTokenHash(PRESENTED_HASH)
         store.revokeAll(7)
         store.deleteFinished(1000)
 
+        // then
         assertEquals(
             listOf(
                 JdbcAuthSessionStore.REVOKE_SESSION,
@@ -222,40 +249,37 @@ class JdbcAuthSessionStoreTest {
             statements.add(sql)
             arguments.add(args)
             val rows = ArrayList<T>()
-            try {
-                val row = mock(ResultSet::class.java)
-                var count = 0
-                if (sql == JdbcAuthSessionStore.LOCK_USER) {
-                    `when`(row.getLong("user_id")).thenReturn(7L)
-                    count = if (userPresent) 1 else 0
-                } else if (sql == JdbcAuthSessionStore.INSERT_SESSION) {
-                    `when`(row.getLong("max_age_seconds")).thenReturn(maxAge)
-                    count = 1
-                } else if (sql == JdbcAuthSessionStore.ROTATE) {
-                    `when`(row.getLong("session_id")).thenReturn(31L)
-                    `when`(row.getLong("user_id")).thenReturn(7L)
-                    `when`(row.getLong("max_age_seconds")).thenReturn(1_209_600L)
-                    count = rotationRows
-                } else if (sql == JdbcAuthSessionStore.FIND_RETIRED) {
-                    `when`(row.getLong("session_id")).thenReturn(31L)
-                    `when`(row.getLong("user_id")).thenReturn(7L)
-                    `when`(row.getBoolean("within_grace")).thenReturn(true)
-                    `when`(row.getBoolean("latest_retirement")).thenReturn(true)
-                    `when`(row.getBoolean("active")).thenReturn(false)
-                    count = retiredRows
-                } else if (sql == JdbcAuthSessionStore.LOCK_UNUSED_SUCCESSOR) {
-                    `when`(row.getString("token_hash")).thenReturn(SUCCESSOR_HASH)
-                    count = successorRows
-                } else {
-                    throw AssertionError("Unexpected query")
-                }
-                for (index in 0 until count) {
-                    rows.add(rowMapper.mapRow(row, index) as T)
-                }
-                return rows
-            } catch (failure: SQLException) {
-                throw AssertionError(failure)
+            val values: Map<String, Any?>
+            val count: Int
+            if (sql == JdbcAuthSessionStore.LOCK_USER) {
+                values = mapOf("user_id" to 7L)
+                count = if (userPresent) 1 else 0
+            } else if (sql == JdbcAuthSessionStore.INSERT_SESSION) {
+                values = mapOf("max_age_seconds" to maxAge)
+                count = 1
+            } else if (sql == JdbcAuthSessionStore.ROTATE) {
+                values = mapOf("session_id" to 31L, "user_id" to 7L, "max_age_seconds" to 1_209_600L)
+                count = rotationRows
+            } else if (sql == JdbcAuthSessionStore.FIND_RETIRED) {
+                values = mapOf(
+                    "session_id" to 31L,
+                    "user_id" to 7L,
+                    "within_grace" to true,
+                    "latest_retirement" to true,
+                    "active" to false,
+                )
+                count = retiredRows
+            } else if (sql == JdbcAuthSessionStore.LOCK_UNUSED_SUCCESSOR) {
+                values = mapOf("token_hash" to SUCCESSOR_HASH)
+                count = successorRows
+            } else {
+                throw AssertionError("Unexpected query")
             }
+            val row = resultSet(values)
+            for (index in 0 until count) {
+                rows.add(rowMapper.mapRow(row, index) as T)
+            }
+            return rows
         }
 
         override fun update(sql: String, vararg args: Any?): Int {
@@ -266,6 +290,22 @@ class JdbcAuthSessionStoreTest {
     }
 
     companion object {
+        /** In-memory ResultSet that answers typed getters by column label; any other call fails the test. */
+        private fun resultSet(values: Map<String, Any?>): ResultSet {
+            val handler = InvocationHandler { _, method, args ->
+                if (method.name.startsWith("get") && args != null && args[0] is String && values.containsKey(args[0])) {
+                    values[args[0]]
+                } else {
+                    throw AssertionError("Unexpected ResultSet call: ${method.name}")
+                }
+            }
+            return Proxy.newProxyInstance(
+                ResultSet::class.java.classLoader,
+                arrayOf<Class<*>>(ResultSet::class.java),
+                handler,
+            ) as ResultSet
+        }
+
         private val POLICY = AuthSessionPolicy(
             Duration.ofMillis(1_209_600_000L),
             Duration.ofDays(30),

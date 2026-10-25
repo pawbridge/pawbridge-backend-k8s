@@ -11,7 +11,8 @@ import java.sql.SQLException
 
 class TotalUserCountExceptionHandlerTest {
     @Test
-    fun given__private_runtime_cause_and_suppressed_messages__when__handling__then__return_common_500_without_custom_cache_and_log_only_type() {
+    fun `비공개 원인과 억제된 메시지가 있는 런타임 예외일 때__처리하면__캐시 지정 없는 공통 500을 돌려주고 예외 유형만 기록한다`() {
+        // given
         val failure = IllegalStateException(
             "Bearer synthetic-private-token",
             SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password"),
@@ -22,8 +23,10 @@ class TotalUserCountExceptionHandlerTest {
         appender.start()
         logger.addAppender(appender)
         try {
+            // when
             val response = TotalUserCountExceptionHandler().serverError(failure)
 
+            // then
             assertEquals(500, response.statusCode.value())
             assertEquals(TotalUserCountController.Response<Void>(500, "서버 에러!", null), response.body)
             assertNull(response.headers.cacheControl)

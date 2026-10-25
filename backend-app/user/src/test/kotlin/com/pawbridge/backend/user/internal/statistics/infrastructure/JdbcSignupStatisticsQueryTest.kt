@@ -11,8 +11,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -23,6 +21,8 @@ import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.TransactionSystemException
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.time.Clock
@@ -36,15 +36,19 @@ import java.util.stream.Stream
 
 class JdbcSignupStatisticsQueryTest {
     @Test
-    fun given__sparse_daily_rows_and_long_count__when__reading__then__return_raw_rows_without_zero_fill_or_clock_and_bind_local_dates() {
+    fun `일별 가입 행이 듬성듬성하고 개수가 long 최대값일 때__일별로 조회하면__0 채움이나 시계 없이 원본 행을 돌려주고 날짜를 로컬 날짜로 바인딩한다`() {
+        // given
         val fixture = Fixture(Instant.EPOCH)
         val start = LocalDate.of(2024, 2, 27)
         val end = LocalDate.of(2024, 2, 29)
         val raw = listOf(DailySignupStats(start, Long.MAX_VALUE), DailySignupStats(end, 2L))
         fixture.jdbc.results.add(raw)
 
-        assertEquals(raw, fixture.query.daily(start, end))
+        // when
+        val result = fixture.query.daily(start, end)
 
+        // then
+        assertEquals(raw, result)
         assertEquals(listOf(Range(start, end)), fixture.jdbc.ranges)
         assertEquals(0, fixture.clock.samples.get())
         assertEquals(1, fixture.transactions.commits)
@@ -56,14 +60,18 @@ class JdbcSignupStatisticsQueryTest {
     }
 
     @Test
-    fun given__reversed_dates__when__reading_daily__then__pass_the_range_to_sql_and_return_its_empty_result() {
+    fun `시작일이 종료일보다 늦을 때__일별로 조회하면__범위를 그대로 SQL에 넘기고 빈 결과를 돌려준다`() {
+        // given
         val fixture = Fixture(Instant.EPOCH)
         val start = LocalDate.of(2024, 3, 1)
         val end = start.minusDays(1)
         fixture.jdbc.results.add(listOf())
 
-        assertEquals(listOf<DailySignupStats>(), fixture.query.daily(start, end))
+        // when
+        val result = fixture.query.daily(start, end)
 
+        // then
+        assertEquals(listOf<DailySignupStats>(), result)
         assertEquals(listOf(Range(start, end)), fixture.jdbc.ranges)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
@@ -71,18 +79,21 @@ class JdbcSignupStatisticsQueryTest {
 
     @ParameterizedTest
     @MethodSource("seoulDays")
-    fun given__a_seoul_day_boundary_and_independent_query_counts__when__reading_periods__then__sample_once_inside_one_read_only_transaction_and_fill_each_inclusive_range(
+    fun `서울 날짜 경계의 시각과 기간별 조회 건수가 서로 다를 때__기간별로 조회하면__읽기 전용 트랜잭션 하나에서 시계를 한 번만 읽고 각 포함 범위를 채운다`(
         instant: Instant,
         today: LocalDate,
     ) {
+        // given
         val fixture = Fixture(instant)
         fixture.jdbc.results.add(listOf(DailySignupStats(today, 10L)))
         fixture.jdbc.results.add(listOf(DailySignupStats(today, 11L)))
         fixture.jdbc.results.add(listOf(DailySignupStats(today, 12L)))
         fixture.jdbc.results.add(listOf(DailySignupStats(today, 13L)))
 
+        // when
         val result = fixture.query.periods()
 
+        // then
         assertEquals(1, fixture.clock.samples.get())
         assertEquals(
             listOf(
@@ -110,9 +121,10 @@ class JdbcSignupStatisticsQueryTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__begin_second_query_or_commit_failure__when__reading_periods__then__propagate_the_original_failure_without_partial_response_or_retry(
+    fun `시작이나 두 번째 조회나 커밋이 실패할 때__기간별로 조회하면__부분 응답이나 재시도 없이 원래 예외를 전파한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture(Instant.EPOCH)
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic-private-begin")
@@ -130,8 +142,11 @@ class JdbcSignupStatisticsQueryTest {
             fixture.transactions.commitFailure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { fixture.query.periods() })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.query.periods() }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(
             if (phase == FailurePhase.BEGIN) 0 else if (phase == FailurePhase.SECOND_QUERY) 2 else 4,
             fixture.jdbc.ranges.size,
@@ -177,9 +192,7 @@ class JdbcSignupStatisticsQueryTest {
             try {
                 var index = 0
                 for (row in results.removeFirst()) {
-                    val rows = mock(ResultSet::class.java)
-                    `when`(rows.getObject("signup_date", LocalDate::class.java)).thenReturn(row.date)
-                    `when`(rows.getLong("signup_count")).thenReturn(row.count)
+                    val rows = signupRow(row)
                     mapped.add(rowMapper.mapRow(rows, index++)!!)
                 }
             } catch (failure: SQLException) {
@@ -246,6 +259,22 @@ class JdbcSignupStatisticsQueryTest {
     }
 
     companion object {
+        /** In-memory ResultSet exposing only the two signup columns; any other access fails the test. */
+        private fun signupRow(row: DailySignupStats): ResultSet {
+            val handler = InvocationHandler { _, method, args ->
+                when {
+                    method.name == "getObject" && args[0] == "signup_date" -> row.date
+                    method.name == "getLong" && args[0] == "signup_count" -> row.count
+                    else -> throw AssertionError("Unexpected ResultSet call: ${method.name}")
+                }
+            }
+            return Proxy.newProxyInstance(
+                ResultSet::class.java.classLoader,
+                arrayOf<Class<*>>(ResultSet::class.java),
+                handler,
+            ) as ResultSet
+        }
+
         @JvmStatic
         fun seoulDays(): Stream<Arguments> = Stream.of(
             Arguments.of(Instant.parse("2024-02-29T14:59:59.999999Z"), LocalDate.of(2024, 2, 29)),
