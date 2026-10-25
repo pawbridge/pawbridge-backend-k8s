@@ -11,49 +11,58 @@ import java.sql.SQLException
 
 class PostgresqlRollbackCharsetViolationTest {
     @Test
-    fun given__structured_community_charset_check__when__classify__then__nested_and_batch_causes_match() {
-        assertTrue(
-            PostgresqlRollbackCharsetViolation.matches(
-                DataIntegrityViolationException(
-                    "synthetic",
-                    error("23514", "pawbridge_community", "ck_rollback_charset_posts"),
-                ),
-            ),
+    fun `구조화된 커뮤니티 문자셋 검사 위반일 때__분류하면__중첩 원인과 배치 원인을 모두 일치로 본다`() {
+        // given
+        val nested = DataIntegrityViolationException(
+            "synthetic",
+            error("23514", "pawbridge_community", "ck_rollback_charset_posts"),
         )
         val batch = BatchUpdateException()
         batch.setNextException(error("23514", "pawbridge_community", "ck_rollback_charset_comments"))
-        assertTrue(PostgresqlRollbackCharsetViolation.matches(batch))
+
+        // when
+        val nestedMatches = PostgresqlRollbackCharsetViolation.matches(nested)
+        val batchMatches = PostgresqlRollbackCharsetViolation.matches(batch)
+
+        // then
+        assertTrue(nestedMatches)
+        assertTrue(batchMatches)
     }
 
     @Test
-    fun given__other_state_schema_constraint_or_unstructured_text__when__classify__then__server_error_is_preserved() {
-        assertFalse(
-            PostgresqlRollbackCharsetViolation.matches(
-                error("23505", "pawbridge_community", "ck_rollback_charset_posts"),
-            ),
-        )
-        assertFalse(
-            PostgresqlRollbackCharsetViolation.matches(
-                error("23514", "other_schema", "ck_rollback_charset_posts"),
-            ),
-        )
-        assertFalse(
-            PostgresqlRollbackCharsetViolation.matches(
-                error("23514", "pawbridge_community", "business_constraint"),
-            ),
-        )
-        assertFalse(
-            PostgresqlRollbackCharsetViolation.matches(SQLException("ck_rollback_charset_posts", "23514")),
-        )
+    fun `다른 상태나 스키마나 제약이거나 구조화되지 않은 문구일 때__분류하면__서버 오류를 그대로 보존한다`() {
+        // given
+        val otherState = error("23505", "pawbridge_community", "ck_rollback_charset_posts")
+        val otherSchema = error("23514", "other_schema", "ck_rollback_charset_posts")
+        val otherConstraint = error("23514", "pawbridge_community", "business_constraint")
+        val unstructured = SQLException("ck_rollback_charset_posts", "23514")
+
+        // when
+        val otherStateMatches = PostgresqlRollbackCharsetViolation.matches(otherState)
+        val otherSchemaMatches = PostgresqlRollbackCharsetViolation.matches(otherSchema)
+        val otherConstraintMatches = PostgresqlRollbackCharsetViolation.matches(otherConstraint)
+        val unstructuredMatches = PostgresqlRollbackCharsetViolation.matches(unstructured)
+
+        // then
+        assertFalse(otherStateMatches)
+        assertFalse(otherSchemaMatches)
+        assertFalse(otherConstraintMatches)
+        assertFalse(unstructuredMatches)
     }
 
     @Test
-    fun given__cyclic_exception_chain__when__classify__then__traversal_finishes_without_matching_message_text() {
+    fun `예외 체인이 순환할 때__분류하면__메시지 문구와 맞추지 않고 순회를 끝낸다`() {
+        // given
         val first = SQLException("ck_rollback_charset_posts", "23514")
         val second = SQLException("synthetic")
         first.initCause(second)
         second.initCause(first)
-        assertFalse(PostgresqlRollbackCharsetViolation.matches(first))
+
+        // when
+        val matches = PostgresqlRollbackCharsetViolation.matches(first)
+
+        // then
+        assertFalse(matches)
     }
 
     private fun error(state: String, schema: String, constraint: String): PSQLException =

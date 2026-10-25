@@ -25,14 +25,16 @@ class JdbcNoteBlockRemovalTest {
 
     @ParameterizedTest
     @MethodSource("memberPairs")
-    fun given__reverse_order_or_same_member_ids_and_no_outgoing_row__when__removing__then__insert_and_lock_each_sorted_distinct_member_before_one_guard_and_zero_row_delete(
+    fun `ID가 역순이거나 같고 나가는 행이 없을 때__차단을 해제하면__정렬된 서로 다른 회원을 삽입하고 잠근 뒤 가드를 한 번 부르고 0행 삭제를 한다`(
         current: Long,
         target: Long,
         expectedMembers: List<Long>,
     ) {
+        // given
         val fixture = Fixture()
         var guardCalls = 0
 
+        // when
         fixture.removal.remove(current, target) {
             assertTrue(fixture.transactions.active)
             assertEquals(expectedMembers.size * 2, fixture.jdbc.calls.size)
@@ -40,6 +42,7 @@ class JdbcNoteBlockRemovalTest {
             fixture.events.add("guard")
         }
 
+        // then
         val expectedEvents = ArrayList<String>()
         expectedEvents.add("begin")
         for (index in expectedMembers.indices) {
@@ -67,9 +70,10 @@ class JdbcNoteBlockRemovalTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__begin_second_lock_guard_delete_or_commit_failure__when__removing__then__propagate_same_failure_stop_later_work_and_do_not_retry(
+    fun `시작 두 번째 잠금 가드 삭제 또는 커밋이 실패할 때__차단을 해제하면__같은 예외를 전파하고 이후 작업을 멈추며 재시도하지 않는다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("private begin")
@@ -89,20 +93,20 @@ class JdbcNoteBlockRemovalTest {
         }
         var guardCalls = 0
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) {
-                fixture.removal.remove(9L, 3L) {
-                    assertTrue(fixture.transactions.active)
-                    guardCalls++
-                    fixture.events.add("guard")
-                    if (phase == FailurePhase.GUARD) {
-                        throw failure
-                    }
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
+            fixture.removal.remove(9L, 3L) {
+                assertTrue(fixture.transactions.active)
+                guardCalls++
+                fixture.events.add("guard")
+                if (phase == FailurePhase.GUARD) {
+                    throw failure
                 }
-            },
-        )
+            }
+        }
 
+        // then
+        assertSame(failure, thrown)
         val prefix = listOf("begin", "insert:3", "lock:3", "insert:9", "lock:9")
         val expected = ArrayList(if (phase == FailurePhase.BEGIN) listOf("begin") else prefix)
         if (phase == FailurePhase.GUARD || phase == FailurePhase.DELETE || phase == FailurePhase.COMMIT) {

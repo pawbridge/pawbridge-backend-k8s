@@ -3,47 +3,51 @@ package com.pawbridge.backend.community.internal.note.application
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.junit.jupiter.api.Test
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import java.util.Collections
 
 class ReadBlockedAuthorsTest {
-    private val members = mock(ContactMemberQuery::class.java)
-    private val blocks = mock(NoteBlockStatusReader::class.java)
+    private val members = mockk<ContactMemberQuery>()
+    private val blocks = mockk<NoteBlockStatusReader>()
     private val query = ReadBlockedAuthors(members, blocks)
 
     @Test
-    fun given__valid_authors_with_duplicates_self_and_max_id__when__reading__then__check_current_once_and_pass_distinct_ids_without_target_lookups() {
-        whenever(members.get(7L)).thenReturn(CURRENT)
+    fun `중복과 자기 자신과 최댓값 ID가 섞인 유효한 작성자 목록이 주어졌을 때__읽으면__현재 회원을 한 번 확인하고 대상 조회 없이 중복 없는 ID를 넘긴다`() {
+        // given
         val storedIds = listOf(99L, Long.MAX_VALUE)
-        whenever(blocks.blockedAuthors(7L, listOf(Long.MAX_VALUE, 7L, 99L))).thenReturn(storedIds)
 
+        every { members.get(any()) } returns CURRENT
+        every { blocks.blockedAuthors(any(), any()) } returns storedIds
+
+        // when
         val result = query.read(7L, listOf(Long.MAX_VALUE, 7L, 99L, Long.MAX_VALUE, 99L))
 
+        // then
         assertSame(storedIds, result.memberIds)
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        order.verify(blocks).blockedAuthors(7L, listOf(Long.MAX_VALUE, 7L, 99L))
-        verifyNoMoreInteractions(members, blocks)
+        verifySequence {
+            members.get(7L)
+            blocks.blockedAuthors(7L, listOf(Long.MAX_VALUE, 7L, 99L))
+        }
     }
 
     @ParameterizedTest
     @EnumSource(InvalidInput::class)
-    fun given__invalid_original_list_and_current_id__when__reading__then__reject_members_before_login_or_any_lookup(
+    fun `잘못된 원본 목록과 현재 회원 ID가 주어졌을 때__읽으면__로그인이나 어떤 조회보다 먼저 잘못된 회원 목록으로 거절한다`(
         input: InvalidInput,
     ) {
+        // given
         val ids: List<Long?>? = when (input) {
             InvalidInput.NULL -> null
             InvalidInput.EMPTY -> listOf()
@@ -54,95 +58,102 @@ class ReadBlockedAuthorsTest {
             InvalidInput.DUPLICATE_101 -> Collections.nCopies(101, 8L)
         }
 
-        assertEquals(
-            BlockStatusRejectedException.Reason.INVALID_MEMBERS,
-            assertThrows(BlockStatusRejectedException::class.java) { query.read(-1L, ids) }.reason(),
-        )
+        // when
+        val failure = assertThrows(BlockStatusRejectedException::class.java) { query.read(-1L, ids) }
 
-        verifyNoInteractions(members, blocks)
+        // then
+        assertEquals(BlockStatusRejectedException.Reason.INVALID_MEMBERS, failure.reason())
+        confirmVerified(members, blocks)
     }
 
     @ParameterizedTest
     @EnumSource(ValidBoundary::class)
-    fun given__one_or_one_hundred_original_ids__when__reading__then__allow_boundary_and_deduplicate_only_after_current_lookup(
+    fun `원본 ID가 1개 또는 100개일 때__읽으면__경계를 허용하고 현재 회원 조회 뒤에만 중복을 없앤다`(
         boundary: ValidBoundary,
     ) {
+        // given
         val ids: List<Long> = when (boundary) {
             ValidBoundary.ONE -> listOf(8L)
             ValidBoundary.DISTINCT_100 -> (1L..100L).toList()
             ValidBoundary.DUPLICATE_100 -> Collections.nCopies(100, 8L)
         }
         val distinctIds = ids.distinct()
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(blocks.blockedAuthors(7L, distinctIds)).thenReturn(listOf())
 
-        assertEquals(listOf<Long>(), query.read(7L, ids).memberIds)
+        every { members.get(any()) } returns CURRENT
+        every { blocks.blockedAuthors(any(), any()) } returns listOf()
 
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        order.verify(blocks).blockedAuthors(7L, distinctIds)
-        verifyNoMoreInteractions(members, blocks)
+        // when
+        val result = query.read(7L, ids)
+
+        // then
+        assertEquals(listOf<Long>(), result.memberIds)
+        verifySequence {
+            members.get(7L)
+            blocks.blockedAuthors(7L, distinctIds)
+        }
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0L, -1L])
-    fun given__valid_list_and_invalid_current_id__when__reading__then__reject_login_before_user_or_block_lookup(
+    fun `유효한 목록과 잘못된 현재 회원 ID가 주어졌을 때__읽으면__회원 조회와 차단 조회 전에 로그인 거절한다`(
         currentId: Long,
     ) {
-        assertEquals(
-            BlockStatusRejectedException.Reason.LOGIN,
-            assertThrows(BlockStatusRejectedException::class.java) { query.read(currentId, listOf(8L)) }.reason(),
-        )
+        // when
+        val failure = assertThrows(BlockStatusRejectedException::class.java) { query.read(currentId, listOf(8L)) }
 
-        verifyNoInteractions(members, blocks)
+        // then
+        assertEquals(BlockStatusRejectedException.Reason.LOGIN, failure.reason())
+        confirmVerified(members, blocks)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__missing_or_pending_current_member__when__reading__then__reject_inactive_before_block_lookup(
+    fun `현재 회원이 없거나 탈퇴 대기일 때__읽으면__차단 조회 전에 비활성으로 거절한다`(
         pending: Boolean,
     ) {
-        whenever(members.get(7L)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, pending))
+        // given
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, pending)
 
-        assertEquals(
-            BlockStatusRejectedException.Reason.INACTIVE,
-            assertThrows(BlockStatusRejectedException::class.java) { query.read(7L, listOf(8L)) }.reason(),
-        )
+        // when
+        val failure = assertThrows(BlockStatusRejectedException::class.java) { query.read(7L, listOf(8L)) }
 
-        verify(members).get(7L)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(blocks)
+        // then
+        assertEquals(BlockStatusRejectedException.Reason.INACTIVE, failure.reason())
+        verify(exactly = 1) { members.get(7L) }
+        confirmVerified(members, blocks)
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__user_or_block_lookup_failure__when__reading__then__preserve_failure_origin_and_stop_later_lookups(
+    fun `회원 조회 또는 차단 조회가 실패할 때__읽으면__실패 원인을 보존하고 이후 조회를 멈춘다`(
         phase: FailurePhase,
     ) {
+        // given
         val failure: RuntimeException = when (phase) {
             FailurePhase.USER ->
                 ContactMemberUnavailableException(DataAccessResourceFailureException("private User SQL"))
             FailurePhase.BLOCK_DAO -> DataAccessResourceFailureException("private block SQL")
             FailurePhase.BLOCK_RUNTIME -> IllegalStateException("private block runtime")
         }
+
         if (phase == FailurePhase.USER) {
-            whenever(members.get(7L)).thenThrow(failure)
+            every { members.get(any()) } throws failure
         } else {
-            whenever(members.get(7L)).thenReturn(CURRENT)
-            whenever(blocks.blockedAuthors(7L, listOf(8L))).thenThrow(failure)
+            every { members.get(any()) } returns CURRENT
+            every { blocks.blockedAuthors(any(), any()) } throws failure
         }
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) { query.read(7L, listOf(8L, 8L)) },
-        )
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { query.read(7L, listOf(8L, 8L)) }
 
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        if (phase != FailurePhase.USER) {
-            order.verify(blocks).blockedAuthors(7L, listOf(8L))
+        // then
+        assertSame(failure, thrown)
+        verifySequence {
+            members.get(7L)
+            if (phase != FailurePhase.USER) {
+                blocks.blockedAuthors(7L, listOf(8L))
+            }
         }
-        verifyNoMoreInteractions(members, blocks)
     }
 
     enum class InvalidInput { NULL, EMPTY, NULL_ELEMENT, ZERO, NEGATIVE, DISTINCT_101, DUPLICATE_101 }

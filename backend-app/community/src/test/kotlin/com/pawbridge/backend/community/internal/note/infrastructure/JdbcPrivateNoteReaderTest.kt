@@ -1,6 +1,8 @@
 package com.pawbridge.backend.community.internal.note.infrastructure
 
 import com.pawbridge.backend.community.internal.note.application.PrivateNoteReader.StoredNote
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -11,8 +13,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -35,14 +35,18 @@ class JdbcPrivateNoteReaderTest {
 
     @ParameterizedTest
     @MethodSource("storedNotes")
-    fun given__nullable_ten_column_row__when__finding__then__bind_owner_uuid_and_strict_instant_and_map_raw_values_in_one_read_only_transaction(
+    fun `null 가능한 열 개짜리 행이 있을 때__쪽지를 찾으면__소유자 UUID와 엄격한 시각을 바인딩하고 원시 값을 하나의 읽기 전용 트랜잭션에서 매핑한다`(
         note: StoredNote,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows = listOf(note)
 
-        assertEquals(Optional.of(note), fixture.reader.find(7L, NOTE_ID, NOW))
+        // when
+        val found = fixture.reader.find(7L, NOTE_ID, NOW)
 
+        // then
+        assertEquals(Optional.of(note), found)
         assertEquals(listOf("begin", "find", "commit"), fixture.events)
         assertEquals(1, fixture.jdbc.calls.size)
         val call = fixture.jdbc.calls.first()
@@ -60,11 +64,15 @@ class JdbcPrivateNoteReaderTest {
     }
 
     @Test
-    fun given__no_owner_scoped_row__when__finding__then__return_empty_after_commit_without_second_query() {
+    fun `소유자 범위의 행이 없을 때__쪽지를 찾으면__두 번째 질의 없이 커밋 뒤 빈 값을 돌려준다`() {
+        // given
         val fixture = Fixture()
 
-        assertEquals(Optional.empty<StoredNote>(), fixture.reader.find(7L, NOTE_ID, NOW))
+        // when
+        val found = fixture.reader.find(7L, NOTE_ID, NOW)
 
+        // then
+        assertEquals(Optional.empty<StoredNote>(), found)
         assertEquals(listOf("begin", "find", "commit"), fixture.events)
         assertEquals(1, fixture.jdbc.calls.size)
         assertFalse(fixture.transactions.active)
@@ -72,9 +80,10 @@ class JdbcPrivateNoteReaderTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__begin_query_or_commit_failure_then_recovery__when__finding__then__propagate_same_failure_without_empty_or_user_wrapping(
+    fun `시작 질의 또는 커밋 실패 뒤 복구될 때__쪽지를 찾으면__빈 값이나 사용자 예외 감싸기 없이 같은 예외를 전파한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows = listOf(storedNotes().findFirst().orElseThrow())
         val failure: RuntimeException = when (phase) {
@@ -88,11 +97,11 @@ class JdbcPrivateNoteReaderTest {
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) { fixture.reader.find(7L, NOTE_ID, NOW) },
-        )
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.reader.find(7L, NOTE_ID, NOW) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.calls.size)
         assertEquals(if (phase == FailurePhase.QUERY) 1 else 0, fixture.transactions.rollbacks)
         assertFalse(fixture.transactions.active)
@@ -100,7 +109,11 @@ class JdbcPrivateNoteReaderTest {
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
 
-        assertEquals(Optional.of(fixture.jdbc.rows.first()), fixture.reader.find(7L, NOTE_ID, NOW))
+        // when
+        val recovered = fixture.reader.find(7L, NOTE_ID, NOW)
+
+        // then
+        assertEquals(Optional.of(fixture.jdbc.rows.first()), recovered)
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.calls.size)
         assertFalse(fixture.transactions.active)
     }
@@ -142,19 +155,19 @@ class JdbcPrivateNoteReaderTest {
             val result = ArrayList<T>()
             for (index in rows.indices) {
                 val value = rows[index]
-                val row = mock(ResultSet::class.java)
+                val row = mockk<ResultSet>()
                 try {
-                    whenever(row.getObject("note_id", UUID::class.java)).thenReturn(value.noteId)
-                    whenever(row.getObject("sender_id")).thenReturn(value.senderId)
-                    whenever(row.getObject("recipient_id")).thenReturn(value.recipientId)
-                    whenever(row.getString("body")).thenReturn(value.body)
-                    whenever(row.getString("context_type")).thenReturn(value.contextType)
-                    whenever(row.getObject("context_id")).thenReturn(value.contextId)
-                    whenever(row.getTimestamp("created_at")).thenReturn(Timestamp.from(value.createdAt))
-                    whenever(row.getString("direction")).thenReturn(value.direction)
-                    whenever(row.getTimestamp("read_at"))
-                        .thenReturn(if (value.readAt == null) null else Timestamp.from(value.readAt))
-                    whenever(row.getBoolean("favorite")).thenReturn(value.favorite)
+                    every { row.getObject("note_id", UUID::class.java) } returns value.noteId
+                    every { row.getObject("sender_id") } returns value.senderId
+                    every { row.getObject("recipient_id") } returns value.recipientId
+                    every { row.getString("body") } returns value.body
+                    every { row.getString("context_type") } returns value.contextType
+                    every { row.getObject("context_id") } returns value.contextId
+                    every { row.getTimestamp("created_at") } returns Timestamp.from(value.createdAt)
+                    every { row.getString("direction") } returns value.direction
+                    every { row.getTimestamp("read_at") } returns
+                        (if (value.readAt == null) null else Timestamp.from(value.readAt))
+                    every { row.getBoolean("favorite") } returns value.favorite
                     result.add(rowMapper.mapRow(row, index) as T)
                 } catch (exception: SQLException) {
                     throw AssertionError(exception)

@@ -25,10 +25,12 @@ import java.util.function.Supplier
 class JdbcNoteBlockCreationTest {
 
     @Test
-    fun given__reverse_order_ids_and_zero_insert_counts__when__creating__then__lock_each_sorted_member_before_one_supplier_and_original_timestamp_insert() {
+    fun `ID가 역순이고 삽입 행 수가 0일 때__차단을 생성하면__정렬된 회원을 하나씩 잠근 뒤 시각 공급자를 한 번 부르고 원래 시각으로 삽입한다`() {
+        // given
         val fixture = Fixture()
         var supplierCalls = 0
 
+        // when
         fixture.creation.create(
             9L,
             3L,
@@ -41,6 +43,7 @@ class JdbcNoteBlockCreationTest {
             },
         )
 
+        // then
         for (index in 0 until 2) {
             val member = if (index == 0) 3L else 9L
             val insert = fixture.jdbc.calls[index * 2]
@@ -67,9 +70,10 @@ class JdbcNoteBlockCreationTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__begin_second_lock_supplier_insert_or_commit_failure__when__creating__then__propagate_same_failure_stop_later_work_and_do_not_retry(
+    fun `시작 두 번째 잠금 시각 공급자 삽입 또는 커밋이 실패할 때__차단을 생성하면__같은 예외를 전파하고 이후 작업을 멈추며 재시도하지 않는다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("private begin")
@@ -89,25 +93,25 @@ class JdbcNoteBlockCreationTest {
         }
         var supplierCalls = 0
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) {
-                fixture.creation.create(
-                    9L,
-                    3L,
-                    Supplier {
-                        assertTrue(fixture.transactions.active)
-                        supplierCalls++
-                        fixture.events.add("supplier")
-                        if (phase == FailurePhase.SUPPLIER) {
-                            throw failure
-                        }
-                        NOW
-                    },
-                )
-            },
-        )
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
+            fixture.creation.create(
+                9L,
+                3L,
+                Supplier {
+                    assertTrue(fixture.transactions.active)
+                    supplierCalls++
+                    fixture.events.add("supplier")
+                    if (phase == FailurePhase.SUPPLIER) {
+                        throw failure
+                    }
+                    NOW
+                },
+            )
+        }
 
+        // then
+        assertSame(failure, thrown)
         val prefix = listOf("begin", "insert:3", "lock:3", "insert:9", "lock:9")
         val expected = ArrayList(if (phase == FailurePhase.BEGIN) listOf("begin") else prefix)
         if (phase == FailurePhase.SUPPLIER || phase == FailurePhase.INSERT || phase == FailurePhase.COMMIT) {

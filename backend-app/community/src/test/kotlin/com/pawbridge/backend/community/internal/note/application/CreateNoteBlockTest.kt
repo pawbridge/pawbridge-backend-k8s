@@ -1,9 +1,12 @@
 package com.pawbridge.backend.community.internal.note.application
 
-import com.pawbridge.backend.community.support.anyNonNull
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -12,13 +15,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import java.time.Clock
 import java.time.Instant
 import java.util.function.Supplier
@@ -27,165 +23,174 @@ import java.util.stream.Stream
 class CreateNoteBlockTest {
     @ParameterizedTest
     @MethodSource("invalidIds")
-    fun given__nonpositive_id_including_zero_self__when__creating__then__reject_login_before_self_port_members_or_clock(
+    fun `0 이하의 ID가 주어졌을 때__차단을 만들면__자기 포트와 회원 조회와 시각 읽기 전에 로그인 거절한다`(
         current: Long,
         target: Long,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val creation = mock(NoteBlockCreation::class.java)
-        val clock = mock(Clock::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val creation = mockk<NoteBlockCreation>()
+        val clock = mockk<Clock>()
 
+        // when
         val failure = assertThrows(NoteBlockCreationRejectedException::class.java) {
             CreateNoteBlock(members, creation, clock).create(current, target)
         }
 
+        // then
         assertEquals(NoteBlockCreationRejectedException.Reason.LOGIN, failure.reason())
-        verifyNoInteractions(members, creation, clock)
+        confirmVerified(members, creation, clock)
     }
 
     @Test
-    fun given__positive_self_target__when__creating__then__reject_self_before_transaction_port_members_or_clock() {
-        val members = mock(ContactMemberQuery::class.java)
-        val creation = mock(NoteBlockCreation::class.java)
-        val clock = mock(Clock::class.java)
+    fun `양수인 자기 자신이 대상일 때__차단을 만들면__트랜잭션 포트와 회원 조회와 시각 읽기 전에 자기 차단으로 거절한다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val creation = mockk<NoteBlockCreation>()
+        val clock = mockk<Clock>()
 
+        // when
         val failure = assertThrows(NoteBlockCreationRejectedException::class.java) {
             CreateNoteBlock(members, creation, clock).create(7L, 7L)
         }
 
+        // then
         assertEquals(NoteBlockCreationRejectedException.Reason.SELF, failure.reason())
-        verifyNoInteractions(members, creation, clock)
+        confirmVerified(members, creation, clock)
     }
 
     @Test
-    fun given__distinct_active_members__when__creation_calls_supplier__then__lookup_current_target_and_clock_once_in_that_order() {
-        val members = mock(ContactMemberQuery::class.java)
-        val creation = mock(NoteBlockCreation::class.java)
-        val clock = mock(Clock::class.java)
+    fun `서로 다른 활성 회원이 주어졌을 때__생성 포트가 공급자를 호출하면__현재 회원 대상 회원 시각을 그 순서로 한 번씩 읽는다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val creation = mockk<NoteBlockCreation>()
+        val clock = mockk<Clock>()
         val events = ArrayList<String>()
-        whenever(members.get(7L)).thenAnswer {
+
+        every { members.get(7L) } answers {
             events.add("current")
             ContactMember(7L, " 原文 ", true, false)
         }
-        whenever(members.get(Long.MAX_VALUE)).thenAnswer {
+        every { members.get(Long.MAX_VALUE) } answers {
             events.add("target")
             ContactMember(Long.MAX_VALUE, "", true, false)
         }
-        whenever(clock.instant()).thenAnswer {
+        every { clock.instant() } answers {
             events.add("clock")
             NOW
         }
-        doAnswer { invocation ->
-            verifyNoInteractions(members, clock)
+        every { creation.create(any(), any(), any()) } answers {
+            confirmVerified(members, clock)
             events.add("before-supplier")
-            val supplier = invocation.getArgument<Supplier<Instant>>(2)
+            val supplier = thirdArg<Supplier<Instant>>()
             assertEquals(NOW, supplier.get())
             events.add("after-supplier")
-            null
-        }.`when`(creation).create(eq(7L), eq(Long.MAX_VALUE), anyNonNull<Supplier<Instant>>())
+        }
 
+        // when
         CreateNoteBlock(members, creation, clock).create(7L, Long.MAX_VALUE)
 
+        // then
         assertEquals(listOf("before-supplier", "current", "target", "clock", "after-supplier"), events)
-        verify(creation).create(eq(7L), eq(Long.MAX_VALUE), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7L)
-        verify(members).get(Long.MAX_VALUE)
-        verify(clock).instant()
-        verifyNoMoreInteractions(members, creation, clock)
+        verify(exactly = 1) { creation.create(7L, Long.MAX_VALUE, any()) }
+        verify(exactly = 1) { members.get(7L) }
+        verify(exactly = 1) { members.get(Long.MAX_VALUE) }
+        verify(exactly = 1) { clock.instant() }
+        confirmVerified(members, creation, clock)
     }
 
     @ParameterizedTest
     @EnumSource(InactiveSide::class)
-    fun given__inactive_current_or_target__when__supplier_checks_members__then__reject_inactive_without_later_member_clock_or_continuation(
+    fun `현재 회원 또는 대상 회원이 비활성일 때__공급자가 회원을 확인하면__이후 회원 조회와 시각 읽기와 이어가기 없이 비활성으로 거절한다`(
         side: InactiveSide,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val creation = mock(NoteBlockCreation::class.java)
-        val clock = mock(Clock::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val creation = mockk<NoteBlockCreation>()
+        val clock = mockk<Clock>()
         val events = ArrayList<String>()
-        whenever(members.get(7L)).thenReturn(
-            ContactMember(7L, "탈퇴한 회원", side != InactiveSide.CURRENT, side == InactiveSide.CURRENT),
-        )
+
+        every { members.get(7L) } returns
+            ContactMember(7L, "탈퇴한 회원", side != InactiveSide.CURRENT, side == InactiveSide.CURRENT)
         if (side == InactiveSide.TARGET) {
-            whenever(members.get(8L)).thenReturn(ContactMember(8L, "탈퇴한 회원", false, false))
+            every { members.get(8L) } returns ContactMember(8L, "탈퇴한 회원", false, false)
         }
-        doAnswer { invocation ->
+        every { creation.create(any(), any(), any()) } answers {
             events.add("before-supplier")
-            val supplier = invocation.getArgument<Supplier<Instant>>(2)
+            val supplier = thirdArg<Supplier<Instant>>()
             supplier.get()
             events.add("after-supplier")
-            null
-        }.`when`(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
+        }
 
+        // when
         val failure = assertThrows(NoteBlockCreationRejectedException::class.java) {
             CreateNoteBlock(members, creation, clock).create(7L, 8L)
         }
 
+        // then
         assertEquals(NoteBlockCreationRejectedException.Reason.INACTIVE, failure.reason())
         assertEquals(listOf("before-supplier"), events)
-        verify(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7L)
+        verify(exactly = 1) { creation.create(7L, 8L, any()) }
+        verify(exactly = 1) { members.get(7L) }
         if (side == InactiveSide.TARGET) {
-            verify(members).get(8L)
+            verify(exactly = 1) { members.get(8L) }
         }
-        verifyNoInteractions(clock)
-        verifyNoMoreInteractions(members, creation)
+        confirmVerified(members, creation, clock)
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__current_target_or_clock_failure__when__supplier_runs__then__propagate_same_failure_and_stop_later_work_without_retry(
+    fun `현재 회원 대상 회원 또는 시각 읽기가 실패할 때__공급자가 실행되면__같은 실패를 전파하고 재시도 없이 이후 작업을 멈춘다`(
         phase: FailurePhase,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val creation = mock(NoteBlockCreation::class.java)
-        val clock = mock(Clock::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val creation = mockk<NoteBlockCreation>()
+        val clock = mockk<Clock>()
         val failure: RuntimeException =
             if (phase == FailurePhase.CLOCK) {
                 IllegalStateException("private clock failure")
             } else {
                 ContactMemberUnavailableException(IllegalStateException("private member failure"))
             }
+        val events = ArrayList<String>()
+
         if (phase == FailurePhase.CURRENT) {
-            whenever(members.get(7L)).thenThrow(failure)
+            every { members.get(7L) } throws failure
         } else {
-            whenever(members.get(7L)).thenReturn(ContactMember(7L, "", true, false))
+            every { members.get(7L) } returns ContactMember(7L, "", true, false)
         }
         if (phase == FailurePhase.TARGET) {
-            whenever(members.get(8L)).thenThrow(failure)
+            every { members.get(8L) } throws failure
         }
         if (phase == FailurePhase.CLOCK) {
-            whenever(members.get(8L)).thenReturn(ContactMember(8L, "", true, false))
-            whenever(clock.instant()).thenThrow(failure)
+            every { members.get(8L) } returns ContactMember(8L, "", true, false)
+            every { clock.instant() } throws failure
         }
-        val events = ArrayList<String>()
-        doAnswer { invocation ->
+        every { creation.create(any(), any(), any()) } answers {
             events.add("before-supplier")
-            val supplier = invocation.getArgument<Supplier<Instant>>(2)
+            val supplier = thirdArg<Supplier<Instant>>()
             supplier.get()
             events.add("after-supplier")
-            null
-        }.`when`(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
+        }
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) {
-                CreateNoteBlock(members, creation, clock).create(7L, 8L)
-            },
-        )
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
+            CreateNoteBlock(members, creation, clock).create(7L, 8L)
+        }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(listOf("before-supplier"), events)
-        verify(creation).create(eq(7L), eq(8L), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7L)
+        verify(exactly = 1) { creation.create(7L, 8L, any()) }
+        verify(exactly = 1) { members.get(7L) }
         if (phase != FailurePhase.CURRENT) {
-            verify(members).get(8L)
+            verify(exactly = 1) { members.get(8L) }
         }
         if (phase == FailurePhase.CLOCK) {
-            verify(clock).instant()
-        } else {
-            verifyNoInteractions(clock)
+            verify(exactly = 1) { clock.instant() }
         }
-        verifyNoMoreInteractions(members, creation, clock)
+        confirmVerified(members, creation, clock)
     }
 
     enum class InactiveSide { CURRENT, TARGET }
