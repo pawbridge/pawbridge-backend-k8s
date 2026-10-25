@@ -1,6 +1,12 @@
 package com.pawbridge.backend.user.internal.animalcommand.infrastructure
 
 import com.pawbridge.backend.animal.api.AnimalCommandActors.Actor
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.excludeRecords
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -14,16 +20,6 @@ import org.junit.jupiter.api.function.Executable
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -34,24 +30,18 @@ import java.sql.ResultSet
 import javax.sql.DataSource
 
 class JdbcAnimalCommandActorsTest {
-    private val source: DataSource = mock(DataSource::class.java)
-    private val jdbc: JdbcTemplate = mock(JdbcTemplate::class.java)
-    private val member: ResultSet = mock(ResultSet::class.java)
-    private val resource = ConnectionHolder(mock(Connection::class.java))
+    private val source: DataSource = mockk<DataSource>()
+    private val jdbc: JdbcTemplate = mockk<JdbcTemplate>()
+    private val member: ResultSet = mockk<ResultSet>()
+    private val resource = ConnectionHolder(mockk<Connection>())
     private val actors = JdbcAnimalCommandActors(jdbc)
 
     @BeforeEach
-    fun givenSharedWriterTransactionAndAnExistingMember() {
+    fun bindSharedWriterTransaction() {
         TransactionSynchronizationManager.clear()
         TransactionSynchronizationManager.setActualTransactionActive(true)
         TransactionSynchronizationManager.setCurrentTransactionReadOnly(false)
         TransactionSynchronizationManager.bindResource(source, resource)
-        `when`(jdbc.dataSource).thenReturn(source)
-        `when`(member.getLong("user_id")).thenReturn(7L)
-        `when`(jdbc.query(eq(MEMBER), any<RowMapper<Any>>(), eq(7L))).thenAnswer { call ->
-            listOf(call.getArgument<RowMapper<*>>(1).mapRow(member, 0))
-        }
-        `when`(jdbc.queryForObject(PENDING, Boolean::class.javaObjectType, 7L)).thenReturn(false)
     }
 
     @AfterEach
@@ -62,48 +52,82 @@ class JdbcAnimalCommandActorsTest {
 
     @ParameterizedTest
     @CsvSource(value = ["ROLE_ADMIN,<null>", "ROLE_SHELTER,care-7"], nullValues = ["<null>"])
-    fun givenCurrentRoleAndNullableShelterIdentity__whenFindingTheVerifiedPrincipal__thenMapOnlyTheCurrentLockedUser(
+    fun `현재 역할과 널 허용 보호소 식별자가 있을 때__검증된 주체를 찾으면__잠긴 현재 사용자만 매핑한다`(
         role: String,
         care: String?,
     ) {
-        `when`(member.getString("role")).thenReturn(role)
-        `when`(member.getString("care_reg_no")).thenReturn(care)
+        // given
+        // The transaction manager keys its resources by the data source, so hashCode is not a data source call.
+        excludeRecords { source.hashCode() }
 
-        assertEquals(Actor(7, role, care, true, false), actors.find(7))
+        every { jdbc.dataSource } returns source
+        every { member.getLong("user_id") } returns 7L
+        every { member.getString("role") } returns role
+        every { member.getString("care_reg_no") } returns care
+        every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<*>>().mapRow(member, 0))
+        }
+        every { jdbc.queryForObject(any<String>(), any<Class<Boolean>>(), *anyVararg()) } returns false
 
-        val order = inOrder(jdbc)
-        order.verify(jdbc).query(eq(MEMBER), any<RowMapper<Any>>(), eq(7L))
-        order.verify(jdbc).queryForObject(PENDING, Boolean::class.javaObjectType, 7L)
+        // when
+        val actor = actors.find(7)
+
+        // then
+        assertEquals(Actor(7, role, care, true, false), actor)
+        verifyOrder {
+            jdbc.query(MEMBER, any<RowMapper<Any>>(), 7L)
+            jdbc.queryForObject(PENDING, Boolean::class.javaObjectType, 7L)
+        }
         assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
         assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly())
         assertSame(resource, TransactionSynchronizationManager.getResource(source))
-        verifyNoInteractions(source)
+        confirmVerified(source)
     }
 
     @Test
-    fun givenPendingContactDeletion__whenFindingTheLockedUser__thenKeepRoleAndCareButReturnInactiveDeleted() {
-        `when`(member.getString("role")).thenReturn("ROLE_SHELTER")
-        `when`(member.getString("care_reg_no")).thenReturn("care-7")
-        `when`(jdbc.queryForObject(PENDING, Boolean::class.javaObjectType, 7L)).thenReturn(true)
+    fun `연락처 삭제가 대기 중일 때__잠긴 사용자를 찾으면__역할과 보호소 번호는 유지하되 비활성 삭제됨으로 돌려준다`() {
+        // given
+        every { jdbc.dataSource } returns source
+        every { member.getLong("user_id") } returns 7L
+        every { member.getString("role") } returns "ROLE_SHELTER"
+        every { member.getString("care_reg_no") } returns "care-7"
+        every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<*>>().mapRow(member, 0))
+        }
+        every { jdbc.queryForObject(any<String>(), any<Class<Boolean>>(), *anyVararg()) } returns true
 
-        assertEquals(Actor(7, "ROLE_SHELTER", "care-7", false, true), actors.find(7))
+        // when
+        val actor = actors.find(7)
 
-        val order = inOrder(jdbc)
-        order.verify(jdbc).query(eq(MEMBER), any<RowMapper<Any>>(), eq(7L))
-        order.verify(jdbc).queryForObject(PENDING, Boolean::class.javaObjectType, 7L)
+        // then
+        assertEquals(Actor(7, "ROLE_SHELTER", "care-7", false, true), actor)
+        verifyOrder {
+            jdbc.query(MEMBER, any<RowMapper<Any>>(), 7L)
+            jdbc.queryForObject(PENDING, Boolean::class.javaObjectType, 7L)
+        }
     }
 
     @Test
-    fun givenNoCurrentUser__whenFindingTheVerifiedPrincipal__thenReturnInactiveDeletedWithoutInventingARoleOrReadingPending() {
-        `when`(jdbc.query(eq(MEMBER), any<RowMapper<Any>>(), eq(7L))).thenReturn(listOf())
+    fun `현재 사용자가 없을 때__검증된 주체를 찾으면__역할을 지어내거나 대기 상태를 읽지 않고 비활성 삭제됨으로 돌려준다`() {
+        // given
+        every { jdbc.dataSource } returns source
+        every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } returns listOf<Any>()
 
-        assertEquals(Actor(7, null, null, false, true), actors.find(7))
+        // when
+        val actor = actors.find(7)
 
-        verify(jdbc, never()).queryForObject(anyString(), eq(Boolean::class.javaObjectType), anyLong())
+        // then
+        assertEquals(Actor(7, null, null, false, true), actor)
+        verify(exactly = 1) { jdbc.query(MEMBER, any<RowMapper<Any>>(), 7L) }
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, *anyVararg()) }
     }
 
     @Test
-    fun givenNoWritableTransactionOrOnlyAnotherDataSourceBinding__whenFinding__thenRejectBeforeAnySql() {
+    fun `쓰기 트랜잭션이 없거나 다른 데이터 소스 바인딩뿐일 때__찾으면__어떤 SQL보다 먼저 거부한다`() {
+        // given
+        every { jdbc.dataSource } returns source
+
+        // when
         TransactionSynchronizationManager.setActualTransactionActive(false)
         assertThrows(IllegalStateException::class.java) { actors.find(7) }
         TransactionSynchronizationManager.setActualTransactionActive(true)
@@ -111,45 +135,66 @@ class JdbcAnimalCommandActorsTest {
         assertThrows(IllegalStateException::class.java) { actors.find(7) }
         TransactionSynchronizationManager.setCurrentTransactionReadOnly(false)
         TransactionSynchronizationManager.unbindResource(source)
-        val other = mock(DataSource::class.java)
+        val other = mockk<DataSource>()
         TransactionSynchronizationManager.bindResource(other, resource)
         try {
             assertThrows(IllegalStateException::class.java) { actors.find(7) }
         } finally {
             TransactionSynchronizationManager.unbindResource(other)
         }
-        verify(jdbc, never()).query(anyString(), any<RowMapper<Any>>(), anyLong())
-        verify(jdbc, never()).queryForObject(anyString(), eq(Boolean::class.javaObjectType), anyLong())
+
+        // then
+        verify(exactly = 0) { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, *anyVararg()) }
     }
 
     @Test
-    fun givenNonpositiveVerifiedIdentity__whenFinding__thenRejectBeforeAnySql() {
+    fun `검증된 식별자가 양수가 아닐 때__찾으면__어떤 SQL보다 먼저 거부한다`() {
+        // given
+        every { jdbc.dataSource } returns source
+
+        // when
         assertAll(
             Executable { assertThrows(IllegalArgumentException::class.java) { actors.find(0) } },
             Executable { assertThrows(IllegalArgumentException::class.java) { actors.find(-1) } },
         )
-        verify(jdbc, never()).query(anyString(), any<RowMapper<Any>>(), anyLong())
-        verify(jdbc, never()).queryForObject(anyString(), eq(Boolean::class.javaObjectType), anyLong())
+
+        // then
+        verify(exactly = 0) { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, *anyVararg()) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["member", "pending"])
-    fun givenSqlFailure__whenLockingOrObservingPendingDeletion__thenPropagateTheSameFailureAndDoNotContinue(phase: String) {
+    fun `잠금이나 대기 삭제 조회에서 SQL 실패가 날 때__찾으면__같은 실패를 전파하고 이어가지 않는다`(phase: String) {
+        // given
         val failure = DataAccessResourceFailureException("Synthetic lookup unavailable")
+
+        every { jdbc.dataSource } returns source
+        every { member.getLong("user_id") } returns 7L
+        every { member.getString("role") } returns "ROLE_ADMIN"
+        every { member.getString("care_reg_no") } returns null
         if (phase == "member") {
-            `when`(jdbc.query(eq(MEMBER), any<RowMapper<Any>>(), eq(7L))).thenThrow(failure)
+            every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } throws failure
         } else {
-            `when`(jdbc.queryForObject(PENDING, Boolean::class.javaObjectType, 7L)).thenThrow(failure)
+            every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+                listOf(secondArg<RowMapper<*>>().mapRow(member, 0))
+            }
+            every { jdbc.queryForObject(any<String>(), any<Class<Boolean>>(), *anyVararg()) } throws failure
         }
 
-        assertSame(failure, assertThrows(DataAccessResourceFailureException::class.java) { actors.find(7) })
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { actors.find(7) }
 
+        // then
+        assertSame(failure, thrown)
         if (phase == "member") {
-            verify(jdbc, never()).queryForObject(anyString(), eq(Boolean::class.javaObjectType), anyLong())
+            verify(exactly = 0) { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, *anyVararg()) }
         } else {
-            val order = inOrder(jdbc)
-            order.verify(jdbc).query(eq(MEMBER), any<RowMapper<Any>>(), eq(7L))
-            order.verify(jdbc).queryForObject(PENDING, Boolean::class.javaObjectType, 7L)
+            verifyOrder {
+                jdbc.query(MEMBER, any<RowMapper<Any>>(), 7L)
+                jdbc.queryForObject(PENDING, Boolean::class.javaObjectType, 7L)
+            }
         }
         assertSame(resource, TransactionSynchronizationManager.getResource(source))
     }

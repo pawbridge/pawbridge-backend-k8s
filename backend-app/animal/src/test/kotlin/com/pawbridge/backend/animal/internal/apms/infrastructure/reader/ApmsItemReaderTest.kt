@@ -2,53 +2,70 @@ package com.pawbridge.backend.animal.internal.apms.infrastructure.reader
 
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsAnimalSnapshot
 import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsAnimal
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
 import org.springframework.batch.core.StepExecution
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
 class ApmsItemReaderTest {
     @Test
-    fun givenSharedChunkThreads__whenReading__thenEachSnapshotAnimalIsReturnedOnce() {
-        val snapshot = mock(ApmsAnimalSnapshot::class.java)
+    fun `청크 스레드가 공유할 때__읽으면__스냅샷의 각 동물을 한 번씩만 돌려준다`() {
+        // given
+        val snapshot = mockk<ApmsAnimalSnapshot>()
         val animals = (0 until 2000).map { i -> ApmsAnimal.builder().desertionNo("id-$i").build() }
-        `when`(snapshot.animals()).thenReturn(animals)
         val reader = ApmsItemReader(snapshot)
-        reader.beforeStep(mock(StepExecution::class.java))
         val pool = Executors.newFixedThreadPool(4)
+
+        every { snapshot.animals() } returns animals
+
         try {
+            reader.beforeStep(mockk<StepExecution>())
             val calls: List<Callable<ApmsAnimal?>> = (0 until 2000).map { Callable<ApmsAnimal?> { reader.read() } }
+
+            // when
             val actual = ArrayList<ApmsAnimal?>()
             for (future in pool.invokeAll(calls)) {
                 actual.add(future.get())
             }
+
+            // then
             assertThat(actual).containsExactlyInAnyOrderElementsOf(animals)
             assertThat(reader.read()).isNull()
-            verify(snapshot, times(1)).animals()
+            verify(exactly = 1) { snapshot.animals() }
         } finally {
             pool.shutdownNow()
         }
     }
 
     @Test
-    fun givenFailedStepFollowedByRetry__whenReaderReinitialized__thenStartSnapshotFromBeginning() {
-        val snapshot = mock(ApmsAnimalSnapshot::class.java)
+    fun `실패한 단계 뒤 재시도할 때__리더를 다시 초기화하면__스냅샷을 처음부터 시작한다`() {
+        // given
+        val snapshot = mockk<ApmsAnimalSnapshot>()
         val one = ApmsAnimal.builder().desertionNo("one").build()
         val two = ApmsAnimal.builder().desertionNo("two").build()
-        `when`(snapshot.animals()).thenReturn(listOf(one, two))
         val reader = ApmsItemReader(snapshot)
-        reader.beforeStep(mock(StepExecution::class.java))
-        assertThat(reader.read()).isSameAs(one)
-        reader.afterStep(mock(StepExecution::class.java))
-        assertThat(reader.read()).isNull()
-        reader.beforeStep(mock(StepExecution::class.java))
-        assertThat(reader.read()).isSameAs(one)
-        assertThat(reader.read()).isSameAs(two)
-        assertThat(reader.read()).isNull()
+
+        every { snapshot.animals() } returns listOf(one, two)
+
+        // when
+        reader.beforeStep(mockk<StepExecution>())
+        val firstRead = reader.read()
+        reader.afterStep(mockk<StepExecution>())
+        val readAfterStep = reader.read()
+        reader.beforeStep(mockk<StepExecution>())
+        val restartedFirst = reader.read()
+        val restartedSecond = reader.read()
+        val restartedEnd = reader.read()
+
+        // then
+        assertThat(firstRead).isSameAs(one)
+        assertThat(readAfterStep).isNull()
+        assertThat(restartedFirst).isSameAs(one)
+        assertThat(restartedSecond).isSameAs(two)
+        assertThat(restartedEnd).isNull()
     }
 }

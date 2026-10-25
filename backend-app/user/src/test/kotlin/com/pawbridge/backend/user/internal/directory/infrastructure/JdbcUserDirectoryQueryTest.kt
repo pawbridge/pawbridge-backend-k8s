@@ -2,6 +2,8 @@ package com.pawbridge.backend.user.internal.directory.infrastructure
 
 import com.pawbridge.backend.user.internal.directory.application.UserDirectoryQuery
 import com.pawbridge.backend.user.internal.profile.application.UserProfile
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -12,10 +14,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.InvalidDataAccessApiUsageException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -33,13 +31,16 @@ import java.util.Calendar
 
 class JdbcUserDirectoryQueryTest {
     @Test
-    fun given__a_raw_nullable_profile__when__listing__then__map_only_the_existing_seven_columns_in_the_read_transaction() {
+    fun `원본 그대로의 널 허용 프로필이 있을 때__목록을 조회하면__읽기 트랜잭션 안에서 기존 일곱 컬럼만 매핑한다`() {
+        // given
         val f = Fixture()
         val timed = UserProfile(7, null, null, "raw nickname", "LOCAL", "ROLE_ADMIN", LocalDateTime.parse("2026-10-20T01:02:03.123456"))
         f.jdbc.rows = listOf(ROW, timed)
 
+        // when
         val result = f.query.page(null, null, request(0, 20))
 
+        // then
         assertEquals(listOf(ROW, timed), result.content())
         assertEquals(2L, result.total())
         assertEquals(listOf("begin", "content", "commit", "cleanup"), f.events)
@@ -54,11 +55,14 @@ class JdbcUserDirectoryQueryTest {
     }
 
     @Test
-    fun given__raw_wildcards_spaces_and_role__when__searching__then__retain_three_like_operands_and_role_and_without_escaping_or_stripping() {
+    fun `와일드카드와 공백과 역할이 원문 그대로일 때__검색하면__이스케이프나 제거 없이 LIKE 피연산자 셋과 역할 AND를 유지한다`() {
+        // given
         val f = Fixture()
 
+        // when
         f.query.page(" %_\\한글 ", "ROLE_SHELTER", request(0, 1))
 
+        // then
         assertTrue(
             f.jdbc.sql.first().contains(
                 "lower(email) LIKE lower(?) ESCAPE '' OR lower(name) LIKE lower(?) ESCAPE '' OR lower(nickname) LIKE lower(?) ESCAPE ''",
@@ -80,20 +84,23 @@ class JdbcUserDirectoryQueryTest {
 
     @ParameterizedTest
     @CsvSource("0,20,0,false,0", "0,20,1,false,1", "2,20,1,false,41", "2,20,0,true,49", "0,1,1,true,49")
-    fun given__full_partial_or_empty_pages__when__reading__then__match_original_count_elision(
+    fun `가득 찬 쪽이나 일부만 찬 쪽이나 빈 쪽일 때__읽으면__원래의 카운트 생략 규칙과 같다`(
         number: Int,
         size: Int,
         rows: Int,
         counted: Boolean,
         total: Long,
     ) {
+        // given
         val f = Fixture()
         if (rows == 0) {
             f.jdbc.rows = listOf()
         }
 
+        // when
         val result = f.query.page(null, null, request(number, size))
 
+        // then
         assertEquals(total, result.total())
         assertEquals(if (counted) 2 else 1, f.jdbc.sql.size)
         assertEquals(
@@ -107,7 +114,8 @@ class JdbcUserDirectoryQueryTest {
     }
 
     @Test
-    fun given__the_seven_projected_properties__when__sorting__then__use_fixed_identifiers_and_lower_only_source_string_types_without_an_added_tiebreak() {
+    fun `투영된 일곱 속성일 때__정렬하면__고정 식별자를 쓰고 원본 문자열 타입만 소문자로 바꾸며 타이브레이크를 더하지 않는다`() {
+        // given
         val f = Fixture()
         val orders = listOf(
             UserDirectoryQuery.Order("UserId", true, true),
@@ -119,8 +127,11 @@ class JdbcUserDirectoryQueryTest {
             UserDirectoryQuery.Order("createdAt", true, true),
         )
 
+
+        // when
         f.query.page(null, null, UserDirectoryQuery.Request(0, 20, orders))
 
+        // then
         assertTrue(
             f.jdbc.sql.first().endsWith(
                 "ORDER BY user_id ASC, lower(email) DESC, lower(name) ASC, lower(nickname) ASC, lower(provider) ASC, role ASC, created_at ASC LIMIT ? OFFSET ?",
@@ -129,7 +140,8 @@ class JdbcUserDirectoryQueryTest {
     }
 
     @Test
-    fun given__unprojected_source_fields_or_unmapped_identifiers__when__sorting__then__reject_in_the_transaction_before_any_sql() {
+    fun `투영되지 않은 원본 필드나 매핑되지 않은 식별자일 때__정렬하면__SQL 실행 전에 트랜잭션 안에서 거부한다`() {
+        // given
         // The first four are a known, deliberately narrower candidate capability than legacy User JPA sorting.
         for (
             property in listOf(
@@ -137,6 +149,8 @@ class JdbcUserDirectoryQueryTest {
             )
         ) {
             val f = Fixture()
+
+            // when
             assertThrows(IllegalArgumentException::class.java) {
                 f.query.page(
                     null,
@@ -144,6 +158,8 @@ class JdbcUserDirectoryQueryTest {
                     UserDirectoryQuery.Request(0, 20, listOf(UserDirectoryQuery.Order(property, true, false))),
                 )
             }
+
+            // then
             assertTrue(f.jdbc.sql.isEmpty())
             assertEquals(listOf("begin", "rollback", "cleanup"), f.events)
         }
@@ -156,7 +172,8 @@ class JdbcUserDirectoryQueryTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["content", "count", "commit"])
-    fun given__content_count_or_commit_failure__when__reading__then__propagate_without_a_partial_page_or_retry(phase: String) {
+    fun `내용 조회나 카운트나 커밋이 실패했을 때__읽으면__부분 페이지나 재시도 없이 예외를 전파한다`(phase: String) {
+        // given
         val f = Fixture()
         val failure: RuntimeException = if (phase == "commit") {
             TransactionSystemException("synthetic-private")
@@ -170,8 +187,11 @@ class JdbcUserDirectoryQueryTest {
         }
         f.jdbc.failure = failure
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { f.query.page(null, null, request(0, 1)) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { f.query.page(null, null, request(0, 1)) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(1L, f.events.count { event -> "begin" == event }.toLong())
         assertEquals("cleanup", f.events.last())
         assertEquals(if (phase == "commit") "commit" else "rollback", f.events[f.events.size - 2])
@@ -209,15 +229,15 @@ class JdbcUserDirectoryQueryTest {
             val mapped = ArrayList<T>()
             try {
                 for (user in rows) {
-                    val row = mock(ResultSet::class.java)
-                    `when`(row.getLong("user_id")).thenReturn(user.userId)
-                    `when`(row.getString("email")).thenReturn(user.email)
-                    `when`(row.getString("name")).thenReturn(user.name)
-                    `when`(row.getString("nickname")).thenReturn(user.nickname)
-                    `when`(row.getString("provider")).thenReturn(user.provider)
-                    `when`(row.getString("role")).thenReturn(user.role)
-                    `when`(row.getTimestamp(eq("created_at"), any(Calendar::class.java))).thenAnswer { call ->
-                        zones.add(call.getArgument<Calendar>(1).timeZone.id)
+                    val row = mockk<ResultSet>()
+                    every { row.getLong("user_id") } returns user.userId
+                    every { row.getString("email") } returns user.email
+                    every { row.getString("name") } returns user.name
+                    every { row.getString("nickname") } returns user.nickname
+                    every { row.getString("provider") } returns user.provider
+                    every { row.getString("role") } returns user.role
+                    every { row.getTimestamp("created_at", any<Calendar>()) } answers {
+                        zones.add(secondArg<Calendar>().timeZone.id)
                         if (user.createdAt == null) null else Timestamp.valueOf(user.createdAt)
                     }
                     mapped.add(rowMapper.mapRow(row, mapped.size)!!)

@@ -6,6 +6,11 @@ import com.pawbridge.backend.user.internal.adminupdate.application.ShelterApprov
 import com.pawbridge.backend.user.internal.nickname.application.NicknameDuplicateException
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
 import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -17,13 +22,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.UncategorizedSQLException
@@ -40,6 +38,7 @@ import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
+import java.lang.reflect.Proxy
 import java.sql.Timestamp
 import java.time.LocalDateTime
 import java.util.Calendar
@@ -53,16 +52,19 @@ private fun normalized(sql: String): String {
 class JdbcAdminUserUpdateTest {
     @ParameterizedTest
     @ValueSource(longs = [-1, 0, 8])
-    fun given__missing_target_including_nonpositive_id__when__locking__then__preserve_missing_user_without_a_new_positive_guard(
+    fun `대상 사용자가 없고 ID가 양수가 아닐 때__잠금 조회를 하면__새 양수 검사 없이 없는 사용자 예외를 유지한다`(
         id: Long,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.present = false
 
+        // when
         assertThrows(UserNotFoundException::class.java) {
             f.query.update(id, Changes("Duplicate", Role.ROLE_SHELTER, "B"))
         }
 
+        // then
         assertEquals(listOf("lock"), f.jdbc.events)
         assertArrayEquals(arrayOf<Any?>(id), f.jdbc.lockArguments)
         assertTrue(f.jdbc.lockSql!!.endsWith("WHERE user_id = ? FOR UPDATE"))
@@ -73,30 +75,36 @@ class JdbcAdminUserUpdateTest {
 
     @ParameterizedTest
     @MethodSource("approvalRequests")
-    fun given__approval_required_before_a_duplicate_nickname__when__updating_locked_user__then__reject_before_duplicate_or_write(
+    fun `중복 닉네임보다 먼저 승인이 필요할 때__잠긴 사용자를 수정하면__중복 확인이나 쓰기 전에 거부한다`(
         current: Role,
         care: String?,
         request: Changes,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.role = current
         f.jdbc.care = care
         f.jdbc.duplicate = true
 
+        // when
         assertThrows(ShelterApprovalRequiredException::class.java) { f.query.update(8, request) }
 
+        // then
         assertEquals(listOf("lock"), f.jdbc.events)
         assertEquals(0, f.samples)
         assertEquals(1, f.tx.rollbacks)
     }
 
     @Test
-    fun given__case_only_nickname_and_existing_self_match__when__updating__then__keep_original_duplicate_query_and_409_exception() {
+    fun `대소문자만 다른 닉네임이 본인과 일치하며 이미 있을 때__수정하면__원래의 중복 조회와 409 예외를 유지한다`() {
+        // given
         val f = Fixture()
         f.jdbc.duplicate = true
 
+        // when
         assertThrows(NicknameDuplicateException::class.java) { f.query.update(8, Changes("ALPHA", null, null)) }
 
+        // then
         assertEquals(listOf("lock", "duplicate"), f.jdbc.events)
         assertEquals("SELECT (count(*) > 0) FROM pawbridge_user.users WHERE lower(nickname) = lower(?)", f.jdbc.duplicateSql)
         assertArrayEquals(arrayOf<Any?>("ALPHA"), f.jdbc.duplicateArguments)
@@ -106,12 +114,15 @@ class JdbcAdminUserUpdateTest {
 
     @ParameterizedTest
     @MethodSource("noChanges")
-    fun given__no_dirty_property__when__saving_equivalent_values__then__commit_without_update_or_auditing(request: Changes) {
+    fun `변경된 속성이 없을 때__동등한 값을 저장하면__수정과 감사 기록 없이 커밋한다`(request: Changes) {
+        // given
         val f = Fixture()
         f.jdbc.care = "A"
 
+        // when
         f.query.update(8, request)
 
+        // then
         assertEquals(listOf("lock"), f.jdbc.events)
         assertEquals(0, f.samples)
         assertEquals(1, f.tx.commits)
@@ -121,19 +132,29 @@ class JdbcAdminUserUpdateTest {
 
     @ParameterizedTest
     @MethodSource("validChanges")
-    fun given__allowed_dirty_fields__when__updating__then__bind_only_mutable_fields_and_one_utc_audit_time_inside_the_lock_transaction(
+    fun `허용된 변경 필드가 있을 때__수정하면__바꿀 수 있는 필드와 하나의 UTC 감사 시각만 잠금 트랜잭션 안에서 바인딩한다`(
         current: Role,
         currentCare: String?,
         request: Changes,
         nickname: String,
         nextRole: Role,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.role = current
         f.jdbc.care = currentCare
 
+        every { f.connection.prepareStatement(any()) } returns f.statement
+        justRun { f.statement.setString(any(), any()) }
+        justRun { f.statement.setTimestamp(any(), any(), any()) }
+        justRun { f.statement.setLong(any(), any()) }
+
+        // when
         f.query.update(8, request)
 
+        // then
+        val sql = slot<String>()
+        val zone = slot<Calendar>()
         assertEquals(
             if (request.nickname != null && request.nickname != "Alpha") {
                 listOf("lock", "duplicate", "update")
@@ -142,17 +163,17 @@ class JdbcAdminUserUpdateTest {
             },
             f.jdbc.events,
         )
+        verify(exactly = 1) { f.connection.prepareStatement(capture(sql)) }
         assertEquals(
             "UPDATE pawbridge_user.users SET nickname = ?, role = ?, care_reg_no = ?, updated_at = ? WHERE user_id = ?",
-            f.jdbc.updateSql,
+            normalized(sql.captured),
         )
-        verify(f.jdbc.statement).setString(1, nickname)
-        verify(f.jdbc.statement).setString(2, nextRole.name)
-        verify(f.jdbc.statement).setString(3, currentCare)
-        val zone = ArgumentCaptor.forClass(Calendar::class.java)
-        verify(f.jdbc.statement).setTimestamp(eq(4), eq(Timestamp.valueOf(MODIFIED)), zone.capture())
-        assertEquals("UTC", zone.value.timeZone.id)
-        verify(f.jdbc.statement).setLong(5, 8)
+        verify(exactly = 1) { f.statement.setString(1, nickname) }
+        verify(exactly = 1) { f.statement.setString(2, nextRole.name) }
+        verify(exactly = 1) { f.statement.setString(3, currentCare) }
+        verify(exactly = 1) { f.statement.setTimestamp(4, Timestamp.valueOf(MODIFIED), capture(zone)) }
+        assertEquals("UTC", zone.captured.timeZone.id)
+        verify(exactly = 1) { f.statement.setLong(5, 8) }
         assertEquals(1, f.samples)
         assertEquals(1, f.tx.starts)
         assertEquals(1, f.tx.commits)
@@ -161,9 +182,10 @@ class JdbcAdminUserUpdateTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["begin", "update", "commit"])
-    fun given__begin_unique_race_or_commit_failure__when__updating__then__propagate_without_duplicate_reclassification_or_retry(
+    fun `시작이나 유일성 경합이나 커밋이 실패할 때__수정하면__중복으로 재분류하거나 재시도하지 않고 전파한다`(
         phase: String,
     ) {
+        // given
         val f = Fixture()
         val failure: RuntimeException = if (phase == "update") {
             DataIntegrityViolationException("synthetic unique race")
@@ -178,11 +200,16 @@ class JdbcAdminUserUpdateTest {
             f.jdbc.updateFailure = failure
         }
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) { f.query.update(8, Changes("Beta", null, null)) },
-        )
+        every { f.connection.prepareStatement(any()) } returns f.statement
+        justRun { f.statement.setString(any(), any()) }
+        justRun { f.statement.setTimestamp(any(), any(), any()) }
+        justRun { f.statement.setLong(any(), any()) }
 
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { f.query.update(8, Changes("Beta", null, null)) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, f.tx.starts)
         assertEquals(if (phase == "update") 1 else 0, f.tx.rollbacks)
         assertFalse(f.tx.active)
@@ -190,38 +217,54 @@ class JdbcAdminUserUpdateTest {
 
     @ParameterizedTest
     @ValueSource(ints = [0, 2])
-    fun given__unexpected_write_count__when__updating_locked_user__then__rollback_instead_of_reporting_success(changed: Int) {
+    fun `쓰기 건수가 예상과 다를 때__잠긴 사용자를 수정하면__성공으로 보고하지 않고 롤백한다`(changed: Int) {
+        // given
         val f = Fixture()
         f.jdbc.changed = changed
 
+        every { f.connection.prepareStatement(any()) } returns f.statement
+        justRun { f.statement.setString(any(), any()) }
+        justRun { f.statement.setTimestamp(any(), any(), any()) }
+        justRun { f.statement.setLong(any(), any()) }
+
+        // when
         assertThrows(IllegalStateException::class.java) { f.query.update(8, Changes("Beta", null, null)) }
 
+        // then
         assertEquals(1, f.tx.rollbacks)
         assertEquals(0, f.tx.commits)
     }
 
     @Test
-    fun given__prepared_statement_binding_failure__when__updating__then__close_the_statement_and_propagate_sql_failure() {
+    fun `준비된 문장 바인딩이 실패할 때__수정하면__문장을 닫고 SQL 실패를 전파한다`() {
+        // given
         val f = Fixture()
         val failure = SQLException("synthetic bind")
-        doThrow(failure).`when`(f.jdbc.statement).setString(2, "ROLE_USER")
 
+        every { f.connection.prepareStatement(any()) } returns f.statement
+        justRun { f.statement.setString(any(), any()) }
+        every { f.statement.setString(2, "ROLE_USER") } throws failure
+        justRun { f.statement.close() }
+
+        // when
         val thrown = assertThrows(UncategorizedSQLException::class.java) {
             f.query.update(8, Changes("Beta", null, null))
         }
 
+        // then
         assertSame(failure, thrown.sqlException)
-        verify(f.jdbc.statement).close()
+        verify(exactly = 1) { f.statement.close() }
         assertEquals(1, f.tx.rollbacks)
     }
 
     @ParameterizedTest
     @MethodSource("roleChanges")
-    fun given__a_role_change__when__updating__then__revoke_all_sessions_only_on_a_demotion_inside_the_same_transaction(
+    fun `역할이 바뀔 때__수정하면__강등일 때만 같은 트랜잭션 안에서 모든 세션을 폐기한다`(
         current: Role,
         requested: Role,
         revokes: Boolean,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.role = current
         f.jdbc.care = if (current == Role.ROLE_SHELTER) "A" else null
@@ -239,14 +282,22 @@ class JdbcAdminUserUpdateTest {
             },
         )
 
+        every { f.connection.prepareStatement(any()) } returns f.statement
+        justRun { f.statement.setString(any(), any()) }
+        justRun { f.statement.setTimestamp(any(), any(), any()) }
+        justRun { f.statement.setLong(any(), any()) }
+
+        // when
         query.update(8, Changes(null, requested, null))
 
+        // then
         assertEquals(if (revokes) listOf(8L) else listOf<Long>(), revoked)
         assertEquals(1, f.tx.commits)
     }
 
     @Test
-    fun given__a_demotion_whose_revocation_fails__when__updating__then__roll_back_the_role_change_too() {
+    fun `강등의 세션 폐기가 실패할 때__수정하면__역할 변경도 롤백한다`() {
+        // given
         val f = Fixture()
         f.jdbc.role = Role.ROLE_ADMIN
         val transaction = TransactionTemplate(f.tx)
@@ -259,18 +310,25 @@ class JdbcAdminUserUpdateTest {
             UserSessionRevoker { userId -> throw failure },
         )
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) { query.update(8, Changes(null, Role.ROLE_USER, null)) },
-        )
+        every { f.connection.prepareStatement(any()) } returns f.statement
+        justRun { f.statement.setString(any(), any()) }
+        justRun { f.statement.setTimestamp(any(), any(), any()) }
+        justRun { f.statement.setLong(any(), any()) }
 
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { query.update(8, Changes(null, Role.ROLE_USER, null)) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, f.tx.rollbacks)
         assertEquals(0, f.tx.commits)
     }
 
     private class Fixture {
         val tx = RecordingTransactions()
-        val jdbc = RecordingJdbc(tx)
+        val connection: Connection = mockk<Connection>()
+        val statement: PreparedStatement = mockk<PreparedStatement>()
+        val jdbc = RecordingJdbc(tx, connection)
         var samples = 0
         val query: JdbcAdminUserUpdate
 
@@ -289,9 +347,10 @@ class JdbcAdminUserUpdateTest {
         }
     }
 
-    private class RecordingJdbc(private val tx: RecordingTransactions) : JdbcTemplate() {
-        val rows: ResultSet = mock(ResultSet::class.java)
-        val statement: PreparedStatement = mock(PreparedStatement::class.java)
+    private class RecordingJdbc(
+        private val tx: RecordingTransactions,
+        private val connection: Connection,
+    ) : JdbcTemplate() {
         val events = ArrayList<String>()
         var present = true
         var duplicate = false
@@ -299,7 +358,6 @@ class JdbcAdminUserUpdateTest {
         var care: String? = null
         var lockSql: String? = null
         var duplicateSql: String? = null
-        var updateSql: String? = null
         var lockArguments: Array<out Any?>? = null
         var duplicateArguments: Array<out Any?>? = null
         var changed = 1
@@ -311,11 +369,7 @@ class JdbcAdminUserUpdateTest {
             lockSql = normalized(sql)
             lockArguments = args
             try {
-                `when`(rows.next()).thenReturn(present)
-                `when`(rows.getString("nickname")).thenReturn("Alpha")
-                `when`(rows.getString("role")).thenReturn(role.name)
-                `when`(rows.getString("care_reg_no")).thenReturn(care)
-                return rse.extractData(rows)
+                return rse.extractData(row())
             } catch (e: SQLException) {
                 throw AssertionError(e)
             }
@@ -330,18 +384,28 @@ class JdbcAdminUserUpdateTest {
             return java.lang.Boolean.valueOf(duplicate) as T
         }
 
+        /** A tiny in-memory row: ResultSet has too many overloads to stub one by one with strict mocks. */
+        private fun row(): ResultSet {
+            val values = mapOf("nickname" to "Alpha", "role" to role.name, "care_reg_no" to care)
+            return Proxy.newProxyInstance(
+                ResultSet::class.java.classLoader,
+                arrayOf(ResultSet::class.java),
+            ) { _, method, args ->
+                when (method.name) {
+                    "next" -> present
+                    "getString" -> values.getValue(args[0] as String)
+                    else -> throw UnsupportedOperationException(method.name)
+                }
+            } as ResultSet
+        }
+
         override fun update(psc: PreparedStatementCreator): Int {
             assertTrue(tx.active)
             events.add("update")
-            val connection = mock(Connection::class.java)
             try {
-                `when`(connection.prepareStatement(anyString())).thenAnswer { call ->
-                    updateSql = normalized(call.getArgument(0))
-                    statement
-                }
-                assertSame(statement, psc.createPreparedStatement(connection))
+                psc.createPreparedStatement(connection)
             } catch (e: SQLException) {
-                throw UncategorizedSQLException("owned unit", updateSql, e)
+                throw UncategorizedSQLException("owned unit", null, e)
             }
             if (updateFailure != null) {
                 throw updateFailure!!

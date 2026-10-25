@@ -20,11 +20,15 @@ import org.springframework.transaction.support.TransactionTemplate
 
 class JdbcTotalUserCountQueryTest {
     @Test
-    fun given__physical_user_count_above_int_range__when__counting__then__query_only_id_column_once_and_return_raw_long_after_read_only_commit() {
+    fun `실제 회원 수가 int 범위를 넘을 때__회원 수를 세면__id 컬럼만 한 번 조회하고 읽기 전용 커밋 뒤 long 그대로 돌려준다`() {
+        // given
         val fixture = Fixture()
 
-        assertEquals(5_000_000_000L, fixture.query.count())
+        // when
+        val count = fixture.query.count()
 
+        // then
+        assertEquals(5_000_000_000L, count)
         assertEquals("SELECT count(user_id) FROM pawbridge_user.users", fixture.jdbc.sql)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
@@ -33,25 +37,32 @@ class JdbcTotalUserCountQueryTest {
     }
 
     @Test
-    fun given__unexpected_null_aggregate_then_recovery__when__counting__then__fail_instead_of_returning_zero_and_allow_the_next_read() {
+    fun `집계 결과가 null이었다가 복구됐을 때__회원 수를 세면__0을 돌려주지 않고 실패한 뒤 다음 조회는 성공한다`() {
+        // given
         val fixture = Fixture()
         fixture.jdbc.count = null
 
+        // when
         assertThrows(NullPointerException::class.java) { fixture.query.count() }
-
-        assertEquals(1, fixture.jdbc.queries)
-        assertFalse(fixture.transactions.active)
+        val queriesAfterFailure = fixture.jdbc.queries
+        val activeAfterFailure = fixture.transactions.active
         fixture.jdbc.count = 7L
-        assertEquals(7L, fixture.query.count())
+        val recovered = fixture.query.count()
+
+        // then
+        assertEquals(1, queriesAfterFailure)
+        assertFalse(activeAfterFailure)
+        assertEquals(7L, recovered)
         assertEquals(2, fixture.jdbc.queries)
         assertFalse(fixture.transactions.active)
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__count_query_or_transaction_failure_then_recovery__when__counting__then__propagate_same_failure_without_zero_or_typed_contact_fallback(
+    fun `조회나 트랜잭션이 실패했다가 복구됐을 때__회원 수를 세면__0이나 대체 값 없이 같은 예외를 전파하고 다음 조회는 성공한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic-private-begin")
@@ -65,18 +76,25 @@ class JdbcTotalUserCountQueryTest {
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { fixture.query.count() })
-
-        assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.queries)
-        assertEquals(
-            if (phase == FailurePhase.QUERY_DAO || phase == FailurePhase.QUERY_RUNTIME) 1 else 0,
-            fixture.transactions.rollbacks,
-        )
-        assertFalse(fixture.transactions.active)
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.query.count() }
+        val queriesAfterFailure = fixture.jdbc.queries
+        val rollbacksAfterFailure = fixture.transactions.rollbacks
+        val activeAfterFailure = fixture.transactions.active
         fixture.transactions.startFailure = null
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
-        assertEquals(5_000_000_000L, fixture.query.count())
+        val recovered = fixture.query.count()
+
+        // then
+        assertSame(failure, thrown)
+        assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, queriesAfterFailure)
+        assertEquals(
+            if (phase == FailurePhase.QUERY_DAO || phase == FailurePhase.QUERY_RUNTIME) 1 else 0,
+            rollbacksAfterFailure,
+        )
+        assertFalse(activeAfterFailure)
+        assertEquals(5_000_000_000L, recovered)
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.queries)
         assertFalse(fixture.transactions.active)
     }

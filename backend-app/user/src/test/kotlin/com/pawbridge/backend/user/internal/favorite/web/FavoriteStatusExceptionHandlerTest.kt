@@ -16,7 +16,8 @@ import java.sql.SQLException
 
 class FavoriteStatusExceptionHandlerTest {
     @Test
-    fun given__sensitive_failure_messages_and_suppressed_text__when__handling__then__log_only_type_and_source_location() {
+    fun `민감한 실패 메시지와 억제된 예외 문구가 있을 때__처리하면__타입과 소스 위치만 로그에 남긴다`() {
+        // given
         val cause = SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password")
         cause.stackTrace = arrayOf(
             StackTraceElement(
@@ -29,8 +30,11 @@ class FavoriteStatusExceptionHandlerTest {
         val failure = IllegalStateException("Bearer synthetic-private-token synthetic-private-user-id=42", cause)
         failure.addSuppressed(RuntimeException("https://fixture.invalid/object?signature=synthetic-private-signature"))
 
+
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertNull(event.throwableProxy)
         assertEquals(1, event.argumentArray.size)
         assertInstanceOf(String::class.java, event.argumentArray[0])
@@ -44,7 +48,8 @@ class FavoriteStatusExceptionHandlerTest {
 
     @Test
     @Timeout(2)
-    fun given__cyclic_causes_and_many_frames__when__handling__then__diagnostics_finish_with_bounded_output() {
+    fun `순환 원인과 많은 프레임이 있을 때__처리하면__진단이 제한된 출력으로 끝난다`() {
+        // given
         val failure = IllegalStateException("synthetic-private-user")
         val cause = IllegalArgumentException("synthetic-private-cause", failure)
         failure.initCause(cause)
@@ -59,8 +64,10 @@ class FavoriteStatusExceptionHandlerTest {
         failure.stackTrace = frames
         cause.stackTrace = frames
 
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertNull(event.throwableProxy)
         assertTrue(event.formattedMessage.length < 4300)
         assertTrue(event.formattedMessage.lines().size < 30)
@@ -68,15 +75,19 @@ class FavoriteStatusExceptionHandlerTest {
     }
 
     @Test
-    fun given__deep_causes_and_long_source_metadata__when__handling__then__respect_depth_and_length_budgets() {
+    fun `깊은 원인 사슬과 긴 소스 메타데이터가 있을 때__처리하면__깊이와 길이 한도를 지킨다`() {
+        // given
         val last = IOException("synthetic-private-cause")
         val fourth = SQLException("synthetic-private-SQL", last)
         val third = UnsupportedOperationException("synthetic-private-operation", fourth)
         val second = IllegalArgumentException("synthetic-private-input", third)
         val failure = IllegalStateException("synthetic-private-user", second)
 
+
+        // when
         val deep = handleAndCapture(failure)
 
+        // then
         assertTrue(deep.formattedMessage.contains("java.sql.SQLException"))
         assertFalse(deep.formattedMessage.contains("java.io.IOException"))
         failure.stackTrace = arrayOf(

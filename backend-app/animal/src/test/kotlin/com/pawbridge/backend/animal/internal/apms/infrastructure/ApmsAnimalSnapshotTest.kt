@@ -7,34 +7,20 @@ import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsHeader
 import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsItems
 import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsResponse
 import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsRootResponse
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.ArgumentMatchers.isNull
-import org.mockito.ArgumentMatchers.nullable
-import org.mockito.Mock
-import org.mockito.Mockito.lenient
-import org.mockito.Mockito.never
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.batch.core.JobExecution
 import org.springframework.batch.support.transaction.ResourcelessTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDate
 
-@ExtendWith(MockitoExtension::class)
 class ApmsAnimalSnapshotTest {
-    @Mock
-    private lateinit var api: ApmsApiClient
+    private val api = mockk<ApmsApiClient>()
 
     private lateinit var execution: JobExecution
     private val plan = ApmsSyncPlan(
@@ -44,240 +30,507 @@ class ApmsAnimalSnapshotTest {
         LocalDate.of(2026, 9, 10),
     )
 
-    @BeforeEach
-    fun defaultEmptyPages() {
-        lenient().`when`(
-            api.getAbandonmentAnimals(
-                anyString(), anyInt(), eq(1000), anyString(), anyString(),
-                isNull<String>(), isNull<String>(), eq("json"), nullable(String::class.java), nullable(String::class.java),
-            ),
-        ).thenAnswer { call -> page("0", listOf(), call.getArgument(1)) }
-    }
-
     @Test
-    fun givenAnActiveWriterTransaction__whenFetchingUncachedSnapshot__thenRejectBeforeAnyProviderCall() {
+    fun `활성 쓰기 트랜잭션 안에서 캐시되지 않은 스냅샷을 가져올 때__동물을 조회하면__제공자 호출 전에 거부한다`() {
+        // given
         val uncached = snapshot()
         val transaction = TransactionTemplate(ResourcelessTransactionManager())
 
-        assertThatThrownBy { transaction.execute { status -> uncached.animals() } }
+        // when
+        val thrown = assertThatThrownBy { transaction.execute { status -> uncached.animals() } }
+
+        // then
+        thrown
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("APMS external fetch must run outside the writer transaction")
-
-        verifyNoInteractions(api)
+        confirmVerified(api)
     }
 
     @Test
-    fun givenOldIntakeRecentlyAdopted__whenCollected__thenIncludeWithoutProtectFilter() {
+    fun `입양으로 종료된 오래된 입소 건이 최근 갱신됐을 때__수집하면__보호 상태 필터 없이 포함한다`() {
+        // given
         val old = animal("old", "20260715", "2026-08-23 15:21:46.0", "종료(입양)")
-        updatedJuly(page("1", listOf(old), 1))
+        val snapshot = snapshot()
 
-        assertThat(snapshot().animals().map { animal -> animal.processState }).containsExactly("종료(입양)")
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals(
+                "test-key", 1, 1000, "20260701", "20260731", null, null, "json", "20260811", "20260910",
+            )
+        } returns page("1", listOf(old), 1)
 
-        verify(api).getAbandonmentAnimals(
-            "test-key", 1, 1000, "20260701", "20260731",
-            null, null, "json", "20260811", "20260910",
-        )
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals.map { animal -> animal.processState }).containsExactly("종료(입양)")
+        verify(exactly = 1) {
+            api.getAbandonmentAnimals(
+                "test-key", 1, 1000, "20260701", "20260731", null, null, "json", "20260811", "20260910",
+            )
+        }
     }
 
     @Test
-    fun givenNewAnimalWithoutUpdateTime__whenCollected__thenKeepIntakePath() {
+    fun `갱신 시각이 없는 신규 동물일 때__수집하면__입소일 경로로 유지한다`() {
+        // given
         val fresh = animal("new", "20260908", null, "보호중")
-        recent(page("1", listOf(fresh), 1))
+        val snapshot = snapshot()
 
-        assertThat(snapshot().animals()).containsExactly(fresh)
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(fresh), 1)
+
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).containsExactly(fresh)
     }
 
     @Test
-    fun givenDuplicateNewNumberWithLaterState__whenCollected__thenWriteOneNewestAnimal() {
+    fun `같은 신규 번호가 더 나중 상태로 중복될 때__수집하면__가장 최신 동물 하나만 쓴다`() {
+        // given
         val first = animal("new", "20260908", "2026-09-08 10:00:00.0", "보호중")
         val latest = animal("new", "20260908", "2026-09-09 10:00:00.123", "종료(입양)")
-        recent(page("1", listOf(first), 1))
-        updatedSeptember(page("1", listOf(latest), 1))
+        val snapshot = snapshot()
 
-        assertThat(snapshot().animals()).containsExactly(latest)
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(first), 1)
+        every {
+            api.getAbandonmentAnimals(
+                "test-key", 1, 1000, "20260901", "20260910", null, null, "json", "20260811", "20260910",
+            )
+        } returns page("1", listOf(latest), 1)
+
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).containsExactly(latest)
     }
 
     @Test
-    fun givenAlreadyEndedAnimalCorrected__whenCollected__thenKeepLatestCorrection() {
+    fun `이미 종료된 동물이 정정됐을 때__수집하면__가장 최신 정정을 유지한다`() {
+        // given
         val latest = animal("ended", "20260908", "2026-09-10 10:00:00", "종료(반환)")
         val stale = animal("ended", "20260908", "2026-09-09 10:00:00", "종료(입양)")
-        recent(page("1", listOf(latest), 1))
-        updatedSeptember(page("1", listOf(stale), 1))
+        val snapshot = snapshot()
 
-        assertThat(snapshot().animals()).containsExactly(latest)
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(latest), 1)
+        every {
+            api.getAbandonmentAnimals(
+                "test-key", 1, 1000, "20260901", "20260910", null, null, "json", "20260811", "20260910",
+            )
+        } returns page("1", listOf(stale), 1)
+
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).containsExactly(latest)
     }
 
     @Test
-    fun givenSameTimestampWithConflictingStatus__whenCollected__thenFailBeforeAnimalWrites() {
-        recent(page("1", listOf(animal("one", "20260908", "2026-09-09 10:00:00", "보호중")), 1))
-        updatedSeptember(page("1", listOf(animal("one", "20260908", "2026-09-09 10:00:00.000", "종료(입양)")), 1))
+    fun `같은 시각에 상태가 충돌할 때__수집하면__동물 쓰기 전에 실패한다`() {
+        // given
+        val protecting = animal("one", "20260908", "2026-09-09 10:00:00", "보호중")
+        val adopted = animal("one", "20260908", "2026-09-09 10:00:00.000", "종료(입양)")
+        val snapshot = snapshot()
 
-        assertThatThrownBy { snapshot().animals() }.hasMessageContaining("conflicting data")
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(protecting), 1)
+        every {
+            api.getAbandonmentAnimals(
+                "test-key", 1, 1000, "20260901", "20260910", null, null, "json", "20260811", "20260910",
+            )
+        } returns page("1", listOf(adopted), 1)
+
+        // when
+        val thrown = assertThatThrownBy { snapshot.animals() }
+
+        // then
+        thrown.hasMessageContaining("conflicting data")
     }
 
     @Test
-    fun givenEquivalentTimestampFormats__whenCollected__thenDeduplicate() {
-        recent(page("1", listOf(animal("one", "20260908", "2026-09-09 10:00:00", "보호중")), 1))
-        updatedSeptember(page("1", listOf(animal("one", "20260908", "2026-09-09 10:00:00.000", "보호중")), 1))
+    fun `동등한 시각 형식일 때__수집하면__중복을 제거한다`() {
+        // given
+        val plain = animal("one", "20260908", "2026-09-09 10:00:00", "보호중")
+        val withMillis = animal("one", "20260908", "2026-09-09 10:00:00.000", "보호중")
+        val snapshot = snapshot()
 
-        assertThat(snapshot().animals()).hasSize(1)
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(plain), 1)
+        every {
+            api.getAbandonmentAnimals(
+                "test-key", 1, 1000, "20260901", "20260910", null, null, "json", "20260811", "20260910",
+            )
+        } returns page("1", listOf(withMillis), 1)
+
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).hasSize(1)
     }
 
     @Test
-    fun givenDifferentNumbersSharingNotice__whenCollected__thenRetainBoth() {
+    fun `공고 번호만 같고 동물 번호가 다를 때__수집하면__둘 다 유지한다`() {
+        // given
         val one = animal("one", "20260908", null, "보호중")
         val two = animal("two", "20260908", null, "보호중")
         one.noticeNo = "same-notice"
         two.noticeNo = "same-notice"
-        recent(page("2", listOf(one, two), 1))
-
-        assertThat(snapshot().animals()).hasSize(2)
-    }
-
-    @Test
-    fun givenSnapshotUsedByTwoSteps__whenReadTwice__thenFetchOnlyOnce() {
         val snapshot = snapshot()
+
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("2", listOf(one, two), 1)
+
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).hasSize(2)
+    }
+
+    @Test
+    fun `두 단계가 스냅샷을 함께 쓸 때__두 번 읽으면__한 번만 가져온다`() {
+        // given
+        val snapshot = snapshot()
+
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+
+        // when
         val first = snapshot.animals()
+        val second = snapshot.animals()
 
-        assertThat(snapshot.animals()).isSameAs(first)
-
-        verify(api, times(4)).getAbandonmentAnimals(
-            anyString(), anyInt(), eq(1000), anyString(), anyString(),
-            isNull<String>(), isNull<String>(), eq("json"), nullable(String::class.java), nullable(String::class.java),
-        )
+        // then
+        assertThat(second).isSameAs(first)
+        verify(exactly = 4) {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        }
     }
 
     @Test
-    fun givenMultiplePages__whenCollected__thenReadEachPageAndStopAtLast() {
+    fun `여러 쪽이 있을 때__수집하면__각 쪽을 읽고 마지막 쪽에서 멈춘다`() {
+        // given
         val first = (0 until 1000).map { i -> animal("id-" + i, "20260908", null, "보호중") }
-        recent(page("1001", first, 1))
-        `when`(api.getAbandonmentAnimals("test-key", 2, 1000, "20260811", "20260910", null, null, "json", null, null))
-            .thenReturn(page("1001", listOf(animal("last", "20260908", null, "보호중")), 2))
+        val last = animal("last", "20260908", null, "보호중")
+        val snapshot = snapshot()
 
-        assertThat(snapshot().animals()).hasSize(1001)
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1001", first, 1)
+        every {
+            api.getAbandonmentAnimals("test-key", 2, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1001", listOf(last), 2)
 
-        verify(api, never()).getAbandonmentAnimals(
-            anyString(), eq(3), anyInt(), anyString(), anyString(),
-            any(), any(), anyString(), any(), any(),
-        )
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).hasSize(1001)
+        verify(exactly = 0) {
+            api.getAbandonmentAnimals(any(), 3, any(), any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test
-    fun givenTransportFailure__whenCollected__thenRecordIncompleteWithoutLeakingRequest() {
-        `when`(
-            api.getAbandonmentAnimals(
-                eq("test-key"), anyInt(), eq(1000), anyString(), anyString(),
-                isNull<String>(), isNull<String>(), eq("json"), isNull<String>(), isNull<String>(),
-            ),
-        ).thenThrow(IllegalStateException("private-service-key-placeholder"))
+    fun `전송 실패가 났을 때__수집하면__요청 내용을 노출하지 않고 불완전으로 기록한다`() {
+        // given
+        val snapshot = snapshot()
 
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", any(), 1000, any(), any(), null, null, "json", null, null)
+        } throws IllegalStateException("private-service-key-placeholder")
+
+        // when
+        snapshot.animals()
+
+        // then
         assertIncomplete("REQUEST_FAILED")
-
         assertThat(execution.executionContext.getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS))
             .doesNotContain("private-service-key-placeholder")
     }
 
     @Test
-    fun givenProviderError__whenCollected__thenRecordIncomplete() {
+    fun `제공자가 오류를 돌려줄 때__수집하면__불완전으로 기록한다`() {
+        // given
         val response = page("0", listOf(), 1)
         response.response!!.header!!.resultCode = "30"
-        everyIntakeQuery(response)
+        val snapshot = snapshot()
 
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", any(), 1000, any(), any(), null, null, "json", null, null)
+        } returns response
+
+        // when
+        snapshot.animals()
+
+        // then
         assertIncomplete("UNSUCCESSFUL_RESPONSE")
     }
 
     @Test
-    fun givenMissingResponse__whenCollected__thenRecordIncomplete() {
-        everyIntakeQuery(null)
+    fun `응답이 없을 때__수집하면__불완전으로 기록한다`() {
+        // given
+        val snapshot = snapshot()
 
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", any(), 1000, any(), any(), null, null, "json", null, null)
+        } returns null
+
+        // when
+        snapshot.animals()
+
+        // then
         assertIncomplete("UNSUCCESSFUL_RESPONSE")
     }
 
     @Test
-    fun givenPositiveCountAndMissingItems__whenCollected__thenRecordIncomplete() {
-        recent(page("3", null, 1))
+    fun `건수는 양수인데 항목이 없을 때__수집하면__불완전으로 기록한다`() {
+        // given
+        val snapshot = snapshot()
 
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("3", null, 1)
+
+        // when
+        snapshot.animals()
+
+        // then
         assertIncomplete("COUNT_MISMATCH")
     }
 
     @Test
-    fun givenPositiveCountAndEmptyItems__whenCollected__thenRecordIncomplete() {
-        recent(page("3", listOf(), 1))
+    fun `건수는 양수인데 항목이 비어 있을 때__수집하면__불완전으로 기록한다`() {
+        // given
+        val snapshot = snapshot()
 
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("3", listOf(), 1)
+
+        // when
+        snapshot.animals()
+
+        // then
         assertIncomplete("COUNT_MISMATCH")
     }
 
     @Test
-    fun givenTruncatedPage__whenCollected__thenRecordIncomplete() {
-        recent(page("2", listOf(animal("one", "20260908", null, "보호중")), 1))
+    fun `쪽이 잘렸을 때__수집하면__불완전으로 기록한다`() {
+        // given
+        val one = animal("one", "20260908", null, "보호중")
+        val snapshot = snapshot()
 
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("2", listOf(one), 1)
+
+        // when
+        snapshot.animals()
+
+        // then
         assertIncomplete("COUNT_MISMATCH")
     }
 
     @Test
-    fun givenSuccessfulZeroCount__whenCollected__thenAcceptEmptyResult() {
-        recent(page("0", null, 1))
+    fun `성공했지만 건수가 0일 때__수집하면__빈 결과를 받아들인다`() {
+        // given
+        val snapshot = snapshot()
 
-        assertThat(snapshot().animals()).isEmpty()
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("0", null, 1)
+
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).isEmpty()
     }
 
     @Test
-    fun givenRequestBudgetReached__whenAnotherQueryNeeded__thenRecordUnqueriedWindowsWithoutExtraCall() {
-        assertThat(snapshot(1, 50000).animals()).isEmpty()
+    fun `요청 예산에 도달했을 때__다른 조회가 더 필요하면__추가 호출 없이 조회하지 못한 구간을 기록한다`() {
+        // given
+        val snapshot = snapshot(1, 50000)
 
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals).isEmpty()
         assertThat(execution.executionContext.getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS)).contains("REQUEST_BUDGET")
-        verify(api, times(1)).getAbandonmentAnimals(
-            anyString(), anyInt(), anyInt(), anyString(), anyString(),
-            any(), any(), anyString(), any(), any(),
-        )
+        verify(exactly = 1) {
+            api.getAbandonmentAnimals(any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test
-    fun givenAnimalBudgetReached__whenNewNumberArrives__thenKeepBoundedDataAndRecordIncomplete() {
-        recent(
-            page(
-                "2",
-                listOf(animal("one", "20260908", null, "보호중"), animal("two", "20260908", null, "보호중")),
-                1,
-            ),
-        )
+    fun `동물 예산에 도달했을 때__새 번호가 들어오면__제한된 데이터는 유지하고 불완전으로 기록한다`() {
+        // given
+        val one = animal("one", "20260908", null, "보호중")
+        val two = animal("two", "20260908", null, "보호중")
+        val snapshot = snapshot(100, 1)
 
-        assertThat(snapshot(100, 1).animals().map { animal -> animal.desertionNo }).containsExactly("one")
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("2", listOf(one, two), 1)
 
+        // when
+        val animals = snapshot.animals()
+
+        // then
+        assertThat(animals.map { animal -> animal.desertionNo }).containsExactly("one")
         assertThat(execution.executionContext.getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT)).isPositive()
         assertThat(execution.executionContext.getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS)).contains("ANIMAL_BUDGET")
     }
 
     @Test
-    fun givenProviderIgnoringModifiedFilter__whenCollected__thenFail() {
-        updatedJuly(page("1", listOf(animal("old", "20260715", "2026-07-16 10:00:00", "보호중")), 1))
+    fun `제공자가 수정일 필터를 무시할 때__수집하면__실패한다`() {
+        // given
+        val outsideWindow = animal("old", "20260715", "2026-07-16 10:00:00", "보호중")
+        val snapshot = snapshot()
 
-        assertThatThrownBy { snapshot().animals() }.hasMessageContaining("update window")
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals(
+                "test-key", 1, 1000, "20260701", "20260731", null, null, "json", "20260811", "20260910",
+            )
+        } returns page("1", listOf(outsideWindow), 1)
+
+        // when
+        val thrown = assertThatThrownBy { snapshot.animals() }
+
+        // then
+        thrown.hasMessageContaining("update window")
     }
 
     @Test
-    fun givenMissingNumber__whenCollected__thenFail() {
-        recent(page("1", listOf(animal(null, "20260908", null, "보호중")), 1))
+    fun `번호가 없을 때__수집하면__실패한다`() {
+        // given
+        val withoutNumber = animal(null, "20260908", null, "보호중")
+        val snapshot = snapshot()
 
-        assertThatThrownBy { snapshot().animals() }.hasMessageContaining("number is missing")
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(withoutNumber), 1)
+
+        // when
+        val thrown = assertThatThrownBy { snapshot.animals() }
+
+        // then
+        thrown.hasMessageContaining("number is missing")
     }
 
     @Test
-    fun givenMalformedUpdateTime__whenCollected__thenFailInsteadOfChoosingAnArbitraryDuplicate() {
-        recent(page("1", listOf(animal("one", "20260908", "bad-date", "보호중")), 1))
+    fun `갱신 시각 형식이 잘못됐을 때__수집하면__임의의 중복을 고르는 대신 실패한다`() {
+        // given
+        val malformed = animal("one", "20260908", "bad-date", "보호중")
+        val snapshot = snapshot()
 
-        assertThatThrownBy { snapshot().animals() }.hasMessageContaining("timestamp is invalid")
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(malformed), 1)
+
+        // when
+        val thrown = assertThatThrownBy { snapshot.animals() }
+
+        // then
+        thrown.hasMessageContaining("timestamp is invalid")
     }
 
     @Test
-    fun givenImpossibleCalendarDate__whenCollected__thenFailInsteadOfNormalizing() {
-        recent(page("1", listOf(animal("one", "20260908", "2026-02-30 10:00:00", "보호중")), 1))
+    fun `존재하지 않는 달력 날짜일 때__수집하면__보정하지 않고 실패한다`() {
+        // given
+        val impossible = animal("one", "20260908", "2026-02-30 10:00:00", "보호중")
+        val snapshot = snapshot()
 
-        assertThatThrownBy { snapshot().animals() }.hasMessageContaining("timestamp is invalid")
+        every {
+            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
+        } answers { page("0", listOf(), arg<Int>(1)) }
+        every {
+            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+        } returns page("1", listOf(impossible), 1)
+
+        // when
+        val thrown = assertThatThrownBy { snapshot.animals() }
+
+        // then
+        thrown.hasMessageContaining("timestamp is invalid")
     }
 
     private fun assertIncomplete(reason: String) {
-        snapshot().animals()
         assertThat(execution.executionContext.getInt(ApmsAnimalSnapshot.INCOMPLETE_COUNT)).isPositive()
         assertThat(execution.executionContext.getString(ApmsAnimalSnapshot.INCOMPLETE_DETAILS)).contains(reason)
     }
@@ -293,36 +546,6 @@ class ApmsAnimalSnapshotTest {
 
     private fun animal(number: String?, intake: String, updated: String?, state: String): ApmsAnimal {
         return ApmsAnimal.builder().desertionNo(number).happenDt(intake).updTm(updated).processState(state).build()
-    }
-
-    private fun everyIntakeQuery(response: ApmsRootResponse<ApmsAnimal>?) {
-        `when`(
-            api.getAbandonmentAnimals(
-                eq("test-key"), anyInt(), eq(1000), anyString(), anyString(),
-                isNull<String>(), isNull<String>(), eq("json"), isNull<String>(), isNull<String>(),
-            ),
-        ).thenReturn(response)
-    }
-
-    private fun recent(response: ApmsRootResponse<ApmsAnimal>) {
-        `when`(api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null))
-            .thenReturn(response)
-    }
-
-    private fun updatedJuly(response: ApmsRootResponse<ApmsAnimal>) {
-        `when`(
-            api.getAbandonmentAnimals(
-                "test-key", 1, 1000, "20260701", "20260731", null, null, "json", "20260811", "20260910",
-            ),
-        ).thenReturn(response)
-    }
-
-    private fun updatedSeptember(response: ApmsRootResponse<ApmsAnimal>) {
-        `when`(
-            api.getAbandonmentAnimals(
-                "test-key", 1, 1000, "20260901", "20260910", null, null, "json", "20260811", "20260910",
-            ),
-        ).thenReturn(response)
     }
 
     private fun page(total: String, animals: List<ApmsAnimal>?, number: Int): ApmsRootResponse<ApmsAnimal> {

@@ -4,53 +4,46 @@ import com.pawbridge.backend.animal.internal.chatbot.infrastructure.exception.Ch
 import io.github.bucket4j.BucketConfiguration
 import io.github.bucket4j.distributed.BucketProxy
 import io.github.bucket4j.distributed.proxy.ProxyManager
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.clearInvocations
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import java.time.Duration
 import java.util.function.Supplier
 
 class ChatbotRateLimitServiceTest {
-    @Suppress("UNCHECKED_CAST")
-    private val manager: ProxyManager<String> = mock(ProxyManager::class.java) as ProxyManager<String>
-    private val buckets: List<BucketProxy> = (0 until 5).map { mock(BucketProxy::class.java) }
+    private val manager = mockk<ProxyManager<String>>()
+    private val buckets: List<BucketProxy> = (0 until 5).map { mockk<BucketProxy>() }
     private val quotas = ChatbotRateLimitService(manager, 5, 20, 20, 100, 300)
 
-    @BeforeEach
-    fun setup() {
-        for (i in 0 until 5) {
-            `when`(manager.getProxy(eq(KEYS[i]), any())).thenReturn(buckets[i])
-            `when`(buckets[i].tryConsume(1)).thenReturn(true)
-        }
-        clearInvocations(manager)
-    }
-
     @Test
-    fun given__five_successful_redis_buckets__when__checking__then__preserve_keys_limits_greedy_intervals_and_one_token_per_bucket() {
+    fun `Redis 버킷 다섯 개가 모두 성공할 때__확인하면__키와 한도와 탐욕 간격과 버킷당 토큰 하나를 유지한다`() {
+        // given
+        val configs = KEYS.map { slot<Supplier<BucketConfiguration>>() }
+
+        for (i in 0 until 5) {
+            every { manager.getProxy(KEYS[i], any()) } returns buckets[i]
+            every { buckets[i].tryConsume(1) } returns true
+        }
+
+        // when
         quotas.check("browser", "hash")
 
-        @Suppress("UNCHECKED_CAST")
-        val config = ArgumentCaptor.forClass(Supplier::class.java) as ArgumentCaptor<Supplier<BucketConfiguration>>
-        val order = inOrder(manager)
-        for (key in KEYS) {
-            order.verify(manager).getProxy(eq(key), config.capture())
+        // then
+        verifyOrder {
+            for (i in 0 until 5) {
+                manager.getProxy(KEYS[i], capture(configs[i]))
+            }
         }
-        verifyNoMoreInteractions(manager)
+        confirmVerified(manager)
         val limits = longArrayOf(5, 20, 20, 100, 300)
         val periods = longArrayOf(
             Duration.ofMinutes(10).toNanos(),
@@ -60,42 +53,46 @@ class ChatbotRateLimitServiceTest {
             Duration.ofDays(1).toNanos(),
         )
         for (i in 0 until 5) {
-            val bandwidth = config.allValues[i].get().bandwidths[0]
+            val bandwidth = configs[i].captured.get().bandwidths[0]
             assertEquals(limits[i], bandwidth.capacity)
             assertEquals(limits[i], bandwidth.refillTokens)
             assertEquals(periods[i], bandwidth.refillPeriodNanos)
             assertFalse(bandwidth.isRefillIntervally)
-            verify(buckets[i]).tryConsume(1)
+            verify(exactly = 1) { buckets[i].tryConsume(1) }
         }
-        verifyNoMoreInteractions(*buckets.toTypedArray())
+        confirmVerified(*buckets.toTypedArray())
     }
 
     @ParameterizedTest
     @ValueSource(ints = [0, 1, 2, 3, 4])
-    fun given__a_bucket_rejection__when__checking__then__short_circuit_later_buckets_without_refunding_earlier_consumption(
+    fun `버킷 하나가 거절할 때__확인하면__이후 버킷은 건너뛰고 앞서 소비한 토큰은 환불하지 않는다`(
         rejected: Int,
     ) {
-        `when`(buckets[rejected].tryConsume(1)).thenReturn(false)
+        // given
+        for (i in 0 until 5) {
+            every { manager.getProxy(KEYS[i], any()) } returns buckets[i]
+            every { buckets[i].tryConsume(1) } returns true
+        }
+        every { buckets[rejected].tryConsume(1) } returns false
 
-        assertEquals(
-            "챗봇 사용량이 많습니다. 잠시 후 다시 시도해주세요.",
-            assertThrows(ChatbotRateLimitExceededException::class.java) { quotas.check("browser", "hash") }.message,
-        )
-        val order = inOrder(manager)
-        for (i in 0..rejected) {
-            order.verify(manager).getProxy(eq(KEYS[i]), any())
+        // when
+        val thrown = assertThrows(ChatbotRateLimitExceededException::class.java) { quotas.check("browser", "hash") }
+
+        // then
+        assertEquals("챗봇 사용량이 많습니다. 잠시 후 다시 시도해주세요.", thrown.message)
+        verifyOrder {
+            for (i in 0..rejected) {
+                manager.getProxy(KEYS[i], any())
+            }
         }
         for (i in rejected + 1 until 5) {
-            verify(manager, never()).getProxy(eq(KEYS[i]), any())
+            verify(exactly = 0) { manager.getProxy(KEYS[i], any()) }
         }
-        verifyNoMoreInteractions(manager)
+        confirmVerified(manager)
         for (i in 0..rejected) {
-            verify(buckets[i]).tryConsume(1)
+            verify(exactly = 1) { buckets[i].tryConsume(1) }
         }
-        for (i in rejected + 1 until 5) {
-            verifyNoInteractions(buckets[i])
-        }
-        verifyNoMoreInteractions(*buckets.toTypedArray())
+        confirmVerified(*buckets.toTypedArray())
     }
 
     companion object {

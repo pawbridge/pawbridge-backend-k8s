@@ -3,16 +3,15 @@ package com.pawbridge.backend.animal.internal.shelter.infrastructure
 import com.pawbridge.backend.animal.api.AnimalShelterReadUnavailableException
 import com.pawbridge.backend.animal.api.AnimalShelterReads
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
@@ -22,78 +21,107 @@ import java.sql.Connection
 import javax.sql.DataSource
 
 class ModuleAnimalShelterReadsTest {
-    private val source: ShelterReads = mock(ShelterReads::class.java)
-    private val manager: PlatformTransactionManager = mock(PlatformTransactionManager::class.java)
+    private val source: ShelterReads = mockk<ShelterReads>()
+    private val manager: PlatformTransactionManager = mockk<PlatformTransactionManager>()
     private val reads = ModuleAnimalShelterReads(source, manager)
 
-    init {
-        `when`(manager.getTransaction(any())).thenAnswer { SimpleTransactionStatus() }
-    }
-
     @Test
-    fun givenRegistrationLookup__whenDelegating__thenReturnOnlySharedIdRegistrationAndNameWithRawInput() {
-        `when`(source.findByCareRegNo(" 등록 번호 ")).thenReturn(
-            ShelterReads.Details(
-                9L, "등록 번호", "보호소", null, null,
-                null, null, null, null, null, null, null, null, null,
-            ),
+    fun `등록번호로 조회할 때__위임하면__원본 입력 그대로 공유 ID와 등록번호와 이름만 돌려준다`() {
+        // given
+        every { manager.getTransaction(any()) } answers { SimpleTransactionStatus() }
+        justRun { manager.commit(any()) }
+        every { source.findByCareRegNo(any()) } returns ShelterReads.Details(
+            9L, "등록 번호", "보호소", null, null,
+            null, null, null, null, null, null, null, null, null,
         )
 
-        assertThat(reads.findByCareRegNo(" 등록 번호 ")).isEqualTo(AnimalShelterReads.Shelter(9L, "등록 번호", "보호소"))
-        verify(source).findByCareRegNo(" 등록 번호 ")
-        verifyNoMoreInteractions(source)
+        // when
+        val found = reads.findByCareRegNo(" 등록 번호 ")
+
+        // then
+        assertThat(found).isEqualTo(AnimalShelterReads.Shelter(9L, "등록 번호", "보호소"))
+        verify(exactly = 1) { source.findByCareRegNo(" 등록 번호 ") }
+        confirmVerified(source)
     }
 
     @Test
-    fun givenModuleBoundary__whenCreatingAnimalReadScope__thenJoinOrStartReadOnlyDefaultIsolationAndTimeoutWithoutASecondConnection() {
+    fun `모듈 경계일 때__동물 읽기 범위를 만들면__두 번째 연결 없이 읽기 전용 기본 격리와 기본 제한 시간으로 합류하거나 시작한다`() {
+        // given
+        every { manager.getTransaction(any()) } answers { SimpleTransactionStatus() }
+        justRun { manager.commit(any()) }
+        every { source.findByCareRegNo(any()) } returns null
+
+        // when
         reads.findByCareRegNo("r")
 
-        val definition = ArgumentCaptor.forClass(TransactionDefinition::class.java)
-        verify(manager).getTransaction(definition.capture())
-        assertThat(definition.value.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-        assertThat(definition.value.isReadOnly).isTrue()
-        assertThat(definition.value.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
-        assertThat(definition.value.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
-        verify(manager).commit(any())
+        // then
+        val definition = slot<TransactionDefinition>()
+        verify(exactly = 1) { manager.getTransaction(capture(definition)) }
+        assertThat(definition.captured.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
+        assertThat(definition.captured.isReadOnly).isTrue()
+        assertThat(definition.captured.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
+        assertThat(definition.captured.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
+        verify(exactly = 1) { manager.commit(any()) }
     }
 
     @Test
-    fun givenCurrentSourceMissingRegistrationFailure__whenDelegating__thenPreserveUnavailableInsteadOfInventing404OrEmpty() {
+    fun `현재 원본이 등록번호 없음으로 실패할 때__위임하면__404나 빈 결과를 지어내지 않고 이용 불가를 유지한다`() {
+        // given
         val failure = IllegalStateException("Shelter not found: r")
-        `when`(source.findByCareRegNo("r")).thenThrow(failure)
 
-        assertThatThrownBy { reads.findByCareRegNo("r") }
-            .isInstanceOf(AnimalShelterReadUnavailableException::class.java)
+        every { manager.getTransaction(any()) } answers { SimpleTransactionStatus() }
+        justRun { manager.rollback(any()) }
+        every { source.findByCareRegNo(any()) } throws failure
+
+        // when
+        val thrown = assertThatThrownBy { reads.findByCareRegNo("r") }
+
+        // then
+        thrown.isInstanceOf(AnimalShelterReadUnavailableException::class.java)
             .hasCause(failure)
-        verify(manager).rollback(any())
+        verify(exactly = 1) { manager.rollback(any()) }
     }
 
     @Test
-    fun givenEmptySourceBody__whenDelegating__thenKeepNullForExistingCallerUnavailableChecks() {
-        assertThat(reads.findByCareRegNo("r")).isNull()
-        verify(source).findByCareRegNo("r")
+    fun `원본 본문이 비었을 때__위임하면__기존 호출자의 이용 불가 검사를 위해 null을 유지한다`() {
+        // given
+        every { manager.getTransaction(any()) } answers { SimpleTransactionStatus() }
+        justRun { manager.commit(any()) }
+        every { source.findByCareRegNo(any()) } returns null
+
+        // when
+        val found = reads.findByCareRegNo("r")
+
+        // then
+        assertThat(found).isNull()
+        verify(exactly = 1) { source.findByCareRegNo("r") }
     }
 
     @Test
-    fun givenApprovalWriterTransactionOnTheSharedPool__whenLookingUp__thenJoinItWithoutBorrowingASecondConnection() {
-        val pool = mock(DataSource::class.java)
-        val connection = mock(Connection::class.java)
-        `when`(pool.connection).thenReturn(connection)
-        `when`(connection.autoCommit).thenReturn(true)
+    fun `공유 풀에 승인 쓰기 트랜잭션이 있을 때__조회하면__두 번째 연결을 빌리지 않고 그 트랜잭션에 합류한다`() {
+        // given
+        val pool = mockk<DataSource>()
+        val connection = mockk<Connection>()
         val readerManager = JdbcTransactionManager(pool)
         readerManager.isEnforceReadOnly = true
-        `when`(source.findByCareRegNo("r")).thenReturn(
-            ShelterReads.Details(
-                9L, "r", "보호소", null, null,
-                null, null, null, null, null, null, null, null, null,
-            ),
-        )
         val shared = ModuleAnimalShelterReads(source, readerManager)
 
+        every { pool.connection } returns connection
+        every { connection.autoCommit } returns true
+        justRun { connection.autoCommit = any() }
+        justRun { connection.commit() }
+        justRun { connection.close() }
+        every { source.findByCareRegNo(any()) } returns ShelterReads.Details(
+            9L, "r", "보호소", null, null,
+            null, null, null, null, null, null, null, null, null,
+        )
+
+        // when
         val found = TransactionTemplate(JdbcTransactionManager(pool)).execute { status -> shared.findByCareRegNo("r") }
 
+        // then
         assertThat(found).isEqualTo(AnimalShelterReads.Shelter(9L, "r", "보호소"))
-        verify(pool, times(1)).connection
-        verify(connection, times(1)).commit()
+        verify(exactly = 1) { pool.connection }
+        verify(exactly = 1) { connection.commit() }
     }
 }

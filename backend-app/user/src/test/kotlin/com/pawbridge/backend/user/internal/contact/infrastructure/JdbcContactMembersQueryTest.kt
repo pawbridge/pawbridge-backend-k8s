@@ -2,6 +2,10 @@ package com.pawbridge.backend.user.internal.contact.infrastructure
 
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -14,12 +18,6 @@ import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.doReturn
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.UncategorizedSQLException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -39,34 +37,40 @@ import java.util.stream.Stream
 class JdbcContactMembersQueryTest {
     @ParameterizedTest
     @MethodSource("invalidLists")
-    fun given__invalid_raw_ids_before_deduplication__when__querying__then__reject_outside_transaction_and_typed_failure_boundary(
+    fun `중복 제거 전의 원본 ID가 올바르지 않을 때__조회하면__트랜잭션 밖에서 거부하고 유형 있는 실패 경계를 타지 않는다`(
         label: String,
         ids: List<Long?>?,
     ) {
+        // given
         val fixture = Fixture()
 
+        // when
         val failure = assertThrows(IllegalArgumentException::class.java) { fixture.query.getAll(ids) }
 
+        // then
         assertEquals("회원 조회 범위를 확인해 주세요.", failure.message)
         assertEquals(0, fixture.transactions.begins)
         assertEquals(0, fixture.transactions.commits)
         assertEquals(0, fixture.transactions.rollbacks)
         assertEquals(0, fixture.jdbc.queries)
-        verifyNoInteractions(fixture.row)
+        confirmVerified(fixture.row)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__exactly_21_raw_ids__when__querying__then__accept_once_and_return_a_projection_for_each_first_occurring_id_after_commit(
+    fun `원본 ID가 정확히 21개일 때__조회하면__한 번 받아들이고 처음 나온 ID마다 커밋 뒤 투영을 돌려준다`(
         repeated: Boolean,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows.clear()
         val ids: List<Long> = if (repeated) Collections.nCopies(21, 7L) else (1L..21L).toList()
         val distinctIds: List<Long> = if (repeated) listOf(7L) else ids
 
+        // when
         val found = fixture.query.getAll(ids)
 
+        // then
         assertEquals(distinctIds.map { id -> ContactMember(id, "탈퇴한 회원", false, false) }, found)
         assertArrayEquals(distinctIds.toTypedArray(), fixture.jdbc.arguments)
         assertEquals(sql(distinctIds.size), fixture.jdbc.sql!!.replace(Regex("\\s+"), " ").trim())
@@ -77,17 +81,30 @@ class JdbcContactMembersQueryTest {
     }
 
     @Test
-    fun given__unordered_active_pending_missing_and_duplicate_ids__when__querying__then__restore_input_order_and_raw_nicknames_without_partial_fallback() {
+    fun `정렬되지 않은 활성과 삭제 대기와 없는 중복 ID일 때__조회하면__입력 순서와 원문 닉네임을 복원하고 부분 대체값을 쓰지 않는다`() {
+        // given
         val fixture = Fixture()
-        val whitespace = member(10, "  원문\n닉네임  ", false)
-        val pending = member(7, "노출하지 않을 닉네임", true)
-        val empty = member(9, "", false)
+        val whitespace = mockk<ResultSet>()
+        val pending = mockk<ResultSet>()
+        val empty = mockk<ResultSet>()
         fixture.jdbc.rows.clear()
         fixture.jdbc.rows.addAll(listOf(whitespace, pending, empty))
         val ids = ArrayList(listOf(9L, 7L, 9L, 8L, 10L))
 
+        every { whitespace.getLong("user_id") } returns 10L
+        every { whitespace.getString("nickname") } returns "  원문\n닉네임  "
+        every { whitespace.getBoolean("pending") } returns false
+        every { pending.getLong("user_id") } returns 7L
+        every { pending.getString("nickname") } returns "노출하지 않을 닉네임"
+        every { pending.getBoolean("pending") } returns true
+        every { empty.getLong("user_id") } returns 9L
+        every { empty.getString("nickname") } returns ""
+        every { empty.getBoolean("pending") } returns false
+
+        // when
         val found = fixture.query.getAll(ids)
 
+        // then
         assertEquals(
             listOf(
                 ContactMember(9L, "", true, false),
@@ -103,14 +120,15 @@ class JdbcContactMembersQueryTest {
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
-        verify(pending, never()).getString("nickname")
+        verify(exactly = 0) { pending.getString("nickname") }
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__batch_begin_query_mapping_or_commit_failure_then_recovery__when__querying__then__preserve_the_cause_as_typed_unavailable_without_partial_results(
+    fun `배치 시작과 조회와 매핑과 커밋이 실패한 뒤 복구될 때__조회하면__부분 결과 없이 원인을 유형 있는 사용 불가로 보존한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic-private-begin")
@@ -121,12 +139,22 @@ class JdbcContactMembersQueryTest {
         when (phase) {
             FailurePhase.BEGIN -> fixture.transactions.startFailure = failure
             FailurePhase.QUERY -> fixture.jdbc.failure = failure
-            FailurePhase.MAP -> `when`(fixture.row.getBoolean("pending")).thenThrow(failure)
+            FailurePhase.MAP -> Unit
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
+        every { fixture.row.getLong("user_id") } returns 7L
+        every { fixture.row.getString("nickname") } returns "원문 닉네임"
+        if (phase == FailurePhase.MAP) {
+            every { fixture.row.getBoolean("pending") } throws failure andThen false
+        } else {
+            every { fixture.row.getBoolean("pending") } returns false
+        }
+
+        // when
         val unavailable = assertThrows(ContactMemberUnavailableException::class.java) { fixture.query.getAll(listOf(7L)) }
 
+        // then
         assertSame(failure, unavailable.cause)
         assertEquals("Contact member lookup is unavailable.", unavailable.message)
         assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.queries)
@@ -135,7 +163,6 @@ class JdbcContactMembersQueryTest {
         fixture.transactions.startFailure = null
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
-        doReturn(false).`when`(fixture.row).getBoolean("pending")
         assertEquals(listOf(ContactMember(7L, "원문 닉네임", true, false)), fixture.query.getAll(listOf(7L)))
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.queries)
         assertFalse(fixture.transactions.active)
@@ -145,7 +172,7 @@ class JdbcContactMembersQueryTest {
 
     private class Fixture {
         val transactions = RecordingTransactionManager()
-        val row: ResultSet = member(7, "원문 닉네임", false)
+        val row: ResultSet = mockk<ResultSet>()
         val jdbc = RecordingJdbc(transactions)
         val query: JdbcContactMembersQuery
 
@@ -234,14 +261,6 @@ class JdbcContactMembersQueryTest {
             return "SELECT u.user_id, u.nickname, d.user_id IS NOT NULL AS pending FROM pawbridge_user.users u " +
                 "LEFT JOIN pawbridge_user.contact_deletions d ON d.user_id = u.user_id WHERE u.user_id IN (" +
                 Collections.nCopies(ids, "?").joinToString(",") + ")"
-        }
-
-        private fun member(id: Long, nickname: String, pending: Boolean): ResultSet {
-            val row = mock(ResultSet::class.java)
-            `when`(row.getLong("user_id")).thenReturn(id)
-            `when`(row.getString("nickname")).thenReturn(nickname)
-            `when`(row.getBoolean("pending")).thenReturn(pending)
-            return row
         }
     }
 }

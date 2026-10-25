@@ -19,10 +19,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -31,22 +27,44 @@ import org.springframework.transaction.support.AbstractPlatformTransactionManage
 import org.springframework.transaction.support.DefaultTransactionStatus
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Timestamp
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.util.Calendar
 import java.util.Collections
 import java.util.function.Supplier
 
+/** A tiny in-memory row: ResultSet has too many overloads to stub one by one with strict mocks. */
+private fun rowOf(
+    strings: Map<String, String?> = mapOf(),
+    longs: Map<String, Long> = mapOf(),
+    timestamps: Map<String, Timestamp> = mapOf(),
+): ResultSet {
+    return Proxy.newProxyInstance(
+        ResultSet::class.java.classLoader,
+        arrayOf(ResultSet::class.java),
+    ) { _, method, args ->
+        when (method.name) {
+            "getString" -> strings.getValue(args[0] as String)
+            "getLong" -> longs.getValue(args[0] as String)
+            "getTimestamp" -> timestamps.getValue(args[0] as String)
+            else -> throw UnsupportedOperationException(method.name)
+        }
+    } as ResultSet
+}
+
 class JdbcUserAnimalActivitiesTest {
     @Test
-    fun given__a_new_favorite__when__adding__then__insert_the_favorite_and_increment_the_count_in_one_write_transaction() {
+    fun `새 즐겨찾기일 때__추가하면__한 쓰기 트랜잭션에서 즐겨찾기를 넣고 건수를 올린다`() {
+        // given
         val f = Fixture()
 
+        // when
         val row = f.service.add(7, -8)
 
+        // then
         assertEquals(Favorite(91L, 7L, -8L, NOW), row)
         assertEquals(listOf("begin", "exists", "user", "now", "favorite-insert", "count", "commit", "cleanup"), f.events)
         assertEquals(listOf(listOf<Any>(-8L, 1)), f.adjustments)
@@ -55,37 +73,48 @@ class JdbcUserAnimalActivitiesTest {
     }
 
     @Test
-    fun given__a_duplicate_and_missing_user__when__adding__then__reject_duplicate_before_user_lookup_and_no_count_change() {
+    fun `이미 있는 즐겨찾기이고 사용자가 없을 때__추가하면__사용자 조회 전에 중복으로 거부하고 건수를 바꾸지 않는다`() {
+        // given
         val f = Fixture()
         f.jdbc.exists = true
         f.jdbc.user = false
 
+        // when
         assertReason("ALREADY_EXISTS") { f.service.add(7, 8) }
 
+        // then
         assertEquals(listOf("begin", "exists", "rollback", "cleanup"), f.events)
         assertTrue(f.adjustments.isEmpty())
     }
 
     @Test
-    fun given__a_missing_user__when__adding_or_listing__then__retain_source_user400_before_insert_or_animal() {
+    fun `사용자가 없을 때__추가하거나 목록을 조회하면__삽입이나 동물 조회 전에 원래의 사용자 400을 유지한다`() {
+        // given
         val add = Fixture()
         add.jdbc.user = false
-        assertThrows(UserNotFoundException::class.java) { add.service.add(7, 8) }
-        assertTrue(add.adjustments.isEmpty())
-        assertFalse(add.events.contains("favorite-insert"))
         val list = Fixture()
         list.jdbc.user = false
+
+        // when
+        assertThrows(UserNotFoundException::class.java) { add.service.add(7, 8) }
         assertThrows(UserNotFoundException::class.java) { list.service.favorites(7) }
+
+        // then
+        assertTrue(add.adjustments.isEmpty())
+        assertFalse(add.events.contains("favorite-insert"))
         assertEquals(0, list.animalCalls)
     }
 
     @Test
-    fun given__a_unique_violation_on_insert__when__adding__then__map_to_409_without_changing_the_count() {
+    fun `삽입에서 유일성 위반이 날 때__추가하면__건수를 바꾸지 않고 409로 매핑한다`() {
+        // given
         val f = Fixture()
         f.jdbc.failure = "favorite"
 
+        // when
         assertReason("ALREADY_EXISTS") { f.service.add(7, 8) }
 
+        // then
         assertTrue(f.adjustments.isEmpty())
         assertTrue(f.events.contains("rollback"))
         assertFalse(f.events.contains("commit"))
@@ -93,51 +122,63 @@ class JdbcUserAnimalActivitiesTest {
     }
 
     @Test
-    fun given__a_commit_failure__when__adding__then__propagate_it_unchanged_without_retry() {
+    fun `커밋이 실패할 때__추가하면__재시도 없이 그대로 전파한다`() {
+        // given
         val f = Fixture()
         val failure: RuntimeException = DataIntegrityViolationException("synthetic-private")
         f.manager.failure = failure
 
+        // when
         assertSame(failure, assertThrows(RuntimeException::class.java) { f.service.add(7, 8) })
 
+        // then
         assertEquals(1, Collections.frequency(f.events, "begin"))
         assertEquals("cleanup", f.events.last())
     }
 
     @Test
-    fun given__a_missing_animal__when__adding__then__reject_404_and_roll_back_the_favorite_row() {
+    fun `동물이 없을 때__추가하면__404로 거부하고 즐겨찾기 행을 롤백한다`() {
+        // given
         val f = Fixture()
         f.animalExists = false
 
+        // when
         assertReason("ANIMAL_NOT_FOUND") { f.service.add(7, 8) }
 
+        // then
         assertEquals(listOf("begin", "exists", "user", "now", "favorite-insert", "count", "rollback", "cleanup"), f.events)
         assertEquals(404, FavoriteActivityRejectedException.Reason.ANIMAL_NOT_FOUND.status())
     }
 
     @Test
-    fun given__a_count_failure__when__adding__then__propagate_it_as_is_not_as_409_and_roll_back() {
+    fun `건수 반영이 실패할 때__추가하면__409가 아니라 그대로 전파하고 롤백한다`() {
+        // given
         val f = Fixture()
         val failure: RuntimeException = DataIntegrityViolationException("synthetic-private")
         f.countFailure = failure
 
+        // when
         assertSame(failure, assertThrows(RuntimeException::class.java) { f.service.add(7, 8) })
 
+        // then
         assertTrue(f.events.contains("rollback"))
         assertFalse(f.events.contains("commit"))
     }
 
     @ParameterizedTest
     @ValueSource(ints = [0, 1])
-    fun given__an_existing_favorite__when__the_bulk_delete_races__then__return_success_and_decrement_only_for_actual_deleted_rows(
+    fun `즐겨찾기가 있고 일괄 삭제가 경합할 때__삭제하면__성공을 돌려주고 실제 삭제된 행만큼만 줄인다`(
         deleted: Int,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.exists = true
         f.jdbc.deleted = deleted
 
+        // when
         f.service.remove(7, 8)
 
+        // then
         assertTrue(f.events.contains("delete"))
         assertEquals(if (deleted == 0) listOf() else listOf(listOf<Any>(8L, -1)), f.adjustments)
         assertFalse(f.events.contains("user"))
@@ -146,58 +187,73 @@ class JdbcUserAnimalActivitiesTest {
     }
 
     @Test
-    fun given__a_favorite_of_a_deleted_animal__when__removing__then__still_delete_the_favorite_and_commit() {
+    fun `삭제된 동물의 즐겨찾기일 때__삭제하면__즐겨찾기를 지우고 커밋한다`() {
+        // given
         val f = Fixture()
         f.jdbc.exists = true
         f.animalExists = false
 
+        // when
         f.service.remove(7, 8)
 
+        // then
         assertEquals(listOf("begin", "exists", "delete", "count", "commit", "cleanup"), f.events)
     }
 
     @Test
-    fun given__a_count_failure__when__removing__then__roll_back_the_delete_and_propagate() {
+    fun `건수 반영이 실패할 때__삭제하면__삭제를 롤백하고 전파한다`() {
+        // given
         val f = Fixture()
         f.jdbc.exists = true
         val failure: RuntimeException = IllegalStateException("private")
         f.countFailure = failure
 
+        // when
         assertSame(failure, assertThrows(RuntimeException::class.java) { f.service.remove(7, 8) })
 
+        // then
         assertTrue(f.events.contains("rollback"))
         assertFalse(f.events.contains("commit"))
     }
 
     @Test
-    fun given__no_favorite__when__removing__then__return_not_found_without_delete_or_user_lookup() {
+    fun `즐겨찾기가 없을 때__삭제하면__삭제나 사용자 조회 없이 없음을 돌려준다`() {
+        // given
         val f = Fixture()
 
+        // when
         assertReason("NOT_FOUND") { f.service.remove(7, 8) }
 
+        // then
         assertEquals(listOf("begin", "exists", "rollback", "cleanup"), f.events)
         assertTrue(f.adjustments.isEmpty())
     }
 
     @Test
-    fun given__no_favorites__when__listing__then__return_empty_without_animal_http() {
+    fun `즐겨찾기가 없을 때__목록을 조회하면__동물 HTTP 없이 빈 목록을 돌려준다`() {
+        // given
         val f = Fixture()
 
+        // when
         val result = f.service.favorites(7)
 
+        // then
         assertEquals(Favorites(7L, 0, listOf()), result)
         assertEquals(0, f.animalCalls)
         assertTrue(f.manager.readOnly)
     }
 
     @Test
-    fun given__ordered_favorites_and_an_absent_animal__when__joining_one_batch__then__preserve_order_and_exact_deleted_fallback() {
+    fun `순서가 있는 즐겨찾기에 없는 동물이 섞였을 때__한 번에 묶어 조인하면__순서와 정확한 삭제됨 대체값을 유지한다`() {
+        // given
         val f = Fixture()
         f.jdbc.favoriteRows = listOf(8L, 9L)
         f.batch = listOf(animal(8))
 
+        // when
         val result = f.service.favorites(7)
 
+        // then
         assertEquals(listOf(8L, 9L), result.favorites!!.map { favorite -> favorite.animalId })
         assertEquals("DOG", result.favorites!!.first().species)
         assertEquals("DELETED", result.favorites!!.last().status)
@@ -208,37 +264,44 @@ class JdbcUserAnimalActivitiesTest {
     }
 
     @Test
-    fun given__favorites__when__listing__then__read_the_animal_batch_only_after_the_user_read_transaction_completed() {
+    fun `즐겨찾기가 있을 때__목록을 조회하면__사용자 읽기 트랜잭션이 끝난 뒤에만 동물 묶음을 읽는다`() {
+        // given
         val f = Fixture()
         f.jdbc.favoriteRows = listOf(8L)
         f.batch = listOf(animal(8))
 
+        // when
         f.service.favorites(7)
 
+        // then
         assertEquals(listOf("begin", "user", "favorites", "commit", "cleanup"), f.events)
         assertEquals(1, f.animalCalls)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["http", "duplicate", "null"])
-    fun given__a_batch_failure_or_duplicate_identity__when__listing__then__propagate_without_turning_failure_into_deleted_animals(
+    fun `묶음 조회가 실패하거나 식별자가 중복될 때__목록을 조회하면__실패를 삭제된 동물로 바꾸지 않고 전파한다`(
         phase: String,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.favoriteRows = listOf(8L)
         f.batchFailure = phase == "http"
         f.batch = if (phase == "null") null else listOf(animal(8), animal(8))
 
+        // when
         assertThrows(RuntimeException::class.java) { f.service.favorites(7) }
 
+        // then
         assertEquals(1, f.animalCalls)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "ROLE_USER", "ROLE_ADMIN", "no-registration"])
-    fun given__missing_or_non_shelter_database_membership__when__reading_registered_animals__then__preserve_source_failure_before_animal_http(
+    fun `데이터베이스 회원이 없거나 보호소 회원이 아닐 때__등록 동물을 읽으면__동물 HTTP 전에 원래의 실패를 유지한다`(
         state: String,
     ) {
+        // given
         val f = Fixture()
         if (state == "missing") {
             f.jdbc.user = false
@@ -248,20 +311,23 @@ class JdbcUserAnimalActivitiesTest {
             f.jdbc.role = state
         }
 
-        if (state == "missing") {
-            assertThrows(UserNotFoundException::class.java) { f.service.registered(7, request()) }
-        } else {
-            assertThrows(IllegalStateException::class.java) { f.service.registered(7, request()) }
-        }
+        // when
+        val expected = if (state == "missing") UserNotFoundException::class.java else IllegalStateException::class.java
+        assertThrows(expected) { f.service.registered(7, request()) }
+
+        // then
         assertEquals(0, f.animalCalls)
     }
 
     @Test
-    fun given__shelter_membership__when__reading_registered_animals__then__run_both_lookups_after_the_readonly_transaction_and_forward_raw_sort() {
+    fun `보호소 회원일 때__등록 동물을 읽으면__읽기 전용 트랜잭션 뒤에 두 조회를 실행하고 원본 정렬을 전달한다`() {
+        // given
         val f = Fixture()
 
+        // when
         val result = f.service.registered(7, request())
 
+        // then
         assertSame(f.page, result)
         assertEquals(request(), f.request)
         // Animal lookups are independent transactions; nesting them would hold two connections of the shared pool.
@@ -271,14 +337,17 @@ class JdbcUserAnimalActivitiesTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["shelter", "animals"])
-    fun given__external_lookup_failure__when__reading_registered_animals__then__propagate_generic_runtime_and_no_empty_page(
+    fun `외부 조회가 실패할 때__등록 동물을 읽으면__일반 런타임 예외를 전파하고 빈 페이지를 돌려주지 않는다`(
         phase: String,
     ) {
+        // given
         val f = Fixture()
         f.externalFailure = phase
 
+        // when
         assertThrows(IllegalStateException::class.java) { f.service.registered(7, request()) }
 
+        // then
         assertEquals(listOf("begin", "current", "commit", "cleanup"), f.events.subList(0, 4))
     }
 
@@ -417,19 +486,16 @@ class JdbcUserAnimalActivitiesTest {
                     if (!user) {
                         return ArrayList()
                     }
-                    val rs = mock(ResultSet::class.java)
-                    `when`(rs.getString("role")).thenReturn(role)
-                    `when`(rs.getString("care_reg_no")).thenReturn(care)
+                    val rs = rowOf(strings = mapOf("role" to role, "care_reg_no" to care))
                     return arrayListOf(rowMapper.mapRow(rs, 0)!!)
                 }
                 events.add("favorites")
                 val result = ArrayList<T>()
                 for (id in favoriteRows) {
-                    val rs = mock(ResultSet::class.java)
-                    `when`(rs.getLong("favorite_id")).thenReturn(id + 100)
-                    `when`(rs.getLong("user_id")).thenReturn(7L)
-                    `when`(rs.getLong("animal_id")).thenReturn(id)
-                    `when`(rs.getTimestamp(eq("created_at"), any(Calendar::class.java))).thenReturn(Timestamp.valueOf(NOW))
+                    val rs = rowOf(
+                        longs = mapOf("favorite_id" to id + 100, "user_id" to 7L, "animal_id" to id),
+                        timestamps = mapOf("created_at" to Timestamp.valueOf(NOW)),
+                    )
                     result.add(rowMapper.mapRow(rs, result.size)!!)
                 }
                 return result

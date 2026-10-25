@@ -1,21 +1,15 @@
 package com.pawbridge.backend.animal.internal.apms.infrastructure
 
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.ArgumentMatcher
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.argThat
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mock
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.batch.core.Job
 import org.springframework.batch.core.JobExecution
 import org.springframework.batch.core.JobParameters
@@ -28,203 +22,339 @@ import java.sql.SQLException
 import java.time.LocalDate
 import javax.sql.DataSource
 
-@ExtendWith(MockitoExtension::class)
 class ApmsBatchRunnerTest {
-    @Mock
-    private lateinit var dataSource: DataSource
-
-    @Mock
-    private lateinit var connection: Connection
-
-    @Mock
-    private lateinit var acquireStatement: PreparedStatement
-
-    @Mock
-    private lateinit var releaseStatement: PreparedStatement
-
-    @Mock
-    private lateinit var acquireResult: ResultSet
-
-    @Mock
-    private lateinit var releaseResult: ResultSet
-
-    @Mock
-    private lateinit var executionRecovery: ApmsBatchExecutionRecovery
-
-    @Mock
-    private lateinit var launcher: JobLauncher
-
-    @Mock
-    private lateinit var job: Job
-
-    @Mock
-    private lateinit var planFactory: ApmsSyncPlanFactory
+    private val dataSource = mockk<DataSource>()
+    private val connection = mockk<Connection>()
+    private val acquireStatement = mockk<PreparedStatement>()
+    private val releaseStatement = mockk<PreparedStatement>()
+    private val acquireResult = mockk<ResultSet>()
+    private val releaseResult = mockk<ResultSet>()
+    private val executionRecovery = mockk<ApmsBatchExecutionRecovery>()
+    private val launcher = mockk<JobLauncher>()
+    private val job = mockk<Job>()
+    private val planFactory = mockk<ApmsSyncPlanFactory>()
 
     private lateinit var runner: ApmsBatchRunner
 
     @BeforeEach
     fun setUp() {
         runner = ApmsBatchRunner(dataSource, executionRecovery, launcher, job, planFactory)
-        `when`(dataSource.connection).thenReturn(connection)
     }
 
     @Test
-    fun givenLockOwnedElsewhere__whenRun__thenRejectWithoutLaunchingOrReleasing() {
-        acquired(0)
+    fun `잠금을 다른 곳이 쥐고 있을 때__실행하면__작업 시작과 잠금 해제 없이 거부한다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns 0
+        justRun { acquireResult.close() }
 
-        assertThatThrownBy { runner.run() }.isInstanceOf(ApmsBatchRunner.AlreadyRunningException::class.java)
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        verifyNoInteractions(executionRecovery, launcher)
-        verify(connection, never()).prepareStatement(RELEASE)
-        verify(connection).close()
+        // then
+        thrown.isInstanceOf(ApmsBatchRunner.AlreadyRunningException::class.java)
+        confirmVerified(executionRecovery, launcher)
+        verify(exactly = 0) { connection.prepareStatement(RELEASE) }
+        verify(exactly = 1) { connection.close() }
     }
 
     @Test
-    fun givenIndeterminateLock__whenRun__thenAbortWithoutLaunching() {
-        acquired(null)
+    fun `잠금 결과가 불확실할 때__실행하면__작업 시작 없이 연결을 폐기한다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        justRun { connection.abort(any()) }
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns null
+        justRun { acquireResult.close() }
 
-        assertThatThrownBy { runner.run() }.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        verify(connection).abort(any())
-        verify(connection).close()
-        verifyNoInteractions(executionRecovery, launcher)
+        // then
+        thrown.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        verify(exactly = 1) { connection.abort(any()) }
+        verify(exactly = 1) { connection.close() }
+        confirmVerified(executionRecovery, launcher)
     }
 
     @Test
-    fun givenRunningMetadata__whenRun__thenReleaseAndRequireRecoveryCheck() {
-        acquired(1)
-        released(1)
-        `when`(job.name).thenReturn("apmsAnimalSyncJob")
-        `when`(executionRecovery.recoverOrReject("apmsAnimalSyncJob"))
-            .thenThrow(ApmsBatchExecutionRecovery.ActiveExecutionMetadataException(1L))
+    fun `실행 중인 메타데이터가 있을 때__실행하면__잠금을 풀고 복구 확인을 요구한다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        every { connection.prepareStatement(RELEASE) } returns releaseStatement
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns 1
+        justRun { acquireResult.close() }
+        justRun { releaseStatement.setInt(any(), any()) }
+        justRun { releaseStatement.setQueryTimeout(any()) }
+        every { releaseStatement.executeQuery() } returns releaseResult
+        justRun { releaseStatement.close() }
+        every { releaseResult.next() } returns true
+        every { releaseResult.getObject(any<Int>()) } returns 1
+        justRun { releaseResult.close() }
+        every { job.name } returns "apmsAnimalSyncJob"
+        every { executionRecovery.recoverOrReject(any()) } throws ApmsBatchExecutionRecovery.ActiveExecutionMetadataException(1L)
 
-        assertThatThrownBy { runner.run() }.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        verifyNoInteractions(launcher)
-        verify(releaseStatement).executeQuery()
-        verify(connection).close()
+        // then
+        thrown.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        confirmVerified(launcher)
+        verify(exactly = 1) { executionRecovery.recoverOrReject("apmsAnimalSyncJob") }
+        verify(exactly = 1) { releaseStatement.executeQuery() }
+        verify(exactly = 1) { connection.close() }
     }
 
     @Test
-    fun givenLaunchFailure__whenRun__thenReleaseSameConnection() {
-        allowedStart()
-        released(1)
-        `when`(launcher.run(eq(job), any())).thenThrow(JobParametersInvalidException("invalid request"))
+    fun `작업 시작이 실패했을 때__실행하면__같은 연결로 잠금을 푼다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        every { connection.prepareStatement(RELEASE) } returns releaseStatement
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns 1
+        justRun { acquireResult.close() }
+        justRun { releaseStatement.setInt(any(), any()) }
+        justRun { releaseStatement.setQueryTimeout(any()) }
+        every { releaseStatement.executeQuery() } returns releaseResult
+        justRun { releaseStatement.close() }
+        every { releaseResult.next() } returns true
+        every { releaseResult.getObject(any<Int>()) } returns 1
+        justRun { releaseResult.close() }
+        every { planFactory.create(any()) } returns SYNC_PLAN
+        every { job.name } returns "apmsAnimalSyncJob"
+        every { executionRecovery.recoverOrReject(any()) } returns 0
+        every { launcher.run(any(), any()) } throws JobParametersInvalidException("invalid request")
 
-        assertThatThrownBy { runner.run() }.isInstanceOf(JobParametersInvalidException::class.java)
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        val order = inOrder(launcher, releaseStatement, connection)
-        order.verify(launcher).run(eq(job), any())
-        order.verify(releaseStatement).executeQuery()
-        order.verify(connection).close()
-        verify(dataSource).connection
+        // then
+        thrown.isInstanceOf(JobParametersInvalidException::class.java)
+        verifyOrder {
+            launcher.run(job, any())
+            releaseStatement.executeQuery()
+            connection.close()
+        }
+        verify(exactly = 1) { launcher.run(job, any()) }
+        verify(exactly = 1) { releaseStatement.executeQuery() }
+        verify(exactly = 1) { connection.close() }
+        verify(exactly = 1) { dataSource.connection }
     }
 
     @Test
-    fun givenSuccessfulLaunch__whenRun__thenReleaseAfterSynchronousCompletion() {
-        allowedStart()
-        released(1)
+    fun `작업 시작이 성공했을 때__실행하면__동기 실행이 끝난 뒤에 잠금을 푼다`() {
+        // given
         val execution = JobExecution(7L)
-        `when`(launcher.run(eq(job), any())).thenReturn(execution)
 
-        assertThat(runner.run()).isSameAs(execution)
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        every { connection.prepareStatement(RELEASE) } returns releaseStatement
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns 1
+        justRun { acquireResult.close() }
+        justRun { releaseStatement.setInt(any(), any()) }
+        justRun { releaseStatement.setQueryTimeout(any()) }
+        every { releaseStatement.executeQuery() } returns releaseResult
+        justRun { releaseStatement.close() }
+        every { releaseResult.next() } returns true
+        every { releaseResult.getObject(any<Int>()) } returns 1
+        justRun { releaseResult.close() }
+        every { planFactory.create(any()) } returns SYNC_PLAN
+        every { job.name } returns "apmsAnimalSyncJob"
+        every { executionRecovery.recoverOrReject(any()) } returns 0
+        every { launcher.run(any(), any()) } returns execution
 
-        val order = inOrder(acquireStatement, executionRecovery, launcher, releaseStatement, connection)
-        order.verify(acquireStatement).executeQuery()
-        order.verify(executionRecovery).recoverOrReject("apmsAnimalSyncJob")
-        order.verify(launcher).run(
-            eq(job),
-            argThat(
-                ArgumentMatcher<JobParameters> { parameters ->
+        // when
+        val result = runner.run()
+
+        // then
+        assertThat(result).isSameAs(execution)
+        verifyOrder {
+            acquireStatement.executeQuery()
+            executionRecovery.recoverOrReject("apmsAnimalSyncJob")
+            launcher.run(
+                job,
+                match<JobParameters> { parameters ->
                     parameters.getString("requestId") != null &&
                         ApmsSyncPlan.from(parameters).end == LocalDate.of(2026, 9, 10)
                 },
-            ),
-        )
-        order.verify(releaseStatement).executeQuery()
-        order.verify(connection).close()
-        verify(connection, never()).abort(any())
-        verify(acquireStatement).setInt(1, 1)
-        verify(acquireStatement).setQueryTimeout(5)
-        verify(releaseStatement).setInt(1, 1)
-        verify(connection, never()).getMetaData()
-        verify(dataSource).connection
+            )
+            releaseStatement.executeQuery()
+            connection.close()
+        }
+        verify(exactly = 1) { acquireStatement.executeQuery() }
+        verify(exactly = 1) { executionRecovery.recoverOrReject("apmsAnimalSyncJob") }
+        verify(exactly = 1) { launcher.run(job, any()) }
+        verify(exactly = 1) { releaseStatement.executeQuery() }
+        verify(exactly = 1) { connection.close() }
+        verify(exactly = 0) { connection.abort(any()) }
+        verify(exactly = 1) { acquireStatement.setInt(1, 1) }
+        verify(exactly = 1) { acquireStatement.setQueryTimeout(5) }
+        verify(exactly = 1) { releaseStatement.setInt(1, 1) }
+        verify(exactly = 0) { connection.metaData }
+        verify(exactly = 1) { dataSource.connection }
     }
 
     @Test
-    fun givenReleaseNotOwned__whenRun__thenAbortAndNeverReportSuccess() {
-        allowedStart()
-        released(0)
-        `when`(launcher.run(eq(job), any())).thenReturn(JobExecution(7L))
+    fun `잠금을 소유하지 않은 채 해제될 때__실행하면__연결을 폐기하고 성공으로 보고하지 않는다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        every { connection.prepareStatement(RELEASE) } returns releaseStatement
+        justRun { connection.abort(any()) }
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns 1
+        justRun { acquireResult.close() }
+        justRun { releaseStatement.setInt(any(), any()) }
+        justRun { releaseStatement.setQueryTimeout(any()) }
+        every { releaseStatement.executeQuery() } returns releaseResult
+        justRun { releaseStatement.close() }
+        every { releaseResult.next() } returns true
+        every { releaseResult.getObject(any<Int>()) } returns 0
+        justRun { releaseResult.close() }
+        every { planFactory.create(any()) } returns SYNC_PLAN
+        every { job.name } returns "apmsAnimalSyncJob"
+        every { executionRecovery.recoverOrReject(any()) } returns 0
+        every { launcher.run(any(), any()) } returns JobExecution(7L)
 
-        assertThatThrownBy { runner.run() }.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        verify(connection).abort(any())
-        verify(connection).close()
+        // then
+        thrown.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        verify(exactly = 1) { connection.abort(any()) }
+        verify(exactly = 1) { connection.close() }
     }
 
     @Test
-    fun givenReleaseConnectionFailure__whenRun__thenAbortAndFailClosed() {
-        allowedStart()
-        `when`(connection.prepareStatement(RELEASE)).thenThrow(SQLException("test failure"))
-        `when`(launcher.run(eq(job), any())).thenReturn(JobExecution(7L))
+    fun `잠금 해제용 연결이 실패할 때__실행하면__연결을 폐기하고 닫힌 상태로 실패한다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        every { connection.prepareStatement(RELEASE) } throws SQLException("test failure")
+        justRun { connection.abort(any()) }
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns 1
+        justRun { acquireResult.close() }
+        every { planFactory.create(any()) } returns SYNC_PLAN
+        every { job.name } returns "apmsAnimalSyncJob"
+        every { executionRecovery.recoverOrReject(any()) } returns 0
+        every { launcher.run(any(), any()) } returns JobExecution(7L)
 
-        assertThatThrownBy { runner.run() }.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        verify(connection).abort(any())
-        verify(connection).close()
+        // then
+        thrown.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        verify(exactly = 1) { connection.abort(any()) }
+        verify(exactly = 1) { connection.close() }
     }
 
     @Test
-    fun givenAcquisitionConnectionFailure__whenRun__thenAbortWithoutLaunching() {
-        `when`(connection.prepareStatement(ACQUIRE)).thenThrow(SQLException("test failure"))
+    fun `잠금 획득용 연결이 실패할 때__실행하면__작업 시작 없이 연결을 폐기한다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } throws SQLException("test failure")
+        justRun { connection.abort(any()) }
+        justRun { connection.close() }
 
-        assertThatThrownBy { runner.run() }.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        verify(connection).abort(any())
-        verify(connection).close()
-        verifyNoInteractions(executionRecovery, launcher)
+        // then
+        thrown.isInstanceOf(ApmsBatchRunner.UnavailableException::class.java)
+        verify(exactly = 1) { connection.abort(any()) }
+        verify(exactly = 1) { connection.close() }
+        confirmVerified(executionRecovery, launcher)
     }
 
     @Test
-    fun givenPlanningFailure__whenRun__thenReleaseLockWithoutLaunching() {
-        allowedStart()
-        released(1)
-        `when`(planFactory.create("apmsAnimalSyncJob")).thenThrow(IllegalStateException("history unavailable"))
+    fun `작업 계획 생성이 실패할 때__실행하면__작업 시작 없이 잠금을 푼다`() {
+        // given
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(ACQUIRE) } returns acquireStatement
+        every { connection.prepareStatement(RELEASE) } returns releaseStatement
+        justRun { connection.close() }
+        justRun { acquireStatement.setInt(any(), any()) }
+        justRun { acquireStatement.setQueryTimeout(any()) }
+        every { acquireStatement.executeQuery() } returns acquireResult
+        justRun { acquireStatement.close() }
+        every { acquireResult.next() } returns true
+        every { acquireResult.getObject(any<Int>()) } returns 1
+        justRun { acquireResult.close() }
+        justRun { releaseStatement.setInt(any(), any()) }
+        justRun { releaseStatement.setQueryTimeout(any()) }
+        every { releaseStatement.executeQuery() } returns releaseResult
+        justRun { releaseStatement.close() }
+        every { releaseResult.next() } returns true
+        every { releaseResult.getObject(any<Int>()) } returns 1
+        justRun { releaseResult.close() }
+        every { planFactory.create(any()) } throws IllegalStateException("history unavailable")
+        every { job.name } returns "apmsAnimalSyncJob"
+        every { executionRecovery.recoverOrReject(any()) } returns 0
 
-        assertThatThrownBy { runner.run() }.hasMessage("history unavailable")
+        // when
+        val thrown = assertThatThrownBy { runner.run() }
 
-        verifyNoInteractions(launcher)
-        verify(releaseStatement).executeQuery()
-        verify(connection).close()
-    }
-
-    private fun allowedStart() {
-        acquired(1)
-        val day = LocalDate.of(2026, 9, 10)
-        `when`(planFactory.create("apmsAnimalSyncJob")).thenReturn(
-            ApmsSyncPlan(day.minusDays(30), day.minusDays(30).withDayOfMonth(1), day.minusDays(30), day),
-        )
-        `when`(job.name).thenReturn("apmsAnimalSyncJob")
-        `when`(executionRecovery.recoverOrReject("apmsAnimalSyncJob")).thenReturn(0)
-    }
-
-    private fun acquired(value: Int?) {
-        `when`(connection.prepareStatement(ACQUIRE)).thenReturn(acquireStatement)
-        `when`(acquireStatement.executeQuery()).thenReturn(acquireResult)
-        `when`(acquireResult.next()).thenReturn(true)
-        `when`(acquireResult.getObject(1)).thenReturn(value)
-    }
-
-    private fun released(value: Int?) {
-        `when`(connection.prepareStatement(RELEASE)).thenReturn(releaseStatement)
-        `when`(releaseStatement.executeQuery()).thenReturn(releaseResult)
-        `when`(releaseResult.next()).thenReturn(true)
-        `when`(releaseResult.getObject(1)).thenReturn(value)
+        // then
+        thrown.hasMessage("history unavailable")
+        confirmVerified(launcher)
+        verify(exactly = 1) { planFactory.create("apmsAnimalSyncJob") }
+        verify(exactly = 1) { releaseStatement.executeQuery() }
+        verify(exactly = 1) { connection.close() }
     }
 
     companion object {
         private const val ACQUIRE = "SELECT CASE WHEN pg_try_advisory_lock(1346459458,?) THEN 1 ELSE 0 END"
         private const val RELEASE = "SELECT CASE WHEN pg_advisory_unlock(1346459458,?) THEN 1 ELSE 0 END"
+
+        private val DAY: LocalDate = LocalDate.of(2026, 9, 10)
+        private val SYNC_PLAN = ApmsSyncPlan(
+            DAY.minusDays(30),
+            DAY.minusDays(30).withDayOfMonth(1),
+            DAY.minusDays(30),
+            DAY,
+        )
     }
 }

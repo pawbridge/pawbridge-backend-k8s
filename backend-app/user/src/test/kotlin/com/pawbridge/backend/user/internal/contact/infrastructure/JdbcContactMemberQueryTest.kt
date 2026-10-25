@@ -2,6 +2,10 @@ package com.pawbridge.backend.user.internal.contact.infrastructure
 
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -10,11 +14,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
-import org.mockito.Mockito.doReturn
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.UncategorizedSQLException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -32,15 +31,21 @@ import java.sql.SQLException
 class JdbcContactMemberQueryTest {
     @ParameterizedTest
     @EnumSource(MemberState::class)
-    fun given__active_missing_or_pending_user__when__reading__then__return_exact_contact_projection_after_read_only_completion(
+    fun `활성이거나 없거나 삭제 대기 중인 사용자일 때__읽으면__읽기 전용 완료 뒤에 정확한 연락처 투영을 돌려준다`(
         state: MemberState,
     ) {
+        // given
         val fixture = Fixture()
-        `when`(fixture.rows.next()).thenReturn(state != MemberState.MISSING)
-        `when`(fixture.rows.getBoolean("pending")).thenReturn(state == MemberState.PENDING)
 
+        every { fixture.rows.next() } returns (state != MemberState.MISSING)
+        every { fixture.rows.getBoolean("pending") } returns (state == MemberState.PENDING)
+        every { fixture.rows.getLong("user_id") } returns USER_ID
+        every { fixture.rows.getString("nickname") } returns NICKNAME
+
+        // when
         val found = fixture.query.get(USER_ID)
 
+        // then
         assertEquals(
             ContactMember(
                 USER_ID,
@@ -59,22 +64,23 @@ class JdbcContactMemberQueryTest {
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
-        verify(fixture.rows).next()
+        verify(exactly = 1) { fixture.rows.next() }
         if (state != MemberState.MISSING) {
-            verify(fixture.rows).getBoolean("pending")
-            verify(fixture.rows).getLong("user_id")
+            verify(exactly = 1) { fixture.rows.getBoolean("pending") }
+            verify(exactly = 1) { fixture.rows.getLong("user_id") }
         }
         if (state == MemberState.ACTIVE) {
-            verify(fixture.rows).getString("nickname")
+            verify(exactly = 1) { fixture.rows.getString("nickname") }
         }
-        verifyNoMoreInteractions(fixture.rows)
+        confirmVerified(fixture.rows)
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__user_query_or_transaction_runtime_then_recovery__when__reading__then__preserve_failure_as_typed_unavailable_without_empty_fallback(
+    fun `사용자 조회나 트랜잭션 런타임 실패 뒤 복구될 때__읽으면__빈 대체값 없이 실패를 유형 있는 사용 불가로 보존한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic-private-begin")
@@ -85,12 +91,23 @@ class JdbcContactMemberQueryTest {
         when (phase) {
             FailurePhase.BEGIN -> fixture.transactions.startFailure = failure
             FailurePhase.QUERY -> fixture.jdbc.failure = failure
-            FailurePhase.MAP -> `when`(fixture.rows.getBoolean("pending")).thenThrow(failure)
+            FailurePhase.MAP -> Unit
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
+        every { fixture.rows.next() } returns true
+        every { fixture.rows.getLong("user_id") } returns USER_ID
+        every { fixture.rows.getString("nickname") } returns NICKNAME
+        if (phase == FailurePhase.MAP) {
+            every { fixture.rows.getBoolean("pending") } throws failure andThen false
+        } else {
+            every { fixture.rows.getBoolean("pending") } returns false
+        }
+
+        // when
         val unavailable = assertThrows(ContactMemberUnavailableException::class.java) { fixture.query.get(USER_ID) }
 
+        // then
         assertSame(failure, unavailable.cause)
         assertEquals("Contact member lookup is unavailable.", unavailable.message)
         assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.queries)
@@ -98,7 +115,6 @@ class JdbcContactMemberQueryTest {
         fixture.transactions.startFailure = null
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
-        doReturn(false).`when`(fixture.rows).getBoolean("pending")
         assertEquals(ContactMember(USER_ID, NICKNAME, true, false), fixture.query.get(USER_ID))
         assertFalse(fixture.transactions.active)
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.queries)
@@ -110,14 +126,11 @@ class JdbcContactMemberQueryTest {
 
     private class Fixture {
         val transactions = RecordingTransactionManager()
-        val rows: ResultSet = mock(ResultSet::class.java)
+        val rows: ResultSet = mockk<ResultSet>()
         val jdbc = RecordingJdbc(rows, transactions)
         val query: JdbcContactMemberQuery
 
         init {
-            `when`(rows.next()).thenReturn(true)
-            `when`(rows.getLong("user_id")).thenReturn(USER_ID)
-            `when`(rows.getString("nickname")).thenReturn(NICKNAME)
             val transaction = TransactionTemplate(transactions)
             transaction.isReadOnly = true
             transaction.timeout = 3

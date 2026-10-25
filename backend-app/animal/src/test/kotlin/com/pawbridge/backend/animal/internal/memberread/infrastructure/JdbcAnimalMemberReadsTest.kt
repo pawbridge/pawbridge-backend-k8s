@@ -5,25 +5,18 @@ import com.pawbridge.backend.animal.api.AnimalMemberReads.Animal
 import com.pawbridge.backend.animal.api.AnimalMemberReads.Page
 import com.pawbridge.backend.animal.api.AnimalMemberReads.PageRequest
 import com.pawbridge.backend.animal.api.AnimalShelterReads
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatcher
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.argThat
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations
@@ -39,156 +32,188 @@ import java.util.stream.Stream
 import javax.sql.DataSource
 
 class JdbcAnimalMemberReadsTest {
-    private val jdbc: NamedParameterJdbcOperations = mock(NamedParameterJdbcOperations::class.java)
-    private val shelters: AnimalShelterReads = mock(AnimalShelterReads::class.java)
+    private val jdbc = mockk<NamedParameterJdbcOperations>()
+    private val shelters = mockk<AnimalShelterReads>()
     private val reads = JdbcAnimalMemberReads(jdbc, TransactionOperations.withoutTransaction(), shelters)
 
     private fun row(id: Long): Animal {
         return Animal(id, null, "DOG", null, null, null, null, null, "ADOPTED", null, null, null, null, null, null)
     }
 
-    private fun rows(rows: List<Animal>) {
-        `when`(jdbc.query(anyString(), any(MapSqlParameterSource::class.java), any<RowMapper<Animal>>())).thenReturn(rows)
-    }
-
     @Test
-    fun givenSourceSupportedCollectionSort__whenRegisteredPage__thenDeduplicateRootsAfterSqlLimitBeforeCountInference() {
-        rows(listOf(row(8), row(8)))
+    fun `원본이 지원하는 컬렉션 정렬일 때__등록 페이지를 조회하면__SQL 제한 뒤에 루트를 중복 제거하고 그 다음에 개수를 추정한다`() {
+        // given
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returns listOf(row(8), row(8))
 
+        // when
         val result = reads.byShelter(7L, PageRequest(0, 2, "shelter.animals.id,asc"))
 
+        // then
         assertThat(result).isEqualTo(Page(listOf(row(8)), 0, 2, 1, 1, true))
-        verify(jdbc).query(
-            argThat(
-                ArgumentMatcher<String> { sql ->
+        verify(exactly = 1) {
+            jdbc.query(
+                match<String> { sql ->
                     sql.contains("LEFT JOIN pawbridge_animal.animals sort_0 ON sort_0.shelter_id=s.id") &&
                         sql.endsWith(" ORDER BY sort_0.id ASC LIMIT :limit OFFSET :offset") &&
                         !sql.contains("DISTINCT") && !sql.contains("GROUP BY") &&
                         !sql.contains("sort_0.api_source") && !sql.contains("sort_0.status")
                 },
-            ),
-            any(MapSqlParameterSource::class.java),
-            any<RowMapper<Animal>>(),
-        )
-        verify(jdbc, never()).queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType))
+                any<MapSqlParameterSource>(),
+                any<RowMapper<Animal>>(),
+            )
+        }
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) }
     }
 
     @ParameterizedTest
     @MethodSource("collectionSortPaths")
-    fun givenSourceAssociationPath__whenSorting__thenPreserveGrammarTerminalEntityAndNestedJoin(sort: String, order: String) {
-        rows(listOf(row(8)))
+    fun `원본 연관 경로 정렬일 때__정렬하면__문법·종단 엔티티·중첩 조인을 보존한다`(sort: String, order: String) {
+        // given
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returns listOf(row(8))
 
-        assertThat(reads.byShelter(7L, PageRequest(0, 2, sort))!!.content).containsExactly(row(8))
+        // when
+        val page = reads.byShelter(7L, PageRequest(0, 2, sort))
 
-        verify(jdbc).query(
-            argThat(
-                ArgumentMatcher<String> { sql ->
+        // then
+        assertThat(page!!.content).containsExactly(row(8))
+        verify(exactly = 1) {
+            jdbc.query(
+                match<String> { sql ->
                     sql.contains("LEFT JOIN pawbridge_animal.animals sort_0 ON sort_0.shelter_id=s.id") &&
                         sql.endsWith(" ORDER BY " + order + " LIMIT :limit OFFSET :offset") &&
                         !sql.contains("DISTINCT") && !sql.contains("NULLS") &&
                         !sql.contains("sort_0.api_source=") && !sql.contains("sort_0.status=")
                 },
-            ),
-            any(MapSqlParameterSource::class.java),
-            any<RowMapper<Animal>>(),
-        )
+                any<MapSqlParameterSource>(),
+                any<RowMapper<Animal>>(),
+            )
+        }
     }
 
     @Test
-    fun givenSharedCollectionPrefixes__whenOrderingMultipleProperties__thenReuseJoinsAndOriginalOrderWithoutExtraFilters() {
-        rows(listOf(row(9), row(9), row(8)))
+    fun `공유하는 컬렉션 접두어로 여러 속성을 정렬할 때__보호소별로 조회하면__조인을 재사용하고 원래 순서를 지키며 추가 필터를 붙이지 않는다`() {
+        // given
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returns listOf(row(9), row(9), row(8))
 
+        // when
         val page = reads.byShelter(7L, PageRequest(2, 3, "shelter.animals.breed,shelter.animals.shelter.name,asc"))
 
+        // then
         assertThat(page).isEqualTo(Page(listOf(row(9), row(8)), 2, 3, 8, 3, true))
-        verify(jdbc).query(
-            argThat(
-                ArgumentMatcher<String> { sql ->
+        verify(exactly = 1) {
+            jdbc.query(
+                match<String> { sql ->
                     sql.contains("LEFT JOIN pawbridge_animal.animals sort_0 ON sort_0.shelter_id=s.id") &&
                         sql.contains("LEFT JOIN pawbridge_animal.shelters sort_1 ON sort_1.id=sort_0.shelter_id") &&
                         sql.endsWith(" ORDER BY sort_0.breed ASC,sort_1.name ASC LIMIT :limit OFFSET :offset") &&
                         !sql.contains("sort_2") && !sql.contains("DISTINCT") &&
                         !sql.contains("sort_0.api_source") && !sql.contains("sort_0.status")
                 },
-            ),
-            argThat(ArgumentMatcher<MapSqlParameterSource> { params -> params.getValue("offset") == 6L }),
-            any<RowMapper<Animal>>(),
-        )
-        verify(jdbc, never()).queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType))
+                match<MapSqlParameterSource> { params -> params.getValue("offset") == 6L },
+                any<RowMapper<Animal>>(),
+            )
+        }
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) }
     }
 
     @Test
-    fun givenCollectionFullAndEmptyLaterPages__whenCounting__thenCountRootManualAnimalsWithoutSortJoins() {
-        `when`(jdbc.queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType)))
-            .thenReturn(99L)
-        rows(listOf(row(9), row(8)))
+    fun `컬렉션 전체 페이지와 비어 있는 뒤쪽 페이지일 때__개수를 세면__정렬 조인 없이 루트 수동 동물만 센다`() {
+        // given
+        every { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) } returns 99L
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returnsMany listOf(listOf(row(9), row(8)), listOf())
 
-        var page = reads.byShelter(7L, PageRequest(1, 2, "shelter.animals.id,asc"))
+        // when
+        val full = reads.byShelter(7L, PageRequest(1, 2, "shelter.animals.id,asc"))
+        val empty = reads.byShelter(7L, PageRequest(50, 2, "shelter.animals.id,asc"))
 
-        assertThat(page).isEqualTo(Page(listOf(row(9), row(8)), 1, 2, 99, 50, false))
-        rows(listOf())
-        page = reads.byShelter(7L, PageRequest(50, 2, "shelter.animals.id,asc"))
-        assertThat(page).isEqualTo(Page(listOf(), 50, 2, 99, 50, true))
-        verify(jdbc, times(2)).queryForObject(
-            eq("SELECT count(*) FROM pawbridge_animal.animals a WHERE a.shelter_id=:shelterId AND a.api_source='MANUAL'"),
-            any(MapSqlParameterSource::class.java),
-            eq(Long::class.javaObjectType),
-        )
+        // then
+        assertThat(full).isEqualTo(Page(listOf(row(9), row(8)), 1, 2, 99, 50, false))
+        assertThat(empty).isEqualTo(Page(listOf(), 50, 2, 99, 50, true))
+        verify(exactly = 2) {
+            jdbc.queryForObject(
+                "SELECT count(*) FROM pawbridge_animal.animals a WHERE a.shelter_id=:shelterId AND a.api_source='MANUAL'",
+                any<MapSqlParameterSource>(),
+                Long::class.javaObjectType,
+            )
+        }
     }
 
     @Test
-    fun givenNullOrEmptyIds__whenBatch__thenNoQueryAndEmptyMutableList() {
-        (reads.batch(null) as MutableList<Animal>).add(row(1))
+    fun `ID가 널이거나 비었을 때__일괄 조회하면__질의 없이 수정 가능한 빈 목록을 돌려준다`() {
+        // given
 
-        assertThat(reads.batch(listOf())).isEmpty()
+        // when
+        val fromNull = reads.batch(null)
+        (fromNull as MutableList<Animal>).add(row(1))
+        val fromEmpty = reads.batch(listOf())
 
-        verifyNoInteractions(jdbc, shelters)
+        // then
+        assertThat(fromEmpty).isEmpty()
+        confirmVerified(jdbc, shelters)
     }
 
     @Test
-    fun givenDuplicateMissingAndNullIds__whenBatch__thenUseOneInQueryWithoutSourceStatusOrOrderPolicy() {
+    fun `중복·없는·널 ID일 때__일괄 조회하면__원본 상태나 정렬 정책 없이 IN 질의 하나를 쓴다`() {
+        // given
         val ids = ArrayList<Long?>()
         ids.add(8L)
         ids.add(8L)
         ids.add(404L)
         ids.add(null)
-        rows(listOf(row(8)))
 
-        assertThat(reads.batch(ids)).containsExactly(row(8))
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returns listOf(row(8))
 
-        val sql = ArgumentCaptor.forClass(String::class.java)
-        val params = ArgumentCaptor.forClass(MapSqlParameterSource::class.java)
-        verify(jdbc).query(sql.capture(), params.capture(), any<RowMapper<Animal>>())
-        assertThat(sql.value).contains("LEFT JOIN pawbridge_animal.shelters", " WHERE a.id IN (:ids)")
+        // when
+        val result = reads.batch(ids)
+
+        // then
+        assertThat(result).containsExactly(row(8))
+        val sql = slot<String>()
+        val params = slot<MapSqlParameterSource>()
+        verify(exactly = 1) { jdbc.query(capture(sql), capture(params), any<RowMapper<Animal>>()) }
+        assertThat(sql.captured).contains("LEFT JOIN pawbridge_animal.shelters", " WHERE a.id IN (:ids)")
             .doesNotContain("ORDER BY", "a.api_source=", "a.status=", "DISTINCT", "LIMIT")
-        assertThat(params.value.getValue("ids")).isEqualTo(ids)
-        verifyNoMoreInteractions(jdbc)
+        assertThat(params.captured.getValue("ids")).isEqualTo(ids)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun givenNullableAndPopulatedRow__whenMapping__thenRetainAll15FieldsAndMapperAge() {
-        val rs = mock(ResultSet::class.java)
-        assertThat(JdbcAnimalMemberReads.animal(rs, 0)).isEqualTo(
-            Animal(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null),
-        )
+    fun `널 행과 채워진 행일 때__매핑하면__15개 필드와 매퍼 나이를 모두 유지한다`() {
+        // given
+        val rs = mockk<ResultSet>()
+        val values = HashMap<String, Any?>()
         val end = LocalDate.of(2026, 12, 31)
         val created = LocalDateTime.of(2026, 10, 20, 2, 3, 4, 123456000)
-        `when`(rs.getObject("id", Long::class.javaObjectType)).thenReturn(9L)
-        `when`(rs.getString("apms_notice_no")).thenReturn("공고")
-        `when`(rs.getString("species")).thenReturn("CAT")
-        `when`(rs.getString("breed")).thenReturn("품종")
-        `when`(rs.getString("gender")).thenReturn("UNKNOWN")
-        `when`(rs.getObject("birth_year", Int::class.javaObjectType)).thenReturn(2020)
-        `when`(rs.getString("special_mark")).thenReturn("특징")
-        `when`(rs.getString("status")).thenReturn("ADOPTION_PENDING")
-        `when`(rs.getObject("notice_end_date", LocalDate::class.java)).thenReturn(end)
-        `when`(rs.getString("image_url")).thenReturn("image")
-        `when`(rs.getObject("favorite_count", Int::class.javaObjectType)).thenReturn(3)
-        `when`(rs.getObject("shelter_id", Long::class.javaObjectType)).thenReturn(7L)
-        `when`(rs.getString("shelter_name")).thenReturn("센터")
-        `when`(rs.getObject("created_at", LocalDateTime::class.java)).thenReturn(created)
 
-        assertThat(JdbcAnimalMemberReads.animal(rs, 0)).isEqualTo(
+        every { rs.getString(any<String>()) } answers { values[firstArg()] as String? }
+        every { rs.getObject(any<String>(), any<Class<Any>>()) } answers {
+            val value = values[firstArg()]
+            if (secondArg<Class<*>>().isInstance(value)) value else null
+        }
+
+        // when
+        val empty = JdbcAnimalMemberReads.animal(rs, 0)
+        values["id"] = 9L
+        values["apms_notice_no"] = "공고"
+        values["species"] = "CAT"
+        values["breed"] = "품종"
+        values["gender"] = "UNKNOWN"
+        values["birth_year"] = 2020
+        values["special_mark"] = "특징"
+        values["status"] = "ADOPTION_PENDING"
+        values["notice_end_date"] = end
+        values["image_url"] = "image"
+        values["favorite_count"] = 3
+        values["shelter_id"] = 7L
+        values["shelter_name"] = "센터"
+        values["created_at"] = created
+        val populated = JdbcAnimalMemberReads.animal(rs, 0)
+
+        // then
+        assertThat(empty).isEqualTo(
+            Animal(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null),
+        )
+        assertThat(populated).isEqualTo(
             Animal(
                 9L, "공고", "CAT", "품종", "UNKNOWN", 2020,
                 LocalDate.now().year - 2020, "특징", "ADOPTION_PENDING", end, "image", 3, 7L, "센터", created,
@@ -197,66 +222,79 @@ class JdbcAnimalMemberReadsTest {
     }
 
     @Test
-    fun givenPartialLaterPage__whenByShelter__thenExactManualPredicateAndCountInferredWithoutStatusFilter() {
-        rows(listOf(row(8)))
+    fun `부분적인 뒤쪽 페이지일 때__보호소별로 조회하면__정확한 수동 조건을 쓰고 상태 필터 없이 개수를 추정한다`() {
+        // given
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returns listOf(row(8))
 
+        // when
         val result = reads.byShelter(7L, PageRequest(2, 20, "createdAt,desc"))
 
+        // then
         assertThat(result).isEqualTo(Page(listOf(row(8)), 2, 20, 41, 3, true))
-        verify(jdbc).query(
-            argThat(
-                ArgumentMatcher<String> { s ->
+        verify(exactly = 1) {
+            jdbc.query(
+                match<String> { s ->
                     s.contains("a.shelter_id=:shelterId AND a.api_source='MANUAL'") &&
                         s.endsWith(" ORDER BY a.created_at DESC LIMIT :limit OFFSET :offset") && !s.contains("a.status=")
                 },
-            ),
-            argThat(
-                ArgumentMatcher<MapSqlParameterSource> { p ->
+                match<MapSqlParameterSource> { p ->
                     p.getValue("shelterId") == 7L && p.getValue("offset") == 40L && p.getValue("limit") == 20
                 },
-            ),
-            any<RowMapper<Animal>>(),
-        )
-        verify(jdbc, never()).queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType))
+                any<RowMapper<Animal>>(),
+            )
+        }
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) }
     }
 
     @Test
-    fun givenFullOrEmptyLaterPage__whenByShelter__thenUseSameManualCountAndPreservePageImplMetadata() {
-        rows(listOf(row(8), row(9)))
-        `when`(jdbc.queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType)))
-            .thenReturn(99L)
+    fun `가득 찬 뒤쪽 페이지와 빈 뒤쪽 페이지일 때__보호소별로 조회하면__같은 수동 개수를 쓰고 PageImpl 메타데이터를 보존한다`() {
+        // given
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returnsMany listOf(listOf(row(8), row(9)), listOf())
+        every { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) } returns 99L
 
-        var result = reads.byShelter(7L, PageRequest(1, 2, "id,asc"))!!
+        // when
+        val full = reads.byShelter(7L, PageRequest(1, 2, "id,asc"))!!
+        val empty = reads.byShelter(7L, PageRequest(50, 2, "id,asc"))!!
 
-        assertThat(result.totalElements).isEqualTo(99)
-        assertThat(result.totalPages).isEqualTo(50)
-        assertThat(result.last).isFalse()
-        rows(listOf())
-        result = reads.byShelter(7L, PageRequest(50, 2, "id,asc"))!!
-        assertThat(result.content).isEmpty()
-        assertThat(result.totalElements).isEqualTo(99)
-        assertThat(result.last).isTrue()
-        verify(jdbc, times(2)).queryForObject(
-            eq("SELECT count(*) FROM pawbridge_animal.animals a WHERE a.shelter_id=:shelterId AND a.api_source='MANUAL'"),
-            any(MapSqlParameterSource::class.java),
-            eq(Long::class.javaObjectType),
-        )
+        // then
+        assertThat(full.totalElements).isEqualTo(99)
+        assertThat(full.totalPages).isEqualTo(50)
+        assertThat(full.last).isFalse()
+        assertThat(empty.content).isEmpty()
+        assertThat(empty.totalElements).isEqualTo(99)
+        assertThat(empty.last).isTrue()
+        verify(exactly = 2) {
+            jdbc.queryForObject(
+                "SELECT count(*) FROM pawbridge_animal.animals a WHERE a.shelter_id=:shelterId AND a.api_source='MANUAL'",
+                any<MapSqlParameterSource>(),
+                Long::class.javaObjectType,
+            )
+        }
     }
 
     @Test
-    fun givenEmptyFirstAndStaleCountFinalPage__whenByShelter__thenKeepSourceInferenceAndTotalAdaptation() {
-        rows(listOf())
-        assertThat(reads.byShelter(7L, PageRequest(0, 2, "id,asc"))).isEqualTo(Page(listOf(), 0, 2, 0, 0, true))
-        verify(jdbc, never()).queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType))
-        rows(listOf(row(8), row(9)))
-        `when`(jdbc.queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType)))
-            .thenReturn(1L)
+    fun `첫 페이지가 비었고 개수가 오래된 마지막 페이지일 때__보호소별로 조회하면__원본의 추정과 총계 보정을 유지한다`() {
+        // given
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returnsMany listOf(listOf(), listOf(row(8), row(9)))
+        every { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) } returns 1L
 
-        assertThat(reads.byShelter(7L, PageRequest(2, 2, "id,asc"))!!.totalElements).isEqualTo(6)
+        // when
+        val first = reads.byShelter(7L, PageRequest(0, 2, "id,asc"))
+
+        // then
+        assertThat(first).isEqualTo(Page(listOf(), 0, 2, 0, 0, true))
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) }
+
+        // when
+        val stale = reads.byShelter(7L, PageRequest(2, 2, "id,asc"))
+
+        // then
+        assertThat(stale!!.totalElements).isEqualTo(6)
     }
 
     @Test
-    fun givenSingleWireSort__whenOrdering__thenRetainAll25ScalarsAndImmediateShelterFieldsWithoutTieOrNullPolicy() {
+    fun `단일 와이어 정렬일 때__정렬을 만들면__스칼라 25개와 직접 보호소 필드를 동순위·널 정책 없이 유지한다`() {
+        // given
         val fields = arrayOf(
             arrayOf("id", "id"), arrayOf("apmsDesertionNo", "apms_desertion_no"), arrayOf("apmsNoticeNo", "apms_notice_no"),
             arrayOf("species", "species"), arrayOf("breed", "breed"), arrayOf("birthYear", "birth_year"),
@@ -271,40 +309,63 @@ class JdbcAnimalMemberReadsTest {
             arrayOf("description", "description"),
             arrayOf("createdAt", "created_at"), arrayOf("updatedAt", "updated_at"),
         )
+
         for (field in fields) {
             for (direction in listOf("asc", "desc")) {
-                assertThat(JdbcAnimalMemberReads.ordering(field[0] + "," + direction))
-                    .isEqualTo(" ORDER BY a." + field[1] + " " + direction.uppercase(Locale.ROOT))
+                // when
+                val ordering = JdbcAnimalMemberReads.ordering(field[0] + "," + direction)
+
+                // then
+                assertThat(ordering).isEqualTo(" ORDER BY a." + field[1] + " " + direction.uppercase(Locale.ROOT))
             }
         }
-        assertThat(JdbcAnimalMemberReads.ordering("BirthYear,asc")).isEqualTo(" ORDER BY a.birth_year ASC")
-        assertThat(JdbcAnimalMemberReads.ordering("Shelter.Name,asc")).isEqualTo(" ORDER BY s.name ASC")
-        assertThat(JdbcAnimalMemberReads.ordering("shelter.name,desc")).isEqualTo(" ORDER BY s.name DESC")
-        assertThat(JdbcAnimalMemberReads.ordering("shelterName,asc")).isEqualTo(" ORDER BY s.name ASC")
-        assertThat(JdbcAnimalMemberReads.ordering("breed,id,desc,ignorecase"))
-            .isEqualTo(" ORDER BY lower(a.breed) DESC,a.id DESC")
-        assertThat(JdbcAnimalMemberReads.ordering("species,asc,ignorecase")).isEqualTo(" ORDER BY a.species ASC")
-        assertThat(JdbcAnimalMemberReads.ordering(null)).isEqualTo(" ORDER BY a.created_at DESC")
-        assertThat(JdbcAnimalMemberReads.ordering(" ")).isEmpty()
+
+        // when
+        val mixedCase = JdbcAnimalMemberReads.ordering("BirthYear,asc")
+        val shelterNameMixedCase = JdbcAnimalMemberReads.ordering("Shelter.Name,asc")
+        val shelterNameDesc = JdbcAnimalMemberReads.ordering("shelter.name,desc")
+        val shelterNameCamel = JdbcAnimalMemberReads.ordering("shelterName,asc")
+        val ignoreCase = JdbcAnimalMemberReads.ordering("breed,id,desc,ignorecase")
+        val ignoreCaseOnString = JdbcAnimalMemberReads.ordering("species,asc,ignorecase")
+        val defaultOrdering = JdbcAnimalMemberReads.ordering(null)
+        val blank = JdbcAnimalMemberReads.ordering(" ")
+
+        // then
+        assertThat(mixedCase).isEqualTo(" ORDER BY a.birth_year ASC")
+        assertThat(shelterNameMixedCase).isEqualTo(" ORDER BY s.name ASC")
+        assertThat(shelterNameDesc).isEqualTo(" ORDER BY s.name DESC")
+        assertThat(shelterNameCamel).isEqualTo(" ORDER BY s.name ASC")
+        assertThat(ignoreCase).isEqualTo(" ORDER BY lower(a.breed) DESC,a.id DESC")
+        assertThat(ignoreCaseOnString).isEqualTo(" ORDER BY a.species ASC")
+        assertThat(defaultOrdering).isEqualTo(" ORDER BY a.created_at DESC")
+        assertThat(blank).isEmpty()
     }
 
     @Test
-    fun givenFlattenedMultipleSortsOrInjectedPath__whenByShelter__thenFailBeforeSqlWithoutInventingPairParsing() {
-        for (sort in listOf("breed,desc,createdAt,asc", "id;drop table animals,asc")) {
-            assertThatThrownBy { reads.byShelter(7L, PageRequest(0, 20, sort)) }
-                .isInstanceOf(AnimalMemberReadUnavailableException::class.java)
+    fun `평탄화된 여러 정렬이나 주입된 경로일 때__보호소별로 조회하면__SQL 전에 실패하고 쌍 파싱을 만들어내지 않는다`() {
+        // given
+        val sorts = listOf("breed,desc,createdAt,asc", "id;drop table animals,asc")
+
+        for (sort in sorts) {
+            // when
+            val thrown = assertThatThrownBy { reads.byShelter(7L, PageRequest(0, 20, sort)) }
+
+            // then
+            thrown.isInstanceOf(AnimalMemberReadUnavailableException::class.java)
         }
-        verifyNoInteractions(jdbc)
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun givenMaximumJpaOffset__whenCalculatingLast__thenPreserveSourceIntOverflow() {
-        rows(listOf())
-        `when`(jdbc.queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType)))
-            .thenReturn(99L)
+    fun `JPA 최대 오프셋일 때__마지막 여부를 계산하면__원본의 int 오버플로를 보존한다`() {
+        // given
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } returns listOf()
+        every { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) } returns 99L
 
+        // when
         val result = reads.byShelter(7L, PageRequest(Int.MAX_VALUE, 1, "id,asc"))!!
 
+        // then
         assertThat(result.number).isEqualTo(Int.MAX_VALUE)
         assertThat(result.totalElements).isEqualTo(99)
         // PageImpl.hasNext uses int page+1, including the existing overflow at MAX_VALUE.
@@ -312,49 +373,64 @@ class JdbcAnimalMemberReadsTest {
     }
 
     @Test
-    fun givenQueryFailure__whenBatchOrCount__thenPropagateUnavailableInsteadOfEmpty() {
+    fun `질의가 실패할 때__일괄 조회나 개수를 세면__빈 결과 대신 이용 불가를 전파한다`() {
+        // given
         val cause = IllegalStateException("selected read failed")
-        `when`(jdbc.query(anyString(), any(MapSqlParameterSource::class.java), any<RowMapper<Animal>>())).thenThrow(cause)
-        assertThatThrownBy { reads.batch(listOf(8L)) }
-            .isInstanceOf(AnimalMemberReadUnavailableException::class.java)
-            .hasCause(cause)
-        rows(listOf())
-        `when`(jdbc.queryForObject(anyString(), any(MapSqlParameterSource::class.java), eq(Long::class.javaObjectType)))
-            .thenThrow(cause)
 
-        assertThatThrownBy { reads.byShelter(7L, PageRequest(1, 20, "id,asc")) }
-            .isInstanceOf(AnimalMemberReadUnavailableException::class.java)
+        every { jdbc.query(any<String>(), any<MapSqlParameterSource>(), any<RowMapper<Animal>>()) } throws cause andThen listOf()
+        every { jdbc.queryForObject(any<String>(), any<MapSqlParameterSource>(), Long::class.javaObjectType) } throws cause
+
+        // when
+        val batch = assertThatThrownBy { reads.batch(listOf(8L)) }
+        val count = assertThatThrownBy { reads.byShelter(7L, PageRequest(1, 20, "id,asc")) }
+
+        // then
+        batch.isInstanceOf(AnimalMemberReadUnavailableException::class.java)
+            .hasCause(cause)
+        count.isInstanceOf(AnimalMemberReadUnavailableException::class.java)
             .hasCause(cause)
     }
 
     @Test
-    fun givenRegistrationLookup__whenDelegating__thenReuseFrozenShelterProjectionAndFailure() {
+    fun `등록번호 조회일 때__위임하면__고정된 보호소 투영과 실패를 재사용한다`() {
+        // given
         val value = AnimalShelterReads.Shelter(7L, "r", "센터")
-        `when`(shelters.findByCareRegNo(" r ")).thenReturn(value)
 
-        assertThat(reads.findByCareRegNo(" r ")).isSameAs(value)
+        every { shelters.findByCareRegNo(any()) } returns value
 
-        verifyNoInteractions(jdbc)
+        // when
+        val found = reads.findByCareRegNo(" r ")
+
+        // then
+        assertThat(found).isSameAs(value)
+        verify(exactly = 1) { shelters.findByCareRegNo(" r ") }
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun givenPublicConstructor__whenReadScopeStarts__thenRequestDefaultReadOnlyTxBeforeValidation() {
-        val manager = mock(PlatformTransactionManager::class.java)
-        val source = mock(DataSource::class.java)
-        `when`(manager.getTransaction(any())).thenReturn(SimpleTransactionStatus())
+    fun `공개 생성자일 때__읽기 범위를 시작하면__검증 전에 기본 읽기 전용 트랜잭션을 요청한다`() {
+        // given
+        val manager = mockk<PlatformTransactionManager>()
+        val source = mockk<DataSource>()
+
+        every { manager.getTransaction(any()) } returns SimpleTransactionStatus()
+        justRun { manager.rollback(any()) }
+
         val publicReads = JdbcAnimalMemberReads(source, manager, shelters)
 
-        assertThatThrownBy { publicReads.byShelter(7L, PageRequest(Int.MAX_VALUE, 20, "id,asc")) }
-            .isInstanceOf(AnimalMemberReadUnavailableException::class.java)
+        // when
+        val thrown = assertThatThrownBy { publicReads.byShelter(7L, PageRequest(Int.MAX_VALUE, 20, "id,asc")) }
 
-        val definition = ArgumentCaptor.forClass(TransactionDefinition::class.java)
-        verify(manager).getTransaction(definition.capture())
-        assertThat(definition.value.isReadOnly).isTrue()
-        assertThat(definition.value.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-        assertThat(definition.value.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
-        assertThat(definition.value.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
-        verify(manager).rollback(any())
-        verifyNoInteractions(source)
+        // then
+        thrown.isInstanceOf(AnimalMemberReadUnavailableException::class.java)
+        val definition = slot<TransactionDefinition>()
+        verify(exactly = 1) { manager.getTransaction(capture(definition)) }
+        assertThat(definition.captured.isReadOnly).isTrue()
+        assertThat(definition.captured.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
+        assertThat(definition.captured.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
+        assertThat(definition.captured.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
+        verify(exactly = 1) { manager.rollback(any()) }
+        confirmVerified(source)
     }
 
     companion object {

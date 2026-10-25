@@ -1,5 +1,10 @@
 package com.pawbridge.backend.user.internal.nickname.infrastructure
 
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -8,14 +13,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
 import org.springframework.jdbc.UncategorizedSQLException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementCreator
@@ -32,26 +29,35 @@ import java.util.function.Supplier
 
 class JdbcUserNicknameStoreTest {
     @Test
-    fun given__present_then_missing_user__when__looking_up__then__two_column_projection_preserves_raw_nickname_and_absence() {
+    fun `닉네임이 있는 회원과 없는 회원일 때__조회하면__두 컬럼 투영이 원문 닉네임과 부재를 보존한다`() {
+        // given
         val jdbc = RecordingJdbc()
-        `when`(jdbc.rows.next()).thenReturn(true, false)
-        `when`(jdbc.rows.getString("nickname")).thenReturn("MiXeD닉네임")
         val store = JdbcUserNicknameStore(jdbc)
 
-        assertEquals(Optional.of("MiXeD닉네임"), store.findNickname(52L))
+        every { jdbc.rows.next() } returnsMany listOf(true, false)
+        every { jdbc.rows.getString("nickname") } returns "MiXeD닉네임"
 
+        // when
+        val present = store.findNickname(52L)
+
+        // then
+        assertEquals(Optional.of("MiXeD닉네임"), present)
         assertEquals("SELECT user_id, nickname FROM pawbridge_user.users WHERE user_id = ?", normalized(jdbc.querySql!!))
         assertArrayEquals(arrayOf<Any?>(52L), jdbc.arguments)
         assertEquals(Optional.empty<String>(), store.findNickname(53L))
     }
 
     @Test
-    fun given__mixed_case_input__when__checking_duplicate__then__database_lower_query_receives_original_string_without_self_exclusion() {
+    fun `대소문자가 섞인 입력일 때__중복을 확인하면__자기 제외 없이 원래 문자열을 데이터베이스 lower 쿼리에 넘긴다`() {
+        // given
         val jdbc = RecordingJdbc()
         val store = JdbcUserNicknameStore(jdbc)
 
-        assertFalse(store.existsByNickname("MiXeD닉네임"))
+        // when
+        val exists = store.existsByNickname("MiXeD닉네임")
 
+        // then
+        assertFalse(exists)
         assertEquals(
             "SELECT (count(*) > 0) FROM pawbridge_user.users WHERE lower(nickname) = lower(?)",
             normalized(jdbc.querySql!!),
@@ -60,41 +66,73 @@ class JdbcUserNicknameStoreTest {
     }
 
     @Test
-    fun given__available_nickname_and_auditing_time__when__updating__then__only_nickname_and_updated_at_are_bound_with_utc_calendar() {
+    fun `사용 가능한 닉네임과 감사 시각일 때__갱신하면__닉네임과 updated_at만 UTC 캘린더로 바인딩한다`() {
+        // given
         val jdbc = RecordingJdbc()
         val store = JdbcUserNicknameStore(jdbc, Supplier { UPDATED })
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        justRun { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) }
+        justRun { jdbc.statement.setLong(any(), any()) }
+
+        // when
         store.updateNickname(52L, "새Nick9")
 
+        // then
+        val calendar = slot<Calendar>()
         assertEquals("UPDATE pawbridge_user.users SET nickname = ?, updated_at = ? WHERE user_id = ?", normalized(jdbc.updateSql!!))
-        verify(jdbc.statement).setString(1, "새Nick9")
-        val calendar = ArgumentCaptor.forClass(Calendar::class.java)
-        verify(jdbc.statement).setTimestamp(eq(2), eq(Timestamp.valueOf(UPDATED)), calendar.capture())
-        assertEquals("UTC", calendar.value.timeZone.id)
-        verify(jdbc.statement).setLong(3, 52L)
+        verify(exactly = 1) { jdbc.statement.setString(1, "새Nick9") }
+        verify(exactly = 1) { jdbc.statement.setTimestamp(2, Timestamp.valueOf(UPDATED), capture(calendar)) }
+        assertEquals("UTC", calendar.captured.timeZone.id)
+        verify(exactly = 1) { jdbc.statement.setLong(3, 52L) }
     }
 
     @ParameterizedTest
     @ValueSource(ints = [0, 2])
-    fun given__unexpected_update_count__when__updating__then__unexpected_failure_is_not_missing_user_or_success(count: Int) {
+    fun `예상 밖의 갱신 행 수일 때__갱신하면__회원 없음이나 성공이 아닌 예기치 않은 실패로 처리한다`(count: Int) {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.changed = count
         val store = JdbcUserNicknameStore(jdbc, Supplier { UPDATED })
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        justRun { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) }
+        justRun { jdbc.statement.setLong(any(), any()) }
+
+        // when
+        // then
         assertThrows(IllegalStateException::class.java) { store.updateNickname(52L, "새Nick9") }
     }
 
     @Test
-    fun given__parameter_binding_failure__when__updating__then__statement_is_closed_before_jdbc_propagates_failure() {
+    fun `파라미터 바인딩이 실패했을 때__갱신하면__JDBC가 실패를 전파하기 전에 문장을 닫는다`() {
+        // given
         val jdbc = RecordingJdbc()
         val failure = SQLException("synthetic private binding failure")
-        doThrow(failure).`when`(jdbc.statement).setTimestamp(eq(2), any(Timestamp::class.java), any(Calendar::class.java))
         val store = JdbcUserNicknameStore(jdbc, Supplier { UPDATED })
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        every { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) } throws failure
+        justRun { jdbc.statement.close() }
+
+        // when
         val thrown = assertThrows(UncategorizedSQLException::class.java) { store.updateNickname(52L, "새Nick9") }
 
+        // then
         assertSame(failure, thrown.sqlException)
-        verify(jdbc.statement).close()
+        verify(exactly = 1) { jdbc.statement.close() }
     }
 
     private fun normalized(sql: String): String {
@@ -102,20 +140,13 @@ class JdbcUserNicknameStoreTest {
     }
 
     private class RecordingJdbc : JdbcTemplate() {
-        val rows: ResultSet = mock(ResultSet::class.java)
-        val connection: Connection = mock(Connection::class.java)
-        val statement: PreparedStatement = mock(PreparedStatement::class.java)
+        val rows = mockk<ResultSet>()
+        val connection = mockk<Connection>()
+        val statement = mockk<PreparedStatement>()
         var querySql: String? = null
         var updateSql: String? = null
         var arguments: Array<out Any?>? = null
         var changed = 1
-
-        init {
-            `when`(connection.prepareStatement(anyString())).thenAnswer { invocation ->
-                updateSql = invocation.getArgument(0, String::class.java)
-                statement
-            }
-        }
 
         override fun <T> query(sql: String, rse: ResultSetExtractor<T>, vararg args: Any?): T? {
             querySql = sql

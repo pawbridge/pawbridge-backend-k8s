@@ -12,10 +12,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.UncategorizedSQLException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -27,6 +23,8 @@ import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.TransactionSystemException
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.sql.Timestamp
@@ -36,11 +34,15 @@ import java.util.stream.Stream
 
 class JdbcUserProfileQueryTest {
     @Test
-    fun given__stored_profile__when__required__then__exact_seven_column_projection_and_identity_return_after_read_only_commit() {
+    fun `저장된 프로필이 있을 때__필수 조회하면__일곱 컬럼만 조회하고 읽기 전용 커밋 뒤 그대로 돌려준다`() {
+        // given
         val fixture = Fixture("반려친구", "ROLE_ADMIN", CREATED)
 
-        assertEquals(fixture.expected(), fixture.query.require(52L))
+        // when
+        val profile = fixture.query.require(52L)
 
+        // then
+        assertEquals(fixture.expected(), profile)
         assertEquals(
             "SELECT user_id, email, name, nickname, provider, role, created_at " +
                 "FROM pawbridge_user.users WHERE user_id = ?",
@@ -54,36 +56,46 @@ class JdbcUserProfileQueryTest {
     }
 
     @Test
-    fun given__null_creation_timestamp__when__required__then__null_is_preserved_after_transaction_ends() {
+    fun `생성 시각이 null일 때__필수 조회하면__트랜잭션이 끝난 뒤에도 null을 그대로 유지한다`() {
+        // given
         val fixture = Fixture("반려친구", "ROLE_USER", null)
 
-        assertEquals(fixture.expected(), fixture.query.require(52L))
+        // when
+        val profile = fixture.query.require(52L)
 
+        // then
+        assertEquals(fixture.expected(), profile)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @ParameterizedTest
     @MethodSource("storedStrings")
-    fun given__stored_strings__when__required__then__empty_whitespace_and_database_role_are_preserved(
+    fun `빈 문자열이나 공백 닉네임과 데이터베이스 역할이 저장돼 있을 때__필수 조회하면__값을 그대로 보존한다`(
         nickname: String,
         role: String,
     ) {
+        // given
         val fixture = Fixture(nickname, role, CREATED)
 
-        assertEquals(fixture.expected(), fixture.query.require(52L))
+        // when
+        val profile = fixture.query.require(52L)
 
+        // then
+        assertEquals(fixture.expected(), profile)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @Test
-    fun given__missing_user__when__required__then__not_found_is_raised_inside_transaction_and_rolls_back() {
-        val fixture = Fixture("반려친구", "ROLE_USER", CREATED)
-        `when`(fixture.rows.next()).thenReturn(false)
+    fun `회원이 없을 때__필수 조회하면__트랜잭션 안에서 찾을 수 없음 예외를 던지고 롤백한다`() {
+        // given
+        val fixture = Fixture("반려친구", "ROLE_USER", CREATED, found = false)
 
+        // when
         val failure = assertThrows(UserNotFoundException::class.java) { fixture.query.require(41L) }
 
+        // then
         assertEquals("존재하지 않는 회원입니다.", failure.message)
         assertEquals(1, fixture.jdbc.queryCount)
         assertEquals(0, fixture.transactions.commits)
@@ -92,56 +104,82 @@ class JdbcUserProfileQueryTest {
     }
 
     @Test
-    fun given__jdbc_failure__when__required_then_recovered__then__original_failure_rolls_back_and_next_request_commits() {
+    fun `JDBC 조회가 실패했다가 복구됐을 때__필수 조회하면__원래 예외로 롤백하고 다음 요청은 커밋한다`() {
+        // given
         val fixture = Fixture("반려친구", "ROLE_USER", CREATED)
         val failure = DataAccessResourceFailureException("synthetic private SQL failure")
         fixture.jdbc.failure = failure
 
-        assertSame(failure, assertThrows(DataAccessResourceFailureException::class.java) { fixture.query.require(52L) })
-
-        assertEquals(1, fixture.jdbc.queryCount)
-        assertEquals(1, fixture.transactions.rollbacks)
-        assertEquals(0, fixture.transactions.commits)
-        assertFalse(fixture.transactions.active)
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { fixture.query.require(52L) }
+        val queriesAfterFailure = fixture.jdbc.queryCount
+        val rollbacksAfterFailure = fixture.transactions.rollbacks
+        val commitsAfterFailure = fixture.transactions.commits
+        val activeAfterFailure = fixture.transactions.active
         fixture.jdbc.failure = null
-        assertEquals(fixture.expected(), fixture.query.require(52L))
+        val recovered = fixture.query.require(52L)
+
+        // then
+        assertSame(failure, thrown)
+        assertEquals(1, queriesAfterFailure)
+        assertEquals(1, rollbacksAfterFailure)
+        assertEquals(0, commitsAfterFailure)
+        assertFalse(activeAfterFailure)
+        assertEquals(fixture.expected(), recovered)
         assertEquals(2, fixture.jdbc.queryCount)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @Test
-    fun given__transaction_start_failure__when__required_then_recovered__then__no_query_precedes_failure_and_next_request_commits() {
+    fun `트랜잭션 시작이 실패했다가 복구됐을 때__필수 조회하면__조회 없이 실패하고 다음 요청은 커밋한다`() {
+        // given
         val fixture = Fixture("반려친구", "ROLE_USER", CREATED)
         val failure = CannotCreateTransactionException("synthetic private start failure")
         fixture.transactions.startFailure = failure
 
-        assertSame(failure, assertThrows(CannotCreateTransactionException::class.java) { fixture.query.require(52L) })
-
-        assertEquals(0, fixture.jdbc.queryCount)
-        assertEquals(0, fixture.transactions.commits)
-        assertEquals(0, fixture.transactions.rollbacks)
-        assertFalse(fixture.transactions.active)
+        // when
+        val thrown = assertThrows(CannotCreateTransactionException::class.java) { fixture.query.require(52L) }
+        val queriesAfterFailure = fixture.jdbc.queryCount
+        val commitsAfterFailure = fixture.transactions.commits
+        val rollbacksAfterFailure = fixture.transactions.rollbacks
+        val activeAfterFailure = fixture.transactions.active
         fixture.transactions.startFailure = null
-        assertEquals(fixture.expected(), fixture.query.require(52L))
+        val recovered = fixture.query.require(52L)
+
+        // then
+        assertSame(failure, thrown)
+        assertEquals(0, queriesAfterFailure)
+        assertEquals(0, commitsAfterFailure)
+        assertEquals(0, rollbacksAfterFailure)
+        assertFalse(activeAfterFailure)
+        assertEquals(fixture.expected(), recovered)
         assertEquals(1, fixture.jdbc.queryCount)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @Test
-    fun given__transaction_completion_failure__when__required_then_recovered__then__no_profile_is_returned_and_next_request_commits() {
+    fun `트랜잭션 완료가 실패했다가 복구됐을 때__필수 조회하면__프로필을 돌려주지 않고 다음 요청은 커밋한다`() {
+        // given
         val fixture = Fixture("반려친구", "ROLE_USER", CREATED)
         val failure = TransactionSystemException("synthetic private completion failure")
         fixture.transactions.completionFailure = failure
 
-        assertSame(failure, assertThrows(TransactionSystemException::class.java) { fixture.query.require(52L) })
-
-        assertEquals(1, fixture.jdbc.queryCount)
-        assertEquals(1, fixture.transactions.commits)
-        assertFalse(fixture.transactions.active)
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { fixture.query.require(52L) }
+        val queriesAfterFailure = fixture.jdbc.queryCount
+        val commitsAfterFailure = fixture.transactions.commits
+        val activeAfterFailure = fixture.transactions.active
         fixture.transactions.completionFailure = null
-        assertEquals(fixture.expected(), fixture.query.require(52L))
+        val recovered = fixture.query.require(52L)
+
+        // then
+        assertSame(failure, thrown)
+        assertEquals(1, queriesAfterFailure)
+        assertEquals(1, commitsAfterFailure)
+        assertFalse(activeAfterFailure)
+        assertEquals(fixture.expected(), recovered)
         assertEquals(2, fixture.jdbc.queryCount)
         assertEquals(2, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
@@ -151,29 +189,47 @@ class JdbcUserProfileQueryTest {
         private val nickname: String,
         private val role: String,
         private val createdAt: LocalDateTime?,
+        found: Boolean = true,
     ) {
         val transactions = RecordingTransactionManager()
-        val rows: ResultSet = mock(ResultSet::class.java)
+        val rows: ResultSet = profileRow(found)
         val jdbc = StubJdbcTemplate(rows, transactions)
         val query: JdbcUserProfileQuery
 
         init {
-            `when`(rows.next()).thenReturn(true)
-            `when`(rows.getLong("user_id")).thenReturn(52L)
-            `when`(rows.getString("email")).thenReturn(EMAIL)
-            `when`(rows.getString("name")).thenReturn(NAME)
-            `when`(rows.getString("nickname")).thenReturn(nickname)
-            `when`(rows.getString("provider")).thenReturn(PROVIDER)
-            `when`(rows.getString("role")).thenReturn(role)
-            `when`(rows.getTimestamp(eq("created_at"), any(Calendar::class.java))).thenAnswer { invocation ->
-                assertTrue(transactions.active)
-                assertEquals("UTC", invocation.getArgument(1, Calendar::class.java).timeZone.id)
-                if (createdAt == null) null else Timestamp.valueOf(createdAt)
-            }
             val readOnlyTransaction = TransactionTemplate(transactions)
             readOnlyTransaction.isReadOnly = true
             readOnlyTransaction.timeout = 3
             query = JdbcUserProfileQuery(jdbc, readOnlyTransaction)
+        }
+
+        /**
+         * In-memory ResultSet instead of a strict mock: the extractor reads seven columns through overloaded getters.
+         * The created_at read also checks it happens inside the transaction with a UTC calendar.
+         */
+        private fun profileRow(found: Boolean): ResultSet {
+            val handler = InvocationHandler { _, method, args ->
+                when {
+                    method.name == "next" -> found
+                    method.name == "getLong" && args[0] == "user_id" -> 52L
+                    method.name == "getString" && args[0] == "email" -> EMAIL
+                    method.name == "getString" && args[0] == "name" -> NAME
+                    method.name == "getString" && args[0] == "nickname" -> nickname
+                    method.name == "getString" && args[0] == "provider" -> PROVIDER
+                    method.name == "getString" && args[0] == "role" -> role
+                    method.name == "getTimestamp" && args[0] == "created_at" -> {
+                        assertTrue(transactions.active)
+                        assertEquals("UTC", (args[1] as Calendar).timeZone.id)
+                        if (createdAt == null) null else Timestamp.valueOf(createdAt)
+                    }
+                    else -> throw AssertionError("Unexpected ResultSet call: ${method.name}")
+                }
+            }
+            return Proxy.newProxyInstance(
+                ResultSet::class.java.classLoader,
+                arrayOf<Class<*>>(ResultSet::class.java),
+                handler,
+            ) as ResultSet
         }
 
         fun expected(): UserProfile {
