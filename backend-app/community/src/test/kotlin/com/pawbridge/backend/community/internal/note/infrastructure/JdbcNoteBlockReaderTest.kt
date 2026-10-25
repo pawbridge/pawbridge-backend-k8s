@@ -21,11 +21,15 @@ import org.springframework.transaction.support.TransactionTemplate
 
 class JdbcNoteBlockReaderTest {
     @Test
-    fun given__member_pair__when__reading__then__bind_pair_in_both_directions_inside_supplied_read_only_transaction() {
+    fun `회원 쌍이 주어졌을 때__차단 여부를 읽으면__양방향으로 쌍을 바인딩하고 읽기 전용 트랜잭션 안에서 조회한다`() {
+        // given
         val fixture = Fixture()
 
-        assertTrue(fixture.reader.blocked(7L, 99L))
+        // when
+        val blocked = fixture.reader.blocked(7L, 99L)
 
+        // then
+        assertTrue(blocked)
         assertArrayEquals(arrayOf<Any?>(7L, 99L, 99L, 7L), fixture.jdbc.arguments)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
@@ -34,9 +38,10 @@ class JdbcNoteBlockReaderTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__block_query_or_transaction_failure_then_recovery__when__reading__then__propagate_same_failure_without_user_wrapping_or_false_fallback(
+    fun `차단 질의 또는 트랜잭션이 실패했다가 복구될 때__차단 여부를 읽으면__같은 예외를 감싸거나 거짓으로 대체하지 않고 전파한 뒤 복구 결과를 돌려준다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic-private-begin")
@@ -50,15 +55,22 @@ class JdbcNoteBlockReaderTest {
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { fixture.reader.blocked(7L, 99L) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.reader.blocked(7L, 99L) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.queries)
         assertFalse(fixture.transactions.active)
         fixture.transactions.startFailure = null
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
 
-        assertTrue(fixture.reader.blocked(7L, 99L))
+        // when
+        val recovered = fixture.reader.blocked(7L, 99L)
+
+        // then
+        assertTrue(recovered)
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.queries)
         assertFalse(fixture.transactions.active)
     }
