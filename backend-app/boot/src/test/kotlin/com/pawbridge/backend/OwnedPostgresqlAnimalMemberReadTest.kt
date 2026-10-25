@@ -55,8 +55,15 @@ import java.time.LocalDateTime
 @Execution(ExecutionMode.SAME_THREAD)
 class OwnedPostgresqlAnimalMemberReadTest {
     @Test
-    fun givenMissingDuplicateAndNullableAnimals__whenBatchOnPostgresql__thenOmitMissingAndKeepAll15DtoValues() {
-        val batch = reads.batch(listOf(MANUAL_A, MANUAL_B, MISSING, MANUAL_A, APMS_ADOPTED_A, null))!!
+    fun `없는 동물과 중복과 null이 섞였을 때__PostgreSQL에서 배치 조회하면__없는 동물은 빼고 DTO 값 15개를 유지한다`() {
+        // given
+        val requested = listOf(MANUAL_A, MANUAL_B, MISSING, MANUAL_A, APMS_ADOPTED_A, null)
+
+        // when
+        val batch = reads.batch(requested)!!
+        val emptyBatch = reads.batch(listOf())
+
+        // then
         assertEquals(3, batch.size)
         val byId: Map<Long?, Animal> = batch.associateBy { animal -> animal.id }
         assertEquals(setOf(MANUAL_A, MANUAL_B, APMS_ADOPTED_A), byId.keys)
@@ -72,21 +79,26 @@ class OwnedPostgresqlAnimalMemberReadTest {
             byId[MANUAL_B],
         )
         assertEquals("ADOPTED", byId[APMS_ADOPTED_A]!!.status)
-        assertEquals(listOf<Animal>(), reads.batch(listOf()))
+        assertEquals(listOf<Animal>(), emptyBatch)
     }
 
     @Test
-    fun givenManualRootAndRelatedApmsIncludingEndedState__whenCollectionPaging__thenApplySqlLimitBeforeRootDedupAndPartialCount() {
+    fun `수동 루트와 연관 APMS가 있을 때__컬렉션을 페이징하면__LIMIT 후 루트 중복을 제거하고 부분 건수를 센다`() {
+        // given
         // Shelter A has one MANUAL ADOPTED root and two APMS children (NOTICE,ADOPTED).
         // Three joined SQL rows yield one deduped root. Restricting sort children to MANUAL
         // or public statuses, or adding DISTINCT before LIMIT, changes the second page.
+
+        // when
         val first = reads.byShelter(SHELTER_A, PageRequest(0, 2, "shelter.animals.id,asc"))!!
+        val second = reads.byShelter(SHELTER_A, PageRequest(1, 2, "shelter.animals.id,asc"))!!
+        val empty = reads.byShelter(SHELTER_A, PageRequest(2, 2, "shelter.animals.id,asc"))!!
+
+        // then
         assertEquals(listOf(MANUAL_A), ids(first))
         assertPage(first, 0, 2, 1, 1, true)
-        val second = reads.byShelter(SHELTER_A, PageRequest(1, 2, "shelter.animals.id,asc"))!!
         assertEquals(listOf(MANUAL_A), ids(second))
         assertPage(second, 1, 2, 3, 2, true)
-        val empty = reads.byShelter(SHELTER_A, PageRequest(2, 2, "shelter.animals.id,asc"))!!
         assertEquals(listOf<Long>(), ids(empty))
         assertPage(empty, 2, 2, 1, 1, true)
         for (sort in listOf(
@@ -102,17 +114,21 @@ class OwnedPostgresqlAnimalMemberReadTest {
     }
 
     @Test
-    fun givenTwoManualRootsAndAnotherShelter__whenFullOrEmptyPages__thenCountOnlyRootManualAndKeepEndedRoots() {
+    fun `수동 루트 둘과 다른 보호소가 있을 때__꽉 찬 페이지와 빈 페이지를 조회하면__수동 루트만 세고 종료 루트는 유지한다`() {
+        // given
+        // when
         val first = reads.byShelter(SHELTER_B, PageRequest(0, 1, "id,asc"))!!
+        val second = reads.byShelter(SHELTER_B, PageRequest(1, 1, "id,asc"))!!
+        val empty = reads.byShelter(SHELTER_B, PageRequest(2, 1, "id,asc"))!!
+        val fullCollection = reads.byShelter(SHELTER_B, PageRequest(0, 2, "shelter.animals.id,asc"))!!
+
+        // then
         assertEquals(listOf(MANUAL_B), ids(first))
         assertPage(first, 0, 1, 2, 2, false)
-        val second = reads.byShelter(SHELTER_B, PageRequest(1, 1, "id,asc"))!!
         assertEquals(listOf(MANUAL_ADOPTED_B), ids(second))
         assertPage(second, 1, 1, 2, 2, true)
-        val empty = reads.byShelter(SHELTER_B, PageRequest(2, 1, "id,asc"))!!
         assertEquals(listOf<Long>(), ids(empty))
         assertPage(empty, 2, 1, 2, 2, true)
-        val fullCollection = reads.byShelter(SHELTER_B, PageRequest(0, 2, "shelter.animals.id,asc"))!!
         assertEquals(setOf(MANUAL_B, MANUAL_ADOPTED_B), ids(fullCollection).toSet())
         assertPage(fullCollection, 0, 2, 2, 1, true) // Root ties have no promised synthetic tie-break.
     }

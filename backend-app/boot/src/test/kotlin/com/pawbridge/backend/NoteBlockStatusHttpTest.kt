@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.NoteBlockReader
 import com.pawbridge.backend.community.internal.note.application.NoteBlockStatusReader
@@ -13,17 +14,16 @@ import com.pawbridge.backend.community.internal.note.web.NoteRecipientExceptionH
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -32,7 +32,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -71,23 +70,26 @@ class NoteBlockStatusHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var blocks: NoteBlockStatusReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var recipientBlocks: NoteBlockReader
 
     @Test
-    fun given__verified_principal_and_spoofed_identity__when__reading_block_status__then__return_only_reader_ordered_raw_ids_and_query_only_current_member() {
+    fun `검증된 주체와 위조 신원이 주어졌을 때__차단 상태를 읽으면__현재 회원만 조회하고 원본 ID를 순서대로 준다`() {
+        // given
         val largeId = Long.MAX_VALUE
         val distinctIds = listOf(largeId, 9L, 7L, 8L)
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(blocks.blockedAuthors(7, distinctIds)).thenReturn(listOf(8L, 9L, largeId))
 
-        val response = mvc.perform(
+        every { members.get(any()) } returns active(7)
+        every { blocks.blockedAuthors(any(), any()) } returns listOf(8L, 9L, largeId)
+
+        // when
+        val result = mvc.perform(
             authenticatedStatus()
                 .param("memberIds", "$largeId,9,7,8,9")
                 .header("X-User-Id", "999")
@@ -96,6 +98,9 @@ class NoteBlockStatusHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":999,\"memberIds\":[999]}"),
         )
+
+        // then
+        val response = result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -107,24 +112,28 @@ class NoteBlockStatusHttpTest {
                 ),
             )
             .andReturn().response
-
         val rawId = mapper.readTree(response.contentAsString).path("data").path("memberIds").get(2)
         assertThat(rawId.isIntegralNumber()).isTrue()
         assertThat(rawId.longValue()).isEqualTo(largeId)
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7)
-        order.verify(blocks).blockedAuthors(7, distinctIds)
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(recipientBlocks)
+        verifySequence {
+            members.get(7)
+            blocks.blockedAuthors(7, distinctIds)
+        }
+        confirmVerified(members, blocks, recipientBlocks)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__no_matching_outgoing_blocks__when__reading__then__return_an_empty_array() {
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(blocks.blockedAuthors(7, listOf(8L))).thenReturn(listOf())
+    fun `일치하는 보낸 차단이 없을 때__읽으면__빈 배열을 돌려준다`() {
+        // given
+        every { members.get(any()) } returns active(7)
+        every { blocks.blockedAuthors(any(), any()) } returns listOf()
 
-        mvc.perform(authenticatedStatus().param("memberIds", "8"))
+        // when
+        val result = mvc.perform(authenticatedStatus().param("memberIds", "8"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -134,38 +143,47 @@ class NoteBlockStatusHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(members).get(7)
-        verify(blocks).blockedAuthors(7, listOf(8L))
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(recipientBlocks)
+        verify(exactly = 1) { members.get(7) }
+        verify(exactly = 1) { blocks.blockedAuthors(7, listOf(8L)) }
+        confirmVerified(members, blocks, recipientBlocks)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_invalid_jwt_with_unconvertible_ids__when__reading__then__authenticate_before_binding_or_dependencies(
+    fun `토큰이 없거나 잘못되고 ID를 변환할 수 없을 때__읽으면__바인딩과 의존성 전에 인증 실패를 준다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = get("/api/v1/notes/blocks/status").param("memberIds", "abc").header("X-User-Id", "7")
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-
-        verifyNoInteractions(members, blocks, recipientBlocks)
+        confirmVerified(members, blocks, recipientBlocks)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__authenticated_request_without_query_ids__when__binding__then__return_common_400_envelope_before_dependencies() {
-        mvc.perform(authenticatedStatus().contentType(MediaType.APPLICATION_JSON).content("{\"memberIds\":[8]}"))
+    fun `쿼리에 ID가 없는 인증 요청일 때__바인딩하면__의존성 전에 공통 400 응답을 준다`() {
+        // given
+        val request = authenticatedStatus().contentType(MediaType.APPLICATION_JSON).content("{\"memberIds\":[8]}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -175,75 +193,90 @@ class NoteBlockStatusHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verifyNoInteractions(members, blocks, recipientBlocks)
+        confirmVerified(members, blocks, recipientBlocks)
     }
 
     @Test
-    fun given__authenticated_csv_mixed_with_repeated_parameter__when__binding__then__return_message_only_conversion_400_before_dependencies() {
-        mvc.perform(authenticatedStatus().param("memberIds", "8,9", "10"))
+    fun `쉼표 목록과 반복 파라미터가 섞였을 때__바인딩하면__의존성 전에 변환 오류 400을 준다`() {
+        // given
+        val request = authenticatedStatus().param("memberIds", "8,9", "10")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-
-        verifyNoInteractions(members, blocks, recipientBlocks)
+        confirmVerified(members, blocks, recipientBlocks)
     }
 
     @Test
-    fun given__authenticated_empty_query_value__when__validating_bound_list__then__return_message_only_list_400_before_member_lookup() {
-        mvc.perform(authenticatedStatus().param("memberIds", ""))
+    fun `쿼리 값이 비어 있을 때__목록을 검증하면__회원 조회 전에 목록 400을 준다`() {
+        // given
+        val request = authenticatedStatus().param("memberIds", "")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"작성자 식별자는 1~100개의 양수여야 합니다.\"}", JsonCompareMode.STRICT))
-
-        verifyNoInteractions(members, blocks, recipientBlocks)
+        confirmVerified(members, blocks, recipientBlocks)
     }
 
     @Test
-    fun given__pending_current_member__when__reading_valid_ids__then__return_message_only_403_without_block_query() {
-        whenever(members.get(7)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, true))
+    fun `탈퇴 대기 호출자가 주어졌을 때__유효한 ID를 읽으면__차단 조회 없이 메시지만 담은 403을 준다`() {
+        // given
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, true)
 
-        mvc.perform(authenticatedStatus().param("memberIds", "8"))
+        // when
+        val result = mvc.perform(authenticatedStatus().param("memberIds", "8"))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"이용할 수 없는 회원입니다.\"}", JsonCompareMode.STRICT))
-
-        verify(members).get(7)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(blocks, recipientBlocks)
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(members, blocks, recipientBlocks)
     }
 
     @ParameterizedTest
     @MethodSource("dependencyFailures")
-    fun given__user_or_block_dependency_failure__when__reading_valid_ids__then__preserve_source_specific_message_only_503(
+    fun `회원이나 차단 조회가 실패했을 때__유효한 ID를 읽으면__원인별 메시지의 503을 유지한다`(
         source: String,
         failure: RuntimeException,
         message: String,
     ) {
+        // given
         if (source == "user") {
-            whenever(members.get(7)).thenThrow(failure)
+            every { members.get(any()) } throws failure
         } else {
-            whenever(members.get(7)).thenReturn(active(7))
-            whenever(blocks.blockedAuthors(7, listOf(8L))).thenThrow(failure)
+            every { members.get(any()) } returns active(7)
+            every { blocks.blockedAuthors(any(), any()) } throws failure
         }
 
-        mvc.perform(authenticatedStatus().param("memberIds", "8"))
+        // when
+        val result = mvc.perform(authenticatedStatus().param("memberIds", "8"))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to message)), JsonCompareMode.STRICT))
-
-        verify(members).get(7)
-        if (source == "user") {
-            verifyNoInteractions(blocks)
-        } else {
-            verify(blocks).blockedAuthors(7, listOf(8L))
+        verify(exactly = 1) { members.get(7) }
+        if (source != "user") {
+            verify(exactly = 1) { blocks.blockedAuthors(7, listOf(8L)) }
         }
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(recipientBlocks)
+        confirmVerified(members, blocks, recipientBlocks)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -254,35 +287,41 @@ class NoteBlockStatusHttpTest {
             "HEAD /api/v1/notes/blocks/status", "OPTIONS /api/v1/notes/blocks/status", "POST /api/v1/notes/blocks/status",
         ],
     )
-    fun given__unexposed_neighbor_path_or_method__when__requesting_with_a_valid_token__then__deny_before_dependencies(
+    fun `노출되지 않은 인접 경로나 메서드일 때__유효한 토큰으로 요청하면__의존성 전에 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
-            .andExpect(status().isForbidden())
 
-        verifyNoInteractions(members, blocks, recipientBlocks)
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(members, blocks, recipientBlocks)
     }
 
     @Test
-    fun given__existing_recipient_route__when__its_own_rejection_occurs__then__retain_recipient_advice() {
-        whenever(members.get(7)).thenReturn(active(7))
+    fun `기존 수신자 경로일 때__자체 거절이 나면__수신자 어드바이스를 유지한다`() {
+        // given
+        every { members.get(any()) } returns active(7)
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             get("/api/v1/notes/recipients/7").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"이 상대에게 쪽지를 보낼 수 없습니다.\"}", JsonCompareMode.STRICT))
-
-        verify(members).get(7)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(blocks, recipientBlocks)
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(members, blocks, recipientBlocks)
     }
 
     private fun authenticatedStatus(): MockHttpServletRequestBuilder {

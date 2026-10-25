@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.PostDetails
@@ -7,19 +8,19 @@ import com.pawbridge.backend.community.internal.post.application.PostNotFoundExc
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import jakarta.servlet.DispatcherType
 import jakarta.servlet.RequestDispatcher
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -46,15 +47,16 @@ class PostReadHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @Test
-    fun given__public_post_with_untrusted_authorization__when__getting_post__then__keep_json_contract() {
-        whenever(readPost.read(42)).thenReturn(
+    fun `신뢰할 수 없는 인증 헤더의 공개 게시글이 주어졌을 때__조회하면__JSON 계약을 유지한다`() {
+        // given
+        every { readPost.read(any()) } returns
             PostDetails(
                 42,
                 7,
@@ -65,9 +67,13 @@ class PostReadHttpTest {
                 listOf("https://fixture.invalid/가.jpg", null, "https://fixture.invalid/가.jpg"),
                 LocalDateTime.of(2026, 10, 18, 0, 1, 2, 123456000),
                 LocalDateTime.of(2026, 10, 18, 1, 2),
-            ),
-        )
-        mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+            )
+
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.code").value(200))
@@ -85,11 +91,13 @@ class PostReadHttpTest {
             .andExpect(jsonPath("$.data.imageUrls[2]").value("https://fixture.invalid/가.jpg"))
             .andExpect(jsonPath("$.data.createdAt").value("2026-10-18T00:01:02.123456"))
             .andExpect(jsonPath("$.data.updatedAt").value("2026-10-18T01:02:00"))
+        verify(exactly = 1) { readPost.read(42) }
     }
 
     @Test
-    fun given__null_display_values__when__getting_post__then__keep_all_keys_with_explicit_null() {
-        whenever(readPost.read(42)).thenReturn(
+    fun `표시 값이 null일 때__조회하면__모든 키를 명시적 null로 유지한다`() {
+        // given
+        every { readPost.read(any()) } returns
             PostDetails(
                 42,
                 7,
@@ -100,48 +108,78 @@ class PostReadHttpTest {
                 null,
                 LocalDateTime.of(2026, 10, 18, 0, 1),
                 LocalDateTime.of(2026, 10, 18, 0, 2),
-            ),
-        )
-        mvc.perform(get("/api/v1/posts/read/42"))
+            )
+
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(9))
             .andExpect(content().string(Matchers.containsString("\"authorNickname\":null")))
             .andExpect(content().string(Matchers.containsString("\"imageUrls\":null")))
+        verify(exactly = 1) { readPost.read(42) }
     }
 
     @Test
-    fun given__absent_post__when__getting_post__then__return_original_404_envelope() {
-        whenever(readPost.read(42)).thenThrow(PostNotFoundException())
-        mvc.perform(get("/api/v1/posts/read/42"))
+    fun `없는 게시글이 주어졌을 때__조회하면__기존 404 응답 형식을 돌려준다`() {
+        // given
+        every { readPost.read(any()) } throws PostNotFoundException()
+
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value(404))
             .andExpect(jsonPath("$.message").value("게시글을 찾을 수 없습니다."))
             .andExpect(jsonPath("$.data").isEmpty())
+        verify(exactly = 1) { readPost.read(42) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "search", "9223372036854775808"])
-    fun given__unparseable_post_id__when__getting_post__then__preserve_legacy_500(value: String) {
-        mvc.perform(get("/api/v1/posts/read/$value"))
+    fun `해석할 수 없는 게시글 ID가 주어졌을 때__조회하면__기존 500을 유지한다`(value: String) {
+        // given
+        val request = get("/api/v1/posts/read/$value")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 에러!"))
-        verifyNoInteractions(readPost)
+        confirmVerified(readPost)
     }
 
     @Test
-    fun given__post_storage_failure__when__getting_post__then__do_not_mask_it_as_missing_or_fallback() {
-        whenever(readPost.read(42)).thenThrow(IllegalStateException("private-detail"))
-        mvc.perform(get("/api/v1/posts/read/42"))
+    fun `게시글 저장소 실패가 주어졌을 때__조회하면__없음이나 대체값으로 가리지 않는다`() {
+        // given
+        every { readPost.read(any()) } throws IllegalStateException("private-detail")
+
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.code").value(500))
             .andExpect(jsonPath("$.message").value("서버 에러!"))
             .andExpect(jsonPath("$.data").isEmpty())
+        verify(exactly = 1) { readPost.read(42) }
     }
 
     @Test
-    fun given__internal_error_dispatch__when__dispatching_to_error_path__then__security_does_not_replace_it_with_403() {
-        mvc.perform(
-            get("/error").with(
+    fun `내부 오류 디스패치가 주어졌을 때__오류 경로로 보내면__보안이 403으로 바꾸지 않는다`() {
+        // given
+        val errorRequest = get("/error")
+
+        // when
+        val result = mvc.perform(
+            errorRequest.with(
                 RequestPostProcessor { request ->
                     request.dispatcherType = DispatcherType.ERROR
                     request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, 404)
@@ -150,14 +188,20 @@ class PostReadHttpTest {
                 },
             ),
         )
-            .andExpect(status().isNotFound())
-        verifyNoInteractions(readPost)
+
+        // then
+        result.andExpect(status().isNotFound())
+        confirmVerified(readPost)
     }
 
     @Test
-    fun given__failed_async_stream__when__tomcat_includes_error_page__then__security_does_not_deny_it() {
-        mvc.perform(
-            get("/error").with(
+    fun `실패한 비동기 스트림이 주어졌을 때__톰캣이 오류 페이지를 포함하면__보안이 거부하지 않는다`() {
+        // given
+        val errorRequest = get("/error")
+
+        // when
+        val result = mvc.perform(
+            errorRequest.with(
                 RequestPostProcessor { request ->
                     request.dispatcherType = DispatcherType.INCLUDE
                     request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, 500)
@@ -166,8 +210,10 @@ class PostReadHttpTest {
                 },
             ),
         )
-            .andExpect(status().isInternalServerError())
-        verifyNoInteractions(readPost)
+
+        // then
+        result.andExpect(status().isInternalServerError())
+        confirmVerified(readPost)
     }
 
     @ParameterizedTest
@@ -178,10 +224,15 @@ class PostReadHttpTest {
             "POST /api/v1/posts/read/42", "PUT /api/v1/posts/read/42", "DELETE /api/v1/posts/read/42",
         ],
     )
-    fun given__unexposed_method_or_path__when__requesting__then__deny_without_business_lookup(request: String) {
+    fun `노출되지 않은 메서드나 경로가 주어졌을 때__요청하면__업무 조회 없이 거부한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(readPost)
+
+        // when
+        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(readPost)
     }
 }

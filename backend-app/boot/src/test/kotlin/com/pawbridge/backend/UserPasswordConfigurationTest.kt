@@ -5,11 +5,12 @@ import com.pawbridge.backend.user.internal.password.application.ChangeUserPasswo
 import com.pawbridge.backend.user.internal.password.application.UserPasswordStore
 import com.pawbridge.backend.user.internal.password.web.UserPasswordController
 import com.pawbridge.backend.user.internal.password.web.UserPasswordExceptionHandler
+import io.mockk.justRun
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
 import org.springframework.aop.support.AopUtils
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Import
@@ -22,14 +23,16 @@ import java.util.function.Supplier
 class UserPasswordConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "on", "yes"])
-    fun given__flag_not_exactly_true__when__assembling_without_inputs__then__register_no_password_feature(
-        flag: String,
-    ) {
+    fun `플래그가 정확히 true가 아니고 입력이 없을 때__조립하면__비밀번호 기능을 등록하지 않는다`(flag: String) {
+        // given
         var runner = ApplicationContextRunner().withUserConfiguration(UserPasswordConfiguration::class.java)
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.user-password.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(ChangeUserPassword::class.java)
                 .doesNotHaveBean(UserPasswordStore::class.java)
@@ -39,23 +42,34 @@ class UserPasswordConfigurationTest {
     }
 
     @Test
-    fun given__enabled_without_writer__when__assembling__then__fail_instead_of_creating_a_replacement() {
-        ApplicationContextRunner().withUserConfiguration(UserPasswordConfiguration::class.java)
+    fun `쓰기 자원 없이 켜졌을 때__조립하면__대체물을 만들지 않고 실패한다`() {
+        // given
+        val runner = ApplicationContextRunner().withUserConfiguration(UserPasswordConfiguration::class.java)
             .withPropertyValues("pawbridge.user-password.enabled=true")
-            .run { context -> assertThat(context).hasFailed() }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasFailed()
+        }
     }
 
     @Test
-    fun given__enabled_writer__when__assembling__then__reuse_writer_jdbc_wrap_change_in_transaction_and_register_no_global_encoder() {
+    fun `쓰기 자원과 함께 켜졌을 때__조립하면__쓰기 JDBC를 재사용하고 변경을 트랜잭션으로 감싸며 전역 인코더를 등록하지 않는다`() {
+        // given
+        val writeJdbc = mockk<JdbcTemplate>()
+        val writeManager = mockk<JdbcTransactionManager>()
+
+        justRun { writeJdbc.afterPropertiesSet() }
+        justRun { writeManager.afterPropertiesSet() }
+
+        // when
         ApplicationContextRunner().withUserConfiguration(UserPasswordConfiguration::class.java)
             .withPropertyValues("pawbridge.user-password.enabled=TRUE")
-            .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { mock(JdbcTemplate::class.java) })
-            .withBean(
-                "writeTransactionManager",
-                JdbcTransactionManager::class.java,
-                Supplier { mock(JdbcTransactionManager::class.java) },
-            )
+            .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { writeJdbc })
+            .withBean("writeTransactionManager", JdbcTransactionManager::class.java, Supplier { writeManager })
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(UserPasswordController::class.java)
                     .hasSingleBean(UserPasswordExceptionHandler::class.java)
@@ -69,11 +83,14 @@ class UserPasswordConfigurationTest {
     }
 
     @Test
-    fun given__application__when__inspecting_imports__then__password_configuration_is_imported_once() {
-        assertThat(
-            PawBridgeApplication::class.java.getAnnotation(Import::class.java).value
-                .filter { type -> type.java == UserPasswordConfiguration::class.java }
-                .size,
-        ).isEqualTo(1)
+    fun `애플리케이션이 주어졌을 때__임포트를 살펴보면__비밀번호 구성이 한 번만 임포트된다`() {
+        // given
+        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value
+
+        // when
+        val count = imports.filter { type -> type.java == UserPasswordConfiguration::class.java }.size
+
+        // then
+        assertThat(count).isEqualTo(1)
     }
 }

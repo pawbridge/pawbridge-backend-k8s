@@ -4,20 +4,17 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
 import com.pawbridge.backend.animal.internal.shelter.infrastructure.MembershipLockedAnimalShelterReads
 import com.pawbridge.backend.boot.configuration.ShelterMembershipConfiguration
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.anyVarargs
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.excludeRecords
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -33,24 +30,33 @@ import javax.sql.DataSource
 class ShelterMembershipConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false"])
-    fun given__no_activation__when__assembling__then__create_no_feature_or_transaction_beans(flag: String) {
+    fun `활성화가 없을 때__구성하면__기능과 트랜잭션 빈을 만들지 않는다`(flag: String) {
+        // given
         var runner = ApplicationContextRunner().withUserConfiguration(ShelterMembershipConfiguration::class.java)
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.shelter-membership.enabled=$flag")
         }
 
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context).doesNotHaveBean(ShelterMembership::class.java)
         }
     }
 
     @Test
-    fun given__existing_writer_resources__when__assembling__then__reuse_jdbc_tm_clock_with_readonly_and_repeatable_read_without_new_resources() {
-        val jdbc = mock(JdbcTemplate::class.java)
-        val manager = mock(PlatformTransactionManager::class.java)
+    fun `기존 writer 자원이 있을 때__구성하면__새 자원 없이 JDBC와 매니저와 시계를 재사용한다`() {
+        // given
+        val jdbc = mockk<JdbcTemplate>()
+        val manager = mockk<PlatformTransactionManager>()
 
+        excludeRecords { manager.hashCode() }
+        justRun { jdbc.afterPropertiesSet() }
+
+        // when
         withReaderInputs(runner(jdbc, manager)).run { context ->
+            // then
             assertThat(context).hasNotFailed()
             val memberships = context.getBean(ShelterMembership::class.java)
             assertThat(ReflectionTestUtils.getField(memberships, "jdbc")).isSameAs(jdbc)
@@ -66,19 +72,25 @@ class ShelterMembershipConfigurationTest {
             val clock = ReflectionTestUtils.getField(memberships, "clock") as Clock
             assertThat(clock.zone).isEqualTo(ZoneId.of("Asia/Seoul"))
             assertThat(context.getBeansOfType(DataSource::class.java)).hasSize(1)
-            verify(jdbc).afterPropertiesSet()
-            verifyNoMoreInteractions(jdbc)
-            verifyNoInteractions(manager)
+            verify(exactly = 1) { jdbc.afterPropertiesSet() }
+            confirmVerified(jdbc)
+            confirmVerified(manager)
         }
     }
 
     @Test
-    fun given__matching_writer_source__when__shelter_commands_are_on__then__wrap_only_the_module_lookup_without_sql_or_new_transaction() {
-        val writer = mock(DataSource::class.java)
-        val jdbc = mock(JdbcTemplate::class.java)
-        whenever(jdbc.dataSource).thenReturn(writer)
+    fun `writer 소스가 일치할 때__보호소 명령이 켜지면__SQL과 새 트랜잭션 없이 모듈 조회만 감싼다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val jdbc = mockk<JdbcTemplate>()
 
+        excludeRecords { writer.hashCode() }
+        justRun { jdbc.afterPropertiesSet() }
+        every { jdbc.dataSource } returns writer
+
+        // when
         lockingRunner(jdbc, writer).run { context ->
+            // then
             assertThat(context).hasNotFailed()
             val lookup = context.getBean(ShelterMembership.ShelterLookup::class.java)
             val locked = ReflectionTestUtils.getField(lookup, "shelters")
@@ -86,53 +98,64 @@ class ShelterMembershipConfigurationTest {
             assertThat(ReflectionTestUtils.getField(locked!!, "delegate")).isSameAs(context.getBean("animalModuleReads"))
             assertThat(ReflectionTestUtils.getField(locked, "jdbc")).isSameAs(jdbc)
             verifyNoSqlOn(jdbc)
-            verifyNoInteractions(writer)
+            confirmVerified(writer)
         }
     }
 
     @Test
-    fun given__different_writer_source__when__shelter_commands_are_on__then__fail_closed_before_sql() {
-        val writer = mock(DataSource::class.java)
-        val jdbc = mock(JdbcTemplate::class.java)
-        whenever(jdbc.dataSource).thenReturn(mock(DataSource::class.java))
+    fun `writer 소스가 다를 때__보호소 명령이 켜지면__SQL 전에 닫힌 채로 실패한다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val jdbc = mockk<JdbcTemplate>()
 
+        excludeRecords { writer.hashCode() }
+        justRun { jdbc.afterPropertiesSet() }
+        every { jdbc.dataSource } returns mockk<DataSource>()
+
+        // when
         lockingRunner(jdbc, writer).run { context ->
+            // then
             assertThat(context).hasFailed()
             assertThat(context.startupFailure)
                 .hasRootCauseMessage("Shelter membership module requires the shared writer data source")
             verifyNoSqlOn(jdbc)
-            verifyNoInteractions(writer)
+            confirmVerified(writer)
         }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "on", "yes", "1", "unknown"])
-    fun given__shelter_commands_not_explicitly_true__when__assembling__then__retain_original_delegate_without_writer_locking(
+    fun `보호소 명령이 true로 명시되지 않았을 때__구성하면__writer 잠금 없이 원래 위임을 유지한다`(
         flag: String,
     ) {
-        val jdbc = mock(JdbcTemplate::class.java)
-        var runner = withReaderInputs(runner(jdbc, mock(PlatformTransactionManager::class.java)))
+        // given
+        val jdbc = mockk<JdbcTemplate>()
+        var runner = withReaderInputs(runner(jdbc, mockk<PlatformTransactionManager>()))
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.shelter-commands.enabled=$flag")
         }
 
+        justRun { jdbc.afterPropertiesSet() }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             val actual = ReflectionTestUtils.getField(context.getBean(ShelterMembership.ShelterLookup::class.java), "shelters")
             assertThat(actual).isSameAs(context.getBean("animalModuleReads"))
-            verify(jdbc, never()).dataSource
+            verify(exactly = 0) { jdbc.dataSource }
             verifyNoSqlOn(jdbc)
         }
     }
 
     companion object {
         private fun verifyNoSqlOn(jdbc: JdbcTemplate) {
-            verify(jdbc, never()).query(anyString(), anyNonNull<RowMapper<Any>>(), *anyVarargs())
-            verify(jdbc, never()).update(anyString(), *anyVarargs())
+            verify(exactly = 0) { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg<Any>()) }
+            verify(exactly = 0) { jdbc.update(any<String>(), *anyVararg<Any>()) }
         }
 
         private fun lockingRunner(jdbc: JdbcTemplate, writer: DataSource): ApplicationContextRunner {
-            return withReaderInputs(runner(jdbc, mock(PlatformTransactionManager::class.java)))
+            return withReaderInputs(runner(jdbc, mockk<PlatformTransactionManager>()))
                 .withBean("writeDataSource", DataSource::class.java, Supplier { writer })
                 .withPropertyValues("pawbridge.shelter-commands.enabled=true")
         }
@@ -140,14 +163,14 @@ class ShelterMembershipConfigurationTest {
         /** Inputs of the in-process Animal shelter reader that the membership lookup is built on. */
         private fun withReaderInputs(runner: ApplicationContextRunner): ApplicationContextRunner {
             return runner
-                .withBean("dataSource", DataSource::class.java, Supplier { mock(DataSource::class.java) })
+                .withBean("dataSource", DataSource::class.java, Supplier { mockk<DataSource>() })
                 .withBean(
                     "transactionManager",
                     PlatformTransactionManager::class.java,
-                    Supplier { mock(PlatformTransactionManager::class.java) },
+                    Supplier { mockk<PlatformTransactionManager>() },
                 )
                 .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
-                .withBean(ShelterReads::class.java, Supplier { mock(ShelterReads::class.java) })
+                .withBean(ShelterReads::class.java, Supplier { mockk<ShelterReads>() })
         }
 
         private fun runner(jdbc: JdbcTemplate, manager: PlatformTransactionManager): ApplicationContextRunner {

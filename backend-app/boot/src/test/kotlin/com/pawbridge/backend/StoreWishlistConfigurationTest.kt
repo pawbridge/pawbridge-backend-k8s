@@ -6,13 +6,12 @@ import com.pawbridge.backend.store.internal.wishlist.infrastructure.JdbcWishlist
 import com.pawbridge.backend.store.internal.wishlist.web.WishlistCommandController
 import com.pawbridge.backend.store.internal.wishlist.web.WishlistCommandExceptionHandler
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.mock
 import org.mockito.Mockito.mockConstruction
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
@@ -29,10 +28,16 @@ import java.util.function.Supplier
 
 class StoreWishlistConfigurationTest {
     @Test
-    fun given__absent_or_false_flag__when__loading_imported_configuration_without_inputs__then__no_writer_or_routes() {
-        assertThat(PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java })
-            .contains(StoreWishlistConfiguration::class.java)
-        for (flag in arrayOf("", "pawbridge.store-wishlist.enabled=false")) {
+    fun `플래그가 없거나 false일 때__입력 없이 가져온 설정을 로드하면__작성기와 경로가 없다`() {
+        // given
+        val flags = arrayOf("", "pawbridge.store-wishlist.enabled=false")
+
+        // when
+        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java }
+
+        // then
+        assertThat(imports).contains(StoreWishlistConfiguration::class.java)
+        for (flag in flags) {
             var runner = ApplicationContextRunner().withUserConfiguration(StoreWishlistConfiguration::class.java)
             if (flag.isNotEmpty()) {
                 runner = runner.withPropertyValues(flag)
@@ -51,9 +56,16 @@ class StoreWishlistConfigurationTest {
     }
 
     @Test
-    fun given__explicit_flag__when__assembling_and_closing__then__bind_the_shared_pool_and_system_clock_without_own_pool_clients_or_connection() {
-        val shared = mock(HikariDataSource::class.java)
+    fun `명시적 플래그가 있을 때__조립하고 닫으면__자체 풀과 클라이언트와 연결 없이 공유 풀과 시스템 시계를 묶는다`() {
+        // given
+        val shared = mockk<HikariDataSource>()
+
+        justRun { shared.close() }
+
+        // MockK cannot count constructor calls, so this test keeps Mockito's mockConstruction
+        // to prove that the configuration never builds its own HikariDataSource.
         mockConstruction(HikariDataSource::class.java).use { constructions ->
+            // when
             ApplicationContextRunner().withUserConfiguration(StoreWishlistConfiguration::class.java)
                 .withBean("storeWishlistWriteDataSource", HikariDataSource::class.java, Supplier { shared })
                 .withPropertyValues(
@@ -62,6 +74,7 @@ class StoreWishlistConfigurationTest {
                     "STORE_WISHLIST_DB_WRITER_PASSWORD=ignored-legacy-only",
                 )
                 .run { context ->
+                    // then
                     assertThat(context).hasNotFailed()
                     assertThat(context.getBeansOfType(HikariDataSource::class.java))
                         .containsOnlyKeys("storeWishlistWriteDataSource")
@@ -87,9 +100,11 @@ class StoreWishlistConfigurationTest {
                     assertThat(context.getBeansOfType(RestClient::class.java)).isEmpty()
                     assertThat(context.getBeansOfType(S3Client::class.java)).isEmpty()
                 }
+
+            // then
             assertThat(constructions.constructed()).isEmpty()
-            verify(shared, never()).getConnection()
-            verify(shared, never()).getConnection(anyString(), anyString())
+            verify(exactly = 0) { shared.connection }
+            verify(exactly = 0) { shared.getConnection(any(), any()) }
         }
     }
 }

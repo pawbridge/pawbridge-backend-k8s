@@ -56,9 +56,13 @@ import javax.sql.DataSource
 /** Actual Main imports and actual persistence/security consumers, without a database fixture or business substitutes. */
 class PawBridgeCoreIntegrationTest {
     @Test
-    fun given__explicit_core_modules_and_writers__when__main_assembles_and_security_rejects__then__share_named_resources_without_borrowing_and_close_them() {
+    fun `명시적 코어 모듈과 writer가 주어졌을 때__main을 조립하고 보안이 거부하면__이름 있는 자원을 빌리지 않고 공유해 닫는다`() {
+        // given
         val resources = Resources()
+
+        // when
         runner(resources).run { context ->
+            // then
             assertThat(context).hasNotFailed()
             // The public chain plus the management-port chain, which never matches a request on the main port.
             assertThat(context.getBeansOfType(SecurityFilterChain::class.java))
@@ -197,6 +201,8 @@ class PawBridgeCoreIntegrationTest {
                 assertThat(pool.hikariPoolMXBean.totalConnections).isZero()
             }
         }
+
+        // then (after the context closes)
         assertThat(resources.pools).hasSize(1).allSatisfy { pool -> assertThat(pool.isClosed).isTrue() }
         assertThat(resources.factories).hasSize(3).allSatisfy { factory -> assertThat(factory.isOpen).isFalse() }
         assertThat(resources.animalAnalyzers).hasSize(1)

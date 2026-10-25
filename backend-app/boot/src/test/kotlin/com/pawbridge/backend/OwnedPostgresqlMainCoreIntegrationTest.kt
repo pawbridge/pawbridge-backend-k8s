@@ -198,9 +198,14 @@ class OwnedPostgresqlMainCoreIntegrationTest {
 
     @Test
     @Order(1)
-    fun given__own_and_other_favorites__when__jwt_enters_user_module__then__read_actual_animal_batch_with_independent_reader() {
+    fun `본인과 타인의 즐겨찾기가 있을 때__JWT로 사용자 모듈에 들어가면__독립 리더로 실제 동물 배치를 읽는다`() {
+        // given
+        // The owned fixture rows are seeded and fenced by the class-level setup.
         contract("User Animal read") {
+            // when
             val data = success("/api/v1/users/me/favorite-animals")
+
+            // then
             check(
                 data.path("userId").asLong() == 910001L && data.path("totalCount").asInt() == 1 &&
                     data.path("favorites").size() == 1,
@@ -228,9 +233,14 @@ class OwnedPostgresqlMainCoreIntegrationTest {
 
     @Test
     @Order(2)
-    fun given__actual_user_and_purchase_snapshots__when__jwt_reads_mypage__then__finish_user_lookup_before_store_ro_page() {
+    fun `실제 사용자와 구매 스냅샷이 있을 때__JWT로 마이페이지를 읽으면__사용자 조회를 끝낸 뒤 스토어 읽기 전용 페이지를 읽는다`() {
+        // given
+        // The owned fixture rows are seeded and fenced by the class-level setup.
         contract("User Store read") {
+            // when
             val page = success("/api/v1/users/me/orders?size=20&sort=id,asc")
+
+            // then
             check(
                 page.path("totalElements").asLong() == 7L && page.path("content").size() == 7,
                 "Only this member's seven purchase parents may return",
@@ -275,9 +285,14 @@ class OwnedPostgresqlMainCoreIntegrationTest {
 
     @Test
     @Order(3)
-    fun given__community_author_and_real_user_nickname__when__reading_the_post__then__cross_module_lookup_avoids_fallback() {
+    fun `커뮤니티 작성자와 실제 사용자 닉네임이 있을 때__게시글을 읽으면__대체값 없이 모듈 간 조회를 한다`() {
+        // given
+        // The owned fixture rows are seeded and fenced by the class-level setup.
         contract("Community User read") {
+            // when
             val post = success("/api/v1/posts/read/810001")
+
+            // then
             check(
                 post.path("postId").asLong() == 810001L && post.path("authorId").asLong() == 910001L &&
                     post.path("authorNickname").asText() == "p22-nick-910001" &&

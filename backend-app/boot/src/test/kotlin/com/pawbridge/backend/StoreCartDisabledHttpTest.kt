@@ -1,18 +1,18 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.store.internal.cart.application.Carts
 import com.pawbridge.backend.store.internal.cart.web.CartController
+import io.mockk.confirmVerified
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -26,7 +26,7 @@ class StoreCartDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var carts: Carts
 
     @ParameterizedTest
@@ -39,12 +39,19 @@ class StoreCartDisabledHttpTest {
         "POST,/api/v1/orders",
         "GET,/api/v1/orders/7",
     )
-    fun given__no_cart_flag__when__verified_member_uses_a_cart_route__then__deny_before_business(
+    fun `장바구니 플래그가 없을 때__인증된 회원이 장바구니 경로를 호출하면__비즈니스 전에 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(carts)
+        // given
+        val request = command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(carts)
     }
 
     companion object {
@@ -69,7 +76,7 @@ class StoreCartAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var carts: Carts
 
     @ParameterizedTest
@@ -82,12 +89,19 @@ class StoreCartAliasDisabledHttpTest {
         "POST,/api/v1/orders",
         "GET,/api/v1/orders/7",
     )
-    fun given__unowned_boolean_alias__when__verified_member_uses_a_route__then__keep_the_owner_flag_closed(
+    fun `소유되지 않은 불리언 별칭일 때__인증된 회원이 경로를 호출하면__소유자 플래그를 닫은 채 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(StoreCartDisabledHttpTest.command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(carts)
+        // given
+        val request = StoreCartDisabledHttpTest.command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(carts)
     }
 }
 
@@ -102,7 +116,7 @@ class StoreCartNeighborDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var carts: Carts
 
     @ParameterizedTest
@@ -113,11 +127,18 @@ class StoreCartNeighborDisabledHttpTest {
         "POST,/api/v1/orders/direct",
         "POST,/api/v1/payments/confirm",
     )
-    fun given__enabled_cart_management_only__when__verified_member_uses_an_unported_route__then__keep_neighbor_routes_closed(
+    fun `장바구니 관리만 켜져 있을 때__인증된 회원이 이식되지 않은 경로를 호출하면__이웃 경로를 닫아 둔다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(StoreCartDisabledHttpTest.command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(carts)
+        // given
+        val request = StoreCartDisabledHttpTest.command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(carts)
     }
 }

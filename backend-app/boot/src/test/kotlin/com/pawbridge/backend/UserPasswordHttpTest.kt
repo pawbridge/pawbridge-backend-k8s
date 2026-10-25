@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.user.internal.nickname.application.ChangeUserNickname
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameController
@@ -13,16 +14,16 @@ import com.pawbridge.backend.user.internal.password.web.UserPasswordController
 import com.pawbridge.backend.user.internal.password.web.UserPasswordExceptionHandler
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -31,7 +32,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
@@ -65,18 +65,20 @@ class UserPasswordHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var change: ChangeUserPassword
 
-    @MockitoBean
+    @MockkBean
     lateinit var nicknames: ChangeUserNickname
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__verified_principal_and_spoofed_identity__when__changing_password__then__use_only_principal_and_return_original_success(
-        role: String,
-    ) {
-        mvc.perform(
+    fun `서명된 주체와 위조된 신원이 주어졌을 때__비밀번호를 바꾸면__주체만 쓰고 원래 성공 응답을 돌려준다`(role: String) {
+        // given
+        justRun { change.change(any(), any(), any()) }
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/password")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
                 .header("X-User-Id", "999")
@@ -85,23 +87,27 @@ class UserPasswordHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"currentPassword\":\"Current1!\",\"newPassword\":\"NewPass1!\",\"userId\":999}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"비밀번호가 변경되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(change).change(7, "Current1!", "NewPass1!")
-        verifyNoMoreInteractions(change)
-        verifyNoInteractions(nicknames)
+        verify(exactly = 1) { change.change(7, "Current1!", "NewPass1!") }
+        confirmVerified(change, nicknames)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["Abcdef1!", "Abcdefghijklmnopqr1@", "a1@$!%*#?&a1@$!%*#?&"])
-    fun given__new_password_at_original_pattern_boundaries__when__changing__then__forward_raw_values(
-        newPassword: String,
-    ) {
-        mvc.perform(
+    fun `원래 패턴 경계의 새 비밀번호가 주어졌을 때__바꾸면__원문 값을 그대로 전달한다`(newPassword: String) {
+        // given
+        justRun { change.change(any(), any(), any()) }
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/password")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -111,25 +117,31 @@ class UserPasswordHttpTest {
                     ),
                 ),
         )
-            .andExpect(status().isOk())
-        verify(change).change(7, " any current ", newPassword)
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { change.change(7, " any current ", newPassword) }
     }
 
     @ParameterizedTest
     @MethodSource("invalidRequests")
-    fun given__invalid_or_absent_fields__when__changing__then__validation_precedes_service_with_original_field_messages(
+    fun `잘못되었거나 없는 필드가 주어졌을 때__바꾸면__서비스 전에 검증하고 원래 필드 메시지를 쓴다`(
         json: String,
         messages: List<String>,
     ) {
-        val result = mvc.perform(
-            put("/api/v1/users/me/password")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json),
-        )
+        // given
+        val request = put("/api/v1/users/me/password")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(json)
+
+        // when
+        val result = mvc.perform(request)
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400))
             .andReturn()
+
+        // then
         val response = mapper.readTree(result.response.contentAsString)
         // Constraint messages contain ", " themselves, so compare against every join order.
         val message = response.get("message").asText()
@@ -141,20 +153,23 @@ class UserPasswordHttpTest {
         assertThat(message).isIn(accepted)
         assertThat(response.get("data").isNull).isTrue()
         assertThat(result.response.contentAsString).doesNotContain("Secret").doesNotContain("short1!")
-        verifyNoInteractions(change, nicknames)
+        confirmVerified(change, nicknames)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "{", "null", "[]", "{\"currentPassword\":[],\"newPassword\":\"NewPass1!\"}"])
-    fun given__malformed_or_nonobject_json__when__changing__then__return_original_safe_body_error_before_service(
-        json: String,
-    ) {
-        mvc.perform(
-            put("/api/v1/users/me/password")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json),
-        )
+    fun `깨졌거나 객체가 아닌 JSON이 주어졌을 때__바꾸면__서비스 전에 기존 안전 본문 오류를 돌려준다`(json: String) {
+        // given
+        val request = put("/api/v1/users/me/password")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(json)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -162,15 +177,16 @@ class UserPasswordHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(change, nicknames)
+        confirmVerified(change, nicknames)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_untrusted_token__when__changing__then__authentication_precedes_validation_and_service(
+    fun `토큰이 없거나 신뢰할 수 없을 때__바꾸면__검증과 서비스보다 인증이 먼저다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = put("/api/v1/users/me/password")
             .header("X-User-Id", "7")
             .contentType(MediaType.APPLICATION_JSON)
@@ -178,7 +194,12 @@ class UserPasswordHttpTest {
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -186,23 +207,29 @@ class UserPasswordHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(change, nicknames)
+        confirmVerified(change, nicknames)
     }
 
     @ParameterizedTest
     @MethodSource("serviceFailures")
-    fun given__service_rejection__when__changing__then__map_to_original_status_and_message(
+    fun `서비스가 거절할 때__바꾸면__원래 상태와 메시지로 매핑한다`(
         failure: RuntimeException,
         status: Int,
         message: String,
     ) {
-        doThrow(failure).`when`(change).change(7, "Current1!", "NewPass1!")
-        mvc.perform(
+        // given
+        every { change.change(any(), any(), any()) } throws failure
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/password")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(VALID),
         )
+
+        // then
+        result
             .andExpect(status().`is`(status))
             .andExpect(
                 content().json(
@@ -210,21 +237,28 @@ class UserPasswordHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(change).change(7, "Current1!", "NewPass1!")
+        verify(exactly = 1) { change.change(7, "Current1!", "NewPass1!") }
     }
 
     @Test
-    fun given__existing_nickname_route__when__password_feature_is_enabled__then__password_advice_does_not_intercept_it() {
-        mvc.perform(
+    fun `기존 닉네임 경로가 주어졌을 때__비밀번호 기능이 켜져 있어도 요청하면__비밀번호 어드바이스가 가로채지 않는다`() {
+        // given
+        justRun { nicknames.change(any(), any()) }
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":\"새닉네임\"}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value("닉네임이 변경되었습니다."))
-        verify(nicknames).change(7, "새닉네임")
-        verifyNoInteractions(change)
+        verify(exactly = 1) { nicknames.change(7, "새닉네임") }
+        confirmVerified(change)
     }
 
     @ParameterizedTest
@@ -240,16 +274,19 @@ class UserPasswordHttpTest {
             "PUT /api/users/me/password",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_service(
-        request: String,
-    ) {
+    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__유효한 토큰으로 요청하면__서비스 없이 거부한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(change, nicknames)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(change, nicknames)
     }
 
     companion object {
