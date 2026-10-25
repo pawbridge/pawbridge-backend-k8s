@@ -1,18 +1,18 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrders
 import com.pawbridge.backend.store.internal.orderadministration.web.AdminOrderController
+import io.mockk.confirmVerified
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -26,7 +26,7 @@ class StoreAdminOrderDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var orders: AdminOrders
 
     @ParameterizedTest
@@ -36,12 +36,19 @@ class StoreAdminOrderDisabledHttpTest {
         "PATCH,/api/v1/admin/orders/7/delivery-status",
         "PATCH,/api/v1/admin/orders/7/status",
     )
-    fun given__disabled_administration__when__signed_administrator_uses_a_route__then__deny_before_business(
+    fun `관리자 기능이 꺼져 있을 때__서명된 관리자가 경로를 호출하면__비즈니스 전에 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(orders)
+        // given
+        val request = command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(orders)
     }
 
     companion object {
@@ -66,7 +73,7 @@ class StoreAdminOrderAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var orders: AdminOrders
 
     @ParameterizedTest
@@ -76,12 +83,19 @@ class StoreAdminOrderAliasDisabledHttpTest {
         "PATCH,/api/v1/admin/orders/7/delivery-status",
         "PATCH,/api/v1/admin/orders/7/status",
     )
-    fun given__boolean_alias__when__signed_administrator_uses_a_route__then__keep_owner_flag_closed(
+    fun `불리언 별칭으로 켰을 때__서명된 관리자가 경로를 호출하면__소유자 플래그를 닫은 채 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(StoreAdminOrderDisabledHttpTest.command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(orders)
+        // given
+        val request = StoreAdminOrderDisabledHttpTest.command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(orders)
     }
 }
 
@@ -96,7 +110,7 @@ class StoreAdminOrderNeighborDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var orders: AdminOrders
 
     @ParameterizedTest
@@ -111,11 +125,18 @@ class StoreAdminOrderNeighborDisabledHttpTest {
         "PATCH,/api/v1/admin/orders/7/status/",
         "PATCH,/api/v1/admin/orders/7/status/extra",
     )
-    fun given__only_administration_enabled__when__an_unported_order_operation_is_requested__then__deny_before_business(
+    fun `관리 기능만 켜져 있을 때__이식되지 않은 주문 경로를 호출하면__비즈니스 전에 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(StoreAdminOrderDisabledHttpTest.command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(orders)
+        // given
+        val request = StoreAdminOrderDisabledHttpTest.command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(orders)
     }
 }

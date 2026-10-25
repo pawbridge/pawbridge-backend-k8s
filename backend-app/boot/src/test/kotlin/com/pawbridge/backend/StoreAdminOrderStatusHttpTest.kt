@@ -1,19 +1,20 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrders
 import com.pawbridge.backend.store.internal.orderadministration.web.AdminOrderController
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -29,44 +30,61 @@ class StoreAdminOrderStatusHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var orders: AdminOrders
 
     @Test
-    fun given__enabled_administration_and_signed_admin__when__patching_status__then__reach_business_with_verified_principal() {
-        mvc.perform(
-            patch("/api/v1/admin/orders/7/status")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-                .header("X-User-Id", "99")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"CANCELLED\"}"),
-        ).andExpect(status().isOk())
-        verify(orders).updateStatus(7, 7, "CANCELLED")
+    fun `관리 기능이 켜져 있고 서명된 관리자일 때__상태를 변경하면__검증된 주체로 비즈니스에 도달한다`() {
+        // given
+        val request = patch("/api/v1/admin/orders/7/status")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+            .header("X-User-Id", "99")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"status\":\"CANCELLED\"}")
+
+        every { orders.updateStatus(any(), any(), any()) } returns StoreOrderHistoryHttpTest.snapshot()
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { orders.updateStatus(7, 7, "CANCELLED") }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_SHELTER"])
-    fun given__signed_non_admin_with_forged_admin_header__when__patching_status__then__forbidden_before_business(
+    fun `관리자 헤더를 위조한 서명된 비관리자일 때__상태를 변경하면__비즈니스 전에 403으로 거부한다`(
         role: String,
     ) {
-        mvc.perform(
-            patch("/api/v1/admin/orders/7/status")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
-                .header("X-User-Role", "ROLE_ADMIN")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"PAID\"}"),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(orders)
+        // given
+        val request = patch("/api/v1/admin/orders/7/status")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
+            .header("X-User-Role", "ROLE_ADMIN")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"status\":\"PAID\"}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__missing_token__when__patching_status__then__unauthorized_before_business() {
-        mvc.perform(
-            patch("/api/v1/admin/orders/7/status")
-                .header("X-User-Role", "ROLE_ADMIN")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"status\":\"PAID\"}"),
-        ).andExpect(status().isUnauthorized())
-        verifyNoInteractions(orders)
+    fun `토큰이 없을 때__상태를 변경하면__비즈니스 전에 401로 거부한다`() {
+        // given
+        val request = patch("/api/v1/admin/orders/7/status")
+            .header("X-User-Role", "ROLE_ADMIN")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"status\":\"PAID\"}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(orders)
     }
 }

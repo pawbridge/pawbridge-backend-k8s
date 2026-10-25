@@ -1,25 +1,25 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.store.api.StorePaymentEvents
 import com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentController
 import com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -44,48 +44,74 @@ class StoreMockPaymentHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var payments: StorePaymentEvents
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__any_verified_role__when__paying_any_order_id__then__run_the_original_business_without_owner_check(
+    fun `검증된 어떤 역할이든__임의 주문 ID를 결제하면__소유자 확인 없이 기존 비즈니스를 실행한다`(
         role: String,
     ) {
-        val result = mvc.perform(
-            command("POST", "/api/v1/orders/41/payment")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, role)),
-        )
+        // given
+        val request = command("POST", "/api/v1/orders/41/payment")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
+
+        justRun { payments.processPayment(any()) }
+
+        // when
+        val response = mvc.perform(request)
+
+        // then
+        val result = response
             .andExpect(status().isOk())
             .andReturn()
-        verify(payments).processPayment(41L)
-        verifyNoMoreInteractions(payments)
+        verify(exactly = 1) { payments.processPayment(41L) }
+        confirmVerified(payments)
         assertThat(result.response.contentAsByteArray).isEmpty()
     }
 
     @Test
-    fun given__only_a_forged_identity_header__when__paying__then__reject_before_business() {
-        mvc.perform(command("POST", "/api/v1/orders/41/payment")).andExpect(status().isUnauthorized())
-        verifyNoInteractions(payments)
+    fun `위조한 신원 헤더만 있을 때__결제하면__비즈니스 전에 거부한다`() {
+        // given
+        val request = command("POST", "/api/v1/orders/41/payment")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(payments)
     }
 
     @Test
-    fun given__an_invalid_bearer__when__paying__then__reject_before_business() {
-        mvc.perform(
-            command("POST", "/api/v1/orders/41/payment").header("Authorization", "Bearer synthetic-invalid-token"),
-        )
-            .andExpect(status().isUnauthorized())
-        verifyNoInteractions(payments)
+    fun `잘못된 베어러 토큰일 때__결제하면__비즈니스 전에 거부한다`() {
+        // given
+        val request = command("POST", "/api/v1/orders/41/payment")
+            .header("Authorization", "Bearer synthetic-invalid-token")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(payments)
     }
 
     @Test
-    fun given__a_missing_order__when__paying__then__map_the_original_illegal_argument_to_c001() {
-        doThrow(IllegalArgumentException("Order not found: 41")).`when`(payments).processPayment(41L)
+    fun `주문이 없을 때__결제하면__기존 잘못된 인자 예외를 C001로 변환한다`() {
+        // given
+        every { payments.processPayment(any()) } throws IllegalArgumentException("Order not found: 41")
+
+        // when
+        val result = mvc.perform(verified("POST", "/api/v1/orders/41/payment"))
+
+        // then
         val json = mapper.readTree(
-            mvc.perform(verified("POST", "/api/v1/orders/41/payment"))
+            result
                 .andExpect(status().isBadRequest())
                 .andReturn().response.contentAsByteArray,
         )
+        verify(exactly = 1) { payments.processPayment(41L) }
         assertThat(json.path("message").asText()).isEqualTo("Invalid Input Value")
         assertThat(json.path("code").asText()).isEqualTo("C001")
         assertThat(json.path("errors").isArray).isTrue()
@@ -94,29 +120,44 @@ class StoreMockPaymentHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["state", "runtime"])
-    fun given__a_non_pending_order_or_event_failure__when__paying__then__map_to_the_original_server_error(
+    fun `대기 상태가 아닌 주문이거나 이벤트가 실패했을 때__결제하면__기존 서버 오류로 변환한다`(
         failure: String,
     ) {
+        // given
         val thrown: RuntimeException = if (failure == "state") {
             IllegalStateException("Order is not in PENDING state. Current: PAID")
         } else {
             RuntimeException("Failed to publish payment event")
         }
-        doThrow(thrown).`when`(payments).processPayment(41L)
+
+        every { payments.processPayment(any()) } throws thrown
+
+        // when
+        val result = mvc.perform(verified("POST", "/api/v1/orders/41/payment"))
+
+        // then
         val json = mapper.readTree(
-            mvc.perform(verified("POST", "/api/v1/orders/41/payment"))
+            result
                 .andExpect(status().isInternalServerError())
                 .andReturn().response.contentAsByteArray,
         )
+        verify(exactly = 1) { payments.processPayment(41L) }
         assertThat(json.path("message").asText()).isEqualTo("Server Error")
         assertThat(json.path("code").asText()).isEqualTo("C004")
         assertThat(json.toString()).doesNotContain("PENDING").doesNotContain("publish")
     }
 
     @Test
-    fun given__a_non_numeric_order_id__when__paying__then__return_the_original_type_error_before_business() {
+    fun `주문 ID가 숫자가 아닐 때__결제하면__비즈니스 전에 기존 타입 오류를 돌려준다`() {
+        // given
+        val request = verified("POST", "/api/v1/orders/abc/payment")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
         val json = mapper.readTree(
-            mvc.perform(verified("POST", "/api/v1/orders/abc/payment"))
+            result
                 .andExpect(status().isBadRequest())
                 .andReturn().response.contentAsByteArray,
         )
@@ -125,7 +166,7 @@ class StoreMockPaymentHttpTest {
         assertThat(json.path("errors").get(0).path("field").asText()).isEqualTo("orderId")
         assertThat(json.path("errors").get(0).path("value").asText()).isEqualTo("abc")
         assertThat(json.path("errors").get(0).path("reason").asText()).isEqualTo("typeMismatch")
-        verifyNoInteractions(payments)
+        confirmVerified(payments)
     }
 
     @ParameterizedTest
@@ -134,12 +175,19 @@ class StoreMockPaymentHttpTest {
         "DELETE,/api/v1/orders/41/payment", "POST,/api/orders/41/payment", "POST,/api/v1/orders/41/payment/extra",
         "POST,/api/v1/orders/payment", "POST,/api/v1/orders/41/payments",
     )
-    fun given__a_verified_member__when__using_an_unregistered_method_or_alias__then__deny_before_business(
+    fun `검증된 회원이 등록되지 않은 메서드나 별칭을 쓸 때__결제하면__비즈니스 전에 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(verified(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(payments)
+        // given
+        val request = verified(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(payments)
     }
 
     companion object {
@@ -166,14 +214,20 @@ class StoreMockPaymentDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var payments: StorePaymentEvents
 
     @Test
-    fun given__no_mock_payment_flag__when__a_verified_member_pays__then__deny_before_business() {
-        mvc.perform(StoreMockPaymentHttpTest.verified("POST", "/api/v1/orders/41/payment"))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(payments)
+    fun `모의 결제 플래그가 없을 때__검증된 회원이 결제하면__비즈니스 전에 거부한다`() {
+        // given
+        val request = StoreMockPaymentHttpTest.verified("POST", "/api/v1/orders/41/payment")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(payments)
     }
 }
 
@@ -197,13 +251,19 @@ class StoreMockPaymentAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var payments: StorePaymentEvents
 
     @Test
-    fun given__a_noncanonical_flag_and_other_payment_flags__when__a_verified_member_pays__then__deny_before_business() {
-        mvc.perform(StoreMockPaymentHttpTest.verified("POST", "/api/v1/orders/41/payment"))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(payments)
+    fun `비표준 플래그와 다른 결제 플래그일 때__검증된 회원이 결제하면__비즈니스 전에 거부한다`() {
+        // given
+        val request = StoreMockPaymentHttpTest.verified("POST", "/api/v1/orders/41/payment")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(payments)
     }
 }
