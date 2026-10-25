@@ -5,17 +5,19 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.service.Anim
 import com.pawbridge.backend.animal.internal.lostsearch.infrastructure.LostSearchService
 import com.pawbridge.backend.animal.internal.lostsearch.infrastructure.PythonLostSearchClient
 import com.pawbridge.backend.animal.internal.lostsearch.web.LostSearchController
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
@@ -29,7 +31,6 @@ import org.springframework.mock.web.MockMultipartFile
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.util.AopTestUtils
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.test.web.servlet.MockMvc
@@ -48,14 +49,18 @@ import javax.sql.DataSource
 class AnimalLostSearchConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on", "1"])
-    fun given__feature_not_explicitly_true__when__assembling_without_inputs__then__create_no_reader_or_client(
+    fun `기능이 명시적 true가 아닐 때__입력 없이 조립하면__리더도 클라이언트도 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = runner()
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.animal-lost-search.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(EntityManagerFactory::class.java)
                 .doesNotHaveBean(PythonLostSearchClient::class.java)
@@ -66,12 +71,17 @@ class AnimalLostSearchConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun given__explicit_feature_and_urls__when__assembling__then__select_the_reader_unit_and_url_without_connecting(
+    fun `명시한 기능과 URL이 주어졌을 때__조립하면__연결 없이 리더 단위와 URL을 선택한다`(
         preferred: Boolean,
     ) {
-        val reader: DataSource = mock(DataSource::class.java)
-        val writer: DataSource = mock(DataSource::class.java)
+        // given
+        val reader: DataSource = mockk<DataSource>()
+        val writer: DataSource = mockk<DataSource>()
         val owned = AtomicReference<EntityManagerFactory>()
+
+        excludeRecords { reader.hashCode() }
+        excludeRecords { writer.hashCode() }
+
         var runner = readerInputs(reader).withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withPropertyValues(
                 "pawbridge.animal-lost-search.enabled=TrUe",
@@ -80,7 +90,10 @@ class AnimalLostSearchConfigurationTest {
         if (preferred) {
             runner = runner.withPropertyValues("lost-search.python-url=https://preferred.example.invalid")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .hasSingleBean(LostSearchService::class.java)
                 .hasSingleBean(LostSearchController::class.java)
@@ -118,16 +131,22 @@ class AnimalLostSearchConfigurationTest {
             assertThat(context.getBeansOfType(DataSource::class.java)).hasSize(2)
             assertThat(context.getBeansOfType(EntityManagerFactory::class.java)).hasSize(1)
             assertThat(context).doesNotHaveBean("jpaAuditingHandler").doesNotHaveBean(AnimalCommandService::class.java)
-            verifyNoInteractions(reader, writer)
+            confirmVerified(reader, writer)
         }
         assertThat(owned.get().isOpen).isFalse()
     }
 
     @Test
-    fun given__commands_and_photo_search_enabled__when__assembling__then__keep_each_repository_on_its_named_reader_or_writer_unit() {
-        val reader: DataSource = mock(DataSource::class.java)
-        val writer: DataSource = mock(DataSource::class.java)
+    fun `명령과 사진 검색이 켜졌을 때__조립하면__각 리포지토리가 이름 붙은 리더 또는 기록 단위에 머문다`() {
+        // given
+        val reader: DataSource = mockk<DataSource>()
+        val writer: DataSource = mockk<DataSource>()
         val units = AtomicReference<List<EntityManagerFactory>>()
+
+        excludeRecords { reader.hashCode() }
+        excludeRecords { writer.hashCode() }
+
+        // when
         readerInputs(reader).withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(writer) })
             .withPropertyValues(
@@ -135,6 +154,7 @@ class AnimalLostSearchConfigurationTest {
                 "pawbridge.animal-commands.enabled=true",
                 "lost-search.python-url=https://fixture.example.invalid",
             ).run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                 units.set(context.getBeansOfType(EntityManagerFactory::class.java).values.toList())
                 assertThat(units.get()).hasSize(2)
@@ -155,17 +175,25 @@ class AnimalLostSearchConfigurationTest {
                 assertThat(
                     context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java).dataSource,
                 ).isSameAs(writer)
-                verifyNoInteractions(reader, writer)
+                confirmVerified(reader, writer)
             }
         assertThat(units.get()).allSatisfy { factory -> assertThat(factory.isOpen).isFalse() }
     }
 
     @Test
-    fun given__feature_enabled_without_a_python_url__when__assembling__then__fail_instead_of_selecting_an_external_fallback() {
-        val reader: DataSource = mock(DataSource::class.java)
-        readerInputs(reader).withPropertyValues("pawbridge.animal-lost-search.enabled=true").run { context ->
+    fun `기능은 켰지만 파이썬 URL이 없을 때__조립하면__외부 대체 경로를 고르지 않고 실패한다`() {
+        // given
+        val reader: DataSource = mockk<DataSource>()
+
+        excludeRecords { reader.hashCode() }
+
+        val runner = readerInputs(reader).withPropertyValues("pawbridge.animal-lost-search.enabled=true")
+
+        // when
+        runner.run { context ->
+            // then
             assertThat(context).hasFailed()
-            verifyNoInteractions(reader)
+            confirmVerified(reader)
         }
     }
 
@@ -218,18 +246,20 @@ class AnimalLostSearchDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var service: LostSearchService
 
     @Test
-    fun given__default_off__when__verified_user_uploads__then__deny_before_search() {
+    fun `기본 꺼짐일 때__검증된 사용자가 업로드하면__검색 전에 거부한다`() {
+        // given, when
         mvc.perform(
             multipart("/api/v1/animals/lost-candidates")
                 .file(MockMultipartFile("image", byteArrayOf(1)))
                 .param("species", "DOG")
                 .header("Authorization", LostSearchTestSecurity.token()),
         ).andExpect(status().isForbidden())
-        verifyNoInteractions(service)
+        // then
+        confirmVerified(service)
     }
 }
 
@@ -244,18 +274,20 @@ class AnimalLostSearchAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var service: LostSearchService
 
     @Test
-    fun given__alias_on__when__verified_user_uploads__then__keep_owner_closed() {
+    fun `별칭 on이 켜졌을 때__검증된 사용자가 업로드하면__소유 경로를 닫아 둔다`() {
+        // given, when
         mvc.perform(
             multipart("/api/v1/animals/lost-candidates")
                 .file(MockMultipartFile("image", byteArrayOf(1)))
                 .param("species", "DOG")
                 .header("Authorization", LostSearchTestSecurity.token()),
         ).andExpect(status().isForbidden())
-        verifyNoInteractions(service)
+        // then
+        confirmVerified(service)
     }
 }
 
@@ -270,11 +302,12 @@ class AnimalLostSearchNeighborHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var service: LostSearchService
 
     @Test
-    fun given__only_public_photo_post_enabled__when__using_get_or_deeper_post__then__deny_both_neighbors() {
+    fun `공개 사진 게시만 켰을 때__GET이나 더 깊은 POST를 쓰면__두 이웃 경로를 모두 거부한다`() {
+        // given, when
         mvc.perform(get("/api/v1/animals/lost-candidates").header("Authorization", LostSearchTestSecurity.token()))
             .andExpect(status().isForbidden())
         mvc.perform(
@@ -283,6 +316,7 @@ class AnimalLostSearchNeighborHttpTest {
                 .param("species", "DOG")
                 .header("Authorization", LostSearchTestSecurity.token()),
         ).andExpect(status().isForbidden())
-        verifyNoInteractions(service)
+        // then
+        confirmVerified(service)
     }
 }

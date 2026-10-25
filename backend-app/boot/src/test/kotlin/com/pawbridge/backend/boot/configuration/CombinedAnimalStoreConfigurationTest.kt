@@ -6,12 +6,13 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.service.Anim
 import com.pawbridge.backend.animal.internal.lostsearch.infrastructure.LostSearchService
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.directorder.infrastructure.JpaDirectOrders
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -27,10 +28,17 @@ import javax.sql.DataSource
 
 class CombinedAnimalStoreConfigurationTest {
     @Test
-    fun given__animal_commands_orders_and_photo_search_enabled__when__assembling__then__separate_reader_units_share_writer_inputs_and_close_all_factories() {
-        val writer: DataSource = mock(DataSource::class.java)
-        val reader: DataSource = mock(DataSource::class.java)
+    fun `동물 명령과 주문과 사진 검색이 켜졌을 때__조립하면__읽기 단위는 분리되고 쓰기 입력은 공유하며 모든 팩토리를 닫는다`() {
+        // given
+        val writer: DataSource = mockk<DataSource>()
+        val reader: DataSource = mockk<DataSource>()
+        val objectMapper = mockk<ObjectMapper>()
         val units = AtomicReference<List<EntityManagerFactory>>()
+
+        excludeRecords { writer.hashCode() }
+        excludeRecords { reader.hashCode() }
+
+        // when
         ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))
             .withUserConfiguration(
@@ -41,7 +49,7 @@ class CombinedAnimalStoreConfigurationTest {
             .withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(writer) })
             .withBean("dataSource", DataSource::class.java, Supplier { reader })
-            .withBean(ObjectMapper::class.java, Supplier { mock(ObjectMapper::class.java) })
+            .withBean(ObjectMapper::class.java, Supplier { objectMapper })
             .withPropertyValues(
                 "pawbridge.animal-commands.enabled=true",
                 "pawbridge.store-direct-orders.enabled=true",
@@ -50,6 +58,7 @@ class CombinedAnimalStoreConfigurationTest {
                 "python-ai-service.internal-api-key=combined-public-synthetic-key",
             )
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(JpaAuditingConfiguration::class.java)
                     .hasSingleBean(AuditingHandler::class.java)
@@ -95,10 +104,10 @@ class CombinedAnimalStoreConfigurationTest {
                 for (repository in listOf("writerOrders", "readerOrders")) {
                     assertThat(repositoryEntityManager(ReflectionTestUtils.getField(orders, repository)!!)).isSameAs(shared)
                 }
-                verifyNoInteractions(writer, reader)
+                confirmVerified(writer, reader)
             }
         assertThat(units.get()).hasSize(3).allSatisfy { factory -> assertThat(factory.isOpen).isFalse() }
-        verifyNoInteractions(writer, reader)
+        confirmVerified(writer, reader)
     }
 
     private fun repositoryEntityManager(repository: Any): EntityManager {

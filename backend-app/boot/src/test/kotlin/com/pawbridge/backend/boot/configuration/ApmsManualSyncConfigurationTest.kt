@@ -3,10 +3,9 @@ package com.pawbridge.backend.boot.configuration
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsBatchRunner
 import com.pawbridge.backend.animal.internal.apms.web.ApmsBatchController
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
 import org.springframework.batch.core.Job
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
@@ -26,8 +25,13 @@ class ApmsManualSyncConfigurationTest {
         )
 
     @Test
-    fun givenManualFlagOnly__whenComposed__thenControllerUsesSharedRunnerWithoutSchedule() {
-        provider.withPropertyValues("pawbridge.apms-manual.enabled=true").run { application ->
+    fun `수동 플래그만 켰을 때__조립하면__스케줄 없이 컨트롤러가 공유 러너를 쓴다`() {
+        // given
+        val runner = provider.withPropertyValues("pawbridge.apms-manual.enabled=true")
+
+        // when
+        runner.run { application ->
+            // then
             assertThat(application).hasNotFailed()
                 .hasSingleBean(ApmsBatchController::class.java)
                 .hasSingleBean(ApmsBatchRunner::class.java)
@@ -35,13 +39,18 @@ class ApmsManualSyncConfigurationTest {
                 .doesNotHaveBean(ApmsCollectionSchedule::class.java)
             assertThat(ReflectionTestUtils.getField(application.getBean(ApmsBatchController::class.java), "apmsBatchRunner"))
                 .isSameAs(application.getBean(ApmsBatchRunner::class.java))
-            verify(application.getBean(HikariDataSource::class.java), never()).getConnection()
+            verify(exactly = 0) { application.getBean(HikariDataSource::class.java).connection }
         }
     }
 
     @Test
-    fun givenScheduleFlagOnly__whenComposed__thenExistingScheduleStaysWithoutManualController() {
-        provider.withPropertyValues("apms.batch.schedule-enabled=true").run { application ->
+    fun `스케줄 플래그만 켰을 때__조립하면__수동 컨트롤러 없이 기존 스케줄이 유지된다`() {
+        // given
+        val runner = provider.withPropertyValues("apms.batch.schedule-enabled=true")
+
+        // when
+        runner.run { application ->
+            // then
             assertThat(application).hasNotFailed()
                 .hasSingleBean(ApmsCollectionSchedule::class.java)
                 .doesNotHaveBean(ApmsBatchController::class.java)
@@ -49,9 +58,14 @@ class ApmsManualSyncConfigurationTest {
     }
 
     @Test
-    fun givenBothFlags__whenComposed__thenBothEntryPointsShareOneRunner() {
-        provider.withPropertyValues("apms.batch.schedule-enabled=true", "pawbridge.apms-manual.enabled=TRUE")
+    fun `두 플래그를 모두 켰을 때__조립하면__두 진입점이 러너 하나를 공유한다`() {
+        // given
+        val runner = provider.withPropertyValues("apms.batch.schedule-enabled=true", "pawbridge.apms-manual.enabled=TRUE")
+
+        // when
+        runner
             .run { application ->
+                // then
                 assertThat(application).hasNotFailed()
                     .hasSingleBean(ApmsBatchRunner::class.java)
                     .hasSingleBean(ApmsCollectionSchedule::class.java)
@@ -60,10 +74,15 @@ class ApmsManualSyncConfigurationTest {
     }
 
     @Test
-    fun givenManualFlagOffOrAlias__whenContextStarts__thenNoApmsDependenciesAreRequired() {
+    fun `수동 플래그가 꺼졌거나 별칭일 때__컨텍스트가 시작되면__APMS 의존 빈이 필요하지 않다`() {
         for (value in arrayOf("false", "on", "yes")) {
-            context.withPropertyValues("pawbridge.apms-manual.enabled=$value", "apms.api.base-url=invalid")
+            // given
+            val runner = context.withPropertyValues("pawbridge.apms-manual.enabled=$value", "apms.api.base-url=invalid")
+
+            // when
+            runner
                 .run { application ->
+                    // then
                     assertThat(application).hasNotFailed()
                         .doesNotHaveBean(ApmsBatchController::class.java)
                         .doesNotHaveBean(ApmsBatchRunner::class.java)
@@ -74,10 +93,15 @@ class ApmsManualSyncConfigurationTest {
     }
 
     @Test
-    fun givenManualFlagWithoutProviderSettings__whenComposed__thenFailLikeTheSchedule() {
-        context.withUserConfiguration(AnimalApmsCollectionConfigurationTest.WriterFixture::class.java)
+    fun `제공자 설정 없이 수동 플래그를 켰을 때__조립하면__스케줄처럼 실패한다`() {
+        // given
+        val runner = context.withUserConfiguration(AnimalApmsCollectionConfigurationTest.WriterFixture::class.java)
             .withPropertyValues("pawbridge.apms-manual.enabled=true", "apms.api.base-url=https://provider.example.test")
+
+        // when
+        runner
             .run { application ->
+                // then
                 assertThat(application.startupFailure).hasRootCauseMessage("APMS service key is required")
             }
     }
