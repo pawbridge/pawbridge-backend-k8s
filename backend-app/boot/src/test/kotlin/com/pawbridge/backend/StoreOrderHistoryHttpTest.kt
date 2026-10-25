@@ -1,23 +1,22 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.store.api.StoreMemberReads
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.directorder.web.OrderReadController
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -37,23 +36,33 @@ class StoreOrderHistoryHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var orders: DirectOrders
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN"])
-    fun given__direct_only_and_verified_member__when__listing_then_reading_detail__then__use_principal_and_preserve_snapshot_wire(
+    fun `직접 주문만 켜졌고 검증된 회원일 때__목록과 상세를 읽으면__주체를 쓰고 스냅샷 응답을 보존한다`(
         role: String,
     ) {
-        whenever(orders.list(7L, null, defaultRequest())).thenReturn(page())
-        whenever(orders.get(7L, 77L)).thenReturn(snapshot())
-        mvc.perform(
-            get("/api/v1/orders")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
-                .header("X-User-Id", "99")
-                .header("X-User-Role", "ROLE_ADMIN")
-                .param("userId", "99"),
-        )
+        // given
+        val listRequest = get("/api/v1/orders")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
+            .header("X-User-Id", "99")
+            .header("X-User-Role", "ROLE_ADMIN")
+            .param("userId", "99")
+        val detailRequest = get("/api/v1/orders/77")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
+            .header("X-User-Id", "99")
+
+        every { orders.list(any(), any(), any()) } returns page()
+        every { orders.get(any(), any()) } returns snapshot()
+
+        // when
+        val listResult = mvc.perform(listRequest)
+        val detailResult = mvc.perform(detailRequest)
+
+        // then
+        listResult
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.data").doesNotExist())
@@ -65,24 +74,21 @@ class StoreOrderHistoryHttpTest {
             .andExpect(jsonPath("$.content[0].receiverName").value("snapshot receiver"))
             .andExpect(jsonPath("$.content[0].items[0].productName").value("purchased item"))
             .andExpect(jsonPath("$.content[0].items[0].price").value(2600))
-        mvc.perform(
-            get("/api/v1/orders/77")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
-                .header("X-User-Id", "99"),
-        )
+        detailResult
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.orderId").value(77))
             .andExpect(jsonPath("$.items[0].price").value(2600))
-        verify(orders).list(7L, null, defaultRequest())
-        verify(orders).get(7L, 77L)
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.list(7L, null, defaultRequest()) }
+        verify(exactly = 1) { orders.get(7L, 77L) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "invalid"])
-    fun given__direct_only_without_valid_jwt__when__forging_owner_on_history__then__reject_before_application(
+    fun `직접 주문만 켜졌고 유효한 JWT가 없을 때__내역에서 소유자를 위조하면__애플리케이션 전에 거부한다`(
         kind: String,
     ) {
+        // given
         val call = get("/api/v1/orders")
             .header("X-User-Id", "99")
             .header("X-User-Role", "ROLE_ADMIN")
@@ -90,22 +96,31 @@ class StoreOrderHistoryHttpTest {
         if (kind == "invalid") {
             call.header("Authorization", "Bearer invalid-token")
         }
-        mvc.perform(call).andExpect(status().isUnauthorized())
-        verifyNoInteractions(orders)
+
+        // when
+        val result = mvc.perform(call)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @CsvSource("GET,/api/orders", "GET,/api/v1/orders/77/extra", "GET,/api/v1/orders/77/payment", "PATCH,/api/v1/orders")
-    fun given__direct_only_and_verified_member__when__using_history_neighbors__then__deny_before_application(
+    fun `직접 주문만 켜졌고 검증된 회원일 때__내역의 이웃 경로를 쓰면__애플리케이션 전에 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(
-            request(HttpMethod.valueOf(method), path)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(orders)
+        // given
+        val request = request(HttpMethod.valueOf(method), path)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(orders)
     }
 
     companion object {
@@ -137,24 +152,29 @@ class StoreOrderHistoryCartOnlyHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var orders: DirectOrders
 
     @Test
-    fun given__cart_only_and_verified_member__when__listing_history__then__allow_the_shared_read_with_verified_identity() {
-        whenever(orders.list(7L, "PENDING", StoreOrderHistoryHttpTest.defaultRequest()))
-            .thenReturn(StoreOrderHistoryHttpTest.page())
-        mvc.perform(
-            get("/api/v1/orders")
-                .param("status", "PENDING")
-                .param("userId", "99")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Id", "99"),
-        )
+    fun `장바구니만 켜졌고 검증된 회원일 때__내역을 조회하면__검증된 신원으로 공유 읽기를 허용한다`() {
+        // given
+        val request = get("/api/v1/orders")
+            .param("status", "PENDING")
+            .param("userId", "99")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Id", "99")
+
+        every { orders.list(any(), any(), any()) } returns StoreOrderHistoryHttpTest.page()
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content[0].status").value("PENDING"))
-        verify(orders).list(7L, "PENDING", StoreOrderHistoryHttpTest.defaultRequest())
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.list(7L, "PENDING", StoreOrderHistoryHttpTest.defaultRequest()) }
+        confirmVerified(orders)
     }
 }
 
@@ -169,17 +189,24 @@ class StoreOrderHistoryBothEnabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var orders: DirectOrders
 
     @Test
-    fun given__both_owner_flags_explicitly_true__when__listing_history__then__invoke_the_same_read_once() {
-        whenever(orders.list(7L, null, StoreOrderHistoryHttpTest.defaultRequest()))
-            .thenReturn(StoreOrderHistoryHttpTest.page())
-        mvc.perform(get("/api/v1/orders").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+    fun `두 소유자 플래그가 모두 true일 때__내역을 조회하면__같은 읽기를 한 번 호출한다`() {
+        // given
+        val request = get("/api/v1/orders").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        every { orders.list(any(), any(), any()) } returns StoreOrderHistoryHttpTest.page()
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content[0].orderId").value(77))
-        verify(orders).list(7L, null, StoreOrderHistoryHttpTest.defaultRequest())
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.list(7L, null, StoreOrderHistoryHttpTest.defaultRequest()) }
+        confirmVerified(orders)
     }
 }

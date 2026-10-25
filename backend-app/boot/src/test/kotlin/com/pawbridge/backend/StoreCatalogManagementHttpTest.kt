@@ -1,5 +1,6 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.store.internal.catalog.application.CatalogSearchUnavailableException
 import com.pawbridge.backend.store.internal.catalog.application.StoreCatalog
@@ -24,8 +25,10 @@ import com.pawbridge.backend.store.internal.catalogwrite.web.ProductImageControl
 import com.pawbridge.backend.store.internal.catalogwrite.web.ProductResponse
 import com.pawbridge.backend.store.internal.catalogwrite.web.ProductUpdateRequest
 import com.pawbridge.backend.store.internal.catalogwrite.web.ProductWriteController
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.argThatValue
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -33,12 +36,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -47,7 +44,6 @@ import org.springframework.http.MediaType
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -86,123 +82,166 @@ class StoreCatalogManagementHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var products: JpaCatalogProducts
 
-    @MockitoBean
+    @MockkBean
     lateinit var options: JpaCatalogOptions
 
-    @MockitoBean
+    @MockkBean
     lateinit var images: S3ProductImages
 
-    @MockitoBean
+    @MockkBean
     lateinit var catalog: StoreCatalog
 
-    @MockitoBean
+    @MockkBean
     lateinit var categories: JpaCatalogCategories
 
     @AfterEach
-    fun given__request_finished__when__security_scope_checked__then__retain_no_principal() {
+    fun `요청이 끝났을 때__보안 범위를 확인하면__주체를 남기지 않는다`() {
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("writes")
-    fun given__enabled_management_and_signed_admin__when__using_each_canonical_write__then__reach_only_its_original_handler(
+    fun `관리가 켜졌고 서명된 관리자일 때__정식 쓰기를 각각 쓰면__원래 핸들러에만 도달한다`(
         route: Route,
     ) {
-        stubWriteResponses(products, options, images, categories)
-        val result = mvc.perform(
-            command(route)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-                .header("X-User-Id", "99")
-                .header("X-User-Role", "ROLE_USER"),
-        )
+        // given
+        val request = command(route)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+            .header("X-User-Id", "99")
+            .header("X-User-Role", "ROLE_USER")
+
+        every { products.createProduct(any()) } returns
+            ProductResponse.builder().id(8L).name("food").status("ACTIVE").skus(listOf()).build()
+        every { products.updateProduct(any(), any()) } returns
+            ProductResponse.builder().id(8L).name("patched").status("HIDDEN").skus(listOf()).build()
+        justRun { products.deleteProduct(any()) }
+        val group = OptionGroupResponse.builder().id(2L).name("size").values(listOf()).build()
+        every { options.createOptionGroup(any()) } returns group
+        every { options.updateOptionGroup(any(), any()) } returns group
+        justRun { options.deleteOptionGroup(any()) }
+        val value = OptionValueResponse.builder().id(3L).name("small").groupId(2L).groupName("size").build()
+        every { options.addOptionValue(any(), any()) } returns value
+        every { options.updateOptionValue(any(), any()) } returns value
+        justRun { options.deleteOptionValue(any()) }
+        every { images.uploadImage(any()) } returns "https://fixture.invalid/products/upload.png"
+        every { categories.createCategory(any()) } returns
+            CategoryResponse.builder().id(4L).name("food").parentId(1L).children(listOf()).build()
+        every { categories.updateCategory(any(), any()) } returns
+            CategoryResponse.builder().id(4L).name("dry").parentId(1L).children(listOf()).build()
+        justRun { categories.deleteCategory(any()) }
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().`is`(route.status))
             .andExpect(header().doesNotExist("Set-Cookie"))
         when (route.method + " " + route.path) {
             "POST /api/v1/products" -> {
                 result.andExpect(jsonPath("$.id").value(8)).andExpect(jsonPath("$.status").value("ACTIVE"))
-                verify(products).createProduct(argThatValue<ProductCreateRequest> { body -> "food" == body.name })
+                verify(exactly = 1) { products.createProduct(match<ProductCreateRequest> { body -> "food" == body.name }) }
             }
             "PATCH /api/v1/products/8" -> {
                 result.andExpect(jsonPath("$.name").value("patched"))
-                verify(products).updateProduct(
-                    eq(8L),
-                    argThatValue<ProductUpdateRequest> { body -> "patched" == body.name },
-                )
+                verify(exactly = 1) {
+                    products.updateProduct(8L, match<ProductUpdateRequest> { body -> "patched" == body.name })
+                }
             }
             "DELETE /api/v1/products/8" -> {
                 result.andExpect(content().string(""))
-                verify(products).deleteProduct(8L)
+                verify(exactly = 1) { products.deleteProduct(8L) }
             }
             "POST /api/v1/option-groups" -> {
                 result.andExpect(jsonPath("$.id").value(2))
-                verify(options).createOptionGroup(
-                    argThatValue<OptionGroupRequest> { body -> "size" == body.name && body.values == listOf("small") },
-                )
+                verify(exactly = 1) {
+                    options.createOptionGroup(
+                        match<OptionGroupRequest> { body -> "size" == body.name && body.values == listOf("small") },
+                    )
+                }
             }
             "PUT /api/v1/option-groups/2" -> {
                 result.andExpect(jsonPath("$.name").value("size"))
-                verify(options).updateOptionGroup(eq(2L), argThatValue<OptionGroupRequest> { body -> "size" == body.name })
+                verify(exactly = 1) {
+                    options.updateOptionGroup(2L, match<OptionGroupRequest> { body -> "size" == body.name })
+                }
             }
-            "DELETE /api/v1/option-groups/2" -> verify(options).deleteOptionGroup(2L)
+            "DELETE /api/v1/option-groups/2" -> verify(exactly = 1) { options.deleteOptionGroup(2L) }
             "POST /api/v1/option-groups/2/values" -> {
                 result.andExpect(jsonPath("$.groupId").value(2))
-                verify(options).addOptionValue(eq(2L), argThatValue<OptionValueRequest> { body -> "small" == body.name })
+                verify(exactly = 1) {
+                    options.addOptionValue(2L, match<OptionValueRequest> { body -> "small" == body.name })
+                }
             }
             "PUT /api/v1/option-groups/values/3" -> {
                 result.andExpect(jsonPath("$.id").value(3))
-                verify(options).updateOptionValue(eq(3L), argThatValue<OptionValueRequest> { body -> "small" == body.name })
+                verify(exactly = 1) {
+                    options.updateOptionValue(3L, match<OptionValueRequest> { body -> "small" == body.name })
+                }
             }
-            "DELETE /api/v1/option-groups/values/3" -> verify(options).deleteOptionValue(3L)
+            "DELETE /api/v1/option-groups/values/3" -> verify(exactly = 1) { options.deleteOptionValue(3L) }
             "POST /api/v1/categories" -> {
                 result.andExpect(jsonPath("$.id").value(4)).andExpect(jsonPath("$.children").isArray())
-                verify(categories).createCategory(
-                    argThatValue<CategoryCreateRequest> { body -> "food" == body.name && 1L == body.parentId },
-                )
+                verify(exactly = 1) {
+                    categories.createCategory(
+                        match<CategoryCreateRequest> { body -> "food" == body.name && 1L == body.parentId },
+                    )
+                }
             }
             "PUT /api/v1/categories/4" -> {
                 result.andExpect(jsonPath("$.name").value("dry"))
-                verify(categories).updateCategory(
-                    eq(4L),
-                    argThatValue<CategoryUpdateRequest> { body -> "dry" == body.name && body.parentId == null },
-                )
+                verify(exactly = 1) {
+                    categories.updateCategory(
+                        4L,
+                        match<CategoryUpdateRequest> { body -> "dry" == body.name && body.parentId == null },
+                    )
+                }
             }
             "DELETE /api/v1/categories/4" -> {
                 result.andExpect(content().string(""))
-                verify(categories).deleteCategory(4L)
+                verify(exactly = 1) { categories.deleteCategory(4L) }
             }
             "POST /api/v1/images" -> {
                 result.andExpect(jsonPath("$.imageUrl").value("https://fixture.invalid/products/upload.png"))
-                verify(images).uploadImage(
-                    argThatValue<org.springframework.web.multipart.MultipartFile> { file ->
-                        "photo.png" == file.originalFilename && file.size == 3L
-                    },
-                )
+                verify(exactly = 1) {
+                    images.uploadImage(
+                        match<org.springframework.web.multipart.MultipartFile> { file ->
+                            "photo.png" == file.originalFilename && file.size == 3L
+                        },
+                    )
+                }
             }
             else -> throw AssertionError("Unknown catalog write contract")
         }
         assertThat(result.andReturn().request.getSession(false)).isNull()
-        verifyNoMoreInteractions(products, options, images, catalog, categories)
+        confirmVerified(products, options, images, catalog, categories)
     }
 
     @ParameterizedTest
     @MethodSource("deniedCredentials")
-    fun given__user_or_missing_invalid_jwt_with_forged_admin_headers__when__using_each_write__then__deny_before_store_business(
+    fun `사용자 또는 무효 JWT와 위조 관리자 헤더일 때__각 쓰기를 호출하면__스토어 비즈니스 전에 거부한다`(
         route: Route,
         credentials: String,
     ) {
+        // given
         val call = command(route).header("X-User-Id", "99").header("X-User-Role", "ROLE_ADMIN")
         if (credentials == "ROLE_USER") {
             call.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
         } else if (credentials == "invalid") {
             call.header("Authorization", "Bearer invalid-token")
         }
-        mvc.perform(call)
+
+        // when
+        val result = mvc.perform(call)
+
+        // then
+        result
             .andExpect(status().`is`(if (credentials == "ROLE_USER") 403 else 401))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verifyNoInteractions(products, options, images, catalog, categories)
+        confirmVerified(products, options, images, catalog, categories)
     }
 
     @ParameterizedTest
@@ -217,49 +256,68 @@ class StoreCatalogManagementHttpTest {
         "PATCH,/api/v1/categories/4", "POST,/api/v1/categories/4", "PUT,/api/v1/categories", "DELETE,/api/v1/categories",
         "POST,/api/v1/categories/4/extra",
     )
-    fun given__signed_admin__when__using_gateway_alias_or_unowned_method_neighbor__then__retain_default_deny(
+    fun `서명된 관리자일 때__게이트웨이 별칭이나 소유하지 않은 메서드 이웃을 쓰면__기본 거부를 유지한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(
-            request(HttpMethod.valueOf(method), path)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{}")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(products, options, images, catalog, categories)
+        // given
+        val request = request(HttpMethod.valueOf(method), path)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{}")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(products, options, images, catalog, categories)
     }
 
     @ParameterizedTest
     @MethodSource("reads")
-    fun given__management_enabled_but_public_catalog_disabled__when__admin_reads_catalog__then__do_not_widen_public_get_scope(
+    fun `관리는 켜졌지만 공개 카탈로그가 꺼졌을 때__관리자가 카탈로그를 읽으면__공개 GET 범위를 넓히지 않는다`(
         path: String,
     ) {
-        mvc.perform(get(path).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(products, options, images, catalog, categories)
+        // given
+        val request = get(path).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(products, options, images, catalog, categories)
     }
 
     @Test
-    fun given__authorized_business_refusal__when__advice_handles_it__then__preserve_original_store_errors_outside_authentication() {
-        whenever(products.createProduct(anyNonNull<ProductCreateRequest>()))
-            .thenThrow(IllegalArgumentException("synthetic input refusal"))
-        mvc.perform(command(WRITES.first()).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+    fun `승인된 비즈니스 거절이 있을 때__조언이 처리하면__인증 밖에서 기존 스토어 오류를 보존한다`() {
+        // given
+        val adminToken = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
+
+        every { products.createProduct(any()) } throws IllegalArgumentException("synthetic input refusal")
+        every { products.deleteProduct(any()) } throws IllegalStateException("synthetic cart refusal")
+        every { categories.deleteCategory(any()) } throws IllegalStateException("synthetic child refusal")
+
+        // when
+        val created = mvc.perform(command(WRITES.first()).header("Authorization", adminToken))
+        val deleted = mvc.perform(command(WRITES[2]).header("Authorization", adminToken))
+        val categoryDeleted = mvc.perform(command(WRITES.last()).header("Authorization", adminToken))
+
+        // then
+        created
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("C001"))
-        doThrow(IllegalStateException("synthetic cart refusal")).`when`(products).deleteProduct(8L)
-        mvc.perform(command(WRITES[2]).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+        deleted
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.code").value("C004"))
-        doThrow(IllegalStateException("synthetic child refusal")).`when`(categories).deleteCategory(4L)
-        mvc.perform(command(WRITES.last()).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+        categoryDeleted
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.code").value("C004"))
-        verify(products).createProduct(anyNonNull<ProductCreateRequest>())
-        verify(products).deleteProduct(8L)
-        verify(categories).deleteCategory(4L)
-        verifyNoMoreInteractions(products, options, images, catalog, categories)
+        verify(exactly = 1) { products.createProduct(any()) }
+        verify(exactly = 1) { products.deleteProduct(8L) }
+        verify(exactly = 1) { categories.deleteCategory(4L) }
+        confirmVerified(products, options, images, catalog, categories)
     }
 
     companion object {
@@ -307,33 +365,6 @@ class StoreCatalogManagementHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(route.body)
         }
-
-        fun stubWriteResponses(
-            products: JpaCatalogProducts,
-            options: JpaCatalogOptions,
-            images: S3ProductImages,
-            categories: JpaCatalogCategories,
-        ) {
-            whenever(products.createProduct(anyNonNull<ProductCreateRequest>())).thenReturn(
-                ProductResponse.builder().id(8L).name("food").status("ACTIVE").skus(listOf()).build(),
-            )
-            whenever(products.updateProduct(eq(8L), anyNonNull<ProductUpdateRequest>())).thenReturn(
-                ProductResponse.builder().id(8L).name("patched").status("HIDDEN").skus(listOf()).build(),
-            )
-            val group = OptionGroupResponse.builder().id(2L).name("size").values(listOf()).build()
-            whenever(options.createOptionGroup(anyNonNull<OptionGroupRequest>())).thenReturn(group)
-            whenever(options.updateOptionGroup(eq(2L), anyNonNull<OptionGroupRequest>())).thenReturn(group)
-            val value = OptionValueResponse.builder().id(3L).name("small").groupId(2L).groupName("size").build()
-            whenever(options.addOptionValue(eq(2L), anyNonNull<OptionValueRequest>())).thenReturn(value)
-            whenever(options.updateOptionValue(eq(3L), anyNonNull<OptionValueRequest>())).thenReturn(value)
-            whenever(images.uploadImage(anyNonNull<org.springframework.web.multipart.MultipartFile>()))
-                .thenReturn("https://fixture.invalid/products/upload.png")
-            val category = CategoryResponse.builder().id(4L).name("dry").parentId(1L).children(listOf()).build()
-            whenever(categories.createCategory(anyNonNull<CategoryCreateRequest>())).thenReturn(
-                CategoryResponse.builder().id(4L).name("food").parentId(1L).children(listOf()).build(),
-            )
-            whenever(categories.updateCategory(eq(4L), anyNonNull<CategoryUpdateRequest>())).thenReturn(category)
-        }
     }
 }
 
@@ -355,32 +386,36 @@ class StoreCatalogManagementDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var products: JpaCatalogProducts
 
-    @MockitoBean
+    @MockkBean
     lateinit var options: JpaCatalogOptions
 
-    @MockitoBean
+    @MockkBean
     lateinit var images: S3ProductImages
 
-    @MockitoBean
+    @MockkBean
     lateinit var catalog: StoreCatalog
 
-    @MockitoBean
+    @MockkBean
     lateinit var categories: JpaCatalogCategories
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
-    fun given__management_default_off__when__signed_admin_uses_each_canonical_write__then__deny_before_business(
+    fun `관리가 기본 꺼짐일 때__서명된 관리자가 정식 쓰기를 각각 쓰면__비즈니스 전에 거부한다`(
         route: StoreCatalogManagementHttpTest.Route,
     ) {
-        mvc.perform(
-            StoreCatalogManagementHttpTest.command(route)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(products, options, images, catalog, categories)
+        // given
+        val request = StoreCatalogManagementHttpTest.command(route)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(products, options, images, catalog, categories)
     }
 }
 
@@ -405,32 +440,36 @@ class StoreCatalogManagementAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var products: JpaCatalogProducts
 
-    @MockitoBean
+    @MockkBean
     lateinit var options: JpaCatalogOptions
 
-    @MockitoBean
+    @MockkBean
     lateinit var images: S3ProductImages
 
-    @MockitoBean
+    @MockkBean
     lateinit var catalog: StoreCatalog
 
-    @MockitoBean
+    @MockkBean
     lateinit var categories: JpaCatalogCategories
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
-    fun given__boolean_alias_instead_of_literal_true__when__admin_uses_each_write__then__keep_management_closed(
+    fun `리터럴 true 대신 불리언 별칭일 때__관리자가 각 쓰기를 쓰면__관리를 닫은 채 유지한다`(
         route: StoreCatalogManagementHttpTest.Route,
     ) {
-        mvc.perform(
-            StoreCatalogManagementHttpTest.command(route)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(products, options, images, catalog, categories)
+        // given
+        val request = StoreCatalogManagementHttpTest.command(route)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(products, options, images, catalog, categories)
     }
 }
 
@@ -455,72 +494,91 @@ class StoreCatalogManagementReadOnlyHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var products: JpaCatalogProducts
 
-    @MockitoBean
+    @MockkBean
     lateinit var options: JpaCatalogOptions
 
-    @MockitoBean
+    @MockkBean
     lateinit var images: S3ProductImages
 
-    @MockitoBean
+    @MockkBean
     lateinit var catalog: StoreCatalog
 
-    @MockitoBean
+    @MockkBean
     lateinit var categories: JpaCatalogCategories
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
-    fun given__only_public_catalog_enabled__when__admin_attempts_each_management_write__then__deny_before_business(
+    fun `공개 카탈로그만 켜졌을 때__관리자가 각 관리 쓰기를 시도하면__비즈니스 전에 거부한다`(
         route: StoreCatalogManagementHttpTest.Route,
     ) {
-        mvc.perform(
-            StoreCatalogManagementHttpTest.command(route)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(products, options, images, catalog, categories)
+        // given
+        val request = StoreCatalogManagementHttpTest.command(route)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(products, options, images, catalog, categories)
     }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#reads")
-    fun given__public_catalog_without_management__when__anonymous_reads_with_unrelated_bad_bearer__then__keep_public_get_and_existing_read_advice(
+    fun `관리 없이 공개 카탈로그만 켜졌을 때__무관한 잘못된 베어러로 읽으면__공개 GET과 기존 읽기 조언을 유지한다`(
         path: String,
     ) {
-        whenever(catalog.search(anyNonNull<StoreCatalog.Search>()))
-            .thenReturn(StoreCatalog.SearchResult(listOf(), 0L, 0, 0, false))
-        whenever(catalog.product(8)).thenReturn(
-            StoreCatalog.Product(8L, "food", null, null, "ACTIVE", null, null, 0L, null, null, listOf()),
-        )
-        whenever(catalog.categories()).thenReturn(listOf())
-        whenever(catalog.optionGroups()).thenReturn(listOf())
-        whenever(catalog.optionGroup(2)).thenReturn(StoreCatalog.OptionGroup(2L, "size", mutableListOf()))
-        mvc.perform(get(path).header("Authorization", "Bearer unrelated-invalid-token").header("X-User-Role", "ROLE_ADMIN"))
+        // given
+        val request = get(path)
+            .header("Authorization", "Bearer unrelated-invalid-token")
+            .header("X-User-Role", "ROLE_ADMIN")
+
+        every { catalog.search(any()) } returns StoreCatalog.SearchResult(listOf(), 0L, 0, 0, false)
+        every { catalog.product(any()) } returns
+            StoreCatalog.Product(8L, "food", null, null, "ACTIVE", null, null, 0L, null, null, listOf())
+        every { catalog.categories() } returns listOf()
+        every { catalog.optionGroups() } returns listOf()
+        every { catalog.optionGroup(any()) } returns StoreCatalog.OptionGroup(2L, "size", mutableListOf())
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
         when (path) {
-            "/api/v1/products" -> verify(catalog)
-                .search(StoreCatalog.Search(null, null, null, null, false, null, "desc", 0, 20))
-            "/api/v1/products/8" -> verify(catalog).product(8)
-            "/api/v1/categories" -> verify(catalog).categories()
-            "/api/v1/option-groups" -> verify(catalog).optionGroups()
-            "/api/v1/option-groups/2" -> verify(catalog).optionGroup(2)
+            "/api/v1/products" -> verify(exactly = 1) {
+                catalog.search(StoreCatalog.Search(null, null, null, null, false, null, "desc", 0, 20))
+            }
+            "/api/v1/products/8" -> verify(exactly = 1) { catalog.product(8) }
+            "/api/v1/categories" -> verify(exactly = 1) { catalog.categories() }
+            "/api/v1/option-groups" -> verify(exactly = 1) { catalog.optionGroups() }
+            "/api/v1/option-groups/2" -> verify(exactly = 1) { catalog.optionGroup(2) }
             else -> throw AssertionError("Unknown catalog read contract")
         }
-        verifyNoMoreInteractions(catalog)
-        verifyNoInteractions(products, options, images, categories)
+        confirmVerified(catalog)
+        confirmVerified(products, options, images, categories)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__catalog_search_unavailable__when__public_get_fails__then__use_read_advice_without_management_error_capture() {
-        whenever(catalog.search(anyNonNull<StoreCatalog.Search>())).thenThrow(CatalogSearchUnavailableException())
-        mvc.perform(get("/api/v1/products"))
+    fun `카탈로그 검색을 쓸 수 없을 때__공개 GET이 실패하면__관리 오류 캡처 없이 읽기 조언을 쓴다`() {
+        // given
+        every { catalog.search(any()) } throws CatalogSearchUnavailableException()
+
+        // when
+        val result = mvc.perform(get("/api/v1/products"))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.code").value("P006"))
-        verify(catalog).search(anyNonNull<StoreCatalog.Search>())
-        verifyNoMoreInteractions(catalog)
-        verifyNoInteractions(products, options, images, categories)
+        verify(exactly = 1) { catalog.search(any()) }
+        confirmVerified(catalog)
+        confirmVerified(products, options, images, categories)
     }
 }

@@ -2,6 +2,7 @@ package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.ListNoteBlocks
 import com.pawbridge.backend.community.internal.note.application.ListPrivateNotes
@@ -28,18 +29,16 @@ import com.pawbridge.backend.user.api.ContactMembersQuery
 import com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -48,7 +47,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -98,43 +96,41 @@ class PrivateNoteListHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var batches: ContactMembersQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var notes: PrivateNoteListReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var blocks: NoteBlockReader
 
-    @MockitoBean(name = "readClock")
+    @MockkBean(name = "readClock")
     lateinit var clock: Clock
 
-    @MockitoBean
+    @MockkBean
     lateinit var details: PrivateNoteReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var notifications: NoteNotificationReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var blockLists: NoteBlockListReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var counts: TotalUserCountQuery
 
     @ParameterizedTest
     @ValueSource(strings = ["INBOX", "SENT"])
-    fun given__default_inbox_or_explicit_sent_favorites_and_spoofed_identity__when__listing__then__preserve_exact_five_and_ten_fields_with_raw_values(
+    fun `받은쪽지함 또는 보낸쪽지함과 위조 헤더__목록을 조회하면__원문 그대로 다섯과 열 필드를 돌려준다`(
         box: String,
     ) {
+        // given
         val sent = box == "SENT"
         val page = if (sent) 1 else 0
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notes.count(7, box, sent, NOW)).thenReturn(11L)
         val first = row(
             FIRST,
             if (sent) 7L else Long.MAX_VALUE,
@@ -147,11 +143,6 @@ class PrivateNoteListHttpTest {
         )
         val second = row(SECOND, Long.MAX_VALUE, 7L, "INBOX", CREATED.plusNanos(1000), false, "REPORT", 8L)
         val third = row(THIRD, null, 7L, "INBOX", null, false, null, null)
-        whenever(notes.read(7, box, sent, page, NOW)).thenReturn(if (sent) listOf(first) else listOf(first, second, third))
-        whenever(batches.getAll(listOf(Long.MAX_VALUE))).thenReturn(listOf(ContactMember(Long.MAX_VALUE, "  ", true, false)))
-        if (!sent) {
-            whenever(blocks.blocked(7, Long.MAX_VALUE)).thenReturn(false, true)
-        }
         val request = authenticated(PATH)
             .header("X-User-Id", "999")
             .header("X-User-Role", "ROLE_ADMIN")
@@ -169,60 +160,83 @@ class PrivateNoteListHttpTest {
             content.add(view(third, null, "탈퇴한 회원", false, null))
         }
 
+        every { members.get(any()) } returns active(7)
+        every { clock.instant() } returns NOW
+        every { notes.count(any(), any(), any(), any()) } returns 11L
+        every { notes.read(any(), any(), any(), any(), any()) } returns
+            (if (sent) listOf(first) else listOf(first, second, third))
+        every { batches.getAll(any()) } returns listOf(ContactMember(Long.MAX_VALUE, "  ", true, false))
+        if (!sent) {
+            every { blocks.blocked(any(), any()) } returnsMany listOf(false, true)
+        }
+
+        // when
         val response = mvc.perform(request)
+
+        // then
+        val body = response
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(expected.toString(), JsonCompareMode.STRICT))
             .andReturn().response
-        val data = mapper.readTree(response.contentAsString).path("data")
+        val data = mapper.readTree(body.contentAsString).path("data")
         assertThat(data.size()).isEqualTo(5)
         for (note in data.path("content")) {
             assertThat(note.size()).isEqualTo(10)
         }
         assertThat(data.path("content").get(0).path("counterpartId").isIntegralNumber()).isTrue()
         assertThat(data.path("content").get(0).path("counterpartId").longValue()).isEqualTo(Long.MAX_VALUE)
-        val order = inOrder(members, clock, notes, batches, blocks)
-        order.verify(members).get(7)
-        order.verify(clock).instant()
-        order.verify(notes).count(7, box, sent, NOW)
-        order.verify(notes).read(7, box, sent, page, NOW)
-        order.verify(batches).getAll(listOf(Long.MAX_VALUE))
-        if (!sent) {
-            order.verify(blocks, times(2)).blocked(7, Long.MAX_VALUE)
+        verifySequence {
+            members.get(7)
+            clock.instant()
+            notes.count(7, box, sent, NOW)
+            notes.read(7, box, sent, page, NOW)
+            batches.getAll(listOf(Long.MAX_VALUE))
+            if (!sent) {
+                blocks.blocked(7, Long.MAX_VALUE)
+                blocks.blocked(7, Long.MAX_VALUE)
+            }
         }
-        verifyNoMoreInteractions(members, clock, notes, batches, blocks)
-        verifyNoInteractions(details, notifications, blockLists, counts)
+        confirmVerified(members, clock, notes, batches, blocks)
+        confirmVerified(details, notifications, blockLists, counts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__zero_count_and_maximum_requested_page__when__listing__then__still_read_and_return_empty_page_without_batch_or_block() {
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notes.count(7, "INBOX", false, NOW)).thenReturn(0L)
-        whenever(notes.read(7, "INBOX", false, 10000, NOW)).thenReturn(listOf())
+    fun `건수가 0이고 최대 페이지를 요청했을 때__목록을 조회하면__일괄 조회와 차단 확인 없이 빈 페이지를 준다`() {
+        // given
+        every { members.get(any()) } returns active(7)
+        every { clock.instant() } returns NOW
+        every { notes.count(any(), any(), any(), any()) } returns 0L
+        every { notes.read(any(), any(), any(), any(), any()) } returns listOf()
 
-        mvc.perform(authenticated(PATH).param("page", "10000"))
+        // when
+        val result = mvc.perform(authenticated(PATH).param("page", "10000"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(page(0, 0, 10000).toString(), JsonCompareMode.STRICT))
-        val order = inOrder(members, clock, notes)
-        order.verify(members).get(7)
-        order.verify(clock).instant()
-        order.verify(notes).count(7, "INBOX", false, NOW)
-        order.verify(notes).read(7, "INBOX", false, 10000, NOW)
-        verifyNoMoreInteractions(members, clock, notes)
-        verifyNoInteractions(batches, blocks, details, notifications, blockLists, counts)
+        verifySequence {
+            members.get(7)
+            clock.instant()
+            notes.count(7, "INBOX", false, NOW)
+            notes.read(7, "INBOX", false, 10000, NOW)
+        }
+        confirmVerified(members, clock, notes)
+        confirmVerified(batches, blocks, details, notifications, blockLists, counts)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_invalid_jwt_with_invalid_queries__when__listing__then__authenticate_before_binding_business_and_all_dependencies(
+    fun `토큰이 없거나 잘못되고 질의도 틀렸을 때__목록을 조회하면__바인딩 전에 401로 거부하고 의존성을 부르지 않는다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = get(PATH)
             .param("favorites", "not-a-boolean")
             .param("page", "-1")
@@ -231,7 +245,12 @@ class PrivateNoteListHttpTest {
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -247,12 +266,19 @@ class PrivateNoteListHttpTest {
 
     @ParameterizedTest
     @MethodSource("businessRejections")
-    fun given__invalid_page_and_box__when__validating__then__page_precedes_box_and_both_precede_member_clock_or_sql(
+    fun `페이지와 쪽지함이 모두 틀렸을 때__목록을 조회하면__페이지를 먼저 검사하고 의존성을 부르지 않는다`(
         page: String,
         box: String,
         message: String,
     ) {
-        mvc.perform(authenticated(PATH).param("page", page).param("box", box))
+        // given
+        val request = authenticated(PATH).param("page", page).param("box", box)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -262,11 +288,18 @@ class PrivateNoteListHttpTest {
 
     @ParameterizedTest
     @MethodSource("conversionRejections")
-    fun given__unconvertible_favorites_or_page_with_invalid_business_queries__when__binding__then__return_conversion_400_before_application_validation(
+    fun `변환할 수 없는 즐겨찾기나 페이지가 주어졌을 때__목록을 조회하면__검증 전에 변환 400을 돌려준다`(
         favorites: String,
         page: String,
     ) {
-        mvc.perform(authenticated(PATH).param("favorites", favorites).param("page", page).param("box", "WRONG"))
+        // given
+        val request = authenticated(PATH).param("favorites", favorites).param("page", page).param("box", "WRONG")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -275,85 +308,98 @@ class PrivateNoteListHttpTest {
     }
 
     @Test
-    fun given__pending_current_member_with_valid_queries__when__listing__then__reject_before_clock_count_list_batch_or_block() {
-        whenever(members.get(7)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, true))
-        mvc.perform(authenticated(PATH))
+    fun `현재 회원이 탈퇴 대기 상태일 때__목록을 조회하면__시계와 조회 없이 403으로 거부한다`() {
+        // given
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, true)
+
+        // when
+        val result = mvc.perform(authenticated(PATH))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"이용할 수 없는 회원입니다.\"}", JsonCompareMode.STRICT))
-        verify(members).get(7)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(clock, notes, batches, blocks, details, notifications, blockLists, counts)
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(members)
+        confirmVerified(clock, notes, batches, blocks, details, notifications, blockLists, counts)
     }
 
     @ParameterizedTest
     @MethodSource("dependencyFailures")
-    fun given__member_clock_count_list_batch_or_block_failure__when__listing__then__preserve_source_specific_503_and_stop_later_dependencies(
+    fun `회원 시계 건수 목록 일괄 조회 또는 차단 확인이 실패했을 때__목록을 조회하면__원인별 503을 주고 이후 호출을 멈춘다`(
         phase: String,
         failure: RuntimeException,
         message: String,
     ) {
+        // given
         if (phase == "CURRENT") {
-            whenever(members.get(7)).thenThrow(failure)
+            every { members.get(any()) } throws failure
         } else {
-            whenever(members.get(7)).thenReturn(active(7))
+            every { members.get(any()) } returns active(7)
             if (phase == "CLOCK") {
-                whenever(clock.instant()).thenThrow(failure)
+                every { clock.instant() } throws failure
             } else {
-                whenever(clock.instant()).thenReturn(NOW)
+                every { clock.instant() } returns NOW
                 if (phase == "COUNT") {
-                    whenever(notes.count(7, "INBOX", false, NOW)).thenThrow(failure)
+                    every { notes.count(any(), any(), any(), any()) } throws failure
                 } else {
-                    whenever(notes.count(7, "INBOX", false, NOW)).thenReturn(1L)
+                    every { notes.count(any(), any(), any(), any()) } returns 1L
                     if (phase == "BATCH" || phase == "BLOCK") {
-                        whenever(notes.read(7, "INBOX", false, 0, NOW))
-                            .thenReturn(listOf(row(FIRST, 8L, 7L, "INBOX", null, false, null, null)))
+                        every { notes.read(any(), any(), any(), any(), any()) } returns
+                            listOf(row(FIRST, 8L, 7L, "INBOX", null, false, null, null))
                         if (phase == "BATCH") {
-                            whenever(batches.getAll(listOf(8L))).thenThrow(failure)
+                            every { batches.getAll(any()) } throws failure
                         } else {
-                            whenever(batches.getAll(listOf(8L))).thenReturn(listOf(active(8)))
-                            whenever(blocks.blocked(7, 8)).thenThrow(failure)
+                            every { batches.getAll(any()) } returns listOf(active(8))
+                            every { blocks.blocked(any(), any()) } throws failure
                         }
                     } else {
-                        whenever(notes.read(7, "INBOX", false, 0, NOW)).thenThrow(failure)
+                        every { notes.read(any(), any(), any(), any(), any()) } throws failure
                     }
                 }
             }
         }
 
-        mvc.perform(authenticated(PATH))
+        // when
+        val result = mvc.perform(authenticated(PATH))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to message)), JsonCompareMode.STRICT))
-        val order = inOrder(members, clock, notes, batches, blocks)
-        order.verify(members).get(7)
-        if (phase != "CURRENT") {
-            order.verify(clock).instant()
+        verifySequence {
+            members.get(7)
+            if (phase != "CURRENT") {
+                clock.instant()
+            }
+            if (phase != "CURRENT" && phase != "CLOCK") {
+                notes.count(7, "INBOX", false, NOW)
+            }
+            if (!listOf("CURRENT", "CLOCK", "COUNT").contains(phase)) {
+                notes.read(7, "INBOX", false, 0, NOW)
+            }
+            if (phase == "BATCH" || phase == "BLOCK") {
+                batches.getAll(listOf(8L))
+            }
+            if (phase == "BLOCK") {
+                blocks.blocked(7, 8)
+            }
         }
-        if (phase != "CURRENT" && phase != "CLOCK") {
-            order.verify(notes).count(7, "INBOX", false, NOW)
-        }
-        if (!listOf("CURRENT", "CLOCK", "COUNT").contains(phase)) {
-            order.verify(notes).read(7, "INBOX", false, 0, NOW)
-        }
-        if (phase == "BATCH" || phase == "BLOCK") {
-            order.verify(batches).getAll(listOf(8L))
-        }
-        if (phase == "BLOCK") {
-            order.verify(blocks).blocked(7, 8)
-        }
-        verifyNoMoreInteractions(members, clock, notes, batches, blocks)
-        verifyNoInteractions(details, notifications, blockLists, counts)
+        confirmVerified(members, clock, notes, batches, blocks)
+        confirmVerified(details, notifications, blockLists, counts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID", "VALID"])
-    fun given__stream_extension_with_no_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_list_or_sse_work(
+    fun `스트림 확장 경로에 토큰이 없거나 잘못되거나 유효할 때__요청하면__목록과 SSE 작업 없이 기본 403을 유지한다`(
         token: String,
     ) {
+        // given
         val request = get("$PATH/stream/extra").accept(MediaType.TEXT_EVENT_STREAM)
         if (token != "MISSING") {
             request.header(
@@ -361,7 +407,12 @@ class PrivateNoteListHttpTest {
                 if (token == "INVALID") "Bearer invalid" else "Bearer " + F3TestInputs.token(7, "ROLE_USER"),
             )
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -372,13 +423,21 @@ class PrivateNoteListHttpTest {
     }
 
     @Test
-    fun given__existing_static_and_detail_routes__when__reading__then__keep_their_success_error_and_scoped_advice_outside_list() {
-        whenever(members.get(7)).thenReturn(active(7))
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notifications.read(7, null, NOW)).thenReturn(listOf())
-        whenever(notifications.unread(7, NOW)).thenReturn(0L)
-        whenever(details.find(7, FIRST, NOW)).thenReturn(Optional.empty())
-        mvc.perform(authenticated("$PATH/notifications"))
+    fun `기존 알림 상세 차단 목록 경로가 있을 때__각각 읽으면__목록 밖에서 성공과 오류와 범위 한정 조언을 유지한다`() {
+        // given
+        every { members.get(any()) } returns active(7)
+        every { clock.instant() } returns NOW
+        every { notifications.read(any(), any(), any()) } returns listOf()
+        every { notifications.unread(any(), any()) } returns 0L
+        every { details.find(any(), any(), any()) } returns Optional.empty()
+
+        // when
+        val notificationResult = mvc.perform(authenticated("$PATH/notifications"))
+        val detailResult = mvc.perform(authenticated("$PATH/$FIRST"))
+        val blockResult = mvc.perform(authenticated("$PATH/blocks").param("page", "-1"))
+
+        // then
+        notificationResult
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -388,23 +447,23 @@ class PrivateNoteListHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        mvc.perform(authenticated("$PATH/$FIRST"))
+        detailResult
             .andExpect(status().isNotFound())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"쪽지를 찾을 수 없습니다.\"}", JsonCompareMode.STRICT))
-        mvc.perform(authenticated("$PATH/blocks").param("page", "-1"))
+        blockResult
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"페이지 범위를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        verify(members, times(2)).get(7)
-        verify(clock, times(2)).instant()
-        verify(notifications).read(7, null, NOW)
-        verify(notifications).unread(7, NOW)
-        verify(details).find(7, FIRST, NOW)
-        verifyNoMoreInteractions(members, clock, notifications, details)
-        verifyNoInteractions(notes, batches, blocks, blockLists, counts)
+        verify(exactly = 2) { members.get(7) }
+        verify(exactly = 2) { clock.instant() }
+        verify(exactly = 1) { notifications.read(7, null, NOW) }
+        verify(exactly = 1) { notifications.unread(7, NOW) }
+        verify(exactly = 1) { details.find(7, FIRST, NOW) }
+        confirmVerified(members, clock, notifications, details)
+        confirmVerified(notes, batches, blocks, blockLists, counts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -415,14 +474,19 @@ class PrivateNoteListHttpTest {
             "GET /api/v1/notes/",
         ],
     )
-    fun given__unexposed_root_alias_trailing_slash_or_method__when__requesting__then__deny_without_list_or_writer_work(
+    fun `노출되지 않은 루트 별칭 끝 슬래시 또는 메서드일 때__요청하면__목록과 쓰기 작업 없이 거부한다`(
         wire: String,
     ) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
+        val request = request(HttpMethod.valueOf(parts[0]), parts[1])
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -430,26 +494,33 @@ class PrivateNoteListHttpTest {
     }
 
     @Test
-    fun given__existing_admin_count_permission_and_runtime_error__when__requesting__then__keep_admin_403_and_common_500_outside_list_advice() {
-        whenever(counts.count()).thenThrow(IllegalStateException("synthetic-admin-count"))
-        mvc.perform(authenticated("/api/v1/admin/users/stats/total-users"))
+    fun `관리자 건수 경로에 일반 권한과 런타임 오류가 있을 때__요청하면__목록 조언 밖에서 403과 공통 500을 유지한다`() {
+        // given
+        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
+
+        // when
+        val forbidden = mvc.perform(authenticated("/api/v1/admin/users/stats/total-users"))
+        val failed = mvc.perform(
+            get("/api/v1/admin/users/stats/total-users")
+                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
+        )
+
+        // then
+        forbidden
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
+        failed
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(counts).count()
-        verifyNoMoreInteractions(counts)
-        verifyNoInteractions(members, batches, clock, notes, blocks, details, notifications, blockLists)
+        verify(exactly = 1) { counts.count() }
+        confirmVerified(counts)
+        confirmVerified(members, batches, clock, notes, blocks, details, notifications, blockLists)
     }
 
     private fun page(total: Long, pages: Int, number: Int): ObjectNode {
@@ -484,7 +555,7 @@ class PrivateNoteListHttpTest {
     }
 
     private fun noDependencies() {
-        verifyNoInteractions(members, batches, notes, blocks, clock, details, notifications, blockLists, counts)
+        confirmVerified(members, batches, notes, blocks, clock, details, notifications, blockLists, counts)
     }
 
     companion object {

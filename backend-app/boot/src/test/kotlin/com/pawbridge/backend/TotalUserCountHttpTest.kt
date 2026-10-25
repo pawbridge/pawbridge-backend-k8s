@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.NoteBlockReader
 import com.pawbridge.backend.community.internal.note.application.ReadNoteRecipient
@@ -15,17 +16,16 @@ import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -34,7 +34,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -70,37 +69,42 @@ class TotalUserCountHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var counts: TotalUserCountQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var blocks: NoteBlockReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(longs = [0, Long.MAX_VALUE])
-    fun given__verified_admin_without_member_state_lookup__when__counting__then__return_the_exact_envelope_and_raw_long(
+    fun `검증된 관리자이고 회원 상태 조회가 없을 때__집계하면__정확한 봉투와 원시 long을 돌려준다`(
         count: Long,
     ) {
-        whenever(counts.count()).thenReturn(count)
+        // given
+        val request = countWithRole("ROLE_ADMIN")
+            .header("X-User-Id", "0")
+            .header("X-User-Role", "ROLE_USER")
+            .param("userId", "0")
+            .param("role", "ROLE_USER")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"userId\":0,\"role\":\"ROLE_USER\"}")
 
-        val response = mvc.perform(
-            countWithRole("ROLE_ADMIN")
-                .header("X-User-Id", "0")
-                .header("X-User-Role", "ROLE_USER")
-                .param("userId", "0")
-                .param("role", "ROLE_USER")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"userId\":0,\"role\":\"ROLE_USER\"}"),
-        )
+        every { counts.count() } returns count
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        val response = result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -111,53 +115,61 @@ class TotalUserCountHttpTest {
                 ),
             )
             .andReturn().response
-
         val rawCount = mapper.readTree(response.contentAsString).path("data")
         assertThat(rawCount.isIntegralNumber).isTrue()
         assertThat(rawCount.longValue()).isEqualTo(count)
-        verify(counts).count()
-        verifyNoMoreInteractions(counts)
-        verifyNoInteractions(members, blocks, readPost, listPosts)
+        verify(exactly = 1) { counts.count() }
+        confirmVerified(counts)
+        confirmVerified(members, blocks, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_SHELTER", "", " ", "ROLE_UNKNOWN", "ROLE_ADMIN "])
-    fun given__nonadmin_signed_role_and_spoofed_admin_identity__when__counting__then__return_only_this_routes_admin_403_before_queries(
+    fun `관리자가 아닌 서명 역할과 위조 관리자 신원일 때__집계하면__질의 전에 이 경로의 관리자 403만 돌려준다`(
         role: String,
     ) {
-        mvc.perform(
-            countWithRole(role)
-                .header("X-User-Id", "1")
-                .header("X-User-Role", "ROLE_ADMIN")
-                .param("userId", "1")
-                .param("role", "ROLE_ADMIN")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"userId\":1,\"role\":\"ROLE_ADMIN\"}"),
-        )
+        // given
+        val request = countWithRole(role)
+            .header("X-User-Id", "1")
+            .header("X-User-Role", "ROLE_ADMIN")
+            .param("userId", "1")
+            .param("role", "ROLE_ADMIN")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"userId\":1,\"role\":\"ROLE_ADMIN\"}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-
-        verifyNoInteractions(counts, members, blocks, readPost, listPosts)
+        confirmVerified(counts, members, blocks, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_invalid_bearer_with_spoofed_admin_header__when__counting__then__return_original_401_before_queries(
+    fun `토큰이 없거나 잘못되고 위조 관리자 헤더가 있을 때__집계하면__질의 전에 기존 401을 돌려준다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = get(PATH).header("X-User-Id", "1").header("X-User-Role", "ROLE_ADMIN")
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -167,27 +179,30 @@ class TotalUserCountHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verifyNoInteractions(counts, members, blocks, readPost, listPosts)
+        confirmVerified(counts, members, blocks, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("countFailures")
-    fun given__count_dependency_failure_after_admin_authorization__when__counting__then__return_common_safe_500_without_reclassifying_authentication(
+    fun `관리자 인가 뒤 집계 의존성이 실패했을 때__집계하면__인증을 재분류하지 않고 안전한 공통 500을 돌려준다`(
         failure: RuntimeException,
     ) {
-        whenever(counts.count()).thenThrow(failure)
+        // given
+        every { counts.count() } throws failure
 
-        mvc.perform(countWithRole("ROLE_ADMIN"))
+        // when
+        val result = mvc.perform(countWithRole("ROLE_ADMIN"))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-
-        verify(counts).count()
-        verifyNoMoreInteractions(counts)
-        verifyNoInteractions(members, blocks, readPost, listPosts)
+        verify(exactly = 1) { counts.count() }
+        confirmVerified(counts)
+        confirmVerified(members, blocks, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -206,59 +221,75 @@ class TotalUserCountHttpTest {
             "DELETE /api/v1/admin/users/8/extra",
         ],
     )
-    fun given__unexposed_admin_neighbor_or_method__when__requesting_with_a_valid_admin_token__then__retain_generic_403_before_queries(
+    fun `노출되지 않은 관리자 이웃 경로나 메서드일 때__유효한 관리자 토큰으로 요청하면__질의 전에 일반 403을 유지한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
+        val builder = request(HttpMethod.valueOf(parts[0]), parts[1])
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
 
-        mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
+        // when
+        val result = mvc.perform(builder)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-
-        verifyNoInteractions(counts, members, blocks, readPost, listPosts)
+        confirmVerified(counts, members, blocks, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_ADMIN", "", " ", "ROLE_UNKNOWN"])
-    fun given__admin_blank_or_unknown_role_on_existing_notes__when__reading_recipient__then__retain_long_principal_and_existing_authenticated_policy(
+    fun `기존 쪽지 경로에 관리자와 빈 또는 알 수 없는 역할이 있을 때__수신자를 읽으면__long 주체와 기존 인증 정책을 유지한다`(
         role: String,
     ) {
-        whenever(members.get(7)).thenReturn(ContactMember(7L, "본인", true, false))
-        whenever(members.get(8)).thenReturn(ContactMember(8L, "상대", true, false))
+        // given
+        val request = get("/api/v1/notes/recipients/8")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
 
-        mvc.perform(get("/api/v1/notes/recipients/8").header("Authorization", "Bearer " + F3TestInputs.token(7, role)))
+        every { members.get(7) } returns ContactMember(7L, "본인", true, false)
+        every { members.get(8) } returns ContactMember(8L, "상대", true, false)
+        every { blocks.blocked(any(), any()) } returns false
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7)
-        order.verify(blocks).blocked(7, 8)
-        order.verify(members).get(8)
-        verifyNoMoreInteractions(members, blocks)
-        verifyNoInteractions(counts, readPost, listPosts)
+        verifySequence {
+            members.get(7)
+            blocks.blocked(7, 8)
+            members.get(8)
+        }
+        confirmVerified(members, blocks)
+        confirmVerified(counts, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__public_post_read_with_bad_bearer__when__its_own_failure_occurs__then__retain_public_access_and_its_scoped_500() {
-        whenever(readPost.read(42)).thenThrow(IllegalStateException("synthetic-private-post"))
+    fun `잘못된 베어러로 공개 게시글을 읽을 때__자체 실패가 나면__공개 접근과 범위 한정 500을 유지한다`() {
+        // given
+        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
 
-        mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-
-        verify(readPost).read(42)
-        verifyNoMoreInteractions(readPost)
-        verifyNoInteractions(counts, members, blocks, listPosts)
+        verify(exactly = 1) { readPost.read(42) }
+        confirmVerified(readPost)
+        confirmVerified(counts, members, blocks, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
