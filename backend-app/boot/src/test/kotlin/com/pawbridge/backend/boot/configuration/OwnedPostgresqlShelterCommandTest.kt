@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.animal.internal.sheltercommand.application.ShelterCommands
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
-import com.pawbridge.backend.support.TestFaker
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembershipRejectedException
 import com.zaxxer.hikari.HikariConfig
@@ -69,6 +68,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Properties
 import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -496,7 +496,7 @@ class OwnedPostgresqlShelterCommandTest {
         http { mvc, _ ->
             val created = create(mvc)
             val before = fingerprint()
-            val nonce = TestFaker.uuid().toString().replace("-", "")
+            val nonce = UUID.randomUUID().toString().replace("-", "")
             val marker = "OWNED-P15-PRIVATE-" + nonce
             val address = "p15-private-address-" + nonce
             val email = "p15-private-" + nonce + "@invalid.example"
@@ -589,7 +589,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     private fun newOwnedCare(): String {
-        val care = "p15-" + TestFaker.uuid().toString().replace("-", "")
+        val care = "p15-" + UUID.randomUUID().toString().replace("-", "")
         check(
             !creations.containsKey(care) &&
                 jdbc.queryForObject(

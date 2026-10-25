@@ -6,7 +6,6 @@ import com.pawbridge.backend.animal.api.AnimalCommandActors
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandService
 import com.pawbridge.backend.animal.internal.discovery.infrastructure.KoreanSearchAnalyzer
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
-import com.pawbridge.backend.support.TestFaker
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.jsonwebtoken.Jwts
@@ -64,6 +63,7 @@ import java.util.Date
 import java.util.LinkedHashSet
 import java.util.Properties
 import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -738,7 +738,7 @@ class OwnedPostgresqlAnimalCommandTest {
         val body = LinkedHashMap<String, Any?>()
         // Create DTO/mapper expose specialMark but not the entity's unique apmsDesertionNo.
         // This UUID key is observed by exact equality; database uniqueness is not assumed.
-        val key = "OWNED-P8-" + TestFaker.uuid()
+        val key = "OWNED-P8-" + UUID.randomUUID()
         ownedKeys.add(key)
         body["specialMark"] = key
         body["careRegNo"] = care

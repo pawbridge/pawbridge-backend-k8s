@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
-import com.pawbridge.backend.support.TestFaker
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.jsonwebtoken.Jwts
@@ -537,7 +536,7 @@ class OwnedPostgresqlStoreCartOrderTest {
     }
 
     private fun body(user: Long, sku: Long, quantity: Int): OwnedBody {
-        val owner = Ownership(user, sku, "OWNED-P12-" + TestFaker.uuid())
+        val owner = Ownership(user, sku, "OWNED-P12-" + UUID.randomUUID())
         requests.add(owner)
         val value = LinkedHashMap<String, Any?>()
         value["receiverName"] = "synthetic receiver"

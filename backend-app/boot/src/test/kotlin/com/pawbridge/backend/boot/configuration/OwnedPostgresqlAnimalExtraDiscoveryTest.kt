@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
-import com.pawbridge.backend.support.TestFaker
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.jsonwebtoken.security.Keys
@@ -63,6 +62,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.Properties
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.Supplier
@@ -199,10 +199,10 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
             )
             check(shelterName != null, "Only the existing P10 shelter may be referenced")
             original = baseline(false)
-            val start = 8_000_000_000L + Math.floorMod(TestFaker.uuid().mostSignificantBits, 100_000_000L) * 10
+            val start = 8_000_000_000L + Math.floorMod(UUID.randomUUID().mostSignificantBits, 100_000_000L) * 10
             val selected = ArrayList<Seed>()
             for (index in 0 until 6) {
-                val nonce = TestFaker.uuid().toString().replace("-", "")
+                val nonce = UUID.randomUUID().toString().replace("-", "")
                 val id = start + (if (index == 0) 2 else if (index == 1) 1 else index + 1)
                 selected.add(Seed(id, "EXTRA-" + nonce, "OWNED-EXTRA-" + nonce, PREFIX + nonce, index))
             }
@@ -278,7 +278,7 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
                 )
                 get(
                     mvc,
-                    "/api/v1/animals/apms/MISSING-" + TestFaker.uuid().toString().replace("-", ""),
+                    "/api/v1/animals/apms/MISSING-" + UUID.randomUUID().toString().replace("-", ""),
                     emptyMap(),
                     404,
                     1,

@@ -8,7 +8,6 @@ import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.Pe
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.PostgresqlTravelCollectionCatalog
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.TourApiClient
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.TourApiProperties
-import com.pawbridge.backend.support.TestFaker
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.mockk.Called
@@ -65,6 +64,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.util.Properties
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -535,7 +535,7 @@ class OwnedPostgresqlTravelCollectionTest {
                     reader.places(AREA, 0).totalElements == 1L,
                 "Quota must preserve the previously published detail and inventory",
             )
-            val orphan = TestFaker.uuid().toString()
+            val orphan = UUID.randomUUID().toString()
             catalog.startRun(orphan, clock.instant())
             val runs = count("pet_travel_collection_runs")
             expect(
@@ -583,7 +583,7 @@ class OwnedPostgresqlTravelCollectionTest {
     private fun run(client: TourApiClient, properties: TourApiProperties): JobExecution {
         return launcher.run(
             configuration.petTravelCollectionJob(repository, manager, collector(client, properties)),
-            JobParametersBuilder().addString("requestId", TestFaker.uuid().toString()).toJobParameters(),
+            JobParametersBuilder().addString("requestId", UUID.randomUUID().toString()).toJobParameters(),
         )
     }
 

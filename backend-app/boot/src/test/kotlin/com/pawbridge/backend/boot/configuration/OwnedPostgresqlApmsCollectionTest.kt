@@ -17,7 +17,6 @@ import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsRootRes
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Animal
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter
-import com.pawbridge.backend.support.TestFaker
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import jakarta.persistence.EntityManager
@@ -83,6 +82,7 @@ import java.time.ZoneId
 import java.util.HexFormat
 import java.util.Locale
 import java.util.Properties
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -476,7 +476,7 @@ class OwnedPostgresqlApmsCollectionTest {
         contract("recent and stale metadata") {
             val execution = repository.createJobExecution(
                 JOB,
-                JobParametersBuilder().addString("ownedRecovery", TestFaker.uuid().toString()).toJobParameters(),
+                JobParametersBuilder().addString("ownedRecovery", UUID.randomUUID().toString()).toJobParameters(),
             )
             execution.status = BatchStatus.STARTED
             repository.update(execution)
