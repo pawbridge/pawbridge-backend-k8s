@@ -34,7 +34,7 @@ class JdbcPrivateNoteListReaderTest {
 
     @ParameterizedTest
     @MethodSource("queryInputs")
-    fun `상자와 즐겨찾기와 쪽 번호와 null 가능한 열 개짜리 행이 있을 때__개수를 센 뒤 목록을 읽으면__같은 시각과 long 오프셋을 별도의 읽기 전용 트랜잭션으로 바인딩한다`(
+    fun `상자와 즐겨찾기와 null 가능한 열 개짜리 행이 있을 때__개수를 센 뒤 목록을 읽으면__같은 시각과 long 오프셋을 별도 읽기 전용 트랜잭션으로 바인딩한다`(
         box: String,
         favorites: Boolean,
         page: Int,

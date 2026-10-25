@@ -154,7 +154,7 @@ class ListPrivateNotesTest {
     }
 
     @Test
-    fun `개수 0 뒤에 중복과 null과 없음과 탈퇴 대기와 원문 이름이 섞인 쪽지가 주어졌을 때__목록을 읽으면__일괄 조회는 한 번 하고 활성 받은 쪽지마다 내용 순서대로 쌍 캐시 없이 차단을 확인한다`() {
+    fun `개수 0 뒤에 중복과 없음과 탈퇴 대기 쪽지가 섞여 있을 때__목록을 읽으면__일괄 조회는 한 번 하고 쪽지마다 순서대로 캐시 없이 차단을 확인한다`() {
         // given
         val first = StoredNote(
             UUID(23L, 1L), 8L, 7L, " 원문\n본문 ", "POST", Long.MAX_VALUE,
@@ -272,7 +272,7 @@ class ListPrivateNotesTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun `호출자 시각 개수 목록 일괄 조회 또는 첫 차단이나 뒤쪽 차단 확인이 실패할 때__목록을 읽으면__같은 실패를 전파하고 이후 단계를 멈추며 부분 쪽을 돌려주지 않는다`(
+    fun `조회나 차단 확인이 실패할 때__목록을 읽으면__같은 실패를 전파하고 이후 단계를 멈추며 부분 쪽을 돌려주지 않는다`(
         phase: FailurePhase,
     ) {
         // given

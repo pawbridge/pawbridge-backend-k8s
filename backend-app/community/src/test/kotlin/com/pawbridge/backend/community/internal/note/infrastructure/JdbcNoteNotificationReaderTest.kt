@@ -34,7 +34,7 @@ class JdbcNoteNotificationReaderTest {
 
     @ParameterizedTest
     @MethodSource("cursors")
-    fun `선택적 커서와 null 가능한 네 열짜리 행이 있을 때__목록을 읽은 뒤 안 읽은 수를 세면__소유자 범위 커서와 같은 시각을 별도의 읽기 전용 트랜잭션으로 바인딩한다`(
+    fun `선택적 커서와 null 가능한 행이 있을 때__목록을 읽은 뒤 안 읽은 수를 세면__소유자 범위 커서와 같은 시각을 별도 읽기 전용 트랜잭션으로 바인딩한다`(
         cursor: UUID?,
     ) {
         // given

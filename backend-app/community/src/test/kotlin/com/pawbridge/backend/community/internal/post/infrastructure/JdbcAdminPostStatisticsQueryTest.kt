@@ -43,7 +43,7 @@ import java.util.stream.Stream
 class JdbcAdminPostStatisticsQueryTest {
 
     @Test
-    fun `날짜가 듬성한 일별 행과 정렬되지 않은 게시판 행이 있을 때__기간을 읽으면__하나의 반복 읽기 트랜잭션 안에서 채우거나 정렬하지 않고 전날 개수를 분리한다`() {
+    fun `듬성한 일별 행과 정렬되지 않은 게시판 행이 있을 때__기간을 읽으면__하나의 반복 읽기 트랜잭션에서 채우거나 정렬하지 않고 전날 개수를 분리한다`() {
         // given
         val fixture = Fixture()
         fixture.jdbc.results.add(
