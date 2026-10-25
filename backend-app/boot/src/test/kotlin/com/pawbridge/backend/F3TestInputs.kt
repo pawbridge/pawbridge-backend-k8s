@@ -15,7 +15,7 @@ object F3TestInputs {
     val KEY: SecretKey = Keys.hmacShaKeyFor(JWT_SECRET.toByteArray(Charsets.UTF_8))
 
     @JvmStatic
-    fun values(): Map<String, String> {
+    fun values(): MutableMap<String, String> {
         val values = HashMap<String, String>()
         values["PAWBRIDGE_DB_URL"] = "jdbc:postgresql://127.0.0.1:5432/pawbridge_f2_ci"
         values["PAWBRIDGE_DB_USER"] = "fixture-reader"
