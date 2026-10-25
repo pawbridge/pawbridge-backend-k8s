@@ -69,19 +69,21 @@ class JdbcAnimalMemberReads : AnimalMemberReads {
         }
     }
 
-    override fun byShelter(shelterId: Long?, request: PageRequest): Page {
+    override fun byShelter(shelterId: Long?, request: PageRequest?): Page {
         try {
             return reads.execute {
-                if (request.page() < 0 || request.size() < 1) {
+                // A null request throws NPE inside the transaction callback, so it is wrapped like in Java.
+                val checked = request!!
+                if (checked.page() < 0 || checked.size() < 1) {
                     throw IllegalArgumentException("Invalid effective pageable")
                 }
-                val offset = request.page().toLong() * request.size()
+                val offset = checked.page().toLong() * checked.size()
                 if (offset > Integer.MAX_VALUE) {
                     throw IllegalArgumentException("Page offset exceeds Integer.MAX_VALUE (2147483647)")
                 }
-                val sorting = sorting(request.sort())
+                val sorting = sorting(checked.sort())
                 val parameters = MapSqlParameterSource("shelterId", shelterId)
-                    .addValue("limit", request.size()).addValue("offset", offset)
+                    .addValue("limit", checked.size()).addValue("offset", offset)
                 var content: List<Animal> = jdbc.query(
                     "SELECT " + COLUMNS + FROM + sorting.joins +
                         " WHERE a.shelter_id=:shelterId AND a.api_source='MANUAL'" + sorting.orderBy +
@@ -97,7 +99,7 @@ class JdbcAnimalMemberReads : AnimalMemberReads {
                 }
                 var total: Long
                 // PageableExecutionUtils skips count on a partial nonempty page, or any partial first page.
-                if (content.size < request.size() && (request.page() == 0 || content.isNotEmpty())) {
+                if (content.size < checked.size() && (checked.page() == 0 || content.isNotEmpty())) {
                     total = offset + content.size
                 } else {
                     total = jdbc.queryForObject(
@@ -108,11 +110,11 @@ class JdbcAnimalMemberReads : AnimalMemberReads {
                     )!!
                 }
                 // PageImpl adapts stale count only for a nonempty final page.
-                if (content.isNotEmpty() && offset + request.size() > total) {
+                if (content.isNotEmpty() && offset + checked.size() > total) {
                     total = offset + content.size
                 }
-                val totalPages = Math.ceil(total.toDouble() / request.size()).toInt()
-                Page(content, request.page(), request.size(), total, totalPages, request.page() + 1 >= totalPages)
+                val totalPages = Math.ceil(total.toDouble() / checked.size()).toInt()
+                Page(content, checked.page(), checked.size(), total, totalPages, checked.page() + 1 >= totalPages)
             }!!
         } catch (failure: RuntimeException) {
             throw AnimalMemberReadUnavailableException(failure)

@@ -67,6 +67,8 @@ interface AnimalDiscovery {
     // A Java record with a compact constructor that copies `orders` (List.copyOf: immutable, rejects nulls).
     // @JvmRecord cannot transform a constructor argument, so this is a plain class that keeps the record-style
     // accessor names, equals, hashCode and toString.
+    // Not Jackson-serializable: this class has no getters (serializing yields `{}`), so do not return it
+    // directly from a controller; map it to a response type first.
     class PageRequest(
         private val number: Int,
         private val size: Int,
@@ -104,6 +106,8 @@ interface AnimalDiscovery {
     }
 
     // Same reason as PageRequest: the Java compact constructor copies `content` with List.copyOf.
+    // Not Jackson-serializable: this class has no getters (serializing yields `{}`), so do not return it
+    // directly from a controller; map it to a response type first.
     class Page(
         content: List<Summary>,
         private val number: Int,
