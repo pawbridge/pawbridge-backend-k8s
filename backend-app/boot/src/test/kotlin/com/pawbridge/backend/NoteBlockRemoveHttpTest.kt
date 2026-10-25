@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.NoteBlockRemoval
 import com.pawbridge.backend.community.internal.note.application.NoteBlockStatusReader
@@ -10,27 +11,22 @@ import com.pawbridge.backend.community.internal.note.web.NoteBlockRemoveControll
 import com.pawbridge.backend.community.internal.note.web.NoteBlockRemoveExceptionHandler
 import com.pawbridge.backend.community.internal.note.web.NoteBlockStatusController
 import com.pawbridge.backend.community.internal.note.web.NoteBlockStatusExceptionHandler
-import com.pawbridge.backend.support.anyNonNull
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
 import com.pawbridge.backend.user.internal.statistics.application.TotalUserCountQuery
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -39,7 +35,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -80,33 +75,33 @@ class NoteBlockRemoveHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var removal: NoteBlockRemoval
 
-    @MockitoBean
+    @MockkBean
     lateinit var statuses: NoteBlockStatusReader
 
-    @MockitoBean
+    @MockkBean
     lateinit var counts: TotalUserCountQuery
 
     @ParameterizedTest
     @ValueSource(longs = [7, Long.MAX_VALUE])
-    fun given__self_or_full_long_target_and_spoofed_identity__when__removing__then__use_signed_caller_and_return_empty_200_after_current_callback(
+    fun `서명된 호출자와 위조 신원이 주어졌을 때__차단을 해제하면__현재 회원 확인 뒤 빈 200을 준다`(
         target: Long,
     ) {
-        whenever(members.get(7)).thenReturn(active())
-        // The mock models the port's callback position, not database locks, row counts or a transaction.
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument<Runnable>(2).run()
-                null
-            },
-        ).`when`(removal).remove(eq(7L), eq(target), anyNonNull<Runnable>())
+        // given
+        every { members.get(any()) } returns active()
 
-        mvc.perform(
+        // The mock models the port's callback position, not database locks, row counts or a transaction.
+        every { removal.remove(any(), any(), any()) } answers {
+            thirdArg<Runnable>().run()
+        }
+
+        // when
+        val result = mvc.perform(
             authenticated(PATH + target)
                 .header("X-User-Id", "999")
                 .header("X-User-Role", "ROLE_ADMIN")
@@ -114,30 +109,38 @@ class NoteBlockRemoveHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":999}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string(""))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-
-        val order = inOrder(removal, members)
-        order.verify(removal).remove(eq(7L), eq(target), anyNonNull<Runnable>())
-        order.verify(members).get(7)
-        verifyNoMoreInteractions(removal, members)
-        verifyNoInteractions(statuses, counts)
+        verifySequence {
+            removal.remove(7L, target, any())
+            members.get(7)
+        }
+        confirmVerified(removal, members, statuses, counts)
         contextCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID"])
-    fun given__missing_or_bad_jwt_and_malformed_target__when__removing__then__authenticate_before_binding_or_business_work(
+    fun `토큰이 없거나 잘못되고 대상이 깨졌을 때__해제하면__바인딩과 업무 처리 전에 인증 실패를 준다`(
         token: String,
     ) {
+        // given
         val request = delete(PATH + "not-a-long").header("X-User-Id", "7")
         if (token == "INVALID") {
             request.header("Authorization", "Bearer invalid")
         }
         val message = if (token == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -149,10 +152,17 @@ class NoteBlockRemoveHttpTest {
 
     @ParameterizedTest
     @ValueSource(longs = [0, -1])
-    fun given__nonpositive_target_with_valid_jwt__when__removing__then__keep_business_login_401_before_removal_or_member_lookup(
+    fun `양수가 아닌 대상과 유효한 토큰이 주어졌을 때__해제하면__해제와 회원 조회 전에 로그인 401을 준다`(
         target: Long,
     ) {
-        mvc.perform(authenticated(PATH + target))
+        // given
+        val request = authenticated(PATH + target)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -162,10 +172,17 @@ class NoteBlockRemoveHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["not-a-long", "9223372036854775808", "status"])
-    fun given__malformed_or_overflow_target_with_valid_jwt__when__removing__then__return_message_only_400_before_business_work(
+    fun `깨지거나 넘치는 대상과 유효한 토큰이 주어졌을 때__해제하면__업무 처리 전에 메시지만 담은 400을 준다`(
         target: String,
     ) {
-        mvc.perform(authenticated(PATH + target))
+        // given
+        val request = authenticated(PATH + target)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -174,71 +191,74 @@ class NoteBlockRemoveHttpTest {
     }
 
     @Test
-    fun given__pending_current_member__when__removal_invokes_its_guard__then__return_message_only_403() {
-        whenever(members.get(7)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, true))
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument<Runnable>(2).run()
-                null
-            },
-        ).`when`(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
+    fun `탈퇴 대기 호출자가 주어졌을 때__해제가 가드를 부르면__메시지만 담은 403을 준다`() {
+        // given
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, true)
+        every { removal.remove(any(), any(), any()) } answers {
+            thirdArg<Runnable>().run()
+        }
 
-        mvc.perform(authenticated(PATH + "8"))
+        // when
+        val result = mvc.perform(authenticated(PATH + "8"))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"이용할 수 없는 회원입니다.\"}", JsonCompareMode.STRICT))
-        verify(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
-        verify(members).get(7)
-        verifyNoMoreInteractions(removal, members)
-        verifyNoInteractions(statuses, counts)
+        verify(exactly = 1) { removal.remove(7L, 8L, any()) }
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(removal, members, statuses, counts)
         contextCleared()
     }
 
     @ParameterizedTest
     @MethodSource("dependencyFailures")
-    fun given__member_dao_or_writer_runtime_failure__when__removing__then__keep_source_specific_503_and_clear_security_context(
+    fun `회원 저장소나 쓰기 런타임 오류가 났을 때__해제하면__원인별 503을 주고 컨텍스트를 비운다`(
         phase: String,
         failure: RuntimeException,
         message: String,
     ) {
+        // given
         val beforeGuard = listOf("BEGIN", "TIMEOUT", "USAGE").contains(phase)
         if (phase == "USER") {
-            whenever(members.get(7)).thenThrow(failure)
+            every { members.get(any()) } throws failure
         } else if (!beforeGuard) {
-            whenever(members.get(7)).thenReturn(active())
+            every { members.get(any()) } returns active()
         }
-        doAnswer(
-            Answer<Any?> { call ->
-                if (beforeGuard) {
-                    throw failure
-                }
-                call.getArgument<Runnable>(2).run()
-                throw failure
-            },
-        ).`when`(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
 
-        mvc.perform(authenticated(PATH + "8"))
+        every { removal.remove(any(), any(), any()) } answers {
+            if (beforeGuard) {
+                throw failure
+            }
+            thirdArg<Runnable>().run()
+            throw failure
+        }
+
+        // when
+        val result = mvc.perform(authenticated(PATH + "8"))
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to message)), JsonCompareMode.STRICT))
-        verify(removal).remove(eq(7L), eq(8L), anyNonNull<Runnable>())
-        if (beforeGuard) {
-            verifyNoInteractions(members)
-        } else {
-            verify(members).get(7)
+        verify(exactly = 1) { removal.remove(7L, 8L, any()) }
+        if (!beforeGuard) {
+            verify(exactly = 1) { members.get(7) }
         }
-        verifyNoMoreInteractions(removal, members)
-        verifyNoInteractions(statuses, counts)
+        confirmVerified(removal, members, statuses, counts)
         contextCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID", "VALID"])
-    fun given__unexposed_stream_extension_with_missing_bad_or_valid_jwt__when__requesting__then__retain_default_403_without_removal_or_sse_work(
+    fun `노출되지 않은 스트림 확장 경로일 때__어떤 토큰으로 요청해도__해제나 SSE 없이 기본 403을 유지한다`(
         token: String,
     ) {
+        // given
         val request = get("/api/v1/notes/stream/extra").accept(MediaType.TEXT_EVENT_STREAM)
         if (token != "MISSING") {
             request.header(
@@ -246,7 +266,12 @@ class NoteBlockRemoveHttpTest {
                 if (token == "INVALID") "Bearer invalid" else "Bearer " + F3TestInputs.token(7, "ROLE_USER"),
             )
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -264,14 +289,20 @@ class NoteBlockRemoveHttpTest {
             "DELETE /api/v1/notes/blocks/8/extra",
         ],
     )
-    fun given__unexposed_block_note_mutation_or_deeper_path__when__requesting__then__retain_default_403_without_removal_work(
+    fun `노출되지 않은 쪽지 변경이나 깊은 경로일 때__요청하면__해제 작업 없이 기본 403을 유지한다`(
         wire: String,
     ) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -282,50 +313,61 @@ class NoteBlockRemoveHttpTest {
     }
 
     @Test
-    fun given__existing_read_only_tx_failure__when__querying_block_status__then__keep_its_storage_policy_outside_remove_advice() {
-        whenever(members.get(7)).thenReturn(active())
-        whenever(statuses.blockedAuthors(7, listOf(8L))).thenThrow(TransactionSystemException("synthetic-status-commit"))
-        mvc.perform(
+    fun `읽기 전용 트랜잭션 오류가 났을 때__차단 상태를 조회하면__해제 어드바이스 밖에서 저장소 503을 유지한다`() {
+        // given
+        every { members.get(any()) } returns active()
+        every { statuses.blockedAuthors(any(), any()) } throws TransactionSystemException("synthetic-status-commit")
+
+        // when
+        val result = mvc.perform(
             get("/api/v1/notes/blocks/status")
                 .param("memberIds", "8")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isServiceUnavailable())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to STORAGE)), JsonCompareMode.STRICT))
-        verify(members).get(7)
-        verify(statuses).blockedAuthors(7, listOf(8L))
-        verifyNoMoreInteractions(members, statuses)
-        verifyNoInteractions(removal, counts)
+        verify(exactly = 1) { members.get(7) }
+        verify(exactly = 1) { statuses.blockedAuthors(7, listOf(8L)) }
+        confirmVerified(members, statuses, removal, counts)
         contextCleared()
     }
 
     @Test
-    fun given__existing_admin_permission_and_runtime_error__when__counting_users__then__keep_admin_403_and_common_500_outside_remove_advice() {
-        whenever(counts.count()).thenThrow(IllegalStateException("synthetic-admin-count"))
-        mvc.perform(
+    fun `관리자 권한과 런타임 오류가 주어졌을 때__사용자 수를 세면__해제 어드바이스 밖에서 403과 500을 유지한다`() {
+        // given
+        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
+
+        // when
+        val forbidden = mvc.perform(
             get("/api/v1/admin/users/stats/total-users")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+        confirmVerified(counts)
+        val failed = mvc.perform(
+            get("/api/v1/admin/users/stats/total-users")
+                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
+        )
+
+        // then
+        forbidden
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(counts)
-        mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
+        failed
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(counts).count()
-        verifyNoMoreInteractions(counts)
-        verifyNoInteractions(removal, members, statuses)
+        verify(exactly = 1) { counts.count() }
+        confirmVerified(counts, removal, members, statuses)
         contextCleared()
     }
 
@@ -334,7 +376,7 @@ class NoteBlockRemoveHttpTest {
     }
 
     private fun noDependencies() {
-        verifyNoInteractions(removal, members, statuses, counts)
+        confirmVerified(removal, members, statuses, counts)
         contextCleared()
     }
 

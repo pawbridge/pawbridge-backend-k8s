@@ -2,13 +2,13 @@ package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.configuration.NoteExpiryConfiguration
 import com.pawbridge.backend.community.internal.note.application.NoteExpiry
+import io.mockk.confirmVerified
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
@@ -28,13 +28,16 @@ import java.time.Duration
 class NoteExpiryConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false"])
-    fun givenDisabledOrAbsentCleanupFlag__whenAssembling__thenRegisterNoExpiryOrSchedulingBeans(flag: String) {
+    fun `정리 플래그가 없거나 꺼져 있을 때__조립하면__만료와 스케줄링 빈을 등록하지 않는다`(flag: String) {
+        // given
         var runner = ApplicationContextRunner().withUserConfiguration(NoteExpiryConfiguration::class.java)
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.jobs.cleanup-enabled=$flag")
         }
 
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(NoteExpiry::class.java)).isEmpty()
             assertThat(context.getBeansOfType(NoteExpiryConfiguration.NoteExpiryJob::class.java)).isEmpty()
@@ -44,11 +47,15 @@ class NoteExpiryConfigurationTest {
     }
 
     @Test
-    fun givenEnabledCleanupAndExistingWriterInputs__whenAssembling__thenUseDedicatedTransactionAndBoundedQualifiedScheduler() {
-        val jdbc = mock(JdbcTemplate::class.java)
-        val manager = mock(JdbcTransactionManager::class.java)
-        val clock = mock(Clock::class.java)
+    fun `정리가 켜지고 기존 쓰기 입력이 있을 때__조립하면__전용 트랜잭션과 제한된 한정 스케줄러를 쓴다`() {
+        // given
+        val jdbc = mockk<JdbcTemplate>()
+        val manager = mockk<JdbcTransactionManager>()
+        val clock = mockk<Clock>()
+
+        // when
         enabled(jdbc, manager, clock).run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(NoteExpiry::class.java)).hasSize(1)
             val expiry = context.getBean(NoteExpiry::class.java)
@@ -85,32 +92,37 @@ class NoteExpiryConfigurationTest {
             assertThat(metadata.scheduler).isEqualTo("noteExpiryScheduler")
             assertThat(metadata.initialDelay).isEqualTo(300000L)
             assertThat(metadata.fixedDelay).isEqualTo(300000L)
-            verifyNoInteractions(jdbc, manager, clock)
+            confirmVerified(jdbc, manager, clock)
         }
     }
 
     @Test
-    fun givenPrivateFailureDetails__whenSchedulerHandlesFailure__thenLogOnlyTheFailureType(output: CapturedOutput) {
-        enabled(mock(JdbcTemplate::class.java), mock(JdbcTransactionManager::class.java), mock(Clock::class.java))
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                val scheduler = context.getBean("noteExpiryScheduler", ThreadPoolTaskScheduler::class.java)
-                val handler = ReflectionTestUtils.getField(scheduler, "errorHandler") as ErrorHandler
-                handler.handleError(
-                    IllegalStateException(
-                        "private-note-body private-token DELETE FROM private_notes",
-                        RuntimeException("private-cause"),
-                    ),
+    fun `비공개 오류 상세가 주어졌을 때__스케줄러가 실패를 처리하면__실패 유형만 기록한다`(output: CapturedOutput) {
+        // given
+        val runner = enabled(mockk<JdbcTemplate>(), mockk<JdbcTransactionManager>(), mockk<Clock>())
+
+        // when
+        runner.run { context ->
+            assertThat(context).hasNotFailed()
+            val scheduler = context.getBean("noteExpiryScheduler", ThreadPoolTaskScheduler::class.java)
+            val handler = ReflectionTestUtils.getField(scheduler, "errorHandler") as ErrorHandler
+            handler.handleError(
+                IllegalStateException(
+                    "private-note-body private-token DELETE FROM private_notes",
+                    RuntimeException("private-cause"),
+                ),
+            )
+
+            // then
+            assertThat(output.all).contains("Private note expiry failed (IllegalStateException)")
+                .doesNotContain(
+                    "private-note-body",
+                    "private-token",
+                    "DELETE FROM",
+                    "private-cause",
+                    "IllegalStateException:",
                 )
-                assertThat(output.all).contains("Private note expiry failed (IllegalStateException)")
-                    .doesNotContain(
-                        "private-note-body",
-                        "private-token",
-                        "DELETE FROM",
-                        "private-cause",
-                        "IllegalStateException:",
-                    )
-            }
+        }
     }
 
     private fun enabled(jdbc: JdbcTemplate, manager: JdbcTransactionManager, clock: Clock): ApplicationContextRunner {

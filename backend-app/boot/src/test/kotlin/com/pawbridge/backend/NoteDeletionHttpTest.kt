@@ -1,11 +1,11 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.note.application.DeletePrivateNote
 import com.pawbridge.backend.community.internal.note.application.NoteDeletion
 import com.pawbridge.backend.community.internal.note.web.NoteDeletionController
 import com.pawbridge.backend.community.internal.note.web.NoteDeletionExceptionHandler
-import com.pawbridge.backend.support.anyNonNull
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
@@ -13,26 +13,21 @@ import com.pawbridge.backend.user.internal.statistics.application.TotalUserCount
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountController
 import com.pawbridge.backend.user.internal.statistics.web.TotalUserCountExceptionHandler
 import io.jsonwebtoken.Jwts
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
@@ -67,30 +62,24 @@ class NoteDeletionHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var members: ContactMemberQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var mutation: NoteDeletion
 
-    @MockitoBean(name = "readClock")
+    @MockkBean(name = "readClock")
     lateinit var clock: Clock
 
-    @MockitoBean
+    @MockkBean
     lateinit var counts: TotalUserCountQuery
 
     @ParameterizedTest
     @ValueSource(strings = ["USER", "EXPIRYLESS_ADMIN"])
-    fun givenSignedUserOrExpirylessAdminRestToken__whenDeletingWithSpoofedHeaders__thenUseOnlyVerifiedCallerAndReturnEmptyNoStore200(
+    fun `서명된 사용자나 만료 없는 관리자 토큰일 때__위조 헤더로 삭제하면__검증된 호출자만 쓰고 빈 200을 준다`(
         tokenKind: String,
     ) {
-        whenever(members.get(7)).thenReturn(active())
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument(2, Runnable::class.java).run()
-                null
-            },
-        ).`when`(mutation).delete(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
+        // given
         // Expiry remains optional for general REST; exact stream keeps its separate expiry requirement.
         val token = if (tokenKind == "USER") {
             F3TestInputs.token(7, "ROLE_USER")
@@ -98,36 +87,49 @@ class NoteDeletionHttpTest {
             Jwts.builder().claim("userId", 7L).claim("role", "ROLE_ADMIN").signWith(F3TestInputs.KEY).compact()
         }
 
-        mvc.perform(
+        every { members.get(any()) } returns active()
+        every { mutation.delete(any(), any(), any(), any()) } answers {
+            thirdArg<Runnable>().run()
+        }
+
+        // when
+        val result = mvc.perform(
             delete(PATH)
                 .header("Authorization", "Bearer $token")
                 .header("X-User-Id", "999")
                 .header("X-User-Role", "ROLE_ADMIN")
                 .header("X-Auth-Expires-At", Long.MAX_VALUE),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().string(""))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
-
-        verify(mutation).delete(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7)
-        verifyNoMoreInteractions(mutation, members)
-        verifyNoInteractions(clock, counts)
+        verify(exactly = 1) { mutation.delete(7L, NOTE, any(), any()) }
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(mutation, members, clock, counts)
         cleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["MISSING", "INVALID"])
-    fun givenMissingOrBadTokenAndMalformedUuid__whenDeleting__thenAuthenticateBeforeBindingWithoutDependencies(
+    fun `토큰이 없거나 잘못되고 UUID가 깨졌을 때__삭제하면__바인딩 전에 의존성 없이 인증 실패를 준다`(
         kind: String,
     ) {
+        // given
         val request = delete("/api/v1/notes/not-a-uuid").header("X-User-Id", "7")
         if (kind == "INVALID") {
             request.header("Authorization", "Bearer invalid")
         }
         val message = if (kind == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -139,12 +141,18 @@ class NoteDeletionHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["not-a-uuid", "blocks", "notifications"])
-    fun givenVerifiedCallerAndSingleNonUuidSegmentIncludingStaticReadLabels__whenDeleting__thenReturnScoped400WithoutReservedLabelExceptions(
+    fun `검증된 호출자와 UUID 아닌 단일 경로일 때__삭제하면__예약 라벨 예외 없이 범위 400을 준다`(
         segment: String,
     ) {
-        mvc.perform(
-            delete("/api/v1/notes/$segment").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
+        // given
+        val request = delete("/api/v1/notes/$segment")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -154,11 +162,12 @@ class NoteDeletionHttpTest {
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun givenCurrentOrDeletionPortFailure__whenDeleting__thenKeepInactiveNotFoundMemberStorageAndWriterRuntimePolicies(
+    fun `현재 회원이나 삭제 포트가 실패했을 때__삭제하면__비활성 없음 회원 저장소 쓰기 정책을 유지한다`(
         kind: String,
         status: Int,
         message: String,
     ) {
+        // given
         val failure: RuntimeException? = when (kind) {
             "inactive" -> null
             "missing" -> NoteDeletion.MissingOwnedNote()
@@ -167,61 +176,66 @@ class NoteDeletionHttpTest {
             else -> TransactionSystemException("private-commit-detail")
         }
         if (kind == "member") {
-            whenever(members.get(7)).thenThrow(failure!!)
+            every { members.get(any()) } throws failure!!
         } else {
-            whenever(members.get(7))
-                .thenReturn(if (kind == "inactive") ContactMember(7L, "", false, true) else active())
+            every { members.get(any()) } returns if (kind == "inactive") ContactMember(7L, "", false, true) else active()
         }
-        doAnswer(
-            Answer<Any?> { call ->
-                call.getArgument(2, Runnable::class.java).run()
-                if (failure != null) {
-                    throw failure
-                }
-                null
-            },
-        ).`when`(mutation).delete(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
 
-        mvc.perform(delete(PATH).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+        every { mutation.delete(any(), any(), any(), any()) } answers {
+            thirdArg<Runnable>().run()
+            if (failure != null) {
+                throw failure
+            }
+        }
+
+        // when
+        val result = mvc.perform(delete(PATH).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+
+        // then
+        result
             .andExpect(status().`is`(status))
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"" + message + "\"}", JsonCompareMode.STRICT))
-
-        verify(mutation).delete(eq(7L), eq(NOTE), anyNonNull<Runnable>(), anyNonNull<Supplier<Instant>>())
-        verify(members).get(7)
-        verifyNoMoreInteractions(mutation, members)
-        verifyNoInteractions(clock, counts)
+        verify(exactly = 1) { mutation.delete(7L, NOTE, any(), any()) }
+        verify(exactly = 1) { members.get(7) }
+        confirmVerified(mutation, members, clock, counts)
         cleared()
     }
 
     @Test
-    fun givenAdminCountOutsideDeletionAdvice__whenUserOrAdminRequestsWithSpoofedRole__thenKeepRole403AndCommon500() {
-        whenever(counts.count()).thenThrow(IllegalStateException("private-count"))
-        mvc.perform(
+    fun `삭제 어드바이스 밖의 관리자 집계일 때__사용자나 위조 역할 관리자가 요청하면__403과 공통 500을 유지한다`() {
+        // given
+        every { counts.count() } throws IllegalStateException("private-count")
+
+        // when
+        val forbidden = mvc.perform(
             get(ADMIN_COUNT)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .header("X-User-Role", "ROLE_ADMIN"),
         )
+        val failed = mvc.perform(get(ADMIN_COUNT).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+
+        // then
+        forbidden
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        mvc.perform(get(ADMIN_COUNT).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+        failed
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(counts).count()
-        verifyNoMoreInteractions(counts)
-        verifyNoInteractions(members, mutation, clock)
+        verify(exactly = 1) { counts.count() }
+        confirmVerified(counts, members, mutation, clock)
         cleared()
     }
 
     private fun noDependencies() {
-        verifyNoInteractions(members, mutation, clock, counts)
+        confirmVerified(members, mutation, clock, counts)
         cleared()
     }
 
