@@ -1,6 +1,11 @@
 package com.pawbridge.backend.community.internal.post.infrastructure.media
 
 import com.pawbridge.backend.community.internal.post.application.PostUpload
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -13,16 +18,10 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.PutObjectResponse
 import java.io.ByteArrayInputStream
 import java.io.FilterInputStream
 import java.io.IOException
@@ -31,11 +30,12 @@ import java.io.UncheckedIOException
 import java.util.stream.Stream
 
 class S3PostMediaUploaderTest {
-    private val s3 = mock(S3Client::class.java)
+    private val s3 = mockk<S3Client>()
     private val uploader = S3PostMediaUploader(s3, BUCKET, "$PUBLIC_BASE///", "")
 
     @Test
-    fun given__no_attachments_or_zero_size__when__upload__then__storage_and_content_are_not_opened() {
+    fun `첨부가 없거나 크기가 0일 때__업로드하면__저장소를 호출하지 않고 내용을 열지 않는다`() {
+        // given
         val empty = PostUpload(
             "empty.txt",
             "text/plain",
@@ -43,36 +43,45 @@ class S3PostMediaUploaderTest {
             PostUpload.Content { throw AssertionError("Empty attachments must not be opened") },
         )
 
-        assertTrue(uploader.upload(null).isEmpty())
-        assertTrue(uploader.upload(listOf()).isEmpty())
-        assertTrue(uploader.upload(listOf(empty)).isEmpty())
-        verifyNoInteractions(s3)
+        // when
+        val fromNull = uploader.upload(null)
+        val fromEmptyList = uploader.upload(listOf())
+        val fromZeroSize = uploader.upload(listOf(empty))
+
+        // then
+        assertTrue(fromNull.isEmpty())
+        assertTrue(fromEmptyList.isEmpty())
+        assertTrue(fromZeroSize.isEmpty())
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
     @MethodSource("allowedMedia")
-    fun given__allowed_media__when__upload__then__bytes_mime_folder_and_public_url_match_legacy(
+    fun `허용된 미디어일 때__업로드하면__바이트와 MIME과 폴더와 공개 URL이 기존과 같다`(
         mime: String,
         folder: String,
     ) {
+        // given
         val bytes = byteArrayOf(0, 7, 255.toByte(), 11)
         val stream = TrackingStream(bytes)
-        val requests = ArrayList<PutObjectRequest>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { invocation ->
-            val request = invocation.getArgument<PutObjectRequest>(0)
-            val body = invocation.getArgument<RequestBody>(1)
-            requests.add(request)
+
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } answers {
+            val body = secondArg<RequestBody>()
             assertEquals(bytes.size.toLong(), body.optionalContentLength().orElseThrow().toLong())
             assertArrayEquals(bytes, body.contentStreamProvider().newStream().readAllBytes())
             assertFalse(stream.closed)
-            null
+            PutObjectResponse.builder().build()
         }
 
+        // when
         val urls = uploader.upload(
             listOf(PostUpload("pet.Photo.PNG", mime, bytes.size.toLong(), PostUpload.Content { stream })),
         )
 
-        val request = requests.first()
+        // then
+        val captured = slot<PutObjectRequest>()
+        verify(exactly = 1) { s3.putObject(capture(captured), any<RequestBody>()) }
+        val request = captured.captured
         assertEquals(BUCKET, request.bucket())
         assertEquals(mime, request.contentType())
         assertTrue(request.key().matches(Regex(folder + "[0-9a-f-]{36}\\.PNG")))
@@ -82,16 +91,15 @@ class S3PostMediaUploaderTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["f3-owner", "f3-owner/", "f3-owner/nested", "f3-owner/nested/"])
-    fun given__configured_prefix__when__upload__then__normalized_prefix_and_attachment_order_are_preserved(
+    fun `접두사가 설정됐을 때__업로드하면__정규화된 접두사와 첨부 순서를 보존한다`(
         prefix: String,
     ) {
-        val requests = ArrayList<PutObjectRequest>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { invocation ->
-            requests.add(invocation.getArgument(0))
-            null
-        }
+        // given
         val prefixed = S3PostMediaUploader(s3, BUCKET, PUBLIC_BASE, prefix)
 
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } returns PutObjectResponse.builder().build()
+
+        // when
         val urls = prefixed.upload(
             listOf(
                 upload("first.png", "image/png", byteArrayOf(1)),
@@ -100,6 +108,9 @@ class S3PostMediaUploaderTest {
             ),
         )
 
+        // then
+        val requests = mutableListOf<PutObjectRequest>()
+        verify(exactly = 2) { s3.putObject(capture(requests), any<RequestBody>()) }
         val normalized = if (prefix.endsWith("/")) prefix else "$prefix/"
         assertEquals(2, requests.size)
         assertTrue(requests[0].key().startsWith(normalized + "posts/images/"))
@@ -109,24 +120,26 @@ class S3PostMediaUploaderTest {
 
     @ParameterizedTest
     @MethodSource("filenames")
-    fun given__filename__when__upload__then__only_last_extension_is_preserved(filename: String?, extension: String) {
-        val requests = ArrayList<PutObjectRequest>()
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { invocation ->
-            requests.add(invocation.getArgument(0))
-            null
-        }
+    fun `파일 이름이 주어질 때__업로드하면__마지막 확장자만 보존한다`(filename: String?, extension: String) {
+        // given
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } returns PutObjectResponse.builder().build()
 
+        // when
         uploader.upload(listOf(upload(filename, "image/png", byteArrayOf(1))))
 
-        assertTrue(requests.first().key().matches(Regex("posts/images/[0-9a-f-]{36}$extension")))
+        // then
+        val captured = slot<PutObjectRequest>()
+        verify(exactly = 1) { s3.putObject(capture(captured), any<RequestBody>()) }
+        assertTrue(captured.captured.key().matches(Regex("posts/images/[0-9a-f-]{36}$extension")))
     }
 
     @ParameterizedTest
     @MethodSource("unsupportedMedia")
-    fun given__unsupported_media__when__upload__then__legacy_failure_is_wrapped_before_opening_content(
+    fun `지원하지 않는 미디어일 때__업로드하면__내용을 열기 전에 기존 실패를 감싸 던진다`(
         contentType: String?,
         expectedMessage: String,
     ) {
+        // given
         val upload = PostUpload(
             "pet.txt",
             contentType,
@@ -134,33 +147,37 @@ class S3PostMediaUploaderTest {
             PostUpload.Content { throw AssertionError("Rejected media must not be opened") },
         )
 
+        // when
         val failure = assertThrows(RuntimeException::class.java) { uploader.upload(listOf(upload)) }
 
+        // then
         assertEquals("파일 업로드 중 오류가 발생했습니다", failure.message)
         assertInstanceOf(IllegalArgumentException::class.java, failure.cause)
         assertEquals(expectedMessage, failure.cause!!.message)
-        verifyNoInteractions(s3)
+        confirmVerified(s3)
     }
 
     @Test
-    fun given__opening_content_fails__when__upload__then__failure_is_wrapped_without_storage_call() {
+    fun `내용을 여는 데 실패할 때__업로드하면__저장소 호출 없이 실패를 감싸 던진다`() {
+        // given
         val cause = IOException("synthetic read failure")
         val upload = PostUpload("pet.png", "image/png", 1, PostUpload.Content { throw cause })
 
+        // when
         val failure = assertThrows(RuntimeException::class.java) { uploader.upload(listOf(upload)) }
 
+        // then
         assertEquals("파일 업로드 중 오류가 발생했습니다", failure.message)
         assertSame(cause, failure.cause)
-        verifyNoInteractions(s3)
+        confirmVerified(s3)
     }
 
     @Test
-    fun given__second_put_fails__when__upload__then__streams_close_and_no_cleanup_or_later_put_occurs() {
+    fun `두 번째 저장이 실패할 때__업로드하면__스트림을 닫고 정리나 이후 저장을 하지 않는다`() {
+        // given
         val first = TrackingStream(byteArrayOf(1))
         val second = TrackingStream(byteArrayOf(2))
         val cause = IllegalStateException("synthetic storage failure")
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java)))
-            .thenReturn(null).thenThrow(cause)
         val third = PostUpload(
             "third.png",
             "image/png",
@@ -168,6 +185,10 @@ class S3PostMediaUploaderTest {
             PostUpload.Content { throw AssertionError("No later attachment may open after a failure") },
         )
 
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } returns
+            PutObjectResponse.builder().build() andThenThrows cause
+
+        // when
         val failure = assertThrows(RuntimeException::class.java) {
             uploader.upload(
                 listOf(
@@ -178,20 +199,21 @@ class S3PostMediaUploaderTest {
             )
         }
 
+        // then
         assertEquals("파일 업로드 중 오류가 발생했습니다", failure.message)
         assertSame(cause, failure.cause)
         assertTrue(first.closed)
         assertTrue(second.closed)
-        verify(s3, times(2))
-            .putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))
-        verifyNoMoreInteractions(s3)
+        verify(exactly = 2) { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) }
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
     @ValueSource(ints = [8, 200_000])
-    fun given__non_resettable_source__when__sdk_reads_for_signing_and_sending__then__fresh_bytes_and_closed_streams(
+    fun `다시 감을 수 없는 원본일 때__SDK가 서명과 전송을 위해 읽으면__매번 새 바이트를 주고 스트림을 닫는다`(
         length: Int,
     ) {
+        // given
         val bytes = ByteArray(length)
         bytes.fill(7)
         val opened = ArrayList<TrackingStream>()
@@ -211,25 +233,29 @@ class S3PostMediaUploaderTest {
                 }
             },
         )
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { invocation ->
-            val body = invocation.getArgument<RequestBody>(1)
+
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } answers {
+            val body = secondArg<RequestBody>()
             val signing: InputStream = body.contentStreamProvider().newStream()
             assertFalse(signing.markSupported())
             assertArrayEquals(bytes, signing.readAllBytes())
             val sending: InputStream = body.contentStreamProvider().newStream()
             assertArrayEquals(bytes, sending.readAllBytes())
-            null
+            PutObjectResponse.builder().build()
         }
 
+        // when
         uploader.upload(listOf(upload))
 
+        // then
         assertEquals(2, opened.size)
         assertTrue(opened.all { stream -> stream.closed })
-        verify(s3).putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))
+        verify(exactly = 1) { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) }
     }
 
     @Test
-    fun given__source_reopen_failure__when__sdk_requests_another_read__then__previous_stream_closes_and_upload_fails() {
+    fun `원본을 다시 여는 데 실패할 때__SDK가 한 번 더 읽으려 하면__이전 스트림을 닫고 업로드를 실패시킨다`() {
+        // given
         val first = TrackingStream(byteArrayOf(1))
         val cause = IOException("synthetic reopen failure")
         var opens = 0
@@ -245,28 +271,38 @@ class S3PostMediaUploaderTest {
                 }
             },
         )
-        whenever(s3.putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))).thenAnswer { invocation ->
-            val body = invocation.getArgument<RequestBody>(1)
+
+        every { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) } answers {
+            val body = secondArg<RequestBody>()
             body.contentStreamProvider().newStream().readAllBytes()
             body.contentStreamProvider().newStream()
-            null
+            PutObjectResponse.builder().build()
         }
 
+        // when
         val failure = assertThrows(RuntimeException::class.java) { uploader.upload(listOf(upload)) }
 
+        // then
         assertSame(cause, assertInstanceOf(UncheckedIOException::class.java, failure.cause).cause)
         assertTrue(first.closed)
-        verify(s3).putObject(any(PutObjectRequest::class.java), any(RequestBody::class.java))
-        verifyNoMoreInteractions(s3)
+        verify(exactly = 1) { s3.putObject(any<PutObjectRequest>(), any<RequestBody>()) }
+        confirmVerified(s3)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["/f3/", "../", "f3/../", "f3//", " f3/", "f3/ ", "f3\\", "f3?x=1", "f3%2f"])
-    fun given__invalid_prefix__when__construct__then__legacy_configuration_validation_rejects_it(prefix: String) {
-        assertThrows(IllegalArgumentException::class.java) {
-            S3PostMediaUploader(s3, BUCKET, PUBLIC_BASE, prefix)
+    fun `잘못된 접두사일 때__생성하면__기존 설정 검증이 거부한다`(prefix: String) {
+        // given
+        val invalidPrefix = prefix
+
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) {
+            S3PostMediaUploader(s3, BUCKET, PUBLIC_BASE, invalidPrefix)
         }
-        verifyNoInteractions(s3)
+
+        // then
+        assertEquals(IllegalArgumentException::class.java, thrown.javaClass)
+        confirmVerified(s3)
     }
 
     private class TrackingStream(bytes: ByteArray) : ByteArrayInputStream(bytes) {

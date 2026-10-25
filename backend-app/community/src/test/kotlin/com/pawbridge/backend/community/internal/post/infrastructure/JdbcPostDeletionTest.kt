@@ -2,99 +2,59 @@ package com.pawbridge.backend.community.internal.post.infrastructure
 
 import com.pawbridge.backend.community.internal.post.application.PostNotFoundException
 import com.pawbridge.backend.community.internal.post.domain.PostNotOwnedException
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.jdbc.core.JdbcOperations
 import org.springframework.jdbc.core.PreparedStatementCreator
 import org.springframework.jdbc.core.ResultSetExtractor
 import org.springframework.transaction.TransactionSystemException
-import org.springframework.transaction.support.SimpleTransactionStatus
-import org.springframework.transaction.support.TransactionCallback
-import org.springframework.transaction.support.TransactionOperations
-import java.sql.Connection
-import java.sql.PreparedStatement
-import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.util.Calendar
 
 class JdbcPostDeletionTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val transactions = mock(TransactionOperations::class.java)
-    private val connection = mock(Connection::class.java)
-    private val result = mock(ResultSet::class.java)
-    private val clock = Clock.fixed(Instant.parse("2026-10-19T00:05:10.123456789Z"), ZoneId.of("Asia/Seoul"))
+    private val jdbc = mockk<JdbcOperations>()
+    private val transactions = FakeTransactions()
     private val calls = ArrayList<StatementCall>()
-    private var transactionActive = false
+    private val connection = recordingConnection(calls) { assertTrue(transactions.active) }
+    private val row = FakeRow()
+    private val clock = Clock.fixed(Instant.parse("2026-10-19T00:05:10.123456789Z"), ZoneId.of("Asia/Seoul"))
     private var failAt = 0
     private var updateCount = 1
     private val failure: RuntimeException = IllegalStateException("synthetic DB failure")
 
-    @BeforeEach
-    fun prepareTransactionAndStatements() {
-        whenever(transactions.execute(any<TransactionCallback<Void>>())).thenAnswer { call ->
-            val callback = call.getArgument<TransactionCallback<Void>>(0)
-            transactionActive = true
-            try {
-                callback.doInTransaction(SimpleTransactionStatus())
-            } finally {
-                transactionActive = false
-            }
+    @Test
+    fun `본인의 활성 게시글일 때__삭제하면__잠금과 두 변경이 아웃박스 없이 한 트랜잭션을 공유한다`() {
+        // given
+        row.longs["author_id"] = 7L
+
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (failAt == calls.size) throw failure
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
         }
-        whenever(connection.prepareStatement(anyString())).thenAnswer { call ->
-            assertTrue(transactionActive)
-            val statementCall = StatementCall(call.getArgument(0))
-            calls.add(statementCall)
-            val statement = mock(PreparedStatement::class.java)
-            doAnswer { binding ->
-                statementCall.values[binding.getArgument(0)] = binding.getArgument(1)
-                null
-            }.`when`(statement).setObject(anyInt(), any())
-            doAnswer { binding ->
-                statementCall.values[binding.getArgument(0)] = binding.getArgument(1)
-                statementCall.calendars[binding.getArgument(0)] = binding.getArgument(2)
-                null
-            }.`when`(statement).setTimestamp(anyInt(), any(Timestamp::class.java), any(Calendar::class.java))
-            statement
-        }
-        whenever(result.next()).thenReturn(true)
-        whenever(result.getLong("author_id")).thenReturn(7L)
-        whenever(jdbc.query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>()))
-            .thenAnswer { call ->
-                call.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
-                if (failAt == calls.size) throw failure
-                call.getArgument<ResultSetExtractor<*>>(1).extractData(result)
-            }
-        whenever(jdbc.update(any(PreparedStatementCreator::class.java))).thenAnswer { call ->
-            call.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
             if (failAt == calls.size) throw failure
             updateCount
         }
-    }
 
-    @Test
-    fun given__own_active_post__when__delete__then__lock_and_two_mutations_share_transaction_without_outbox() {
+        // when
         deletion().delete(42L, 7L)
 
-        assertFalse(transactionActive)
+        // then
+        assertFalse(transactions.active)
         assertEquals(3, calls.size)
         assertTrue(calls.stream().noneMatch { call -> call.sql.contains("outbox_events") })
         val lock = calls[0]
@@ -118,74 +78,122 @@ class JdbcPostDeletionTest {
     }
 
     @Test
-    fun given__missing_or_already_deleted_locked_row__when__delete__then__no_mutation_is_attempted() {
-        whenever(result.next()).thenReturn(false)
+    fun `잠근 행이 없거나 이미 삭제됐을 때__삭제하면__어떤 변경도 시도하지 않는다`() {
+        // given
+        row.hasNext = false
 
-        assertThrows(PostNotFoundException::class.java) { deletion().delete(42L, 7L) }
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
+        }
 
+        // when
+        val thrown = assertThrows(PostNotFoundException::class.java) { deletion().delete(42L, 7L) }
+
+        // then
+        assertEquals(PostNotFoundException::class.java, thrown.javaClass)
         assertEquals(1, calls.size)
-        verify(jdbc, never()).update(any(PreparedStatementCreator::class.java))
+        verify(exactly = 0) { jdbc.update(any<PreparedStatementCreator>()) }
     }
 
     @Test
-    fun given__different_locked_owner__when__delete__then__no_mutation_is_attempted() {
-        whenever(result.getLong("author_id")).thenReturn(8L)
+    fun `잠근 소유자가 다를 때__삭제하면__어떤 변경도 시도하지 않는다`() {
+        // given
+        row.longs["author_id"] = 8L
 
-        assertThrows(PostNotOwnedException::class.java) { deletion().delete(42L, 7L) }
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
+        }
 
+        // when
+        val thrown = assertThrows(PostNotOwnedException::class.java) { deletion().delete(42L, 7L) }
+
+        // then
+        assertEquals(PostNotOwnedException::class.java, thrown.javaClass)
         assertEquals(1, calls.size)
-        verify(jdbc, never()).update(any(PreparedStatementCreator::class.java))
+        verify(exactly = 0) { jdbc.update(any<PreparedStatementCreator>()) }
     }
 
     @Test
-    fun given__conditional_update_affects_no_row__when__delete__then__no_search_mutation_follows() {
+    fun `조건부 갱신이 한 행도 바꾸지 못할 때__삭제하면__검색 문서 변경이 뒤따르지 않는다`() {
+        // given
         updateCount = 0
+        row.longs["author_id"] = 7L
 
-        assertThrows(PostNotFoundException::class.java) { deletion().delete(42L, 7L) }
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            updateCount
+        }
 
+        // when
+        val thrown = assertThrows(PostNotFoundException::class.java) { deletion().delete(42L, 7L) }
+
+        // then
+        assertEquals(PostNotFoundException::class.java, thrown.javaClass)
         assertEquals(2, calls.size)
     }
 
     @ParameterizedTest
     @ValueSource(ints = [1, 2, 3])
-    fun given__lock_or_mutation_failure__when__delete__then__original_failure_leaves_transaction_without_retry(
+    fun `잠금이나 변경이 실패할 때__삭제하면__재시도 없이 원래 예외로 트랜잭션을 벗어난다`(
         failingStatement: Int,
     ) {
+        // given
         failAt = failingStatement
+        row.longs["author_id"] = 7L
 
-        assertSame(failure, assertThrows(IllegalStateException::class.java) { deletion().delete(42L, 7L) })
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (failAt == calls.size) throw failure
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            if (failAt == calls.size) throw failure
+            updateCount
+        }
 
-        assertFalse(transactionActive)
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { deletion().delete(42L, 7L) }
+
+        // then
+        assertSame(failure, thrown)
+        assertFalse(transactions.active)
         assertEquals(failingStatement, calls.size)
-        verify(transactions).execute(any<TransactionCallback<Void>>())
+        assertEquals(1, transactions.executions)
     }
 
     @Test
-    fun given__commit_outcome_unknown__when__delete__then__original_transaction_failure_is_not_retried() {
+    fun `커밋 결과를 알 수 없을 때__삭제하면__원래 트랜잭션 예외를 재시도하지 않고 던진다`() {
+        // given
         val unknown = TransactionSystemException("synthetic commit outcome unknown")
-        doAnswer { call ->
-            val callback = call.getArgument<TransactionCallback<Void>>(0)
-            transactionActive = true
-            try {
-                callback.doInTransaction(SimpleTransactionStatus())
-                // Model a transaction API reporting an unknown outcome after the SQL callback.
-                throw unknown
-            } finally {
-                transactionActive = false
-            }
-        }.`when`(transactions).execute(any<TransactionCallback<Void>>())
+        row.longs["author_id"] = 7L
+        // Model a transaction API reporting an unknown outcome after the SQL callback.
+        transactions.failureAfterCallback = unknown
 
-        assertSame(unknown, assertThrows(TransactionSystemException::class.java) { deletion().delete(42L, 7L) })
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(row.resultSet)
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            updateCount
+        }
 
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { deletion().delete(42L, 7L) }
+
+        // then
+        assertSame(unknown, thrown)
         assertEquals(3, calls.size)
-        assertFalse(transactionActive)
-        verify(transactions).execute(any<TransactionCallback<Void>>())
+        assertFalse(transactions.active)
+        assertEquals(1, transactions.executions)
     }
 
     private fun deletion(): JdbcPostDeletion = JdbcPostDeletion(jdbc, transactions, clock)
-
-    private class StatementCall(val sql: String) {
-        val values = LinkedHashMap<Int, Any?>()
-        val calendars = LinkedHashMap<Int, Calendar>()
-    }
 }

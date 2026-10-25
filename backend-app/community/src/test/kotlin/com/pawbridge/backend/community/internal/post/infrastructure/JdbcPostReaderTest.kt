@@ -4,199 +4,231 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.PostSnapshot
 import com.pawbridge.backend.community.support.userNicknameQuery
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doReturn
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcOperations
 import org.springframework.jdbc.core.RowMapper
-import org.springframework.transaction.support.SimpleTransactionStatus
-import org.springframework.transaction.support.TransactionCallback
-import org.springframework.transaction.support.TransactionOperations
-import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.LocalDateTime
-import java.util.Calendar
 import java.util.Optional
 import java.util.stream.Stream
 
 class JdbcPostReaderTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val transactions = mock(TransactionOperations::class.java)
-    private val row = mock(ResultSet::class.java)
+    private val jdbc = mockk<JdbcOperations>()
+    private val transactions = FakeTransactions()
+    private val row = FakeRow()
     private val reader = JdbcPostReader(jdbc, transactions, ObjectMapper())
     private val createdAt = LocalDateTime.of(2026, 10, 18, 23, 59, 59, 123456000)
     private val updatedAt = LocalDateTime.of(2026, 10, 19, 0, 0, 1, 654321000)
-    private var transactionActive = false
-
-    @BeforeEach
-    fun prepareTransactionAndRow() {
-        whenever(transactions.execute(any<TransactionCallback<Any>>())).thenAnswer { invocation ->
-            val callback = invocation.getArgument<TransactionCallback<Any>>(0)
-            transactionActive = true
-            try {
-                callback.doInTransaction(SimpleTransactionStatus())
-            } finally {
-                transactionActive = false
-            }
-        }
-        whenever(jdbc.query(anyString(), any<RowMapper<PostSnapshot>>(), eq(42L))).thenAnswer { invocation ->
-            assertTrue(transactionActive)
-            val mapper = invocation.getArgument<RowMapper<PostSnapshot>>(1)
-            listOf(mapper.mapRow(row, 0))
-        }
-        whenever(row.getLong("post_id")).thenReturn(42L)
-        whenever(row.getLong("author_id")).thenReturn(7L)
-        whenever(row.getString("title")).thenReturn("함께 찾아주세요")
-        whenever(row.getString("content")).thenReturn("게시글 본문")
-        whenever(row.getString("board_type")).thenReturn("REPORT")
-        whenever(row.getString("image_urls")).thenReturn("[]")
-        whenever(row.getTimestamp(eq("created_at"), any(Calendar::class.java))).thenAnswer { invocation ->
-            assertEquals("UTC", invocation.getArgument<Calendar>(1).timeZone.id)
-            Timestamp.valueOf(createdAt)
-        }
-        whenever(row.getTimestamp(eq("updated_at"), any(Calendar::class.java))).thenAnswer { invocation ->
-            assertEquals("UTC", invocation.getArgument<Calendar>(1).timeZone.id)
-            Timestamp.valueOf(updatedAt)
-        }
-    }
 
     @Test
-    fun given__post_row__when__find__then__snapshot_is_fully_mapped_before_transaction_returns() {
+    fun `게시글 행이 있을 때__조회하면__트랜잭션이 끝나기 전에 스냅샷을 모두 매핑한다`() {
+        // given
+        givenPostRow("[]")
+
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
         val post = reader.findById(42L).orElseThrow()
 
+        // then
         assertEquals(
             PostSnapshot(42L, 7L, "함께 찾아주세요", "게시글 본문", "REPORT", listOf(), createdAt, updatedAt),
             post,
         )
-        assertFalse(transactionActive)
+        assertFalse(transactions.active)
     }
 
     @ParameterizedTest
     @MethodSource("imageUrls")
-    fun given__stored_image_urls__when__find__then__legacy_null_order_and_duplicates_are_preserved(
+    fun `저장된 이미지 URL이 있을 때__조회하면__기존의 null과 순서와 중복을 보존한다`(
         stored: String?,
         expected: List<String?>?,
     ) {
-        whenever(row.getString("image_urls")).thenReturn(stored)
+        // given
+        givenPostRow(stored)
 
-        assertEquals(expected, reader.findById(42L).orElseThrow().imageUrls())
-        assertFalse(transactionActive)
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val imageUrls = reader.findById(42L).orElseThrow().imageUrls()
+
+        // then
+        assertEquals(expected, imageUrls)
+        assertFalse(transactions.active)
     }
 
     @ParameterizedTest
     @MethodSource("imageUrls")
-    fun given__post_rows__when__find_all__then__existing_field_and_image_mapping_is_reused(
+    fun `게시글 행들이 있을 때__전체를 조회하면__기존 필드와 이미지 매핑을 재사용한다`(
         stored: String?,
         expected: List<String?>?,
     ) {
-        whenever(row.getString("image_urls")).thenReturn(stored)
-        prepareListQuery()
+        // given
+        givenPostRow(stored)
 
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>()) } answers {
+            assertTrue(transactions.active)
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val posts = reader.findAll()
+
+        // then
         assertEquals(
             listOf(PostSnapshot(42L, 7L, "함께 찾아주세요", "게시글 본문", "REPORT", expected, createdAt, updatedAt)),
-            reader.findAll(),
+            posts,
         )
-        assertFalse(transactionActive)
-        verify(jdbc).query(anyString(), any<RowMapper<PostSnapshot>>())
+        assertFalse(transactions.active)
+        verify(exactly = 1) { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>()) }
     }
 
     @Test
-    fun given__list_reader__when__nickname_is_queried__then__post_mapping_transaction_has_completed() {
-        prepareListQuery()
+    fun `목록 조회기일 때__닉네임을 조회하면__게시글 매핑 트랜잭션은 이미 끝나 있다`() {
+        // given
+        givenPostRow("[]")
+
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>()) } answers {
+            assertTrue(transactions.active)
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
         val listPosts = ListPosts(
             reader,
             userNicknameQuery { authorId ->
-                assertFalse(transactionActive)
+                assertFalse(transactions.active)
                 assertEquals(7L, authorId)
                 Optional.of("반려친구")
             },
         )
 
-        assertEquals("반려친구", listPosts.read().first().authorNickname)
-        assertFalse(transactionActive)
+        // when
+        val details = listPosts.read()
+
+        // then
+        assertEquals("반려친구", details.first().authorNickname)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__no_post_rows__when__find_all__then__empty_list_is_returned_after_transaction() {
-        doReturn(listOf<PostSnapshot>()).`when`(jdbc).query(anyString(), any<RowMapper<PostSnapshot>>())
+    fun `게시글 행이 없을 때__전체를 조회하면__트랜잭션이 끝난 뒤 빈 목록을 돌려준다`() {
+        // given
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>()) } returns listOf()
 
-        assertEquals(listOf<PostSnapshot>(), reader.findAll())
-        assertFalse(transactionActive)
+        // when
+        val posts = reader.findAll()
+
+        // then
+        assertEquals(listOf<PostSnapshot>(), posts)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__invalid_list_image_json__when__find_all__then__mapping_failure_leaves_transaction() {
-        prepareListQuery()
-        whenever(row.getString("image_urls")).thenReturn("{\"unexpected\":\"shape\"}")
+    fun `목록의 이미지 JSON이 잘못됐을 때__전체를 조회하면__매핑 실패가 트랜잭션을 벗어난다`() {
+        // given
+        givenPostRow("{\"unexpected\":\"shape\"}")
 
-        assertThrows(IllegalStateException::class.java) { reader.findAll() }
-        assertFalse(transactionActive)
-    }
-
-    @Test
-    fun given__list_query_failure__when__find_all__then__original_failure_propagates_after_transaction() {
-        val failure = DataAccessResourceFailureException("unavailable")
-        doThrow(failure).`when`(jdbc).query(anyString(), any<RowMapper<PostSnapshot>>())
-
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { reader.findAll() },
-        )
-        assertFalse(transactionActive)
-    }
-
-    private fun prepareListQuery() {
-        whenever(jdbc.query(anyString(), any<RowMapper<PostSnapshot>>())).thenAnswer { invocation ->
-            assertTrue(transactionActive)
-            val mapper = invocation.getArgument<RowMapper<PostSnapshot>>(1)
-            listOf(mapper.mapRow(row, 0))
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>()) } answers {
+            assertTrue(transactions.active)
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
         }
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { reader.findAll() }
+
+        // then
+        assertEquals(IllegalStateException::class.java, thrown.javaClass)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__no_post_row__when__find__then__empty_is_returned_after_transaction() {
-        doReturn(listOf<PostSnapshot>()).`when`(jdbc)
-            .query(anyString(), any<RowMapper<PostSnapshot>>(), eq(42L))
-
-        assertEquals(Optional.empty<PostSnapshot>(), reader.findById(42L))
-        assertFalse(transactionActive)
-    }
-
-    @Test
-    fun given__invalid_image_json__when__find__then__mapping_failure_leaves_transaction() {
-        whenever(row.getString("image_urls")).thenReturn("{\"unexpected\":\"shape\"}")
-
-        assertThrows(IllegalStateException::class.java) { reader.findById(42L) }
-        assertFalse(transactionActive)
-    }
-
-    @Test
-    fun given__query_failure__when__find__then__failure_propagates_after_transaction() {
+    fun `목록 조회가 실패할 때__전체를 조회하면__트랜잭션이 끝난 뒤 원래 예외를 전파한다`() {
+        // given
         val failure = DataAccessResourceFailureException("unavailable")
-        doThrow(failure).`when`(jdbc)
-            .query(anyString(), any<RowMapper<PostSnapshot>>(), eq(42L))
 
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { reader.findById(42L) },
-        )
-        assertFalse(transactionActive)
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>()) } throws failure
+
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { reader.findAll() }
+
+        // then
+        assertSame(failure, thrown)
+        assertFalse(transactions.active)
+    }
+
+    @Test
+    fun `게시글 행이 없을 때__조회하면__트랜잭션이 끝난 뒤 빈 값을 돌려준다`() {
+        // given
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } returns listOf()
+
+        // when
+        val post = reader.findById(42L)
+
+        // then
+        assertEquals(Optional.empty<PostSnapshot>(), post)
+        assertFalse(transactions.active)
+    }
+
+    @Test
+    fun `이미지 JSON이 잘못됐을 때__조회하면__매핑 실패가 트랜잭션을 벗어난다`() {
+        // given
+        givenPostRow("{\"unexpected\":\"shape\"}")
+
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } answers {
+            assertTrue(transactions.active)
+            listOf(secondArg<RowMapper<PostSnapshot>>().mapRow(row.resultSet, 0))
+        }
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { reader.findById(42L) }
+
+        // then
+        assertEquals(IllegalStateException::class.java, thrown.javaClass)
+        assertFalse(transactions.active)
+    }
+
+    @Test
+    fun `조회가 실패할 때__조회하면__트랜잭션이 끝난 뒤 예외를 전파한다`() {
+        // given
+        val failure = DataAccessResourceFailureException("unavailable")
+
+        every { jdbc.query(any<String>(), any<RowMapper<PostSnapshot>>(), *anyVararg()) } throws failure
+
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { reader.findById(42L) }
+
+        // then
+        assertSame(failure, thrown)
+        assertFalse(transactions.active)
+    }
+
+    /** Data builder: the columns of the one post row these tests read. */
+    private fun givenPostRow(imageUrls: String?) {
+        row.longs["post_id"] = 42L
+        row.longs["author_id"] = 7L
+        row.strings["title"] = "함께 찾아주세요"
+        row.strings["content"] = "게시글 본문"
+        row.strings["board_type"] = "REPORT"
+        row.strings["image_urls"] = imageUrls
+        row.timestamps["created_at"] = Timestamp.valueOf(createdAt)
+        row.timestamps["updated_at"] = Timestamp.valueOf(updatedAt)
     }
 
     companion object {
