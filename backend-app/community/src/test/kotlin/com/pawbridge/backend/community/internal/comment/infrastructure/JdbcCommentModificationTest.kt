@@ -1,27 +1,21 @@
 package com.pawbridge.backend.community.internal.comment.infrastructure
 
 import com.pawbridge.backend.community.internal.comment.application.UnsupportedCommentCharactersException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.dao.DataAccessResourceFailureException
@@ -43,146 +37,201 @@ import java.util.Calendar
 import java.util.stream.Stream
 
 class JdbcCommentModificationTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val transactions = mock(TransactionOperations::class.java)
-    private val connection = mock(Connection::class.java)
-    private val statement = mock(PreparedStatement::class.java)
-    private val clock = mock(Clock::class.java)
+    private val jdbc = mockk<JdbcOperations>()
+    private val transactions = RecordingTransactions()
+    private val connection = mockk<Connection>()
+    private val statement = mockk<PreparedStatement>()
+    private val clock = mockk<Clock>()
     private val writer = JdbcCommentWriter(jdbc, transactions, clock)
-    private var transactionActive = false
     private var updateCount = 1
     private var updateAttempts = 0
 
-    @BeforeEach
-    fun prepareTransactionAndJdbc() {
-        whenever(clock.zone).thenReturn(ZONE)
-        whenever(clock.instant()).thenAnswer {
-            assertTrue(transactionActive)
-            UPDATED
-        }
-        whenever(transactions.execute(any<TransactionCallback<Void>>())).thenAnswer { invocation ->
-            transactionActive = true
-            try {
-                invocation.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-            } finally {
-                transactionActive = false
-            }
-        }
-        whenever(connection.prepareStatement(anyString())).thenAnswer {
-            assertTrue(transactionActive)
-            statement
-        }
-        whenever(jdbc.update(any(PreparedStatementCreator::class.java))).thenAnswer { invocation ->
-            updateAttempts++
-            invocation.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
-            updateCount
-        }
-    }
-
     @Test
-    fun given__changed_raw_content__when__update__then__one_id_only_update_binds_content_and_audit_time_without_reads() {
+    fun `내용이 바뀐 원문일 때__수정하면__읽기 없이 id만 조건으로 한 UPDATE 한 번에 내용과 감사 시각을 바인딩한다`() {
+        // given
         val content = "  수정 원문\n　 "
 
+        every { clock.zone } returns ZONE
+        every { clock.instant() } answers {
+            assertTrue(transactions.active)
+            UPDATED
+        }
+        every { connection.prepareStatement(any<String>()) } answers {
+            assertTrue(transactions.active)
+            statement
+        }
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            updateAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            updateCount
+        }
+        justRun { statement.setString(any(), any()) }
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+        justRun { statement.setLong(any(), any()) }
+
+        // when
         writer.update(13L, content)
 
-        assertFalse(transactionActive)
+        // then
+        assertFalse(transactions.active)
         assertEquals(1, updateAttempts)
-        val sql = ArgumentCaptor.forClass(String::class.java)
-        verify(connection).prepareStatement(sql.capture())
+        val sql = slot<String>()
+        verify(exactly = 1) { connection.prepareStatement(capture(sql)) }
         assertEquals(
             "UPDATE pawbridge_community.comments SET content = ?, updated_at = ? WHERE comment_id = ?",
-            sql.value.replace(Regex("\\s+"), " ").trim(),
+            sql.captured.replace(Regex("\\s+"), " ").trim(),
         )
-        verify(statement).setString(1, content)
-        val timestamp = ArgumentCaptor.forClass(Timestamp::class.java)
-        val calendar = ArgumentCaptor.forClass(Calendar::class.java)
-        verify(statement).setTimestamp(eq(2), timestamp.capture(), calendar.capture())
-        assertEquals(Timestamp.valueOf(LocalDateTime.ofInstant(UPDATED, ZONE)), timestamp.value)
-        assertEquals(123456789, timestamp.value.nanos)
-        assertEquals("UTC", calendar.value.timeZone.id)
-        verify(statement).setLong(3, 13L)
-        verify(clock).instant()
-        verify(transactions).execute(any<TransactionCallback<Void>>())
-        verify(jdbc).update(any(PreparedStatementCreator::class.java))
-        verifyNoMoreInteractions(jdbc)
+        verify(exactly = 1) { statement.setString(1, content) }
+        val timestamp = slot<Timestamp>()
+        val calendar = slot<Calendar>()
+        verify(exactly = 1) { statement.setTimestamp(2, capture(timestamp), capture(calendar)) }
+        assertEquals(Timestamp.valueOf(LocalDateTime.ofInstant(UPDATED, ZONE)), timestamp.captured)
+        assertEquals(123456789, timestamp.captured.nanos)
+        assertEquals("UTC", calendar.captured.timeZone.id)
+        verify(exactly = 1) { statement.setLong(3, 13L) }
+        verify(exactly = 1) { clock.instant() }
+        assertEquals(1, transactions.executions)
+        verify(exactly = 1) { jdbc.update(any<PreparedStatementCreator>()) }
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__row_disappeared_after_snapshot__when__update__then__zero_rows_is_unexpected_failure_without_retry() {
+    fun `스냅샷 이후 행이 사라졌을 때__수정하면__영향 행 0건을 재시도 없이 예상 밖 실패로 처리한다`() {
+        // given
         updateCount = 0
 
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returns UPDATED
+        every { connection.prepareStatement(any<String>()) } returns statement
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            updateAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            updateCount
+        }
+        justRun { statement.setString(any(), any()) }
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+        justRun { statement.setLong(any(), any()) }
+
+        // when
         assertThrows(IllegalStateException::class.java) { writer.update(13L, "댓글") }
-        assertFalse(transactionActive)
+
+        // then
+        assertFalse(transactions.active)
         assertEquals(1, updateAttempts)
-        verify(transactions).execute(any<TransactionCallback<Void>>())
-        verify(jdbc).update(any(PreparedStatementCreator::class.java))
-        verifyNoMoreInteractions(jdbc)
+        assertEquals(1, transactions.executions)
+        verify(exactly = 1) { jdbc.update(any<PreparedStatementCreator>()) }
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__update_sql_failure__when__update__then__original_failure_leaves_transaction_without_retry() {
+    fun `UPDATE SQL이 실패할 때__수정하면__재시도 없이 트랜잭션을 벗어나 원래 예외를 전파한다`() {
+        // given
         val failure = DataAccessResourceFailureException("synthetic unavailable")
-        doThrow(failure).`when`(jdbc).update(any(PreparedStatementCreator::class.java))
 
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { writer.update(13L, "댓글") },
-        )
-        assertFalse(transactionActive)
-        verify(transactions).execute(any<TransactionCallback<Void>>())
-        verify(jdbc).update(any(PreparedStatementCreator::class.java))
-        verifyNoMoreInteractions(jdbc)
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returns UPDATED
+        every { jdbc.update(any<PreparedStatementCreator>()) } throws failure
+
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { writer.update(13L, "댓글") }
+
+        // then
+        assertSame(failure, thrown)
+        assertFalse(transactions.active)
+        assertEquals(1, transactions.executions)
+        verify(exactly = 1) { jdbc.update(any<PreparedStatementCreator>()) }
+        confirmVerified(jdbc)
     }
 
     @ParameterizedTest
     @MethodSource("commitFailures")
-    fun given__commit_failure_after_update__when__update__then__only_named_community_charset_rejection_is_translated(
+    fun `UPDATE 뒤 커밋이 실패할 때__수정하면__이름 붙은 커뮤니티 문자셋 거부만 사용자 오류로 바꾼다`(
         commitFailure: TransactionSystemException,
         translated: Boolean,
     ) {
-        doAnswer { invocation ->
-            transactionActive = true
-            try {
-                invocation.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-                throw commitFailure
-            } finally {
-                transactionActive = false
-            }
-        }.`when`(transactions).execute(any<TransactionCallback<Void>>())
+        // given
+        transactions.failureAfterCallback = commitFailure
 
-        if (translated) {
-            val failure = assertThrows(UnsupportedCommentCharactersException::class.java) {
-                writer.update(13L, "댓글")
-            }
-            assertSame(commitFailure, failure.cause)
-            assertEquals("일부 이모지 등 지원하지 않는 문자를 제외해 주세요.", failure.message)
-        } else {
-            assertSame(
-                commitFailure,
-                assertThrows(TransactionSystemException::class.java) { writer.update(13L, "댓글") },
-            )
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returns UPDATED
+        every { connection.prepareStatement(any<String>()) } returns statement
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            updateAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            updateCount
         }
-        assertFalse(transactionActive)
+        justRun { statement.setString(any(), any()) }
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+        justRun { statement.setLong(any(), any()) }
+
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { writer.update(13L, "댓글") }
+
+        // then
+        if (translated) {
+            assertTrue(thrown is UnsupportedCommentCharactersException)
+            assertSame(commitFailure, thrown.cause)
+            assertEquals("일부 이모지 등 지원하지 않는 문자를 제외해 주세요.", thrown.message)
+        } else {
+            assertSame(commitFailure, thrown)
+        }
+        assertFalse(transactions.active)
         assertEquals(1, updateAttempts)
-        verify(transactions, times(1)).execute(any<TransactionCallback<Void>>())
-        verify(jdbc, times(1)).update(any(PreparedStatementCreator::class.java))
-        verifyNoMoreInteractions(jdbc)
+        assertEquals(1, transactions.executions)
+        verify(exactly = 1) { jdbc.update(any<PreparedStatementCreator>()) }
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__timestamp_binding_and_close_failures__when__preparing_update__then__statement_is_closed_and_original_failure_retained() {
+    fun `타임스탬프 바인딩과 닫기가 모두 실패할 때__UPDATE를 준비하면__문장을 닫고 원래 예외를 유지한다`() {
+        // given
         val failure = IllegalStateException("synthetic binding failure")
         val closing = SQLException("synthetic close failure")
-        doThrow(failure).`when`(statement)
-            .setTimestamp(eq(2), any(Timestamp::class.java), any(Calendar::class.java))
-        doThrow(closing).`when`(statement).close()
 
-        assertSame(failure, assertThrows(IllegalStateException::class.java) { writer.update(13L, "댓글") })
+        every { clock.zone } returns ZONE
+        every { clock.instant() } returns UPDATED
+        every { connection.prepareStatement(any<String>()) } returns statement
+        every { jdbc.update(any<PreparedStatementCreator>()) } answers {
+            updateAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            updateCount
+        }
+        justRun { statement.setString(any(), any()) }
+        every { statement.setTimestamp(2, any<Timestamp>(), any<Calendar>()) } throws failure
+        every { statement.close() } throws closing
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { writer.update(13L, "댓글") }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, updateAttempts)
-        assertFalse(transactionActive)
+        assertFalse(transactions.active)
         assertEquals(1, failure.suppressed.size)
         assertSame(closing, failure.suppressed[0])
-        verify(statement).close()
+        verify(exactly = 1) { statement.close() }
+    }
+
+    /** An in-memory TransactionOperations that records running state and calls, and can fail after the callback. */
+    private class RecordingTransactions : TransactionOperations {
+        var active = false
+        var executions = 0
+        var failureAfterCallback: RuntimeException? = null
+
+        override fun <T> execute(action: TransactionCallback<T>): T? {
+            executions++
+            active = true
+            try {
+                val result = action.doInTransaction(SimpleTransactionStatus())
+                val failure = failureAfterCallback
+                if (failure != null) {
+                    throw failure
+                }
+                return result
+            } finally {
+                active = false
+            }
+        }
     }
 
     companion object {

@@ -5,6 +5,11 @@ import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
 import com.pawbridge.backend.user.api.ContactMembersQuery
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -14,13 +19,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.transaction.CannotCreateTransactionException
 import org.springframework.transaction.TransactionSystemException
@@ -31,126 +29,133 @@ import java.util.UUID
 import java.util.stream.Stream
 
 class ListPrivateNotesTest {
-    private val members = mock(ContactMemberQuery::class.java)
-    private val notes = mock(PrivateNoteListReader::class.java)
-    private val contactMembers = mock(ContactMembersQuery::class.java)
-    private val blocks = mock(NoteBlockReader::class.java)
-    private val clock = mock(Clock::class.java)
+    private val members = mockk<ContactMemberQuery>()
+    private val notes = mockk<PrivateNoteListReader>()
+    private val contactMembers = mockk<ContactMembersQuery>()
+    private val blocks = mockk<NoteBlockReader>()
+    private val clock = mockk<Clock>()
     private val query = ListPrivateNotes(members, notes, contactMembers, blocks, clock)
 
     @ParameterizedTest
     @ValueSource(ints = [-1, 10001])
-    fun given__invalid_page_box_and_caller__when__listing__then__reject_page_before_box_member_clock_or_sql(page: Int) {
-        assertEquals(
-            PrivateNoteListRejectedException.Reason.INVALID_PAGE,
-            assertThrows(PrivateNoteListRejectedException::class.java) {
-                query.read(0L, "invalid", false, page)
-            }.reason(),
-        )
+    fun `잘못된 쪽 번호와 상자와 호출자가 주어졌을 때__목록을 읽으면__상자와 회원 조회와 시각 읽기와 SQL 전에 쪽 번호를 거절한다`(page: Int) {
+        // when
+        val failure = assertThrows(PrivateNoteListRejectedException::class.java) {
+            query.read(0L, "invalid", false, page)
+        }
 
-        verifyNoInteractions(members, clock, notes, contactMembers, blocks)
+        // then
+        assertEquals(PrivateNoteListRejectedException.Reason.INVALID_PAGE, failure.reason())
+        confirmVerified(members, clock, notes, contactMembers, blocks)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["inbox", " INBOX"])
-    fun given__raw_invalid_box_and_caller__when__listing__then__reject_box_without_case_or_whitespace_normalization_before_caller(
+    fun `원문 그대로 잘못된 상자와 호출자가 주어졌을 때__목록을 읽으면__대소문자나 공백을 고치지 않고 호출자 확인 전에 상자를 거절한다`(
         box: String,
     ) {
-        assertEquals(
-            PrivateNoteListRejectedException.Reason.INVALID_BOX,
-            assertThrows(PrivateNoteListRejectedException::class.java) { query.read(0L, box, false, 0) }.reason(),
-        )
+        // when
+        val failure = assertThrows(PrivateNoteListRejectedException::class.java) { query.read(0L, box, false, 0) }
 
-        verifyNoInteractions(members, clock, notes, contactMembers, blocks)
+        // then
+        assertEquals(PrivateNoteListRejectedException.Reason.INVALID_BOX, failure.reason())
+        confirmVerified(members, clock, notes, contactMembers, blocks)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0L, -1L])
-    fun given__valid_page_and_box_but_invalid_caller__when__listing__then__reject_login_before_dependencies(
+    fun `유효한 쪽과 상자지만 잘못된 호출자가 주어졌을 때__목록을 읽으면__의존성 호출 전에 로그인 거절한다`(
         caller: Long,
     ) {
-        assertEquals(
-            PrivateNoteListRejectedException.Reason.LOGIN,
-            assertThrows(PrivateNoteListRejectedException::class.java) {
-                query.read(caller, "INBOX", false, 0)
-            }.reason(),
-        )
+        // when
+        val failure = assertThrows(PrivateNoteListRejectedException::class.java) {
+            query.read(caller, "INBOX", false, 0)
+        }
 
-        verifyNoInteractions(members, clock, notes, contactMembers, blocks)
+        // then
+        assertEquals(PrivateNoteListRejectedException.Reason.LOGIN, failure.reason())
+        confirmVerified(members, clock, notes, contactMembers, blocks)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__missing_or_pending_caller__when__listing__then__reject_inactive_before_clock_count_list_batch_or_block(
+    fun `호출자가 없거나 탈퇴 대기일 때__목록을 읽으면__시각 읽기와 개수와 목록과 일괄 조회와 차단 확인 전에 비활성으로 거절한다`(
         pending: Boolean,
     ) {
-        whenever(members.get(7L)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, pending))
+        // given
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, pending)
 
-        assertEquals(
-            PrivateNoteListRejectedException.Reason.INACTIVE,
-            assertThrows(PrivateNoteListRejectedException::class.java) {
-                query.read(7L, "INBOX", false, 0)
-            }.reason(),
-        )
+        // when
+        val failure = assertThrows(PrivateNoteListRejectedException::class.java) {
+            query.read(7L, "INBOX", false, 0)
+        }
 
-        verify(members).get(7L)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(clock, notes, contactMembers, blocks)
+        // then
+        assertEquals(PrivateNoteListRejectedException.Reason.INACTIVE, failure.reason())
+        verify(exactly = 1) { members.get(7L) }
+        confirmVerified(members, clock, notes, contactMembers, blocks)
     }
 
     @ParameterizedTest
     @MethodSource("emptyPages")
-    fun given__empty_page_with_zero_or_large_count__when__listing__then__still_list_and_preserve_raw_count_requested_page_and_size(
+    fun `개수가 0이거나 큰 빈 쪽이 주어졌을 때__목록을 읽으면__그래도 목록을 읽고 원본 개수와 요청한 쪽과 크기를 보존한다`(
         count: Long,
         page: Int,
         totalPages: Int,
     ) {
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notes.count(7L, "SENT", true, NOW)).thenReturn(count)
-        whenever(notes.read(7L, "SENT", true, page, NOW)).thenReturn(listOf())
+        // given
+        every { members.get(any()) } returns CURRENT
+        every { clock.instant() } returns NOW
+        every { notes.count(any(), any(), any(), any()) } returns count
+        every { notes.read(any(), any(), any(), any(), any()) } returns listOf()
 
-        assertEquals(PrivateNotePage(listOf(), count, totalPages, page, 10), query.read(7L, "SENT", true, page))
+        // when
+        val result = query.read(7L, "SENT", true, page)
 
-        val order = inOrder(members, clock, notes)
-        order.verify(members).get(7L)
-        order.verify(clock).instant()
-        order.verify(notes).count(7L, "SENT", true, NOW)
-        order.verify(notes).read(7L, "SENT", true, page, NOW)
-        verifyNoMoreInteractions(members, clock, notes)
-        verifyNoInteractions(contactMembers, blocks)
+        // then
+        assertEquals(PrivateNotePage(listOf(), count, totalPages, page, 10), result)
+        verifySequence {
+            members.get(7L)
+            clock.instant()
+            notes.count(7L, "SENT", true, NOW)
+            notes.read(7L, "SENT", true, page, NOW)
+        }
+        confirmVerified(contactMembers, blocks)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["INBOX", "SENT"])
-    fun given__page_with_only_null_counterparts__when__listing__then__keep_notes_and_skip_batch_and_block(box: String) {
+    fun `상대가 모두 null인 쪽이 주어졌을 때__목록을 읽으면__쪽지는 유지하고 일괄 조회와 차단 확인만 건너뛴다`(box: String) {
+        // given
         val sender: Long? = if (box == "INBOX") null else 7L
         val recipient: Long? = if (box == "INBOX") 7L else null
         val note = StoredNote(
             UUID(23L, 1L), sender, recipient, " 原文\n본문 ", null, null,
             NOW.minusSeconds(1), box, NOW, true,
         )
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notes.count(7L, box, false, NOW)).thenReturn(1L)
-        whenever(notes.read(7L, box, false, 0, NOW)).thenReturn(listOf(note))
 
-        assertEquals(
-            PrivateNotePage(listOf(view(note, null, "탈퇴한 회원", false, null)), 1L, 1, 0, 10),
-            query.read(7L, box, false, 0),
-        )
+        every { members.get(any()) } returns CURRENT
+        every { clock.instant() } returns NOW
+        every { notes.count(any(), any(), any(), any()) } returns 1L
+        every { notes.read(any(), any(), any(), any(), any()) } returns listOf(note)
 
-        val order = inOrder(members, clock, notes)
-        order.verify(members).get(7L)
-        order.verify(clock).instant()
-        order.verify(notes).count(7L, box, false, NOW)
-        order.verify(notes).read(7L, box, false, 0, NOW)
-        verifyNoMoreInteractions(members, clock, notes)
-        verifyNoInteractions(contactMembers, blocks)
+        // when
+        val result = query.read(7L, box, false, 0)
+
+        // then
+        assertEquals(PrivateNotePage(listOf(view(note, null, "탈퇴한 회원", false, null)), 1L, 1, 0, 10), result)
+        verifySequence {
+            members.get(7L)
+            clock.instant()
+            notes.count(7L, box, false, NOW)
+            notes.read(7L, box, false, 0, NOW)
+        }
+        confirmVerified(contactMembers, blocks)
     }
 
     @Test
-    fun given__mixed_duplicate_null_missing_pending_and_raw_names_after_zero_count__when__listing__then__batch_once_and_block_each_active_inbox_in_content_order_without_pair_cache() {
+    fun `개수 0 뒤에 중복과 없음과 탈퇴 대기 쪽지가 섞여 있을 때__목록을 읽으면__일괄 조회는 한 번 하고 쪽지마다 순서대로 캐시 없이 차단을 확인한다`() {
+        // given
         val first = StoredNote(
             UUID(23L, 1L), 8L, 7L, " 원문\n본문 ", "POST", Long.MAX_VALUE,
             NOW.minusSeconds(1), "INBOX", null, true,
@@ -160,22 +165,26 @@ class ListPrivateNotesTest {
             inbox(5, 10L), inbox(6, 11L), inbox(7, 12L),
         )
         val ids = listOf(8L, 9L, 10L, 11L, 12L)
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notes.count(7L, "INBOX", false, NOW)).thenReturn(0L)
-        whenever(notes.read(7L, "INBOX", false, 0, NOW)).thenReturn(found)
-        whenever(contactMembers.getAll(ids)).thenReturn(
-            listOf(
-                ContactMember(8L, " 原文 이름 ", true, false),
-                ContactMember(9L, "탈퇴한 회원", false, false),
-                ContactMember(10L, "탈퇴한 회원", false, true),
-                ContactMember(11L, "", true, false),
-                ContactMember(12L, "  ", true, false),
-            ),
-        )
-        whenever(blocks.blocked(7L, 8L)).thenReturn(false, true)
-        whenever(blocks.blocked(7L, 12L)).thenReturn(true)
 
+        every { members.get(any()) } returns CURRENT
+        every { clock.instant() } returns NOW
+        every { notes.count(any(), any(), any(), any()) } returns 0L
+        every { notes.read(any(), any(), any(), any(), any()) } returns found
+        every { contactMembers.getAll(any()) } returns listOf(
+            ContactMember(8L, " 原文 이름 ", true, false),
+            ContactMember(9L, "탈퇴한 회원", false, false),
+            ContactMember(10L, "탈퇴한 회원", false, true),
+            ContactMember(11L, "", true, false),
+            ContactMember(12L, "  ", true, false),
+        )
+        every { blocks.blocked(7L, 8L) } returnsMany listOf(false, true)
+        every { blocks.blocked(7L, 11L) } returns false
+        every { blocks.blocked(7L, 12L) } returns true
+
+        // when
+        val result = query.read(7L, "INBOX", false, 0)
+
+        // then
         val expected = listOf(
             view(first, 8L, " 原文 이름 ", true, "/community/" + Long.MAX_VALUE),
             view(found[1], null, "탈퇴한 회원", false, null),
@@ -185,78 +194,88 @@ class ListPrivateNotesTest {
             view(found[5], 11L, "", true, null),
             view(found[6], 12L, "  ", false, null),
         )
-        assertEquals(PrivateNotePage(expected, 0L, 0, 0, 10), query.read(7L, "INBOX", false, 0))
-
-        val order = inOrder(members, clock, notes, contactMembers, blocks)
-        order.verify(members).get(7L)
-        order.verify(clock).instant()
-        order.verify(notes).count(7L, "INBOX", false, NOW)
-        order.verify(notes).read(7L, "INBOX", false, 0, NOW)
-        order.verify(contactMembers).getAll(ids)
-        order.verify(blocks, times(2)).blocked(7L, 8L)
-        order.verify(blocks).blocked(7L, 11L)
-        order.verify(blocks).blocked(7L, 12L)
-        verifyNoMoreInteractions(members, clock, notes, contactMembers, blocks)
+        assertEquals(PrivateNotePage(expected, 0L, 0, 0, 10), result)
+        verifySequence {
+            members.get(7L)
+            clock.instant()
+            notes.count(7L, "INBOX", false, NOW)
+            notes.read(7L, "INBOX", false, 0, NOW)
+            contactMembers.getAll(ids)
+            blocks.blocked(7L, 8L)
+            blocks.blocked(7L, 8L)
+            blocks.blocked(7L, 11L)
+            blocks.blocked(7L, 12L)
+        }
     }
 
     @Test
-    fun given__sent_page_with_active_recipient__when__listing__then__display_batch_recipient_report_link_and_page_without_block_lookup() {
+    fun `활성 수신자가 있는 보낸 쪽이 주어졌을 때__목록을 읽으면__차단 조회 없이 일괄 조회한 수신자와 신고 링크와 쪽을 보여준다`() {
+        // given
         val note = StoredNote(
             UUID(23L, 8L), 7L, Long.MAX_VALUE, "보낸 원문", "REPORT", 13L,
             NOW.minusSeconds(5), "SENT", NOW.minusSeconds(1), false,
         )
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notes.count(7L, "SENT", false, NOW)).thenReturn(11L)
-        whenever(notes.read(7L, "SENT", false, 1, NOW)).thenReturn(listOf(note))
-        whenever(contactMembers.getAll(listOf(Long.MAX_VALUE)))
-            .thenReturn(listOf(ContactMember(Long.MAX_VALUE, "수신자", true, false)))
 
+        every { members.get(any()) } returns CURRENT
+        every { clock.instant() } returns NOW
+        every { notes.count(any(), any(), any(), any()) } returns 11L
+        every { notes.read(any(), any(), any(), any(), any()) } returns listOf(note)
+        every { contactMembers.getAll(any()) } returns listOf(ContactMember(Long.MAX_VALUE, "수신자", true, false))
+
+        // when
+        val result = query.read(7L, "SENT", false, 1)
+
+        // then
         assertEquals(
             PrivateNotePage(listOf(view(note, Long.MAX_VALUE, "수신자", false, "/reports/13")), 11L, 2, 1, 10),
-            query.read(7L, "SENT", false, 1),
+            result,
         )
-
-        val order = inOrder(members, clock, notes, contactMembers)
-        order.verify(members).get(7L)
-        order.verify(clock).instant()
-        order.verify(notes).count(7L, "SENT", false, NOW)
-        order.verify(notes).read(7L, "SENT", false, 1, NOW)
-        order.verify(contactMembers).getAll(listOf(Long.MAX_VALUE))
-        verifyNoMoreInteractions(members, clock, notes, contactMembers)
-        verifyNoInteractions(blocks)
+        verifySequence {
+            members.get(7L)
+            clock.instant()
+            notes.count(7L, "SENT", false, NOW)
+            notes.read(7L, "SENT", false, 1, NOW)
+            contactMembers.getAll(listOf(Long.MAX_VALUE))
+        }
+        confirmVerified(blocks)
     }
 
     @Test
-    fun given__time_advances_during_caller_and_count__when__listing__then__capture_once_after_caller_and_reuse_that_instant_for_list() {
+    fun `호출자 조회와 개수 조회 중 시간이 흘렀을 때__목록을 읽으면__호출자 조회 뒤 한 번만 시각을 잡고 목록에 그 시각을 재사용한다`() {
+        // given
         var time = NOW.minusSeconds(1)
-        whenever(members.get(7L)).thenAnswer {
+
+        every { members.get(any()) } answers {
             time = NOW
             CURRENT
         }
-        whenever(clock.instant()).thenAnswer { time }
-        whenever(notes.count(7L, "INBOX", false, NOW)).thenAnswer {
+        every { clock.instant() } answers { time }
+        every { notes.count(any(), any(), any(), any()) } answers {
             time = NOW.plusSeconds(3600)
             0L
         }
-        whenever(notes.read(7L, "INBOX", false, 0, NOW)).thenReturn(listOf())
+        every { notes.read(any(), any(), any(), any(), any()) } returns listOf()
 
-        assertEquals(PrivateNotePage(listOf(), 0L, 0, 0, 10), query.read(7L, "INBOX", false, 0))
+        // when
+        val result = query.read(7L, "INBOX", false, 0)
 
-        val order = inOrder(members, clock, notes)
-        order.verify(members).get(7L)
-        order.verify(clock).instant()
-        order.verify(notes).count(7L, "INBOX", false, NOW)
-        order.verify(notes).read(7L, "INBOX", false, 0, NOW)
-        verifyNoMoreInteractions(members, clock, notes)
-        verifyNoInteractions(contactMembers, blocks)
+        // then
+        assertEquals(PrivateNotePage(listOf(), 0L, 0, 0, 10), result)
+        verifySequence {
+            members.get(7L)
+            clock.instant()
+            notes.count(7L, "INBOX", false, NOW)
+            notes.read(7L, "INBOX", false, 0, NOW)
+        }
+        confirmVerified(contactMembers, blocks)
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__caller_clock_count_list_batch_or_first_or_late_block_failure__when__listing__then__propagate_same_failure_stop_later_steps_and_return_no_partial_page(
+    fun `조회나 차단 확인이 실패할 때__목록을 읽으면__같은 실패를 전파하고 이후 단계를 멈추며 부분 쪽을 돌려주지 않는다`(
         phase: FailurePhase,
     ) {
+        // given
         val found = listOf(inbox(1, 8L), inbox(2, 9L), inbox(3, 10L))
         val ids = listOf(8L, 9L, 10L)
         val failure: RuntimeException = when (phase) {
@@ -270,46 +289,69 @@ class ListPrivateNotesTest {
             FailurePhase.FIRST_BLOCK -> TransactionTimedOutException("private block timeout")
             FailurePhase.LATE_BLOCK -> TransactionSystemException("private second block commit")
         }
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(clock.instant()).thenReturn(NOW)
-        whenever(notes.count(7L, "INBOX", false, NOW)).thenReturn(3L)
-        whenever(notes.read(7L, "INBOX", false, 0, NOW)).thenReturn(found)
-        whenever(contactMembers.getAll(ids)).thenReturn(ids.map { id -> ContactMember(id, "회원", true, false) })
+
+        if (phase == FailurePhase.CALLER) {
+            every { members.get(any()) } throws failure
+        } else {
+            every { members.get(any()) } returns CURRENT
+        }
+        if (phase == FailurePhase.CLOCK) {
+            every { clock.instant() } throws failure
+        } else {
+            every { clock.instant() } returns NOW
+        }
+        if (phase == FailurePhase.COUNT) {
+            every { notes.count(any(), any(), any(), any()) } throws failure
+        } else {
+            every { notes.count(any(), any(), any(), any()) } returns 3L
+        }
+        if (phase == FailurePhase.LIST) {
+            every { notes.read(any(), any(), any(), any(), any()) } throws failure
+        } else {
+            every { notes.read(any(), any(), any(), any(), any()) } returns found
+        }
+        if (phase == FailurePhase.BATCH) {
+            every { contactMembers.getAll(any()) } throws failure
+        } else {
+            every { contactMembers.getAll(any()) } returns ids.map { id -> ContactMember(id, "회원", true, false) }
+        }
         when (phase) {
-            FailurePhase.CALLER -> whenever(members.get(7L)).thenThrow(failure)
-            FailurePhase.CLOCK -> whenever(clock.instant()).thenThrow(failure)
-            FailurePhase.COUNT -> whenever(notes.count(7L, "INBOX", false, NOW)).thenThrow(failure)
-            FailurePhase.LIST -> whenever(notes.read(7L, "INBOX", false, 0, NOW)).thenThrow(failure)
-            FailurePhase.BATCH -> whenever(contactMembers.getAll(ids)).thenThrow(failure)
-            FailurePhase.FIRST_BLOCK -> whenever(blocks.blocked(7L, 8L)).thenThrow(failure)
-            FailurePhase.LATE_BLOCK -> whenever(blocks.blocked(7L, 9L)).thenThrow(failure)
+            FailurePhase.FIRST_BLOCK -> every { blocks.blocked(any(), any()) } throws failure
+            FailurePhase.LATE_BLOCK -> {
+                every { blocks.blocked(7L, 8L) } returns false
+                every { blocks.blocked(7L, 9L) } throws failure
+            }
+            else -> every { blocks.blocked(any(), any()) } returns false
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { query.read(7L, "INBOX", false, 0) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { query.read(7L, "INBOX", false, 0) }
 
-        val order = inOrder(members, clock, notes, contactMembers, blocks)
-        order.verify(members).get(7L)
-        if (phase != FailurePhase.CALLER) {
-            order.verify(clock).instant()
+        // then
+        assertSame(failure, thrown)
+        verifySequence {
+            members.get(7L)
+            if (phase != FailurePhase.CALLER) {
+                clock.instant()
+            }
+            if (phase != FailurePhase.CALLER && phase != FailurePhase.CLOCK) {
+                notes.count(7L, "INBOX", false, NOW)
+            }
+            if (phase == FailurePhase.LIST || phase == FailurePhase.BATCH ||
+                phase == FailurePhase.FIRST_BLOCK || phase == FailurePhase.LATE_BLOCK
+            ) {
+                notes.read(7L, "INBOX", false, 0, NOW)
+            }
+            if (phase == FailurePhase.BATCH || phase == FailurePhase.FIRST_BLOCK || phase == FailurePhase.LATE_BLOCK) {
+                contactMembers.getAll(ids)
+            }
+            if (phase == FailurePhase.FIRST_BLOCK || phase == FailurePhase.LATE_BLOCK) {
+                blocks.blocked(7L, 8L)
+            }
+            if (phase == FailurePhase.LATE_BLOCK) {
+                blocks.blocked(7L, 9L)
+            }
         }
-        if (phase != FailurePhase.CALLER && phase != FailurePhase.CLOCK) {
-            order.verify(notes).count(7L, "INBOX", false, NOW)
-        }
-        if (phase == FailurePhase.LIST || phase == FailurePhase.BATCH ||
-            phase == FailurePhase.FIRST_BLOCK || phase == FailurePhase.LATE_BLOCK
-        ) {
-            order.verify(notes).read(7L, "INBOX", false, 0, NOW)
-        }
-        if (phase == FailurePhase.BATCH || phase == FailurePhase.FIRST_BLOCK || phase == FailurePhase.LATE_BLOCK) {
-            order.verify(contactMembers).getAll(ids)
-        }
-        if (phase == FailurePhase.FIRST_BLOCK || phase == FailurePhase.LATE_BLOCK) {
-            order.verify(blocks).blocked(7L, 8L)
-        }
-        if (phase == FailurePhase.LATE_BLOCK) {
-            order.verify(blocks).blocked(7L, 9L)
-        }
-        verifyNoMoreInteractions(members, clock, notes, contactMembers, blocks)
     }
 
     enum class FailurePhase { CALLER, CLOCK, COUNT, LIST, BATCH, FIRST_BLOCK, LATE_BLOCK }

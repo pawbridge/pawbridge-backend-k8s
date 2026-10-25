@@ -10,15 +10,19 @@ import org.slf4j.LoggerFactory
 
 class AdminPostStatisticsExceptionHandlerTest {
     @Test
-    fun given__private_runtime_details__when__handling__then__return_original_500_and_log_only_type_without_new_cache_policy() {
+    fun `내부 실행 정보가 담긴 예외일 때__처리하면__기존 500 응답을 돌려주고 예외 유형만 기록하며 캐시 정책을 새로 두지 않는다`() {
+        // given
         val logger = LoggerFactory.getLogger(AdminPostStatisticsExceptionHandler::class.java) as Logger
         val events = ListAppender<ILoggingEvent>()
         events.start()
         logger.addAppender(events)
         try {
+            // when
             val response = AdminPostStatisticsExceptionHandler().serverError(
                 IllegalStateException("private-body-sql-token", RuntimeException("private-cause")),
             )
+
+            // then
             assertEquals(500, response.statusCode.value())
             assertEquals(ApiResponse<Void>(500, "서버 에러!", null), response.body)
             assertNull(response.headers.cacheControl)

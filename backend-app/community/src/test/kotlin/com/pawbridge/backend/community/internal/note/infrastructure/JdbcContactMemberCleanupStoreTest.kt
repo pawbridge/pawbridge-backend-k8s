@@ -31,16 +31,19 @@ class JdbcContactMemberCleanupStoreTest {
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun givenAbsentOrInstalledChatAndAffectedNotes__whenRemoving__thenKeepOriginalSqlOrderBoundIdsAndBatchBeforeCommitHint(
+    fun `채팅 설치 여부가 다르고 영향받는 쪽지가 있을 때__회원을 제거하면__원래 SQL 순서와 바인딩 ID를 지키고 배치를 커밋 힌트보다 먼저 보낸다`(
         installed: Boolean,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.installed = installed
         fixture.jdbc.notes = if (installed) (1..301).map { i -> UUID(17, i.toLong()) } else listOf()
         fixture.jdbc.rooms = if (installed) listOf(UUID(19, 1), UUID(19, 2)) else listOf()
 
+        // when
         fixture.store.remove(MEMBER) { fixture.events.add("policy") }
 
+        // then
         val calls = fixture.jdbc.calls
         assertCall(
             calls[0],
@@ -136,9 +139,10 @@ class JdbcContactMemberCleanupStoreTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun givenPolicyNoteSqlInstallationQueryOrSynchronousChatFailure__whenRemoving__thenPropagateRollbackAndNeverCallCommittedHint(
+    fun `정책 쪽지 SQL 설치 질의 또는 동기 채팅 처리가 실패할 때__회원을 제거하면__예외를 전파하고 롤백하며 커밋 힌트를 부르지 않는다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.installed = true
         fixture.jdbc.notes = listOf(UUID(17, 1))
@@ -157,18 +161,18 @@ class JdbcContactMemberCleanupStoreTest {
             FailurePhase.CHAT -> "UPDATE pawbridge_community.member_chat_messages"
         }
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) {
-                fixture.store.remove(MEMBER) {
-                    fixture.events.add("policy")
-                    if (phase == FailurePhase.POLICY) {
-                        throw failure
-                    }
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
+            fixture.store.remove(MEMBER) {
+                fixture.events.add("policy")
+                if (phase == FailurePhase.POLICY) {
+                    throw failure
                 }
-            },
-        )
+            }
+        }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(
             listOf("rollback", "cleanup"),
             fixture.events.subList(fixture.events.size - 2, fixture.events.size),
@@ -185,18 +189,19 @@ class JdbcContactMemberCleanupStoreTest {
     }
 
     @Test
-    fun givenCommitFailure__whenRemoving__thenPropagateExactFailureAndDoNotSendHint() {
+    fun `커밋이 실패할 때__회원을 제거하면__같은 예외를 전파하고 힌트를 보내지 않는다`() {
+        // given
         val fixture = Fixture()
         val failure = TransactionSystemException("private commit")
         fixture.transactions.commitFailure = failure
 
-        assertSame(
-            failure,
-            assertThrows(TransactionSystemException::class.java) {
-                fixture.store.remove(MEMBER) { fixture.events.add("policy") }
-            },
-        )
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) {
+            fixture.store.remove(MEMBER) { fixture.events.add("policy") }
+        }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, fixture.transactions.commitAttempts)
         assertEquals(0, fixture.hints)
         assertFalse(fixture.transactions.committed)
@@ -204,7 +209,8 @@ class JdbcContactMemberCleanupStoreTest {
     }
 
     @Test
-    fun givenCommittedHintRuntimeFailure__whenRemoving__thenKeepCommitAndLogOnlyFailureType() {
+    fun `커밋 뒤 힌트가 런타임 예외를 던질 때__회원을 제거하면__커밋을 유지하고 예외 종류만 기록한다`() {
+        // given
         val fixture = Fixture()
         fixture.hintFailure = IllegalStateException("private hint payload")
         val logger = LoggerFactory.getLogger(JdbcContactMemberCleanupStore::class.java) as Logger
@@ -214,8 +220,10 @@ class JdbcContactMemberCleanupStoreTest {
         appender.start()
         logger.addAppender(appender)
         try {
+            // when
             fixture.store.remove(MEMBER) { fixture.events.add("policy") }
 
+            // then
             assertEquals(1, fixture.transactions.commitAttempts)
             assertTrue(fixture.transactions.committed)
             assertEquals(1, fixture.hints)

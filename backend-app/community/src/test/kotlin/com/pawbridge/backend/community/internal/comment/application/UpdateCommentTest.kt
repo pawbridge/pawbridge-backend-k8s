@@ -3,6 +3,12 @@ package com.pawbridge.backend.community.internal.comment.application
 import com.pawbridge.backend.community.internal.comment.domain.CommentNotOwnedException
 import com.pawbridge.backend.user.api.UserNicknameQuery
 import com.pawbridge.backend.user.api.UserNicknameUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -11,11 +17,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.`when` as whenever
 import java.time.LocalDateTime
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicInteger
@@ -23,33 +24,38 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.stream.Stream
 
 class UpdateCommentTest {
-    private val comments = mock(CommentReader::class.java)
-    private val nicknames = mock(UserNicknameQuery::class.java)
-    private val modification = mock(CommentModification::class.java)
+    private val comments = mockk<CommentReader>()
+    private val nicknames = mockk<UserNicknameQuery>()
+    private val modification = mockk<CommentModification>()
     private val update = UpdateComment(comments, nicknames, modification)
 
     @Test
-    fun given__owned_comment_and_changed_content__when__update__then__read_nickname_and_committed_write_keep_original_response_times() {
-        whenever(comments.findById(13L)).thenReturn(Optional.of(snapshot()))
-        whenever(nicknames.findNickname(7L)).thenReturn(Optional.of("작성자"))
+    fun `본인 댓글의 내용을 바꿀 때__수정하면__읽기와 닉네임 조회 뒤 쓰고 원래 생성 수정 시각으로 응답한다`() {
+        // given
+        val stored = snapshot()
 
-        assertEquals(
-            CommentDetails(13L, 42L, 7L, "작성자", CONTENT, CREATED, UPDATED),
-            update.update(13L, 7L, CONTENT),
-        )
-        val order = inOrder(comments, nicknames, modification)
-        order.verify(comments).findById(13L)
-        order.verify(nicknames).findNickname(7L)
-        order.verify(modification).update(13L, CONTENT)
-        order.verifyNoMoreInteractions()
+        every { comments.findById(any()) } returns Optional.of(stored)
+        every { nicknames.findNickname(any()) } returns Optional.of("작성자")
+        justRun { modification.update(any(), any()) }
+
+        // when
+        val result = update.update(13L, 7L, CONTENT)
+
+        // then
+        assertEquals(CommentDetails(13L, 42L, 7L, "작성자", CONTENT, CREATED, UPDATED), result)
+        verifySequence {
+            comments.findById(13L)
+            nicknames.findNickname(7L)
+            modification.update(13L, CONTENT)
+        }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__content_changed_after_snapshot__when__update__then__initial_content_alone_decides_whether_to_write(
+    fun `스냅샷 이후 저장된 내용이 바뀌었을 때__수정하면__처음 읽은 내용만으로 쓸지 정한다`(
         changed: Boolean,
     ) {
-        whenever(comments.findById(13L)).thenReturn(Optional.of(snapshot()))
+        // given
         val stored = AtomicReference(ORIGINAL)
         val nicknameReads = AtomicInteger()
         val writes = AtomicInteger()
@@ -70,97 +76,126 @@ class UpdateCommentTest {
         }
         val requested = if (changed) CONTENT else ORIGINAL
 
-        assertEquals(
-            CommentDetails(13L, 42L, 7L, "작성자", requested, CREATED, UPDATED),
-            UpdateComment(comments, nickname, modifying).update(13L, 7L, requested),
-        )
+        every { comments.findById(any()) } returns Optional.of(snapshot())
+
+        // when
+        val result = UpdateComment(comments, nickname, modifying).update(13L, 7L, requested)
+
+        // then
+        assertEquals(CommentDetails(13L, 42L, 7L, "작성자", requested, CREATED, UPDATED), result)
         assertEquals(CONTENT, stored.get())
         assertEquals(1, nicknameReads.get())
         assertEquals(if (changed) 1 else 0, writes.get())
+        verify(exactly = 1) { comments.findById(13L) }
     }
 
     @Test
-    fun given__absent_or_deleted_comment__when__update_by_another_author__then__not_found_precedes_nickname_and_write() {
-        whenever(comments.findById(13L)).thenReturn(Optional.empty())
+    fun `없거나 삭제된 댓글일 때__다른 작성자가 수정하면__닉네임 조회와 쓰기보다 먼저 찾을 수 없음으로 실패한다`() {
+        // given
+        every { comments.findById(any()) } returns Optional.empty()
 
+        // when
         val failure = assertThrows(CommentNotFoundException::class.java) { update.update(13L, 99L, CONTENT) }
+
+        // then
         assertEquals("댓글을 찾을 수 없습니다.", failure.message)
-        verifyNoInteractions(nicknames, modification)
+        verify(exactly = 1) { comments.findById(13L) }
+        confirmVerified(comments, nicknames, modification)
     }
 
     @Test
-    fun given__another_authors_comment__when__update_with_same_content__then__ownership_precedes_nickname_and_write() {
-        whenever(comments.findById(13L)).thenReturn(Optional.of(snapshot()))
+    fun `다른 작성자의 댓글일 때__같은 내용으로 수정하면__닉네임 조회와 쓰기보다 먼저 소유권으로 거부한다`() {
+        // given
+        every { comments.findById(any()) } returns Optional.of(snapshot())
 
+        // when
         val failure = assertThrows(CommentNotOwnedException::class.java) { update.update(13L, 99L, ORIGINAL) }
+
+        // then
         assertEquals("댓글에 접근할 권한이 없습니다.", failure.message)
-        verifyNoInteractions(nicknames, modification)
+        verify(exactly = 1) { comments.findById(13L) }
+        confirmVerified(comments, nicknames, modification)
     }
 
     @Test
-    fun given__snapshot_read_failure__when__update__then__original_failure_prevents_nickname_and_write() {
+    fun `스냅샷 조회가 실패할 때__수정하면__원래 예외로 실패하고 닉네임 조회와 쓰기를 하지 않는다`() {
+        // given
         val failure = IllegalStateException("read failed")
-        whenever(comments.findById(13L)).thenThrow(failure)
 
-        assertSame(
-            failure,
-            assertThrows(IllegalStateException::class.java) { update.update(13L, 7L, CONTENT) },
-        )
-        verifyNoInteractions(nicknames, modification)
+        every { comments.findById(any()) } throws failure
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { update.update(13L, 7L, CONTENT) }
+
+        // then
+        assertSame(failure, thrown)
+        verify(exactly = 1) { comments.findById(13L) }
+        confirmVerified(comments, nicknames, modification)
     }
 
     @ParameterizedTest
     @MethodSource("nicknameOutcomes")
-    fun given__defined_nickname_outcome__when__update__then__existing_fallback_and_raw_nickname_policy_are_preserved(
+    fun `정해진 닉네임 조회 결과가 주어졌을 때__수정하면__기존 대체 닉네임과 원본 닉네임 정책을 지킨다`(
         nickname: UserNicknameQuery,
         expected: String?,
     ) {
-        whenever(comments.findById(13L)).thenReturn(Optional.of(snapshot()))
+        // given
+        every { comments.findById(any()) } returns Optional.of(snapshot())
+        justRun { modification.update(any(), any()) }
 
-        assertEquals(
-            CommentDetails(13L, 42L, 7L, expected, CONTENT, CREATED, UPDATED),
-            UpdateComment(comments, nickname, modification).update(13L, 7L, CONTENT),
-        )
-        val order = inOrder(comments, modification)
-        order.verify(comments).findById(13L)
-        order.verify(modification).update(13L, CONTENT)
-        order.verifyNoMoreInteractions()
+        // when
+        val result = UpdateComment(comments, nickname, modification).update(13L, 7L, CONTENT)
+
+        // then
+        assertEquals(CommentDetails(13L, 42L, 7L, expected, CONTENT, CREATED, UPDATED), result)
+        verifySequence {
+            comments.findById(13L)
+            modification.update(13L, CONTENT)
+        }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__unexpected_nickname_failure__when__updating_changed_or_same_content__then__original_failure_prevents_write(
+    fun `닉네임 조회가 예상 밖으로 실패할 때__바뀐 내용이나 같은 내용으로 수정하면__원래 예외로 실패하고 쓰지 않는다`(
         changed: Boolean,
     ) {
-        whenever(comments.findById(13L)).thenReturn(Optional.of(snapshot()))
+        // given
         val failure = IllegalArgumentException("unexpected User failure")
-        whenever(nicknames.findNickname(7L)).thenThrow(failure)
 
-        assertSame(
-            failure,
-            assertThrows(IllegalArgumentException::class.java) {
-                update.update(13L, 7L, if (changed) CONTENT else ORIGINAL)
-            },
-        )
-        verifyNoInteractions(modification)
+        every { comments.findById(any()) } returns Optional.of(snapshot())
+        every { nicknames.findNickname(any()) } throws failure
+
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) {
+            update.update(13L, 7L, if (changed) CONTENT else ORIGINAL)
+        }
+
+        // then
+        assertSame(failure, thrown)
+        verify(exactly = 1) { comments.findById(13L) }
+        verify(exactly = 1) { nicknames.findNickname(7L) }
+        confirmVerified(comments, nicknames, modification)
     }
 
     @Test
-    fun given__modification_commit_failure__when__update__then__failure_propagates_without_response_or_retry() {
-        whenever(comments.findById(13L)).thenReturn(Optional.of(snapshot()))
-        whenever(nicknames.findNickname(7L)).thenReturn(Optional.of("작성자"))
+    fun `수정 커밋이 실패할 때__수정하면__응답이나 재시도 없이 같은 예외를 전파한다`() {
+        // given
         val failure = IllegalStateException("commit outcome unknown")
-        doThrow(failure).`when`(modification).update(13L, CONTENT)
 
-        assertSame(
-            failure,
-            assertThrows(IllegalStateException::class.java) { update.update(13L, 7L, CONTENT) },
-        )
-        val order = inOrder(comments, nicknames, modification)
-        order.verify(comments).findById(13L)
-        order.verify(nicknames).findNickname(7L)
-        order.verify(modification).update(13L, CONTENT)
-        order.verifyNoMoreInteractions()
+        every { comments.findById(any()) } returns Optional.of(snapshot())
+        every { nicknames.findNickname(any()) } returns Optional.of("작성자")
+        every { modification.update(any(), any()) } throws failure
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { update.update(13L, 7L, CONTENT) }
+
+        // then
+        assertSame(failure, thrown)
+        verifySequence {
+            comments.findById(13L)
+            nicknames.findNickname(7L)
+            modification.update(13L, CONTENT)
+        }
     }
 
     private fun snapshot(): CommentSnapshot = CommentSnapshot(13L, 42L, 7L, ORIGINAL, CREATED, UPDATED)

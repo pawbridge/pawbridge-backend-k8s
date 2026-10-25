@@ -25,14 +25,18 @@ class JdbcVisitCountReaderTest {
 
     @ParameterizedTest
     @ValueSource(longs = [0L, 3_000_000_001L, Long.MAX_VALUE])
-    fun given__stored_count__when__reading__then__bind_exact_sql_date_and_preserve_long_after_read_only_completion(
+    fun `저장된 집계 수가 있을 때__읽으면__정확한 SQL 날짜를 바인딩하고 읽기 전용 완료 뒤에도 Long 값을 보존한다`(
         count: Long,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows = listOf(count)
 
-        assertEquals(count, fixture.reader.count(DAY))
+        // when
+        val result = fixture.reader.count(DAY)
 
+        // then
+        assertEquals(count, result)
         assertEquals(
             "SELECT unique_visitors FROM pawbridge_community.daily_visit_count WHERE visit_date = ?",
             fixture.jdbc.sql!!.replace(Regex("\\s+"), " ").trim(),
@@ -45,11 +49,15 @@ class JdbcVisitCountReaderTest {
     }
 
     @Test
-    fun given__no_daily_row__when__reading__then__return_zero_after_read_only_completion() {
+    fun `일별 행이 없을 때__읽으면__읽기 전용 완료 뒤에 0을 돌려준다`() {
+        // given
         val fixture = Fixture()
 
-        assertEquals(0L, fixture.reader.count(DAY))
+        // when
+        val result = fixture.reader.count(DAY)
 
+        // then
+        assertEquals(0L, result)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertEquals(0, fixture.transactions.rollbacks)
@@ -57,66 +65,90 @@ class JdbcVisitCountReaderTest {
     }
 
     @Test
-    fun given__query_failure_then_recovery__when__reading__then__propagate_without_zero_fallback_and_release_transaction() {
+    fun `질의가 실패했다가 복구될 때__읽으면__0으로 대체하지 않고 전파하며 트랜잭션을 놓는다`() {
+        // given
         val fixture = Fixture()
         val failure = DataAccessResourceFailureException("synthetic-private-query")
         fixture.jdbc.failure = failure
 
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { fixture.reader.count(DAY) },
-        )
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { fixture.reader.count(DAY) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, fixture.transactions.rollbacks)
         assertEquals(0, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
+
+        // given
         fixture.jdbc.failure = null
         fixture.jdbc.rows = listOf(77L)
 
-        assertEquals(77L, fixture.reader.count(DAY))
+        // when
+        val recovered = fixture.reader.count(DAY)
+
+        // then
+        assertEquals(77L, recovered)
         assertEquals(2, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @Test
-    fun given__transaction_start_failure_then_recovery__when__reading__then__no_query_precedes_successful_begin() {
+    fun `트랜잭션 시작이 실패했다가 복구될 때__읽으면__시작에 성공하기 전에는 질의하지 않는다`() {
+        // given
         val fixture = Fixture()
         val failure = CannotCreateTransactionException("synthetic-private-begin")
         fixture.transactions.startFailure = failure
 
-        assertSame(
-            failure,
-            assertThrows(CannotCreateTransactionException::class.java) { fixture.reader.count(DAY) },
-        )
+        // when
+        val thrown = assertThrows(CannotCreateTransactionException::class.java) { fixture.reader.count(DAY) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(0, fixture.jdbc.queries)
         assertEquals(0, fixture.transactions.commits)
         assertEquals(0, fixture.transactions.rollbacks)
         assertFalse(fixture.transactions.active)
+
+        // given
         fixture.transactions.startFailure = null
 
-        assertEquals(0L, fixture.reader.count(DAY))
+        // when
+        val recovered = fixture.reader.count(DAY)
+
+        // then
+        assertEquals(0L, recovered)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
     }
 
     @Test
-    fun given__transaction_completion_failure_then_recovery__when__reading__then__no_count_is_returned_before_successful_completion() {
+    fun `트랜잭션 완료가 실패했다가 복구될 때__읽으면__완료에 성공하기 전에는 집계 수를 돌려주지 않는다`() {
+        // given
         val fixture = Fixture()
         val failure = TransactionSystemException("synthetic-private-completion")
         fixture.transactions.completionFailure = failure
 
-        assertSame(
-            failure,
-            assertThrows(TransactionSystemException::class.java) { fixture.reader.count(DAY) },
-        )
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { fixture.reader.count(DAY) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)
+
+        // given
         fixture.transactions.completionFailure = null
         fixture.jdbc.rows = listOf(77L)
 
-        assertEquals(77L, fixture.reader.count(DAY))
+        // when
+        val recovered = fixture.reader.count(DAY)
+
+        // then
+        assertEquals(77L, recovered)
         assertEquals(2, fixture.jdbc.queries)
         assertEquals(2, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)

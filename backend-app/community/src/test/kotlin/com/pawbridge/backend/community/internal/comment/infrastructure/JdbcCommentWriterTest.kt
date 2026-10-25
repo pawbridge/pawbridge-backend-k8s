@@ -2,24 +2,18 @@ package com.pawbridge.backend.community.internal.comment.infrastructure
 
 import com.pawbridge.backend.community.internal.comment.application.CommentSnapshot
 import com.pawbridge.backend.community.internal.comment.application.UnsupportedCommentCharactersException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
 import org.springframework.dao.DataAccessResourceFailureException
@@ -41,144 +35,190 @@ import java.time.ZoneId
 import java.util.Calendar
 
 class JdbcCommentWriterTest {
-    private val jdbc = mock(JdbcOperations::class.java)
-    private val transactions = mock(TransactionOperations::class.java)
-    private val connection = mock(Connection::class.java)
-    private val statement = mock(PreparedStatement::class.java)
-    private val result = mock(ResultSet::class.java)
+    private val jdbc = mockk<JdbcOperations>()
+    private val transactions = RecordingTransactions()
+    private val connection = mockk<Connection>()
+    private val statement = mockk<PreparedStatement>()
+    private val result = mockk<ResultSet>()
     private val clock = Clock.fixed(Instant.parse("2026-10-19T03:30:10.123456789Z"), ZoneId.of("Asia/Seoul"))
     private val writer = JdbcCommentWriter(jdbc, transactions, clock)
-    private var transactionActive = false
     private var insertAttempts = 0
 
-    @BeforeEach
-    fun prepareTransactionAndJdbc() {
-        whenever(transactions.execute(any<TransactionCallback<CommentSnapshot>>())).thenAnswer { invocation ->
-            transactionActive = true
-            try {
-                invocation.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-            } finally {
-                transactionActive = false
-            }
-        }
-        whenever(connection.prepareStatement(anyString())).thenReturn(statement)
-        whenever(result.next()).thenReturn(true)
-        whenever(result.getLong("comment_id")).thenReturn(13L)
-        whenever(jdbc.query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>()))
-            .thenAnswer { invocation ->
-                assertTrue(transactionActive)
-                insertAttempts++
-                invocation.getArgument<PreparedStatementCreator>(0).createPreparedStatement(connection)
-                invocation.getArgument<ResultSetExtractor<*>>(1).extractData(result)
-            }
-    }
-
     @Test
-    fun given__comment_content_and_clock__when__create__then__one_comment_insert_returns_identity_and_full_precision_snapshot() {
+    fun `댓글 내용과 시계가 주어졌을 때__작성하면__INSERT 한 번으로 식별자를 받아 전체 정밀도의 스냅샷을 돌려준다`() {
+        // given
         val content = "  댓글 원문\n "
         val now = LocalDateTime.now(clock)
 
-        assertEquals(CommentSnapshot(13L, 42L, 7L, content, now, now), writer.create(42L, 7L, content))
-        assertFalse(transactionActive)
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            assertTrue(transactions.active)
+            insertAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { statement.setLong(any(), any()) }
+        justRun { statement.setString(any(), any()) }
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+        every { result.next() } returns true
+        every { result.getLong("comment_id") } returns 13L
+
+        // when
+        val created = writer.create(42L, 7L, content)
+
+        // then
+        assertEquals(CommentSnapshot(13L, 42L, 7L, content, now, now), created)
+        assertFalse(transactions.active)
         assertEquals(1, insertAttempts)
-        val sql = ArgumentCaptor.forClass(String::class.java)
-        verify(connection).prepareStatement(sql.capture())
-        assertTrue(sql.value.contains("INSERT INTO pawbridge_community.comments"))
-        assertTrue(sql.value.contains("RETURNING comment_id"))
-        verify(statement).setLong(1, 42L)
-        verify(statement).setLong(2, 7L)
-        verify(statement).setString(3, content)
-        val timestamps = ArgumentCaptor.forClass(Timestamp::class.java)
-        val calendars = ArgumentCaptor.forClass(Calendar::class.java)
-        verify(statement).setTimestamp(eq(4), timestamps.capture(), calendars.capture())
-        verify(statement).setTimestamp(eq(5), timestamps.capture(), calendars.capture())
-        assertEquals(Timestamp.valueOf(now), timestamps.allValues[0])
-        assertEquals(Timestamp.valueOf(now), timestamps.allValues[1])
-        assertEquals(123456789, timestamps.allValues[0].nanos)
-        assertEquals("UTC", calendars.allValues[0].timeZone.id)
-        assertSame(calendars.allValues[0], calendars.allValues[1])
-        verify(jdbc).query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>())
-        verifyNoMoreInteractions(jdbc)
+        val sql = slot<String>()
+        verify(exactly = 1) { connection.prepareStatement(capture(sql)) }
+        assertTrue(sql.captured.contains("INSERT INTO pawbridge_community.comments"))
+        assertTrue(sql.captured.contains("RETURNING comment_id"))
+        verify(exactly = 1) { statement.setLong(1, 42L) }
+        verify(exactly = 1) { statement.setLong(2, 7L) }
+        verify(exactly = 1) { statement.setString(3, content) }
+        val timestamps = mutableListOf<Timestamp>()
+        val calendars = mutableListOf<Calendar>()
+        verify(exactly = 1) { statement.setTimestamp(4, capture(timestamps), capture(calendars)) }
+        verify(exactly = 1) { statement.setTimestamp(5, capture(timestamps), capture(calendars)) }
+        assertEquals(Timestamp.valueOf(now), timestamps[0])
+        assertEquals(Timestamp.valueOf(now), timestamps[1])
+        assertEquals(123456789, timestamps[0].nanos)
+        assertEquals("UTC", calendars[0].timeZone.id)
+        assertSame(calendars[0], calendars[1])
+        verify(exactly = 1) { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) }
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__missing_generated_identity__when__create__then__failure_leaves_transaction_without_retry() {
-        whenever(result.next()).thenReturn(false)
+    fun `생성된 식별자가 없을 때__작성하면__재시도 없이 트랜잭션을 벗어나 실패한다`() {
+        // given
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            assertTrue(transactions.active)
+            insertAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { statement.setLong(any(), any()) }
+        justRun { statement.setString(any(), any()) }
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+        every { result.next() } returns false
 
+        // when
         assertThrows(IllegalStateException::class.java) { writer.create(42L, 7L, "댓글") }
+
+        // then
         assertEquals(1, insertAttempts)
-        assertFalse(transactionActive)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__insert_failure__when__create__then__original_failure_propagates_after_one_attempt_and_transaction_exit() {
+    fun `INSERT가 실패할 때__작성하면__한 번 시도한 뒤 트랜잭션을 벗어나 원래 예외를 전파한다`() {
+        // given
         val failure = DataAccessResourceFailureException("synthetic unavailable")
-        doThrow(failure).`when`(jdbc)
-            .query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>())
 
-        assertSame(
-            failure,
-            assertThrows(DataAccessResourceFailureException::class.java) { writer.create(42L, 7L, "댓글") },
-        )
-        assertFalse(transactionActive)
-        verify(jdbc, times(1)).query(any(PreparedStatementCreator::class.java), any<ResultSetExtractor<Long>>())
-        verifyNoMoreInteractions(jdbc)
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } throws failure
+
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) {
+            writer.create(42L, 7L, "댓글")
+        }
+
+        // then
+        assertSame(failure, thrown)
+        assertFalse(transactions.active)
+        verify(exactly = 1) { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) }
+        confirmVerified(jdbc)
     }
 
     @Test
-    fun given__charset_failure_at_commit__when__create__then__named_community_constraint_becomes_user_error() {
+    fun `커밋 시점에 문자셋 제약이 실패할 때__작성하면__이름 붙은 커뮤니티 제약을 사용자 오류로 바꾼다`() {
+        // given
         val failure = TransactionSystemException(
             "commit",
             constraint("23514", "pawbridge_community", "ck_rollback_charset_comments"),
         )
-        failAfterCallback(failure)
+        transactions.failureAfterCallback = failure
 
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            insertAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { statement.setLong(any(), any()) }
+        justRun { statement.setString(any(), any()) }
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+        every { result.next() } returns true
+        every { result.getLong("comment_id") } returns 13L
+
+        // when
         val translated = assertThrows(UnsupportedCommentCharactersException::class.java) {
             writer.create(42L, 7L, "댓글")
         }
+
+        // then
         assertSame(failure, translated.cause)
         assertEquals("일부 이모지 등 지원하지 않는 문자를 제외해 주세요.", translated.message)
         assertEquals(1, insertAttempts)
-        assertFalse(transactionActive)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__unrelated_check_failure_at_commit__when__create__then__original_failure_is_not_a_user_error() {
+    fun `커밋 시점에 무관한 체크 제약이 실패할 때__작성하면__사용자 오류로 바꾸지 않고 원래 예외를 전파한다`() {
+        // given
         val failure = TransactionSystemException(
             "commit",
             constraint("23514", "pawbridge_community", "business_constraint"),
         )
-        failAfterCallback(failure)
+        transactions.failureAfterCallback = failure
 
-        assertSame(
-            failure,
-            assertThrows(TransactionSystemException::class.java) { writer.create(42L, 7L, "댓글") },
-        )
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            insertAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { statement.setLong(any(), any()) }
+        justRun { statement.setString(any(), any()) }
+        justRun { statement.setTimestamp(any(), any<Timestamp>(), any<Calendar>()) }
+        every { result.next() } returns true
+        every { result.getLong("comment_id") } returns 13L
+
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { writer.create(42L, 7L, "댓글") }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, insertAttempts)
-        assertFalse(transactionActive)
+        assertFalse(transactions.active)
     }
 
     @Test
-    fun given__timestamp_binding_failure__when__preparing_insert__then__statement_is_closed_and_failure_propagates() {
+    fun `타임스탬프 바인딩이 실패할 때__INSERT를 준비하면__문장을 닫고 예외를 전파한다`() {
+        // given
         val failure = IllegalStateException("synthetic binding failure")
-        doThrow(failure).`when`(statement).setTimestamp(eq(4), any(Timestamp::class.java), any(Calendar::class.java))
 
-        assertSame(failure, assertThrows(IllegalStateException::class.java) { writer.create(42L, 7L, "댓글") })
-        verify(statement).close()
+        every { jdbc.query(any<PreparedStatementCreator>(), any<ResultSetExtractor<Long>>()) } answers {
+            insertAttempts++
+            firstArg<PreparedStatementCreator>().createPreparedStatement(connection)
+            secondArg<ResultSetExtractor<Long>>().extractData(result)
+        }
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { statement.setLong(any(), any()) }
+        justRun { statement.setString(any(), any()) }
+        every { statement.setTimestamp(4, any<Timestamp>(), any<Calendar>()) } throws failure
+        justRun { statement.close() }
+
+        // when
+        val thrown = assertThrows(IllegalStateException::class.java) { writer.create(42L, 7L, "댓글") }
+
+        // then
+        assertSame(failure, thrown)
+        verify(exactly = 1) { statement.close() }
         assertEquals(1, insertAttempts)
-        assertFalse(transactionActive)
-    }
-
-    private fun failAfterCallback(failure: RuntimeException) {
-        doAnswer { invocation ->
-            transactionActive = true
-            try {
-                invocation.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-                throw failure
-            } finally {
-                transactionActive = false
-            }
-        }.`when`(transactions).execute(any<TransactionCallback<CommentSnapshot>>())
+        assertFalse(transactions.active)
     }
 
     private fun constraint(state: String, schema: String, name: String): PSQLException =
@@ -187,4 +227,24 @@ class JdbcCommentWriterTest {
                 "SERROR\u0000C" + state + "\u0000Msynthetic\u0000s" + schema + "\u0000n" + name + "\u0000",
             ),
         )
+
+    /** An in-memory TransactionOperations that records whether a callback is running and can fail after it. */
+    private class RecordingTransactions : TransactionOperations {
+        var active = false
+        var failureAfterCallback: RuntimeException? = null
+
+        override fun <T> execute(action: TransactionCallback<T>): T? {
+            active = true
+            try {
+                val result = action.doInTransaction(SimpleTransactionStatus())
+                val failure = failureAfterCallback
+                if (failure != null) {
+                    throw failure
+                }
+                return result
+            } finally {
+                active = false
+            }
+        }
+    }
 }

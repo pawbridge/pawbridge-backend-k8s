@@ -5,14 +5,13 @@ import com.pawbridge.backend.community.internal.chat.application.MemberChatModel
 import com.pawbridge.backend.community.internal.chat.application.MemberChatModels.Receipt
 import com.pawbridge.backend.community.internal.chat.application.MemberChatModels.Send
 import com.pawbridge.backend.community.internal.chat.infrastructure.MemberChatTickets
-import com.pawbridge.backend.community.support.anyNonNull
+import com.pawbridge.backend.community.support.TestFaker
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.context.support.StaticApplicationContext
 import org.springframework.messaging.Message
 import org.springframework.messaging.MessageChannel
@@ -31,17 +30,22 @@ import java.util.UUID
 /** Dispatches /app/chat/send through Spring's real annotation handler, so argument resolution is covered. */
 class MemberChatSocketDispatchTest {
     private val outbound = ArrayList<Message<*>>()
-    private val chat = mock(MemberChat::class.java)
+    private val chat = mockk<MemberChat>()
     private val handler = handler()
 
     @Test
-    fun givenTicketIdentityAndValidFrame__whenSending__thenServiceReceivesItAndReceiptGoesToTheSession() {
-        val receipt = Receipt(REQUEST, UUID.randomUUID(), 1)
-        whenever(chat.send(anyLong(), anyNonNull())).thenReturn(receipt)
+    fun `티켓 신원과 올바른 프레임이 있을 때__전송하면__서비스가 받고 영수증은 세션으로 간다`() {
+        // given
+        val receipt = Receipt(REQUEST, TestFaker.uuid(), 1)
 
+        every { chat.send(any(), any()) } returns receipt
+
+        // when
         dispatch(VALID_FRAME, MemberChatTickets.Identity(7, Long.MAX_VALUE))
 
-        verify(chat).send(7, Send(8L, REQUEST, "hi", null, null))
+        // then
+        verify(exactly = 1) { chat.send(7, Send(8L, REQUEST, "hi", null, null)) }
+        confirmVerified(chat)
         assertThat(outbound).singleElement().satisfies({ message ->
             assertThat(SimpMessageHeaderAccessor.getDestination(message.headers)).isEqualTo("/user/s1/queue/chat")
             assertThat(message.payload).isEqualTo(receipt)
@@ -49,20 +53,32 @@ class MemberChatSocketDispatchTest {
     }
 
     @Test
-    fun givenEmptyPayload__whenSending__thenNothingIsSentAndInvalidFrameAnswers() {
-        dispatch("", MemberChatTickets.Identity(7, Long.MAX_VALUE))
+    fun `빈 페이로드일 때__전송하면__아무것도 보내지 않고 잘못된 프레임으로 응답한다`() {
+        // given
+        val frame = ""
 
-        verify(chat, never()).send(anyLong(), anyNonNull())
+        // when
+        dispatch(frame, MemberChatTickets.Identity(7, Long.MAX_VALUE))
+
+        // then
+        verify(exactly = 0) { chat.send(any(), any()) }
+        confirmVerified(chat)
         assertThat(outbound).singleElement().satisfies({ message ->
             assertThat(message.payload).isEqualTo(Failure(null, 400, "메시지 형식을 확인해 주세요."))
         })
     }
 
     @Test
-    fun givenNoTicketIdentity__whenSending__thenReturnSilently() {
-        dispatch(VALID_FRAME, null)
+    fun `티켓 신원이 없을 때__전송하면__조용히 반환한다`() {
+        // given
+        val user: MemberChatTickets.Identity? = null
 
-        verify(chat, never()).send(anyLong(), anyNonNull())
+        // when
+        dispatch(VALID_FRAME, user)
+
+        // then
+        verify(exactly = 0) { chat.send(any(), any()) }
+        confirmVerified(chat)
         assertThat(outbound).isEmpty()
     }
 

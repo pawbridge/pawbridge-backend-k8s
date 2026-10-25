@@ -23,9 +23,10 @@ class CreatePostTest {
 
     @ParameterizedTest
     @EnumSource(value = PostBoardType::class, names = ["PROTECTION", "ADOPTION", "COMMUNICATION"])
-    fun given__general_board__when__create__then__upload_nickname_and_committed_snapshot_determine_response(
+    fun `일반 게시판일 때__생성하면__업로드와 닉네임과 저장된 스냅샷으로 응답을 정한다`(
         board: PostBoardType,
     ) {
+        // given
         val calls = ArrayList<String>()
         val uploads = listOf(PostUpload("photo.png", "image/png", 3L, PostUpload.Content { throw AssertionError() }))
         val create = CreatePost(
@@ -48,57 +49,88 @@ class CreatePostTest {
             },
         )
 
+        // when
         val result = create.create(7L, "제목", "본문", board, uploads)
 
+        // then
         assertEquals(listOf("upload", "nickname", "writer-commit"), calls)
         assertEquals(PostDetails(42L, 7L, "반려친구", "제목", "본문", board.name, URLS, NOW, NOW), result)
     }
 
     @ParameterizedTest
     @EnumSource(value = PostBoardType::class, names = ["MISSING", "REPORT"])
-    fun given__report_board__when__create__then__reject_before_any_upload_nickname_or_write(board: PostBoardType) {
+    fun `제보 게시판일 때__생성하면__업로드와 닉네임 조회와 저장 전에 거부한다`(board: PostBoardType) {
+        // given
         val create = CreatePost(
             postMediaUploader { throw AssertionError("No media upload") },
             userNicknameQuery { throw AssertionError("No nickname read") },
             postWriter { throw AssertionError("No post write") },
         )
 
+        // when
         val failure = assertThrows(PostBoardNotAllowedException::class.java) {
             create.create(7L, "제목", "본문", board, listOf())
         }
 
+        // then
         assertEquals("실종·목격 제보는 전용 등록 화면에서 작성해 주세요.", failure.message)
     }
 
     @Test
-    fun given__missing_user__when__create__then__writer_still_commits_with_author_id_fallback() {
-        assertEquals("사용자7", createWithNickname(userNicknameQuery { Optional.empty() }).authorNickname)
+    fun `작성자가 없을 때__생성하면__작성자 번호 기반 대체 이름으로 저장을 계속한다`() {
+        // given
+        val nicknames = userNicknameQuery { Optional.empty() }
+
+        // when
+        val result = createWithNickname(nicknames)
+
+        // then
+        assertEquals("사용자7", result.authorNickname)
     }
 
     @Test
-    fun given__unavailable_nickname__when__create__then__writer_still_commits_with_fallback() {
+    fun `닉네임을 조회할 수 없을 때__생성하면__대체 이름으로 저장을 계속한다`() {
+        // given
         val unavailable = userNicknameQuery {
             throw UserNicknameUnavailableException(IllegalStateException("unavailable"))
         }
-        assertEquals("사용자7", createWithNickname(unavailable).authorNickname)
+
+        // when
+        val result = createWithNickname(unavailable)
+
+        // then
+        assertEquals("사용자7", result.authorNickname)
     }
 
     @Test
-    fun given__empty_nickname__when__create__then__legacy_empty_body_is_null() {
-        assertNull(createWithNickname(userNicknameQuery { Optional.of("") }).authorNickname)
+    fun `닉네임이 빈 문자열일 때__생성하면__기존 동작대로 null로 나타낸다`() {
+        // given
+        val nicknames = userNicknameQuery { Optional.of("") }
+
+        // when
+        val result = createWithNickname(nicknames)
+
+        // then
+        assertNull(result.authorNickname)
     }
 
     @Test
-    fun given__blank_nickname_and_post_fields__when__create__then__existing_blank_values_are_preserved() {
-        val result = createWithNickname(userNicknameQuery { Optional.of("  \t ") })
+    fun `닉네임과 제목과 본문이 공백일 때__생성하면__기존 공백 값을 그대로 보존한다`() {
+        // given
+        val nicknames = userNicknameQuery { Optional.of("  \t ") }
 
+        // when
+        val result = createWithNickname(nicknames)
+
+        // then
         assertEquals("  \t ", result.authorNickname)
         assertEquals("", result.title)
         assertEquals(" ", result.content)
     }
 
     @Test
-    fun given__unexpected_nickname_failure_after_upload__when__create__then__failure_propagates_before_writer() {
+    fun `업로드 후 닉네임 조회가 예상 밖으로 실패할 때__생성하면__저장 전에 예외를 전파한다`() {
+        // given
         val failure = IllegalArgumentException("programming failure")
         val create = CreatePost(
             postMediaUploader { URLS },
@@ -106,16 +138,18 @@ class CreatePostTest {
             postWriter { throw AssertionError("No write after unexpected nickname failure") },
         )
 
-        assertSame(
-            failure,
-            assertThrows(IllegalArgumentException::class.java) {
-                create.create(7L, "제목", "본문", PostBoardType.COMMUNICATION, listOf())
-            },
-        )
+        // when
+        val thrown = assertThrows(IllegalArgumentException::class.java) {
+            create.create(7L, "제목", "본문", PostBoardType.COMMUNICATION, listOf())
+        }
+
+        // then
+        assertSame(failure, thrown)
     }
 
     @Test
-    fun given__upload_failure__when__create__then__nickname_and_writer_are_not_called() {
+    fun `업로드가 실패할 때__생성하면__닉네임 조회와 저장을 호출하지 않는다`() {
+        // given
         val failure = RuntimeException("partial upload")
         val create = CreatePost(
             postMediaUploader { throw failure },
@@ -123,16 +157,18 @@ class CreatePostTest {
             postWriter { throw AssertionError("No post write") },
         )
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) {
-                create.create(7L, "제목", "본문", PostBoardType.COMMUNICATION, listOf())
-            },
-        )
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
+            create.create(7L, "제목", "본문", PostBoardType.COMMUNICATION, listOf())
+        }
+
+        // then
+        assertSame(failure, thrown)
     }
 
     @Test
-    fun given__writer_commit_outcome_unknown__when__create__then__failure_propagates_without_upload_or_write_retry() {
+    fun `저장 커밋 결과를 알 수 없을 때__생성하면__업로드와 저장을 재시도하지 않고 예외를 전파한다`() {
+        // given
         val uploads = AtomicInteger()
         val writes = AtomicInteger()
         val failure = RuntimeException("commit response unavailable")
@@ -148,12 +184,13 @@ class CreatePostTest {
             },
         )
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) {
-                create.create(7L, "제목", "본문", PostBoardType.COMMUNICATION, listOf())
-            },
-        )
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
+            create.create(7L, "제목", "본문", PostBoardType.COMMUNICATION, listOf())
+        }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, uploads.get())
         assertEquals(1, writes.get())
     }

@@ -2,21 +2,20 @@ package com.pawbridge.backend.community.internal.note.web
 
 import com.pawbridge.backend.community.internal.note.application.NoteNotifications
 import com.pawbridge.backend.community.internal.note.application.RequireActiveNoteStream
+import com.pawbridge.backend.community.support.TestFaker
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.GrantedAuthority
 import org.springframework.web.server.ResponseStatusException
@@ -41,20 +40,30 @@ import java.util.function.LongFunction
 class PrivateNoteStreamRegistryTest {
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun givenWithdrawnMemberTabsOrNoMemberTabsAndAnotherMember__whenClosingOnlyThatMemberThenResyncingAll__thenCompleteOnlyOwnedTabsAndKeepTheRegistryRunning(
+    fun `탈퇴한 회원의 탭이 있거나 없고 다른 회원이 있을 때__그 회원만 닫고 전체를 다시 동기화하면__소유한 탭만 완료하고 레지스트리는 계속 동작한다`(
         hasOwner: Boolean,
     ) {
-        Fixture().use { f ->
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             if (hasOwner) {
                 f.streams.open(7, f.expiry())
                 f.streams.open(7, f.expiry())
             }
             f.streams.open(8, f.expiry())
             val other = if (hasOwner) 2 else 0
+
+            // when
             f.streams.closeMember(7)
             f.streams.resyncAll()
             f.writes.runAll()
             f.completions.runAll()
+
+            // then
             for (i in 0 until other) {
                 assertThat(f.emitters[i].completed).hasValue(1)
                 assertThat(f.emitters[i].sends).hasValue(1)
@@ -64,28 +73,46 @@ class PrivateNoteStreamRegistryTest {
             assertThat(f.emitters[other].frames.last().filter { it is String }.map { it.toString() })
                 .anySatisfy({ part -> assertThat(part).contains("event:resync\n") })
             assertThat(f.streams.isRunning()).isTrue()
+
+            // when
             f.streams.open(9, f.expiry())
             f.streams.resync(8)
             f.writes.runAll()
+
+            // then
             assertThat(f.emitters[other].sends).hasValue(3)
         }
     }
 
     @Test
-    fun givenFullCompletionQueueDuringMemberRemoval__whenTheExistingHeartbeatRetries__thenKeepTheClosingTabCountedAndEventuallyCloseItWithoutSendingItHints() {
-        Fixture().use { f ->
+    fun `회원 제거 중 완료 큐가 가득 찼을 때__기존 하트비트가 재시도하면__닫는 탭을 계속 센 채 결국 닫고 힌트는 보내지 않는다`() {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             f.completions.capacity = 1
             f.streams.open(7, f.expiry())
             f.streams.open(7, f.expiry())
             f.streams.open(8, f.expiry())
+
+            // when
             f.streams.closeMember(7)
             f.streams.resyncAll()
             f.writes.runAll()
+
+            // then
             assertThat(f.emitters[0].sends).hasValue(1)
             assertThat(f.emitters[1].sends).hasValue(1)
+
+            // when
             f.completions.runAll()
             f.streams.heartbeat()
             f.completions.runAll()
+
+            // then
             assertThat(f.emitters[0].completed).hasValue(1)
             assertThat(f.emitters[1].completed).hasValue(1)
             assertThat(f.emitters[2].completed).hasValue(0)
@@ -94,16 +121,30 @@ class PrivateNoteStreamRegistryTest {
     }
 
     @Test
-    fun givenRecipientTabsAndAnotherMember__whenPublishingCommittedNote__thenUseOnlyTheSameBoundedRecipientRegistryAndExactPayload() {
-        Fixture().use { f ->
+    fun `수신자의 탭들과 다른 회원이 있을 때__확정된 쪽지를 발행하면__같은 제한된 수신자 레지스트리만 쓰고 정확한 페이로드를 보낸다`() {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             f.streams.open(7, f.expiry())
             f.streams.open(7, f.expiry())
             f.streams.open(8, f.expiry())
             val payload = notification(f.clock.instant())
+
+            // when
             f.streams.publish(7, payload)
+
+            // then
             assertThat(f.writes.tasks).hasSize(2)
             assertThat(f.emitters).allSatisfy({ emitter -> assertThat(emitter.sends).hasValue(1) })
+
+            // when
             f.writes.runAll()
+
+            // then
             for (index in intArrayOf(0, 1)) {
                 val frames = f.emitters[index].frames
                 assertThat(frames).hasSize(2)
@@ -117,22 +158,36 @@ class PrivateNoteStreamRegistryTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["expired", "full"])
-    fun givenExpiredConnectionOrFullWriteQueue__whenPublishingNote__thenKeepExistingBoundedBestEffortWithoutLateDelivery(
+    fun `만료된 연결이거나 쓰기 큐가 가득 찼을 때__쪽지를 발행하면__기존의 제한된 최선 전달을 유지하고 늦은 전달은 없다`(
         condition: String,
     ) {
-        Fixture().use { f ->
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             f.streams.open(7, f.clock.instant().plusSeconds(if (condition == "expired") 1 else 60))
             val payload = notification(f.clock.instant())
             f.writes.capacity = 1
+
+            // when
             f.streams.publish(7, payload)
             if (condition == "expired") {
                 f.clock.advance(2)
             } else {
                 assertThatCode { f.streams.publish(7, payload) }.doesNotThrowAnyException()
             }
+
+            // then
             assertThat(f.writes.tasks).hasSize(1)
+
+            // when
             f.writes.runAll()
             f.completions.runAll()
+
+            // then
             assertThat(f.emitters.first().sends).hasValue(if (condition == "expired") 1 else 2)
             assertThat(f.emitters.first().completed).hasValue(if (condition == "expired") 1 else 0)
         }
@@ -140,10 +195,17 @@ class PrivateNoteStreamRegistryTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["member", "global", "pending"])
-    fun givenConnectionBudget__whenOpeningBeyondIt__thenReturn429WithRetryAfterAndKeepExistingConnections(
+    fun `연결 한도가 주어졌을 때__한도를 넘어 열면__429와 Retry-After를 돌려주고 기존 연결은 유지한다`(
         budget: String,
     ) {
-        Fixture().use { f ->
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
+            val client = TestFaker.uuid()
             if (budget == "member") {
                 for (n in 0 until 3) {
                     f.streams.open(7, f.expiry())
@@ -153,89 +215,135 @@ class PrivateNoteStreamRegistryTest {
                     f.streams.open(id, f.expiry())
                 }
             } else {
-                val client = UUID.randomUUID()
                 for (n in 0 until 4) {
                     f.streams.open(7, f.expiry(), client)
                 }
-                assertFull { f.streams.open(7, f.expiry(), client) }
-                assertThat(f.emitters).hasSize(4)
-                return@use
             }
-            assertFull { f.streams.open(if (budget == "global") 501 else 7, f.expiry()) }
-            assertThat(f.emitters).hasSize(if (budget == "global") 500 else 3)
-            assertThat(f.emitters).allSatisfy({ emitter -> assertThat(emitter.completed.get()).isZero() })
+
+            // when
+            val failure = catchThrowable {
+                if (budget == "pending") {
+                    f.streams.open(7, f.expiry(), client)
+                } else {
+                    f.streams.open(if (budget == "global") 501 else 7, f.expiry())
+                }
+            }
+
+            // then
+            assertFull(failure)
+            if (budget == "pending") {
+                assertThat(f.emitters).hasSize(4)
+            } else {
+                assertThat(f.emitters).hasSize(if (budget == "global") 500 else 3)
+                assertThat(f.emitters).allSatisfy({ emitter -> assertThat(emitter.completed.get()).isZero() })
+            }
         }
     }
 
     @Test
-    fun givenSameClientReconnectAndLateOldCallback__whenResyncing__thenPreserveReplacementOtherTabsAndOtherMembers() {
-        Fixture().use { f ->
-            val tab = UUID.randomUUID()
+    fun `같은 클라이언트가 재연결하고 이전 콜백이 늦게 올 때__다시 동기화하면__교체된 연결과 다른 탭과 다른 회원을 보존한다`() {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
+            val tab = TestFaker.uuid()
             f.streams.open(7, f.expiry(), tab)
             val old = f.emitters.first()
             f.streams.open(8, f.expiry(), tab)
-            f.streams.open(7, f.expiry(), UUID.randomUUID())
+            f.streams.open(7, f.expiry(), TestFaker.uuid())
             f.streams.open(7, f.expiry(), tab)
             f.completions.runAll()
             old.completion.run()
+
+            // when
             f.streams.resync(7)
             f.writes.runAll()
+
+            // then
             assertThat(old.completed).hasValue(1)
             assertThat(old.sends).hasValue(1)
             assertThat(f.emitters[1].sends).hasValue(1)
             assertThat(f.emitters[2].sends).hasValue(2)
             assertThat(f.emitters[3].sends).hasValue(2)
-            f.streams.open(7, f.expiry(), UUID.randomUUID())
+            f.streams.open(7, f.expiry(), TestFaker.uuid())
             assertFull { f.streams.open(7, f.expiry()) }
         }
     }
 
     @ParameterizedTest
     @ValueSource(longs = [12, 600])
-    fun givenVerifiedJwtLifetime__whenOpening__thenUseTokenOrFiveMinuteCapAndOneFifteenSecondHeartbeat(seconds: Long) {
-        Fixture().use { f ->
-            assertThat(f.streams.open(7, f.clock.instant().plusSeconds(seconds)).timeout)
-                .isEqualTo(Math.min(seconds, 300) * 1000)
-            verify(f.heartbeat).scheduleAtFixedRate(
-                any(Runnable::class.java),
-                eq(15L),
-                eq(15L),
-                eq(TimeUnit.SECONDS),
-            )
+    fun `검증된 JWT 수명이 주어졌을 때__열면__토큰 수명 또는 5분 상한과 15초 하트비트 한 개를 쓴다`(seconds: Long) {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
+            // when
+            val emitter = f.streams.open(7, f.clock.instant().plusSeconds(seconds))
+
+            // then
+            assertThat(emitter.timeout).isEqualTo(Math.min(seconds, 300) * 1000)
+            verify(exactly = 1) {
+                heartbeat.scheduleAtFixedRate(any<Runnable>(), 15L, 15L, TimeUnit.SECONDS)
+            }
         }
     }
 
     @Test
-    fun givenMemberReadCrossesVerifiedExpiry__whenOpening__thenFinishMemberQueryButAdmitNoEmitter() {
-        Fixture().use { f ->
+    fun `회원 조회가 검증된 만료 시각을 넘길 때__열면__회원 조회는 끝내지만 에미터는 받아들이지 않는다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             val expiry = f.clock.instant().plusSeconds(1)
-            val members = mock(ContactMemberQuery::class.java)
-            whenever(members.get(7)).thenAnswer {
-                f.clock.advance(2)
-                ContactMember(7L, "", true, false)
-            }
             val authentication = UsernamePasswordAuthenticationToken(7L, null, emptyList<GrantedAuthority>())
             authentication.details = expiry
             val controller = NoteStreamController(RequireActiveNoteStream(members), f.streams)
-            assertThatThrownBy { controller.open(7L, authentication, null) }
-                .isInstanceOfSatisfying(ResponseStatusException::class.java) { failure ->
-                    assertThat(failure.statusCode.value()).isEqualTo(401)
-                }
-            verify(members).get(7)
-            verifyNoMoreInteractions(members)
+
+            every { members.get(any()) } answers {
+                f.clock.advance(2)
+                ContactMember(7L, "", true, false)
+            }
+
+            // when
+            val thrown = assertThatThrownBy { controller.open(7L, authentication, null) }
+
+            // then
+            thrown.isInstanceOfSatisfying(ResponseStatusException::class.java) { failure ->
+                assertThat(failure.statusCode.value()).isEqualTo(401)
+            }
+            verify(exactly = 1) { members.get(7) }
+            confirmVerified(members)
             assertThat(f.emitters).isEmpty()
         }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun givenQueuedHintOrHeldSpringWriteLock__whenTokenExpiresBeforeActualSend__thenSuppressResyncAndCompleteConnection(
+    fun `대기 중인 힌트가 있거나 스프링 쓰기 잠금이 잡혀 있을 때__실제 전송 전에 토큰이 만료되면__재동기화를 억제하고 연결을 완료한다`(
         locked: Boolean,
     ) {
-        Fixture().use { f ->
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             f.streams.open(7, f.clock.instant().plusSeconds(1))
             val emitter = f.emitters.first()
             f.streams.resync(7)
+
+            // when
             if (locked) {
                 val worker = Executors.newSingleThreadExecutor()
                 emitter.lock()
@@ -261,55 +369,98 @@ class PrivateNoteStreamRegistryTest {
                 f.writes.runAll()
             }
             f.completions.runAll()
+
+            // then
             assertThat(emitter.sends).hasValue(1)
             assertThat(emitter.completed).hasValue(1)
         }
     }
 
     @Test
-    fun givenRejectedCompletion__whenHeartbeatRetries__thenKeepClosingSlotCountedAndSuppressAlreadyQueuedHint() {
-        Fixture().use { f ->
+    fun `완료가 거부됐을 때__하트비트가 재시도하면__닫는 슬롯을 계속 세고 이미 대기 중인 힌트는 억제한다`() {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             f.streams.open(7, f.clock.instant().plusSeconds(1))
             f.streams.resync(7)
             f.clock.advance(2)
             f.completions.rejectNext = true
+
+            // when
             f.streams.heartbeat()
             f.streams.open(7, f.expiry())
             f.streams.open(7, f.expiry())
+
+            // then
             assertFull { f.streams.open(7, f.expiry()) }
+
+            // when
             f.writes.runAll()
+
+            // then
             assertThat(f.emitters.first().sends).hasValue(1)
+
+            // when
             f.streams.heartbeat()
             f.completions.runAll()
             f.streams.open(7, f.expiry())
+
+            // then
             assertThat(f.emitters.first().completed).hasValue(1)
         }
     }
 
     @Test
-    fun givenFullWriteQueue__whenAnotherHintArrives__thenDropOnlyHintWithoutUnboundedQueueOrThrowing() {
-        Fixture().use { f ->
+    fun `쓰기 큐가 가득 찼을 때__다른 힌트가 도착하면__힌트만 버리고 큐를 무한히 늘리거나 예외를 던지지 않는다`() {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             f.writes.capacity = 1
             f.streams.open(7, f.expiry())
             f.streams.resync(7)
-            assertThatCode { f.streams.resync(7) }.doesNotThrowAnyException()
+
+            // when
+            val action = assertThatCode { f.streams.resync(7) }
+
+            // then
+            action.doesNotThrowAnyException()
             assertThat(f.writes.tasks).hasSize(1)
+
+            // when
             f.writes.runAll()
+
+            // then
             assertThat(f.emitters.first().sends).hasValue(2)
         }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["error", "timeout"])
-    fun givenDisconnectOrTimeoutCallback__whenCleaningConnection__thenReleaseOnlyItsSlotAndSuppressQueuedWrites(
+    fun `연결 끊김 또는 타임아웃 콜백이 있을 때__연결을 정리하면__그 연결의 슬롯만 풀고 대기 중인 쓰기는 억제한다`(
         callback: String,
     ) {
-        Fixture().use { f ->
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
             for (n in 0 until 3) {
                 f.streams.open(7, f.expiry())
             }
             val closing = f.emitters.first()
             f.streams.resync(7)
+
+            // when
             if (callback == "error") {
                 closing.error.accept(IOException("synthetic-disconnect"))
             } else {
@@ -319,6 +470,8 @@ class PrivateNoteStreamRegistryTest {
             }
             f.streams.open(7, f.expiry())
             f.writes.runAll()
+
+            // then
             assertThat(closing.sends).hasValue(1)
             assertThat(closing.completed).hasValue(if (callback == "error") 0 else 1)
             assertFull { f.streams.open(7, f.expiry()) }
@@ -326,19 +479,29 @@ class PrivateNoteStreamRegistryTest {
     }
 
     @Test
-    fun givenOwnedConnections__whenStoppingTwice__thenCompleteBeforeServerPhaseAndTerminateOwnedExecutorsOnce() {
-        val f = Fixture()
+    fun `소유한 연결이 있을 때__두 번 멈추면__서버 단계 전에 완료하고 소유한 실행기를 한 번만 종료한다`() {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        val f = Fixture(heartbeat)
         f.streams.open(7, f.expiry())
         val callbacks = AtomicInteger()
+
+        // when
         f.streams.stop(Runnable { callbacks.incrementAndGet() })
         f.streams.destroy()
+
+        // then
         assertThat(f.streams.getPhase()).isEqualTo(Integer.MAX_VALUE)
         assertThat(f.streams.isRunning()).isFalse()
         assertThat(callbacks).hasValue(1)
         assertThat(f.emitters.first().completed).hasValue(1)
         assertThat(f.writes.shutdownNowCalls).isEqualTo(1)
         assertThat(f.completions.shutdownCalls).isEqualTo(1)
-        verify(f.heartbeat).shutdownNow()
+        verify(exactly = 1) { heartbeat.shutdownNow() }
         assertThatThrownBy { f.streams.open(7, f.expiry()) }
             .isInstanceOfSatisfying(ResponseStatusException::class.java) { failure ->
                 assertThat(failure.statusCode.value()).isEqualTo(503)
@@ -350,11 +513,21 @@ class PrivateNoteStreamRegistryTest {
     }
 
     @Test
-    fun givenExecutorDoesNotTerminate__whenStopping__thenForceShutdownWithinSharedBudgetAndAlwaysNotifyLifecycle() {
-        val f = Fixture()
+    fun `실행기가 종료되지 않을 때__멈추면__공유 예산 안에서 강제 종료하고 항상 생명주기에 알린다`() {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        val f = Fixture(heartbeat)
         f.writes.terminates = false
         val callbacks = AtomicInteger()
+
+        // when
         f.streams.stop(Runnable { callbacks.incrementAndGet() })
+
+        // then
         assertThat(callbacks).hasValue(1)
         assertThat(f.writes.shutdownNowCalls).isEqualTo(2)
         assertThat(f.writes.awaitBudgets).hasSize(1)
@@ -363,8 +536,12 @@ class PrivateNoteStreamRegistryTest {
         f.close()
     }
 
-    private fun assertFull(action: () -> Unit) {
-        assertThatThrownBy { action() }.isInstanceOfSatisfying(ResponseStatusException::class.java) { failure ->
+    private fun assertFull(action: () -> Any?) {
+        assertFull(catchThrowable { action() })
+    }
+
+    private fun assertFull(thrown: Throwable?) {
+        assertThat(thrown).isInstanceOfSatisfying(ResponseStatusException::class.java) { failure ->
             assertThat(failure.statusCode.value()).isEqualTo(429)
             assertThat(failure.headers.getFirst("Retry-After")).isEqualTo("15")
         }
@@ -381,16 +558,14 @@ class PrivateNoteStreamRegistryTest {
             "/notes/f2900000-0000-0000-0000-000000000001",
         )
 
-    private class Fixture : AutoCloseable {
+    private class Fixture(heartbeat: ScheduledExecutorService) : AutoCloseable {
         val clock = MutableClock()
         val writes = ManualExecutor()
         val completions = ManualExecutor()
-        val heartbeat: ScheduledExecutorService = mock(ScheduledExecutorService::class.java)
         val emitters = ArrayList<TrackingEmitter>()
         val streams: PrivateNoteStreamRegistry
 
         init {
-            whenever(heartbeat.awaitTermination(anyLong(), any(TimeUnit::class.java))).thenReturn(true)
             streams = PrivateNoteStreamRegistry(
                 clock,
                 LongFunction { timeout ->

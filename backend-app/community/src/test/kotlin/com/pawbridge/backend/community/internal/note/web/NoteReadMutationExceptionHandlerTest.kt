@@ -11,7 +11,8 @@ import java.sql.SQLException
 
 class NoteReadMutationExceptionHandlerTest {
     @Test
-    fun given__private_runtime_cause_and_suppressed_messages__when__handling__then__return_no_store_generic_503_and_log_type_without_throwable() {
+    fun `비공개 원인과 억제 예외 메시지가 있을 때__처리하면__캐시 금지 일반 503을 돌려주고 예외 형식만 로그에 남긴다`() {
+        // given
         val failure = IllegalStateException("Bearer synthetic-private-token", SQLException("synthetic-private-SQL"))
         failure.addSuppressed(IllegalArgumentException("synthetic-private-member-and-note-body"))
         val logger = LoggerFactory.getLogger(NoteReadMutationExceptionHandler::class.java) as Logger
@@ -19,8 +20,10 @@ class NoteReadMutationExceptionHandlerTest {
         appender.start()
         logger.addAppender(appender)
         try {
+            // when
             val response = NoteReadMutationExceptionHandler().unexpectedFailure(failure)
 
+            // then
             assertEquals(503, response.statusCode.value())
             assertEquals("no-store", response.headers.cacheControl)
             assertNull(response.headers.getFirst("Set-Cookie"))
