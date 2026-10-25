@@ -31,7 +31,7 @@ class S3AnimalReportMediaUploader(
             return urls
         }
         for (upload in uploads) {
-            if (upload.size() == 0L) {
+            if (upload.size == 0L) {
                 continue
             }
             try {
@@ -52,7 +52,7 @@ class S3AnimalReportMediaUploader(
 
     private fun uploadSingleFile(upload: PostUpload): String {
         validateMedia(upload)
-        val originalFilename = upload.originalFilename()
+        val originalFilename = upload.originalFilename
         val extension = if (originalFilename != null && originalFilename.contains(".")) {
             originalFilename.substring(originalFilename.lastIndexOf('.'))
         } else {
@@ -63,10 +63,10 @@ class S3AnimalReportMediaUploader(
         val request = PutObjectRequest.builder()
             .bucket(bucket)
             .key(key)
-            .contentType(upload.contentType())
+            .contentType(upload.contentType)
             .build()
-        ReopeningContent(upload.content()).use { content ->
-            s3.putObject(request, RequestBody.fromContentProvider(content, upload.size(), upload.contentType()))
+        ReopeningContent(upload.content).use { content ->
+            s3.putObject(request, RequestBody.fromContentProvider(content, upload.size, upload.contentType))
         }
         return "$publicBaseUrl/$key"
     }
@@ -103,10 +103,10 @@ class S3AnimalReportMediaUploader(
         private val OBJECT_PREFIX = Regex("[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*/?")
 
         private fun validateMedia(upload: PostUpload) {
-            val contentType = upload.contentType()
+            val contentType = upload.contentType
             if (contentType == null) {
                 throw IllegalArgumentException(
-                    String.format("파일 타입을 확인할 수 없습니다. (파일: %s)", upload.originalFilename()),
+                    String.format("파일 타입을 확인할 수 없습니다. (파일: %s)", upload.originalFilename),
                 )
             }
             // Java String.toLowerCase() uses the default locale.
@@ -116,7 +116,7 @@ class S3AnimalReportMediaUploader(
                     String.format(
                         "지원하지 않는 파일 형식입니다. (업로드한 파일: %s, 타입: %s). " +
                             "허용된 형식 - 이미지: jpg, jpeg, png, gif, webp / 영상: mp4, mov, avi, mkv",
-                        upload.originalFilename(),
+                        upload.originalFilename,
                         contentType,
                     ),
                 )
