@@ -8,8 +8,8 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.enums.*;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository;
 
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.StepExecutionListener;
@@ -32,9 +32,9 @@ import java.util.stream.Collectors;
  * - 신규(id==null): Writer에서 saveAll() → INSERT
  * - 기존(id!=null): Writer에서 @Modifying UPDATE → SELECT 없이 UPDATE만 실행
  */
-@Slf4j
-@RequiredArgsConstructor
 public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, StepExecutionListener {
+
+    private static final Logger log = LoggerFactory.getLogger(AnimalItemProcessor.class);
 
     private final AnimalRepository animalRepository;
     private final ShelterRepository shelterRepository;
@@ -46,6 +46,11 @@ public class AnimalItemProcessor implements ItemProcessor<ApmsAnimal, Animal>, S
     // ConcurrentHashMap: 멀티스레딩 환경에서 여러 스레드가 동시에 읽음 (쓰기는 beforeStep에서만)
     private ConcurrentHashMap<String, Long> existingAnimalIdMap;  // desertionNo → id
     private ConcurrentHashMap<String, Shelter> shelterCache;       // careRegNo → Shelter
+
+    public AnimalItemProcessor(AnimalRepository animalRepository, ShelterRepository shelterRepository) {
+        this.animalRepository = animalRepository;
+        this.shelterRepository = shelterRepository;
+    }
 
     /**
      * Step 실행 전 전체 캐시 구성 (DB SELECT 각 1회)
