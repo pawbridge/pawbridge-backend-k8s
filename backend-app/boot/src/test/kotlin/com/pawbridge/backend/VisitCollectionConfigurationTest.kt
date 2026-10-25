@@ -5,15 +5,15 @@ import com.pawbridge.backend.community.internal.visit.application.VisitCollectio
 import com.pawbridge.backend.community.internal.visit.application.VisitCollectionStore
 import com.pawbridge.backend.community.internal.visit.application.VisitIdentity
 import com.pawbridge.backend.community.internal.visit.web.VisitCollectionController
+import io.mockk.confirmVerified
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
@@ -34,15 +34,17 @@ import java.util.Base64
 class VisitCollectionConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false"])
-    fun given__read_enabled_without_collection_or_key__when__assembling__then__no_collection_or_scheduler(
-        flag: String,
-    ) {
+    fun `수집이 켜지지 않았거나 키가 없고 읽기만 켜졌을 때__조립하면__수집도 스케줄러도 만들지 않는다`(flag: String) {
+        // given
         var runner = ApplicationContextRunner().withUserConfiguration(VisitCollectionConfiguration::class.java)
             .withPropertyValues("pawbridge.visits.enabled=true")
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.visits.collection-enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(VisitCollection::class.java)).isEmpty()
             assertThat(context.getBeansOfType(VisitIdentity::class.java)).isEmpty()
@@ -52,24 +54,38 @@ class VisitCollectionConfigurationTest {
     }
 
     @Test
-    fun given__collection_enabled_but_read_disabled_or_key_missing__when__assembling__then__fail_closed() {
-        ApplicationContextRunner().withUserConfiguration(VisitCollectionConfiguration::class.java)
+    fun `읽기가 꺼졌거나 키가 없는데 수집이 켜졌을 때__조립하면__닫힌 채 실패한다`() {
+        // given
+        val withoutRead = ApplicationContextRunner().withUserConfiguration(VisitCollectionConfiguration::class.java)
             .withPropertyValues("pawbridge.visits.collection-enabled=true")
-            .run { context ->
-                assertThat(context.startupFailure)
-                    .hasRootCauseMessage("Visit collection requires pawbridge.visits.enabled=true.")
-            }
-        inputs(false).run { context ->
+        val withoutKey = inputs(false)
+
+        // when
+        withoutRead.run { context ->
+            // then
+            assertThat(context.startupFailure)
+                .hasRootCauseMessage("Visit collection requires pawbridge.visits.enabled=true.")
+        }
+        withoutKey.run { context ->
             assertThat(context.startupFailure)
                 .hasRootCauseMessage("Visit signing key must contain at least 32 bytes.")
         }
     }
 
     @Test
-    fun given__enabled_with_existing_writer_and_synthetic_key__when__assembling__then__one_qualified_lifecycle_and_original_transaction(
-        output: CapturedOutput,
-    ) {
-        inputs(true).run { context ->
+    fun `기존 쓰기 자원과 합성 키로 켜졌을 때__조립하면__한정된 생명주기 하나와 원래 트랜잭션을 쓴다`(output: CapturedOutput) {
+        // given
+        val jdbc = mockk<JdbcTemplate>()
+        val manager = mockk<JdbcTransactionManager>()
+        val clock = mockk<Clock>()
+        val service = mockk<VisitCollection>()
+
+        justRun { service.start() }
+        justRun { service.cleanup() }
+
+        // when
+        inputs(true, jdbc, manager, clock).run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(VisitCollection::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(VisitCollectionConfiguration.VisitCollectionLifecycle::class.java))
@@ -102,33 +118,35 @@ class VisitCollectionConfigurationTest {
                 .getMethod("cleanup")
                 .getAnnotation(Scheduled::class.java)
             assertThat(annotation.scheduler).isEqualTo("visitCollectionScheduler")
-            verifyNoInteractions(
-                context.getBean("writeJdbc"),
-                context.getBean("writeTransactionManager"),
-                context.getBean("readClock"),
-            )
+            confirmVerified(jdbc, manager, clock)
             val handler = ReflectionTestUtils.getField(scheduler, "errorHandler") as ErrorHandler
             handler.handleError(IllegalStateException("synthetic-secret-cookie", RuntimeException("synthetic-private-sql")))
             assertThat(output.all).contains("Visit collection cleanup failed (IllegalStateException)")
                 .doesNotContain("synthetic-secret-cookie", "synthetic-private-sql")
         }
-        val service = mock(VisitCollection::class.java)
         val lifecycle = VisitCollectionConfiguration.VisitCollectionLifecycle(service)
         lifecycle.start()
         lifecycle.cleanup()
-        val order = inOrder(service)
-        order.verify(service).start()
-        order.verify(service, times(2)).cleanup()
+        verifySequence {
+            service.start()
+            service.cleanup()
+            service.cleanup()
+        }
     }
 
-    private fun inputs(key: Boolean): ApplicationContextRunner {
+    private fun inputs(
+        key: Boolean,
+        jdbc: JdbcTemplate = mockk(),
+        manager: JdbcTransactionManager = mockk(),
+        clock: Clock = mockk(),
+    ): ApplicationContextRunner {
         val runner = ApplicationContextRunner().withUserConfiguration(VisitCollectionConfiguration::class.java)
             .withPropertyValues("pawbridge.visits.enabled=true", "pawbridge.visits.collection-enabled=true")
             .withInitializer { context ->
                 context.beanFactory.registerSingleton("writeDataSource", Any())
-                context.beanFactory.registerSingleton("writeJdbc", mock(JdbcTemplate::class.java))
-                context.beanFactory.registerSingleton("writeTransactionManager", mock(JdbcTransactionManager::class.java))
-                context.beanFactory.registerSingleton("readClock", mock(Clock::class.java))
+                context.beanFactory.registerSingleton("writeJdbc", jdbc)
+                context.beanFactory.registerSingleton("writeTransactionManager", manager)
+                context.beanFactory.registerSingleton("readClock", clock)
             }
         return if (key) {
             runner.withPropertyValues("pawbridge.visits.signing-key=" + Base64.getEncoder().encodeToString(ByteArray(32)))

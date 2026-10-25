@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.ReadPost
@@ -17,17 +18,16 @@ import com.pawbridge.backend.user.internal.profile.web.UserProfileController
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -35,7 +35,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -72,24 +71,26 @@ class UserNicknameHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var change: ChangeUserNickname
 
-    @MockitoBean
+    @MockkBean
     lateinit var profiles: UserProfileQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__verified_principal_and_spoofed_identity__when__changing_nickname__then__use_only_principal_and_return_original_null_success(
-        role: String,
-    ) {
-        mvc.perform(
+    fun `서명된 주체와 위조된 신원이 주어졌을 때__닉네임을 바꾸면__주체만 쓰고 널 성공을 돌려준다`(role: String) {
+        // given
+        justRun { change.change(any(), any()) }
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
                 .header("X-User-Id", "999")
@@ -98,80 +99,99 @@ class UserNicknameHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":\"새닉네임7\",\"userId\":999}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":200,\"message\":\"닉네임이 변경되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(change).change(7, "새닉네임7")
-        verifyNoMoreInteractions(change)
-        verifyNoInteractions(profiles, readPost, listPosts)
+        verify(exactly = 1) { change.change(7, "새닉네임7") }
+        confirmVerified(change, profiles, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["가1", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcd"])
-    fun given__valid_two_or_thirty_character_nickname__when__changing__then__forward_original_text(nickname: String) {
-        mvc.perform(
+    fun `두 글자 또는 서른 글자 닉네임이 주어졌을 때__바꾸면__원문을 그대로 전달한다`(nickname: String) {
+        // given
+        justRun { change.change(any(), any()) }
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(mapper.writeValueAsString(mapOf("nickname" to nickname))),
         )
-            .andExpect(status().isOk())
-        verify(change).change(7, nickname)
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { change.change(7, nickname) }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun given__json_boolean_nickname__when__changing__then__preserve_existing_jackson_string_coercion(
-        nickname: Boolean,
-    ) {
-        mvc.perform(
+    fun `JSON 불리언 닉네임이 주어졌을 때__바꾸면__기존 Jackson 문자열 변환을 유지한다`(nickname: Boolean) {
+        // given
+        justRun { change.change(any(), any()) }
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":$nickname}"),
         )
-            .andExpect(status().isOk())
-        verify(change).change(7, nickname.toString())
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { change.change(7, nickname.toString()) }
     }
 
     @ParameterizedTest
     @MethodSource("invalidNicknames")
-    fun given__invalid_or_absent_nickname__when__changing__then__validation_precedes_service_and_keeps_original_message_set(
+    fun `잘못되었거나 없는 닉네임이 주어졌을 때__바꾸면__서비스 전에 검증하고 기존 메시지 집합을 유지한다`(
         json: String,
         messages: List<String>,
     ) {
-        val result = mvc.perform(
-            put("/api/v1/users/me/nickname")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json),
-        )
+        // given
+        val request = put("/api/v1/users/me/nickname")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(json)
+
+        // when
+        val result = mvc.perform(request)
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400))
             .andReturn()
+
+        // then
         val response = mapper.readTree(result.response.contentAsString)
         val message = response.get("message").asText()
         assertThat(message).startsWith("nickname: ")
         assertThat(message.substring("nickname: ".length).split(", nickname: "))
             .containsExactlyInAnyOrderElementsOf(messages)
         assertThat(response.get("data").isNull).isTrue()
-        verifyNoInteractions(change, profiles, readPost, listPosts)
+        confirmVerified(change, profiles, readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "{", "null", "[]", "{\"nickname\":[]}", "{\"nickname\":{}}"])
-    fun given__malformed_or_nonobject_json__when__changing__then__return_original_safe_body_error_before_service(
-        json: String,
-    ) {
-        mvc.perform(
-            put("/api/v1/users/me/nickname")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(json),
-        )
+    fun `깨졌거나 객체가 아닌 JSON이 주어졌을 때__바꾸면__서비스 전에 기존 안전 본문 오류를 돌려준다`(json: String) {
+        // given
+        val request = put("/api/v1/users/me/nickname")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(json)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -179,15 +199,16 @@ class UserNicknameHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(change, profiles, readPost, listPosts)
+        confirmVerified(change, profiles, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_untrusted_token_and_invalid_body__when__changing__then__authentication_precedes_validation_and_service(
+    fun `토큰이 없거나 신뢰할 수 없고 본문이 잘못됐을 때__바꾸면__검증과 서비스보다 인증이 먼저다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = put("/api/v1/users/me/nickname")
             .header("X-User-Id", "7")
             .contentType(MediaType.APPLICATION_JSON)
@@ -195,7 +216,12 @@ class UserNicknameHttpTest {
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -203,39 +229,49 @@ class UserNicknameHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(change, profiles, readPost, listPosts)
+        confirmVerified(change, profiles, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun given__signed_invalid_identity__when__changing__then__claim_failure_prevents_service(
-        claims: Map<String, Any>,
-    ) {
+    fun `서명된 잘못된 신원 클레임이 주어졌을 때__바꾸면__클레임 실패로 서비스를 막는다`(claims: Map<String, Any>) {
+        // given
         val token = Jwts.builder()
             .claims(claims)
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .header("Authorization", "Bearer $token")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":\"새닉네임\"}"),
         )
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.message").value("토큰 파싱에 실패했습니다."))
-        verifyNoInteractions(change, profiles, readPost, listPosts)
+        confirmVerified(change, profiles, readPost, listPosts)
     }
 
     @Test
-    fun given__authenticated_member_no_longer_exists__when__changing__then__preserve_missing_member_response() {
-        doThrow(UserNotFoundException()).`when`(change).change(7, "새닉네임")
-        mvc.perform(
+    fun `인증된 회원이 더는 없을 때__바꾸면__기존 회원 없음 응답을 유지한다`() {
+        // given
+        every { change.change(any(), any()) } throws UserNotFoundException()
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":\"새닉네임\"}"),
         )
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -243,18 +279,24 @@ class UserNicknameHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(change).change(7, "새닉네임")
+        verify(exactly = 1) { change.change(7, "새닉네임") }
     }
 
     @Test
-    fun given__nickname_already_used__when__changing__then__return_original_conflict_without_success_fallback() {
-        doThrow(NicknameDuplicateException()).`when`(change).change(7, "기존닉네임")
-        mvc.perform(
+    fun `닉네임이 이미 사용 중일 때__바꾸면__성공 대체 없이 기존 충돌 응답을 돌려준다`() {
+        // given
+        every { change.change(any(), any()) } throws NicknameDuplicateException()
+
+        // when
+        val result = mvc.perform(
             put("/api/v1/users/me/nickname")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"nickname\":\"기존닉네임\"}"),
         )
+
+        // then
+        result
             .andExpect(status().isConflict())
             .andExpect(
                 content().json(
@@ -262,21 +304,32 @@ class UserNicknameHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(change).change(7, "기존닉네임")
+        verify(exactly = 1) { change.change(7, "기존닉네임") }
     }
 
     @Test
-    fun given__existing_profile_and_public_read__when__requesting__then__nickname_advice_and_authentication_do_not_intercept_them() {
-        whenever(profiles.require(7))
-            .thenReturn(UserProfile(7, "synthetic@fixture.invalid", "합성", "기존닉네임", "LOCAL", "ROLE_USER", null))
-        whenever(listPosts.read()).thenReturn(listOf())
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+    fun `기존 프로필과 공개 조회가 주어졌을 때__요청하면__닉네임 어드바이스와 인증이 가로채지 않는다`() {
+        // given
+        every { profiles.require(any()) } returns
+            UserProfile(7, "synthetic@fixture.invalid", "합성", "기존닉네임", "LOCAL", "ROLE_USER", null)
+        every { listPosts.read() } returns listOf()
+
+        // when
+        val profile = mvc.perform(
+            get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
+        )
+        val posts = mvc.perform(get("/api/v1/posts/read").header("Authorization", "Bearer invalid"))
+
+        // then
+        profile
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.nickname").value("기존닉네임"))
-        mvc.perform(get("/api/v1/posts/read").header("Authorization", "Bearer invalid"))
+        posts
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data").isArray())
-        verifyNoInteractions(change)
+        verify(exactly = 1) { profiles.require(7) }
+        verify(exactly = 1) { listPosts.read() }
+        confirmVerified(change, profiles, listPosts)
     }
 
     @ParameterizedTest
@@ -295,16 +348,19 @@ class UserNicknameHttpTest {
             "PUT /api/users/me/nickname",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_service(
-        request: String,
-    ) {
+    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__유효한 토큰으로 요청하면__서비스 없이 거부한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(change, profiles, readPost, listPosts)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(change, profiles, readPost, listPosts)
     }
 
     companion object {

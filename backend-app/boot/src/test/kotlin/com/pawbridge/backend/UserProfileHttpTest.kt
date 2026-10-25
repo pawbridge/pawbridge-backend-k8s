@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.comment.application.ListComments
 import com.pawbridge.backend.community.internal.comment.web.CommentReadController
@@ -23,6 +24,9 @@ import com.pawbridge.backend.user.internal.profile.web.UserProfileController
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Test
@@ -30,12 +34,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.stubbing.Answer
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -45,7 +43,6 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -86,30 +83,33 @@ class UserProfileHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var profiles: UserProfileQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
-    @MockitoBean
+    @MockkBean
     lateinit var searchPosts: SearchPosts
 
-    @MockitoBean
+    @MockkBean
     lateinit var listComments: ListComments
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__signed_identity_and_spoofed_headers_query_and_body__when__getting_me__then__return_only_that_ids_current_database_profile(
+    fun `서명된 신원과 위조된 헤더·쿼리·본문이 주어졌을 때__내 정보를 조회하면__그 ID의 현재 DB 프로필만 돌려준다`(
         tokenRole: String,
     ) {
+        // given
         val profile = profile(7, "현재 닉네임", LocalDateTime.parse("2026-10-19T01:02:03.123456"))
-        whenever(profiles.require(7)).thenReturn(profile)
 
-        mvc.perform(
+        every { profiles.require(any()) } returns profile
+
+        // when
+        val result = mvc.perform(
             get("/api/v1/users/me")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, tokenRole))
                 .header("X-User-Id", "999")
@@ -121,6 +121,9 @@ class UserProfileHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":999,\"role\":\"ROLE_ADMIN\"}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.data.length()").value(7))
@@ -135,20 +138,24 @@ class UserProfileHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(profiles).require(7)
-        verifyNoMoreInteractions(profiles)
-        verifyNoInteractions(readPost, listPosts, searchPosts, listComments)
+        verify(exactly = 1) { profiles.require(7) }
+        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "  \t ", "닉네임"])
-    fun given__nullable_join_date_and_raw_nickname__when__getting_me__then__preserve_null_key_empty_string_and_whitespace_in_exact_seven_fields(
-        nickname: String,
-    ) {
-        whenever(profiles.require(7)).thenReturn(profile(7, nickname, null))
+    fun `가입일이 없고 닉네임이 원문일 때__내 정보를 조회하면__널 키·빈 문자열·공백을 일곱 필드로 유지한다`(nickname: String) {
+        // given
+        every { profiles.require(any()) } returns profile(7, nickname, null)
 
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+        // when
+        val result = mvc.perform(
+            get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
+        )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.length()").value(7))
             .andExpect(jsonPath("$.data.nickname").value(nickname))
@@ -161,21 +168,26 @@ class UserProfileHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(profiles).require(7)
+        verify(exactly = 1) { profiles.require(7) }
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_untrusted_token_with_spoofed_identity__when__getting_me__then__401_precedes_profile_query(
+    fun `토큰이 없거나 신뢰할 수 없고 신원이 위조됐을 때__내 정보를 조회하면__프로필 조회 전에 401을 돌려준다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = get("/api/v1/users/me").header("X-User-Id", "7").header("X-User-Role", "ROLE_ADMIN")
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -183,22 +195,25 @@ class UserProfileHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(profiles, readPost, listPosts, searchPosts, listComments)
+        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun given__signed_invalid_identity__when__getting_me__then__claim_failure_prevents_profile_query(
-        claims: Map<String, Any>,
-    ) {
+    fun `서명된 잘못된 신원이 주어졌을 때__내 정보를 조회하면__클레임 실패로 프로필 조회를 막는다`(claims: Map<String, Any>) {
+        // given
         val token = Jwts.builder()
             .claims(claims)
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
 
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer $token"))
+        // when
+        val result = mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer $token"))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -206,11 +221,12 @@ class UserProfileHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(profiles, readPost, listPosts, searchPosts, listComments)
+        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
     }
 
     @Test
-    fun given__valid_id_with_unrelated_subject_name_and_nonstandard_string_role__when__getting_me__then__reuse_existing_identity_contract_without_new_role_or_subject_policy() {
+    fun `무관한 subject와 비표준 역할이 주어졌을 때__내 정보를 조회하면__새 정책 없이 기존 신원 계약을 쓴다`() {
+        // given
         val token = Jwts.builder()
             .subject("another-member@fixture.invalid")
             .claim("userId", 7)
@@ -219,39 +235,60 @@ class UserProfileHttpTest {
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
-        whenever(profiles.require(7)).thenReturn(profile(7, "현재 닉네임", null))
 
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer $token"))
+        every { profiles.require(any()) } returns profile(7, "현재 닉네임", null)
+
+        // when
+        val result = mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer $token"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.userId").value(7))
             .andExpect(jsonPath("$.data.email").value("current-7@fixture.invalid"))
             .andExpect(jsonPath("$.data.name").value("현재 이름7"))
             .andExpect(jsonPath("$.data.role").value("ROLE_SHELTER"))
-        verify(profiles).require(7)
+        verify(exactly = 1) { profiles.require(7) }
     }
 
     @Test
-    fun given__two_members_then_anonymous_request__when__getting_me__then__each_query_uses_its_own_principal_and_anonymous_cannot_reuse_it() {
-        whenever(profiles.require(anyLong())).thenAnswer(
-            Answer<UserProfile> { call -> profile(call.getArgument<Long>(0), "현재 닉네임", null) },
-        )
-        for (id in longArrayOf(7, 8)) {
-            mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")))
+    fun `회원 둘과 익명 요청이 주어졌을 때__내 정보를 조회하면__각자 자기 주체로 조회하고 익명은 재사용하지 못한다`() {
+        // given
+        every { profiles.require(any()) } answers { profile(firstArg(), "현재 닉네임", null) }
+
+        // when
+        val members = longArrayOf(7, 8).map { id ->
+            id to mvc.perform(
+                get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")),
+            )
+        }
+        val anonymous = mvc.perform(get("/api/v1/users/me"))
+
+        // then
+        members.forEach { (id, result) ->
+            result
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.userId").value(id.toInt()))
         }
-        mvc.perform(get("/api/v1/users/me")).andExpect(status().isUnauthorized())
-        verify(profiles).require(7)
-        verify(profiles).require(8)
-        verifyNoMoreInteractions(profiles)
+        anonymous.andExpect(status().isUnauthorized())
+        verify(exactly = 1) { profiles.require(7) }
+        verify(exactly = 1) { profiles.require(8) }
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__authenticated_member_no_longer_exists__when__getting_me__then__preserve_original_400_without_profile_fallback() {
-        whenever(profiles.require(7)).thenThrow(UserNotFoundException())
+    fun `인증된 회원이 더는 없을 때__내 정보를 조회하면__프로필 대체 없이 원래 400을 유지한다`() {
+        // given
+        every { profiles.require(any()) } throws UserNotFoundException()
 
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+        // when
+        val result = mvc.perform(
+            get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
+        )
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -259,23 +296,31 @@ class UserProfileHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(profiles).require(7)
-        verifyNoMoreInteractions(profiles)
+        verify(exactly = 1) { profiles.require(7) }
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("queryFailures")
-    fun given__sql_transaction_or_unexpected_query_failure__when__getting_me__then__return_safe_500_outside_authentication_catch_without_sensitive_logs(
+    fun `조회 실패가 주어졌을 때__내 정보를 조회하면__인증 catch 밖에서 안전한 500을 돌려주고 민감 로그를 남기지 않는다`(
         failure: RuntimeException,
     ) {
-        whenever(profiles.require(7)).thenThrow(failure)
+        // given
+        every { profiles.require(any()) } throws failure
+
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
-            mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+            // when
+            val result = mvc.perform(
+                get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
+            )
+
+            // then
+            result
                 .andExpect(status().isInternalServerError())
                 .andExpect(
                     content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
@@ -296,8 +341,8 @@ class UserProfileHttpTest {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(profiles).require(7)
-        verifyNoMoreInteractions(profiles)
+        verify(exactly = 1) { profiles.require(7) }
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -310,15 +355,17 @@ class UserProfileHttpTest {
             "/api/v1/comments/posts/read/42",
         ],
     )
-    fun given__existing_public_read_with_invalid_bearer__when__requesting__then__profile_authentication_and_advice_do_not_intercept_it(
-        path: String,
-    ) {
-        whenever(readPost.read(42)).thenThrow(PostNotFoundException())
-        whenever(listPosts.read()).thenReturn(listOf())
-        whenever(searchPosts.search("test")).thenReturn(listOf())
-        whenever(listComments.read(42)).thenReturn(listOf())
+    fun `유효하지 않은 Bearer와 기존 공개 조회가 주어졌을 때__요청하면__프로필 인증과 어드바이스가 가로채지 않는다`(path: String) {
+        // given
+        every { readPost.read(any()) } throws PostNotFoundException()
+        every { listPosts.read() } returns listOf()
+        every { searchPosts.search(any()) } returns listOf()
+        every { listComments.read(any()) } returns listOf()
 
+        // when
         val response = mvc.perform(get(path).header("Authorization", "Bearer invalid"))
+
+        // then
         if (path == "/api/v1/posts/read/42") {
             response.andExpect(status().isNotFound())
                 .andExpect(
@@ -327,7 +374,7 @@ class UserProfileHttpTest {
                         JsonCompareMode.STRICT,
                     ),
                 )
-            verify(readPost).read(42)
+            verify(exactly = 1) { readPost.read(42) }
         } else {
             response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
@@ -335,7 +382,7 @@ class UserProfileHttpTest {
                 .andExpect(jsonPath("$.data").isArray())
                 .andExpect(jsonPath("$.data.length()").value(0))
         }
-        verifyNoInteractions(profiles)
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -349,16 +396,21 @@ class UserProfileHttpTest {
             "PATCH /api/v1/users/me", "DELETE /api/v1/users/me",
         ],
     )
-    fun given__unexposed_method_internal_api_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_profile_query(
+    fun `노출되지 않은 메서드·내부 API·인접 경로가 주어졌을 때__유효한 토큰으로 요청하면__프로필 조회 없이 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(profiles, readPost, listPosts, searchPosts, listComments)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
     }
 
     @ParameterizedTest
@@ -368,12 +420,18 @@ class UserProfileHttpTest {
             "POST /api/v1/comments/posts/42", "PUT /api/v1/comments/12", "DELETE /api/v1/comments/12",
         ],
     )
-    fun given__existing_write_without_token__when__requesting__then__preserve_its_jwt_boundary(request: String) {
+    fun `토큰 없는 기존 쓰기 요청이 주어졌을 때__요청하면__기존 JWT 경계를 유지한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // when
+        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(profiles, readPost, listPosts, searchPosts, listComments)
+        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
     }
 
     companion object {

@@ -3,18 +3,17 @@ package com.pawbridge.backend
 import com.pawbridge.backend.boot.configuration.UserStoreMyPageConfiguration
 import com.pawbridge.backend.store.api.StoreMemberReads
 import com.pawbridge.backend.store.internal.memberread.infrastructure.JpaStoreMemberReads
-import com.pawbridge.backend.support.anyValue
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage
 import com.pawbridge.backend.user.internal.storemypage.infrastructure.ModuleStoreMyPage
 import com.pawbridge.backend.user.internal.storemypage.web.StoreMyPageController
 import com.pawbridge.backend.user.internal.storemypage.web.StoreMyPageExceptionHandler
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -34,8 +33,13 @@ class UserStoreMyPageConfigurationTest {
     }
 
     @Test
-    fun given__no_explicit_enablement__when__starting__then__create_no_store_reader_or_routes() {
-        runner().run { context ->
+    fun `명시적 활성화가 없을 때__시작하면__스토어 리더도 경로도 만들지 않는다`() {
+        // given
+        val runner = runner()
+
+        // when
+        runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(StoreMyPage::class.java)).isEmpty()
             assertThat(context.getBeansOfType(StoreMyPageController::class.java)).isEmpty()
@@ -46,10 +50,14 @@ class UserStoreMyPageConfigurationTest {
     }
 
     @Test
-    fun given__explicit_enablement__when__assembling__then__reuse_reader_and_separate_repeatable_read_transaction() {
-        runner()
-            .withPropertyValues("pawbridge.user-store-mypage.enabled=true")
+    fun `명시적 활성화가 주어졌을 때__조립하면__리더를 재사용하고 반복 읽기 트랜잭션을 분리한다`() {
+        // given
+        val runner = runner().withPropertyValues("pawbridge.user-store-mypage.enabled=true")
+
+        // when
+        runner
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                 assertThat(context).hasSingleBean(StoreMemberReads::class.java)
                 assertThat(context.getBean(StoreMyPage::class.java)).isInstanceOf(ModuleStoreMyPage::class.java)
@@ -98,25 +106,35 @@ class UserStoreMyPageConfigurationTest {
     }
 
     private fun verifyNoConnectionOrTransaction(source: DataSource, manager: JdbcTransactionManager) {
-        verify(source, never()).getConnection()
-        verify(manager, never()).getTransaction(anyValue<TransactionDefinition>())
+        verify(exactly = 0) { source.connection }
+        verify(exactly = 0) { manager.getTransaction(any()) }
     }
 
     @Configuration(proxyBeanMethods = false)
     class ModuleInputs {
         @Bean
-        fun dataSource(): DataSource = mock(DataSource::class.java)
+        fun dataSource(): DataSource = mockk<DataSource>()
 
         @Bean
-        fun transactionManager(): JdbcTransactionManager = mock(JdbcTransactionManager::class.java)
+        fun transactionManager(): JdbcTransactionManager {
+            val manager = mockk<JdbcTransactionManager>()
+            // Spring runs this lifecycle callback when the bean is created; nothing else touches the manager.
+            justRun { manager.afterPropertiesSet() }
+            return manager
+        }
     }
 
     @Configuration(proxyBeanMethods = false)
     class Inputs {
         @Bean
-        fun userProfileQuery(): UserProfileQuery = mock(UserProfileQuery::class.java)
+        fun userProfileQuery(): UserProfileQuery = mockk<UserProfileQuery>()
 
         @Bean
-        fun readOnlyTransaction(): TransactionTemplate = mock(TransactionTemplate::class.java)
+        fun readOnlyTransaction(): TransactionTemplate {
+            val template = mockk<TransactionTemplate>()
+            // Spring runs this lifecycle callback when the bean is created; nothing else touches the template.
+            justRun { template.afterPropertiesSet() }
+            return template
+        }
     }
 }
