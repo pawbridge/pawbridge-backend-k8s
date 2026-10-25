@@ -1,3 +1,5 @@
+@file:Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+
 package com.pawbridge.backend.animal.internal.discovery.web
 
 import com.pawbridge.backend.animal.internal.discovery.application.AnimalDiscovery
@@ -25,9 +27,12 @@ class AnimalDiscoveryController(
         return animalPage(result)
     }
 
+    // The path variable is java.lang.Long deliberately: kotlin.Long? makes it optional (a blank segment reaches the
+    // service as null) and kotlin.Long is a primitive (a blank segment becomes a type mismatch). A non-null
+    // java.lang.Long keeps the Java behaviour: required and boxed, so a blank segment fails before the handler runs.
     @GetMapping("/api/v1/animals/{id}")
-    fun detail(@PathVariable("id") id: Long?): AnimalDetails {
-        return AnimalDetails.from(animals.findById(id!!))
+    fun detail(@PathVariable("id") id: java.lang.Long): AnimalDetails {
+        return AnimalDetails.from(animals.findById(id.toLong()))
     }
 
     @GetMapping("/api/v1/animals/apms/{apmsDesertionNo}")
