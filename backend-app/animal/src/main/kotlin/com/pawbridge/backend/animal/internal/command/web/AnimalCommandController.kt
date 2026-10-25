@@ -33,7 +33,7 @@ class AnimalCommandController(
     @PatchMapping("/{id}/status")
     fun updateStatus(
         @AuthenticationPrincipal verifiedUserId: Long?,
-        @PathVariable("id") id: Long?,
+        @PathVariable("id") id: Long,
         @Valid @RequestBody request: UpdateAnimalStatusRequest,
     ): AnimalDetailResponse {
         return animals.updateStatus(verifiedUserId, id, request)
@@ -42,7 +42,7 @@ class AnimalCommandController(
     @PatchMapping("/{id}/description")
     fun updateDescription(
         @AuthenticationPrincipal verifiedUserId: Long?,
-        @PathVariable("id") id: Long?,
+        @PathVariable("id") id: Long,
         @Valid @RequestBody request: UpdateAnimalDescriptionRequest,
     ): AnimalDetailResponse {
         return animals.updateDescription(verifiedUserId, id, request)
@@ -51,7 +51,7 @@ class AnimalCommandController(
     @DeleteMapping("/{id}")
     fun delete(
         @AuthenticationPrincipal verifiedUserId: Long?,
-        @PathVariable("id") id: Long?,
+        @PathVariable("id") id: Long,
     ): ResponseEntity<Void> {
         animals.delete(verifiedUserId, id)
         return ResponseEntity.noContent().build()

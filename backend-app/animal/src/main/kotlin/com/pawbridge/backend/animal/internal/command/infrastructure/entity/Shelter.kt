@@ -205,7 +205,8 @@ class Shelter private constructor(
         private var introduction: String? = null
         private var adoptionProcedure: String? = null
         private var operatingHours: String? = null
-        private var animals: MutableList<Animal>? = ArrayList()
+        private var animals: MutableList<Animal>? = null
+        private var animalsSet = false
 
         fun id(id: Long?): ShelterBuilder = apply {
             this.id = id
@@ -253,8 +254,10 @@ class Shelter private constructor(
 
         fun animals(animals: MutableList<Animal>?): ShelterBuilder = apply {
             this.animals = animals
+            this.animalsSet = true
         }
 
+        // Like Lombok's @Builder.Default, every build() gets its own new list unless animals() was called.
         fun build(): Shelter = Shelter(
             id,
             careRegNo,
@@ -267,7 +270,7 @@ class Shelter private constructor(
             introduction,
             adoptionProcedure,
             operatingHours,
-            animals,
+            if (animalsSet) animals else ArrayList(),
         )
     }
 

@@ -43,7 +43,7 @@ class ShelterCommandController(
     @PutMapping("/{id}")
     fun update(
         @AuthenticationPrincipal verifiedUserId: Long?,
-        @PathVariable("id") id: Long?,
+        @PathVariable("id") id: Long,
         @Valid @RequestBody request: UpdateShelterRequest,
     ): Details {
         val command = ShelterCommands.Update(
@@ -59,7 +59,7 @@ class ShelterCommandController(
     @DeleteMapping("/{id}")
     fun delete(
         @AuthenticationPrincipal verifiedUserId: Long?,
-        @PathVariable("id") id: Long?,
+        @PathVariable("id") id: Long,
     ): ResponseEntity<Void> {
         shelters.delete(verifiedUserId, id)
         return ResponseEntity.noContent().build()
