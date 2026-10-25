@@ -232,7 +232,7 @@ jobs:
 
   check:
     needs: [selection, proof, package]
-    if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}
+    if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}
     name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || 'F25 six-smoke pilot with the same candidate JAR' }} (shard ${{ matrix.shard }}/4)
     # Each shard is a fresh runner that re-provisions the fixture from F2 up to its own last stage
     # and runs only its packaged smokes; the stage-to-shard map is SHARDS in backend_contract_profile.py.
