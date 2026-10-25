@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
 import com.pawbridge.backend.store.api.StoreOrderActors
 import com.pawbridge.backend.store.internal.catalog.infrastructure.KoreanSearchTerms
+import com.pawbridge.backend.support.TestFaker
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import io.jsonwebtoken.Jwts
@@ -223,7 +224,7 @@ class OwnedPostgresqlDirectOrderTest {
     }
 
     @Test
-    fun givenVerifiedBuyerAndForgedHeaders_whenBuyingThenReading_thenKeepFullPendingSchemaAndPurchaseSnapshotsWithoutOutbox() {
+    fun `검증된 구매자와 위조 헤더가 주어졌을 때__구매 후 조회하면__대기 스키마와 구매 스냅샷을 보존하고 아웃박스는 없다`() {
         http(pool()) { mvc, _ ->
             val request = body(BUYER, NORMAL, 2)
             request.value["userId"] = 990001L
@@ -283,7 +284,7 @@ class OwnedPostgresqlDirectOrderTest {
     }
 
     @Test
-    fun givenMissingPendingOrUnauthenticatedMembers_whenCallingExactOrderRoutes_thenIgnoreForgedIdentityAndWriteNothing() {
+    fun `대기·누락·미인증 회원이 주어졌을 때__주문 경로를 호출하면__위조 신원을 무시하고 아무것도 쓰지 않는다`() {
         http(pool()) { mvc, _ ->
             val before = fingerprint()
             for (user in listOf(PENDING, 910099L)) {
@@ -304,7 +305,7 @@ class OwnedPostgresqlDirectOrderTest {
 
     @ParameterizedTest
     @ValueSource(longs = [73003, 73004])
-    fun givenInsufficientStockOrInactiveProduct_whenBuying_thenPreserveOriginal500AndRollBackAllTables(sku: Long) {
+    fun `재고 부족이나 비활성 상품이 주어졌을 때__구매하면__원래 500을 보존하고 모든 테이블을 롤백한다`(sku: Long) {
         http(pool()) { mvc, _ ->
             val before = fingerprint()
             val request = body(BUYER, sku, 1)
@@ -317,7 +318,7 @@ class OwnedPostgresqlDirectOrderTest {
     }
 
     @Test
-    fun givenNonpositiveInputOrLateAmountOverflow_whenBuying_thenReturn400WithoutStockSearchEventOrOrderChanges() {
+    fun `양수가 아닌 입력이나 금액 넘침이 주어졌을 때__구매하면__400을 돌려주고 재고·검색·이벤트·주문은 그대로다`() {
         http(pool()) { mvc, _ ->
             for (input in listOf(longArrayOf(NORMAL, 0), longArrayOf(0, 1), longArrayOf(73005, 2))) {
                 val before = fingerprint()
@@ -333,7 +334,7 @@ class OwnedPostgresqlDirectOrderTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["search", "constraint"])
-    fun givenSearchOrOriginalNotNullFailure_whenBuyingThenRetrying_thenRollBackAndRecoverNormally(failure: String) {
+    fun `검색이나 NOT NULL 실패가 주어졌을 때__구매 후 재시도하면__롤백하고 정상으로 복구된다`(failure: String) {
         http(pool()) { mvc, _ ->
             val sku: Long = if (failure == "search") 73006 else NORMAL
             val request = body(BUYER, sku, 1)
@@ -364,7 +365,7 @@ class OwnedPostgresqlDirectOrderTest {
     }
 
     @Test
-    fun givenOriginalShippingRollbackCharsetConstraint_whenBuyingFourByteText_thenReturn400C007AndRollBackEveryWrite() {
+    fun `원래 배송 롤백 문자셋 제약이 주어졌을 때__4바이트 문자로 구매하면__400 C007을 돌려주고 모든 쓰기를 롤백한다`() {
         http(pool()) { mvc, _ ->
             val request = body(BUYER, NORMAL, 1)
             request.value["deliveryAddress"] = "synthetic 🐶 address"
@@ -378,7 +379,7 @@ class OwnedPostgresqlDirectOrderTest {
     }
 
     @Test
-    fun givenActualWriteAndReadTemplates_whenResolvingTheCurrentBuyer_thenUseOnePhysicalConnectionCorrectReadModeAndOnlyWriteRowLocks() {
+    fun `실제 쓰기·읽기 템플릿이 주어졌을 때__현재 구매자를 확인하면__연결 하나와 올바른 읽기 모드와 쓰기 행 잠금만 쓴다`() {
         http(pool()) { _, context ->
             val pids: MutableList<Int> = ArrayList()
             for (readOnly in listOf(false, true)) {
@@ -435,7 +436,7 @@ class OwnedPostgresqlDirectOrderTest {
     }
 
     @Test
-    fun givenTwoPhysicalWriterConnectionsAndDifferentBuyers_whenOneProductIsContended_thenCommitOnlyOnePurchaseWithoutOverselling() {
+    fun `쓰기 연결 둘과 서로 다른 구매자가 주어졌을 때__한 상품을 다투면__구매 하나만 커밋하고 초과 판매는 없다`() {
         http(pool()) { first, _ ->
             newPool("owned-direct-order-second").use { secondPool ->
                 http(secondPool) { second, _ ->
@@ -585,7 +586,7 @@ class OwnedPostgresqlDirectOrderTest {
     }
 
     private fun body(user: Long, sku: Long, quantity: Int): OwnedBody {
-        val owner = Ownership(user, sku, "OWNED-P9-" + UUID.randomUUID())
+        val owner = Ownership(user, sku, "OWNED-P9-" + TestFaker.uuid())
         requests.add(owner)
         val value = LinkedHashMap<String, Any?>()
         value["skuId"] = sku

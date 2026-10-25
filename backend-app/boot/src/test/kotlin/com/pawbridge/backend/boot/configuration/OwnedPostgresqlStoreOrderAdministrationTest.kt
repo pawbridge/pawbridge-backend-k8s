@@ -168,7 +168,7 @@ class OwnedPostgresqlStoreOrderAdministrationTest {
     }
 
     @Test
-    fun givenCurrentAdministratorsAndOtherDbRoles_whenListingReadingAndUpdatingDelivery_thenPreservePageWireAndRejectStaleOrForgedAuthority() {
+    fun `현재 관리자와 다른 DB 역할이 주어졌을 때__목록·조회·배송 수정을 하면__페이지 응답을 보존하고 오래되거나 위조된 권한을 거절한다`() {
         http(pool()) { mvc, _ ->
             val first = send(mvc, "GET", ROOT + "?userId=910001&sortBy=id&sortOrder=asc&page=0&size=1", token(ADMIN_A), null, 200)
             check(
@@ -228,7 +228,7 @@ class OwnedPostgresqlStoreOrderAdministrationTest {
     }
 
     @Test
-    fun givenTwoPopulatedOrdersAndAnEmptyPage_whenListingAtMaximumPageSize_thenBatchItemsWithoutChangingPageOrderOrIssuingPerOrderQueries() {
+    fun `주문 둘과 빈 페이지가 주어졌을 때__최대 페이지 크기로 목록을 읽으면__항목을 일괄 조회하고 주문별 쿼리는 없다`() {
         http(pool()) { mvc, context ->
             val factory = context.getBean("storeDirectOrderEntityManagerFactory", EntityManagerFactory::class.java)
             val statistics = factory.unwrap(SessionFactory::class.java).statistics
@@ -270,7 +270,7 @@ class OwnedPostgresqlStoreOrderAdministrationTest {
     }
 
     @Test
-    fun givenNullDeliveryOrMissingOrders_whenUpdatingOrReading_thenReturnSafe500AndOriginalMissingBoundariesWithFullRollbackAndNoPrivateLogs() {
+    fun `배송이 null이거나 주문이 없을 때__수정하거나 조회하면__안전한 500과 원래 누락 경계를 돌려주고 전부 롤백한다`() {
         http(pool()) { mvc, _ ->
             val before = fingerprint()
             val body = LinkedHashMap<String, Any?>()
@@ -314,7 +314,7 @@ class OwnedPostgresqlStoreOrderAdministrationTest {
     }
 
     @Test
-    fun givenTwoDifferentCurrentAdminsAndAnOrderHolder_whenBothDeliveryUpdatesWait_thenSerializeOnTheOrderAndPreserveEveryOtherField() {
+    fun `서로 다른 관리자 둘과 주문 보유자가 주어졌을 때__배송 수정이 모두 기다리면__주문에서 직렬화하고 다른 필드를 보존한다`() {
         http(pool()) { mvc, _ ->
             val before = nonDeliveryFingerprint()
             val workers: ExecutorService = Executors.newFixedThreadPool(2)

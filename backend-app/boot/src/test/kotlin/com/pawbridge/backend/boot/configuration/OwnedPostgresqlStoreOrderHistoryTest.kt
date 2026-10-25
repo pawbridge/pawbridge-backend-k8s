@@ -176,7 +176,7 @@ class OwnedPostgresqlStoreOrderHistoryTest {
 
     @Test
     @Order(1)
-    fun givenOwnAndOtherOrders__whenStatusIsAbsentOrAnEnum__thenRestrictEveryResultToVerifiedOwner() {
+    fun `내 주문과 타인 주문이 주어졌을 때__상태가 없거나 enum이면__모든 결과를 검증된 소유자로 한정한다`() {
         contract("owner and status") {
             val all = list(910001, null, request(0, 20))
             check(
@@ -198,7 +198,7 @@ class OwnedPostgresqlStoreOrderHistoryTest {
 
     @Test
     @Order(2)
-    fun givenTiedCreatedTimesAndMultipleItems__whenPagedWithDynamicSort__thenPreserveParentPageAndPurchaseSnapshots() {
+    fun `같은 생성 시각과 여러 항목이 주어졌을 때__동적 정렬로 페이지를 읽으면__부모 페이지와 구매 스냅샷을 보존한다`() {
         contract("page snapshots and sort") {
             val request = StoreMemberReads.Request(0, 2, listOf(StoreMemberReads.Order("totalAmount", true, false)))
             val page = list(910001, null, request)
@@ -233,7 +233,7 @@ class OwnedPostgresqlStoreOrderHistoryTest {
 
     @Test
     @Order(3)
-    fun givenMissingOrDeletionPendingCurrentMember__whenListing__thenRejectBeforeOrderSql() {
+    fun `회원이 없거나 탈퇴 대기일 때__목록을 읽으면__주문 SQL 전에 거절한다`() {
         contract("current actor") {
             for (user in listOf(910003L, 910099L)) {
                 pool().samples.clear()
@@ -255,7 +255,7 @@ class OwnedPostgresqlStoreOrderHistoryTest {
 
     @Test
     @Order(4)
-    fun givenSmallAndLargerParentPages__whenActuallyRead__thenUseOneReadOnlyWriterConnectionAndAtMostThreeStoreQueries() {
+    fun `작은 부모 페이지와 큰 부모 페이지가 주어졌을 때__실제로 읽으면__읽기 전용 쓰기 연결 하나와 스토어 쿼리 세 개 이하를 쓴다`() {
         contract("RO identity and query bound") {
             for (size in listOf(2, 4)) {
                 list(910001, null, request(0, size))
@@ -283,7 +283,7 @@ class OwnedPostgresqlStoreOrderHistoryTest {
 
     @Test
     @Order(5)
-    fun givenActualOuterWriteTransaction__whenReadFacadeJoins__thenRefuseWrongModeAndReturnEveryResource() {
+    fun `실제 바깥 쓰기 트랜잭션이 주어졌을 때__읽기 파사드가 합류하면__잘못된 모드를 거절하고 모든 자원을 돌려준다`() {
         contract("outer mode failure") {
             val writes = context!!.getBean("storeDirectOrderWrites", TransactionTemplate::class.java)
             pool().samples.clear()
