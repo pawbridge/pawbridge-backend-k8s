@@ -30,6 +30,9 @@ subprojects {
     // no-arg constructors for @Entity/@Embeddable/@MappedSuperclass, as Hibernate requires.
     apply plugin: 'org.jetbrains.kotlin.plugin.jpa'
 
+    // Coverage is reported only (no verification rules). The jacoco plugin ships with Gradle.
+    apply plugin: 'jacoco'
+
     kotlin {
         jvmToolchain(21)
     }
@@ -77,6 +80,18 @@ subprojects {
             useJUnitPlatform()
             maxHeapSize = '256m'
             maxParallelForks = 1
+        }
+
+        tasks.named('test') {
+            finalizedBy tasks.named('jacocoTestReport')
+        }
+
+        tasks.named('jacocoTestReport') {
+            dependsOn tasks.named('test')
+            reports {
+                xml.required = true
+                html.required = true
+            }
         }
     }
 }
