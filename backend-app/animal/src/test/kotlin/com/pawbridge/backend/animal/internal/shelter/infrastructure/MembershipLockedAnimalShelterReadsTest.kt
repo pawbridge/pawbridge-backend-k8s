@@ -2,6 +2,11 @@ package com.pawbridge.backend.animal.internal.shelter.infrastructure
 
 import com.pawbridge.backend.animal.api.AnimalShelterReadUnavailableException
 import com.pawbridge.backend.animal.api.AnimalShelterReads
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -13,15 +18,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -32,30 +28,21 @@ import java.sql.ResultSet
 import javax.sql.DataSource
 
 class MembershipLockedAnimalShelterReadsTest {
-    private val source: DataSource = mock(DataSource::class.java)
-    private val other: DataSource = mock(DataSource::class.java)
-    private val jdbc: JdbcTemplate = mock(JdbcTemplate::class.java)
-    private val delegate: AnimalShelterReads = mock(AnimalShelterReads::class.java)
-    private val row: ResultSet = mock(ResultSet::class.java)
-    private val binding = ConnectionHolder(mock(Connection::class.java))
+    private val source: DataSource = mockk<DataSource>()
+    private val other: DataSource = mockk<DataSource>()
+    private val jdbc: JdbcTemplate = mockk<JdbcTemplate>()
+    private val delegate: AnimalShelterReads = mockk<AnimalShelterReads>()
+    private val row: ResultSet = mockk<ResultSet>()
+    private val binding = ConnectionHolder(mockk<Connection>())
     private val snapshot = AnimalShelterReads.Shelter(7L, "care", "full detail name")
     private val reads = MembershipLockedAnimalShelterReads(delegate, jdbc)
 
     @BeforeEach
-    fun bindCallerAndMatchingRow() {
+    fun bindCallerWriterScope() {
         TransactionSynchronizationManager.clear()
         TransactionSynchronizationManager.setActualTransactionActive(true)
         TransactionSynchronizationManager.setCurrentTransactionReadOnly(false)
         TransactionSynchronizationManager.bindResource(source, binding)
-        `when`(jdbc.dataSource).thenReturn(source)
-        `when`(delegate.findByCareRegNo("care")).thenReturn(snapshot)
-        `when`(row.getObject("id", Long::class.javaObjectType)).thenReturn(7L)
-        `when`(row.getString("care_reg_no")).thenReturn("care")
-        `when`(row.getString("name")).thenReturn("current name")
-        `when`(jdbc.query(eq(SQL), any<RowMapper<Any>>(), eq("care"))).thenAnswer { call ->
-            val mapper: RowMapper<*> = call.getArgument(1)
-            listOf(mapper.mapRow(row, 0))
-        }
     }
 
     @AfterEach
@@ -66,92 +53,154 @@ class MembershipLockedAnimalShelterReadsTest {
     }
 
     @Test
-    fun given__full_detail__when__confirming_membership__then__lock_after_delegate_and_return_its_unchanged_snapshot() {
-        assertSame(snapshot, reads.findByCareRegNo("care"))
+    fun `전체 상세가 있을 때__멤버십을 확인하면__위임 뒤에 잠그고 위임이 준 스냅샷을 그대로 돌려준다`() {
+        // given
+        every { jdbc.dataSource } returns source
+        every { delegate.findByCareRegNo(any()) } returns snapshot
+        every { row.getObject("id", Long::class.javaObjectType) } returns 7L
+        every { row.getString("care_reg_no") } returns "care"
+        every { row.getString("name") } returns "current name"
+        every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(arg<RowMapper<*>>(1).mapRow(row, 0)!!)
+        }
 
-        val order = inOrder(delegate, jdbc)
-        order.verify(delegate).findByCareRegNo("care")
-        order.verify(jdbc).query(eq(SQL), any<RowMapper<Any>>(), eq("care"))
+        // when
+        val found = reads.findByCareRegNo("care")
+
+        // then
+        assertSame(snapshot, found)
+        verifyOrder {
+            delegate.findByCareRegNo("care")
+            jdbc.query(SQL, any<RowMapper<Any>>(), "care")
+        }
         assertSame(binding, TransactionSynchronizationManager.getResource(source))
         assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
         assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly())
-        verifyNoInteractions(source, other)
+        verify(exactly = 0) { source.connection }
+        verify(exactly = 0) { other.connection }
     }
 
     @Test
-    fun given__empty_delegate__when__confirming__then__keep_null_without_writer_query() {
-        `when`(delegate.findByCareRegNo("care")).thenReturn(null)
+    fun `위임이 비어 있을 때__확인하면__쓰기 쿼리 없이 null을 유지한다`() {
+        // given
+        every { jdbc.dataSource } returns source
+        every { delegate.findByCareRegNo(any()) } returns null
 
-        assertNull(reads.findByCareRegNo("care"))
+        // when
+        val found = reads.findByCareRegNo("care")
+
+        // then
+        assertNull(found)
+        verify(exactly = 1) { delegate.findByCareRegNo("care") }
         noSql()
     }
 
     @Test
-    fun given__full_detail_failure__when__confirming__then__preserve_failure_without_locking() {
+    fun `전체 상세 조회가 실패할 때__확인하면__잠그지 않고 그 실패를 보존한다`() {
+        // given
         val failure = AnimalShelterReadUnavailableException(IllegalStateException("Synthetic public info failure"))
-        `when`(delegate.findByCareRegNo("care")).thenThrow(failure)
 
-        assertSame(failure, assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") })
+        every { jdbc.dataSource } returns source
+        every { delegate.findByCareRegNo(any()) } throws failure
+
+        // when
+        val thrown = assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }
+
+        // then
+        assertSame(failure, thrown)
+        verify(exactly = 1) { delegate.findByCareRegNo("care") }
         noSql()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "id", "registration", "delegateRegistration", "nullId"])
-    fun given__changed_or_missing_row__when__locking__then__return_only_fixed_unavailable(mode: String) {
-        if (mode == "missing") {
-            `when`(jdbc.query(eq(SQL), any<RowMapper<Any>>(), eq("care"))).thenReturn(listOf())
-        }
-        if (mode == "id") {
-            `when`(row.getObject("id", Long::class.javaObjectType)).thenReturn(8L)
-        }
-        if (mode == "registration") {
-            `when`(row.getString("care_reg_no")).thenReturn("other")
-        }
-        if (mode == "delegateRegistration") {
-            `when`(delegate.findByCareRegNo("care")).thenReturn(AnimalShelterReads.Shelter(7L, "other", "x"))
-        }
-        if (mode == "nullId") {
-            `when`(delegate.findByCareRegNo("care")).thenReturn(AnimalShelterReads.Shelter(null, "care", "x"))
+    fun `행이 바뀌었거나 없을 때__잠그면__고정된 이용 불가 메시지만 돌려준다`(mode: String) {
+        // given
+        every { jdbc.dataSource } returns source
+        every { delegate.findByCareRegNo(any()) } returns snapshot
+        every { row.getObject("id", Long::class.javaObjectType) } returns 7L
+        every { row.getString("care_reg_no") } returns "care"
+        every { row.getString("name") } returns "current name"
+        every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(arg<RowMapper<*>>(1).mapRow(row, 0)!!)
         }
 
-        assertEquals(
-            "Animal shelter information could not be read",
-            assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }.message,
-        )
+        if (mode == "missing") {
+            every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } returns listOf()
+        }
+        if (mode == "id") {
+            every { row.getObject("id", Long::class.javaObjectType) } returns 8L
+        }
+        if (mode == "registration") {
+            every { row.getString("care_reg_no") } returns "other"
+        }
+        if (mode == "delegateRegistration") {
+            every { delegate.findByCareRegNo(any()) } returns AnimalShelterReads.Shelter(7L, "other", "x")
+        }
+        if (mode == "nullId") {
+            every { delegate.findByCareRegNo(any()) } returns AnimalShelterReads.Shelter(null, "care", "x")
+        }
+
+        // when
+        val thrown = assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }
+
+        // then
+        assertEquals("Animal shelter information could not be read", thrown.message)
+        verify(exactly = 1) { delegate.findByCareRegNo("care") }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["inactive", "readOnly", "other", "missingSource"])
-    fun given__no_writer_scope__when__confirming__then__reject_before_delegate_or_sql(mode: String) {
+    fun `쓰기 범위가 없을 때__확인하면__위임이나 SQL 전에 거부한다`(mode: String) {
+        // given
+        every { jdbc.dataSource } returns (if (mode == "missingSource") null else source)
+
         invalidate(mode)
 
-        assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }
-        verifyNoInteractions(delegate)
+        // when
+        val thrown = assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }
+
+        // then
+        assertEquals("Animal shelter information could not be read", thrown.message)
+        confirmVerified(delegate)
         noSql()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["inactive", "readOnly", "other", "replacement"])
-    fun given__delegate_changes_writer_scope__when__returning__then__reject_before_locking(mode: String) {
-        `when`(delegate.findByCareRegNo("care")).thenAnswer {
+    fun `위임이 쓰기 범위를 바꿀 때__돌려주면__잠그기 전에 거부한다`(mode: String) {
+        // given
+        every { jdbc.dataSource } returns source
+        every { delegate.findByCareRegNo(any()) } answers {
             invalidate(mode)
             snapshot
         }
 
-        assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }
+        // when
+        val thrown = assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }
+
+        // then
+        assertEquals("Animal shelter information could not be read", thrown.message)
+        verify(exactly = 1) { delegate.findByCareRegNo("care") }
         noSql()
     }
 
     @Test
-    fun given__lock_query_failure__when__confirming__then__keep_unavailable_classification() {
+    fun `잠금 쿼리가 실패할 때__확인하면__이용 불가 분류를 유지한다`() {
+        // given
         val failure = DataAccessResourceFailureException("Synthetic shelter lock failure")
-        `when`(jdbc.query(eq(SQL), any<RowMapper<Any>>(), eq("care"))).thenThrow(failure)
 
-        assertSame(
-            failure,
-            assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }.cause,
-        )
+        every { jdbc.dataSource } returns source
+        every { delegate.findByCareRegNo(any()) } returns snapshot
+        every { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } throws failure
+
+        // when
+        val thrown = assertThrows(AnimalShelterReadUnavailableException::class.java) { reads.findByCareRegNo("care") }
+
+        // then
+        assertSame(failure, thrown.cause)
         assertSame(binding, TransactionSynchronizationManager.getResource(source))
+        verify(exactly = 1) { jdbc.query(SQL, any<RowMapper<Any>>(), "care") }
     }
 
     private fun invalidate(mode: String) {
@@ -164,14 +213,14 @@ class MembershipLockedAnimalShelterReadsTest {
             }
             "replacement" -> {
                 TransactionSynchronizationManager.unbindResource(source)
-                TransactionSynchronizationManager.bindResource(source, ConnectionHolder(mock(Connection::class.java)))
+                TransactionSynchronizationManager.bindResource(source, ConnectionHolder(mockk<Connection>()))
             }
-            else -> `when`(jdbc.dataSource).thenReturn(null)
+            else -> Unit
         }
     }
 
     private fun noSql() {
-        verify(jdbc, never()).query(anyString(), any<RowMapper<Any>>(), any())
+        verify(exactly = 0) { jdbc.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
     }
 
     companion object {

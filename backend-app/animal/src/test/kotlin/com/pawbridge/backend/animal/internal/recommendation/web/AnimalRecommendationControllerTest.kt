@@ -11,14 +11,15 @@ import com.pawbridge.backend.animal.internal.discovery.application.AnimalNotFoun
 import com.pawbridge.backend.animal.internal.recommendation.application.AnimalRecommendations
 import com.pawbridge.backend.animal.internal.recommendation.application.AnimalRecommendations.Card
 import com.pawbridge.backend.animal.internal.recommendation.application.RecommendationUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.test.web.servlet.MockMvc
@@ -31,7 +32,7 @@ import java.time.LocalDateTime
 import java.util.stream.Stream
 
 class AnimalRecommendationControllerTest {
-    private val recommendations: AnimalRecommendations = mock(AnimalRecommendations::class.java)
+    private val recommendations: AnimalRecommendations = mockk<AnimalRecommendations>()
     private val mapper: ObjectMapper = ObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -41,23 +42,24 @@ class AnimalRecommendationControllerTest {
         .build()
 
     @Test
-    fun givenStoredCardFields__whenGettingSimilarAnimals__thenReturnOriginalArrayWithAll18FieldsInOrder() {
-        `when`(recommendations.recommend(1)).thenReturn(
-            listOf(
-                Card(
-                    4L, "공고-4", Species.DOG, "믹스", Gender.FEMALE,
-                    2023, 3, "0.69(Kg)", "레몬색&흰색", LocalDate.of(2026, 9, 29), "귀 반점", AnimalStatus.PROTECT,
-                    LocalDate.of(2026, 10, 9), "https://example.test/a.jpg", 7, 8L, "보호소",
-                    LocalDateTime.of(2026, 9, 29, 13, 4, 5),
-                ),
+    fun `저장된 카드 필드가 있을 때__비슷한 동물을 조회하면__18개 필드를 순서대로 담은 원래 배열을 돌려준다`() {
+        // given
+        every { recommendations.recommend(any()) } returns listOf(
+            Card(
+                4L, "공고-4", Species.DOG, "믹스", Gender.FEMALE,
+                2023, 3, "0.69(Kg)", "레몬색&흰색", LocalDate.of(2026, 9, 29), "귀 반점", AnimalStatus.PROTECT,
+                LocalDate.of(2026, 10, 9), "https://example.test/a.jpg", 7, 8L, "보호소",
+                LocalDateTime.of(2026, 9, 29, 13, 4, 5),
             ),
         )
 
+        // when
         val actual: JsonNode = json(
             mvc.perform(get("/api/v1/animals/1/similar")).andExpect(status().isOk()).andReturn()
                 .response.getContentAsString(StandardCharsets.UTF_8),
         )
 
+        // then
         assertThat(actual.isArray()).isTrue()
         assertThat(actual.size()).isOne()
         assertThat(actual.get(0)).isEqualTo(
@@ -71,50 +73,66 @@ class AnimalRecommendationControllerTest {
                 """.trimIndent(),
             ),
         )
+        verify(exactly = 1) { recommendations.recommend(1) }
     }
 
     @Test
-    fun givenMissingOptionalFieldsOrNoCandidates__whenGettingSimilarAnimals__thenOmitNullFieldsOrReturnEmptyArray() {
-        `when`(recommendations.recommend(1)).thenReturn(
-            listOf(
-                Card(
-                    4L, null, Species.CAT, null, null, null, null,
-                    null, null, null, null, AnimalStatus.NOTICE, null, null, null, null, null, null,
-                ),
+    fun `선택 필드가 없거나 후보가 없을 때__비슷한 동물을 조회하면__null 필드는 생략하고 후보가 없으면 빈 배열을 돌려준다`() {
+        // given
+        every { recommendations.recommend(any()) } returns listOf(
+            Card(
+                4L, null, Species.CAT, null, null, null, null,
+                null, null, null, null, AnimalStatus.NOTICE, null, null, null, null, null, null,
             ),
         )
 
+        // when
         val response = mvc.perform(get("/api/v1/animals/1/similar")).andExpect(status().isOk()).andReturn().response
 
+        // then
         assertThat(json(response.contentAsString))
             .isEqualTo(mapper.readTree("[{\"id\":4,\"species\":\"CAT\",\"status\":\"NOTICE\"}]"))
-        `when`(recommendations.recommend(1)).thenReturn(listOf())
-        assertThat(
-            mvc.perform(get("/api/v1/animals/1/similar")).andExpect(status().isOk()).andReturn().response
-                .contentAsString,
-        ).isEqualTo("[]")
+
+        // given
+        every { recommendations.recommend(any()) } returns listOf()
+
+        // when
+        val empty = mvc.perform(get("/api/v1/animals/1/similar")).andExpect(status().isOk()).andReturn().response
+            .contentAsString
+
+        // then
+        assertThat(empty).isEqualTo("[]")
+        verify(exactly = 2) { recommendations.recommend(1) }
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun givenSourceOrUpstreamOrDatabaseFailure__whenGettingSimilarAnimals__thenKeepOriginalStatusAndSafeEnvelope(
+    fun `원본이나 상류나 데이터베이스가 실패할 때__비슷한 동물을 조회하면__원래 상태와 안전한 응답 봉투를 유지한다`(
         failure: RuntimeException,
         code: Int,
         message: String,
     ) {
-        `when`(recommendations.recommend(1)).thenThrow(failure)
+        // given
+        every { recommendations.recommend(any()) } throws failure
 
+        // when
         val response = mvc.perform(get("/api/v1/animals/1/similar")).andExpect(status().`is`(code)).andReturn().response
 
+        // then
         val actual = json(response.getContentAsString(StandardCharsets.UTF_8))
         assertThat(actual).isEqualTo(mapper.createObjectNode().put("code", code).put("message", message).putNull("data"))
+        verify(exactly = 1) { recommendations.recommend(1) }
     }
 
     @Test
-    fun givenNonNumericId__whenBindingPath__thenKeepSourceCatchAll500WithoutCallingApplication() {
-        mvc.perform(get("/api/v1/animals/invalid/similar")).andExpect(status().isInternalServerError())
+    fun `ID가 숫자가 아닐 때__경로를 바인딩하면__애플리케이션을 호출하지 않고 원래의 포괄 500을 낸다`() {
+        // given
+        // when
+        val result = mvc.perform(get("/api/v1/animals/invalid/similar"))
 
-        verifyNoInteractions(recommendations)
+        // then
+        result.andExpect(status().isInternalServerError())
+        confirmVerified(recommendations)
     }
 
     private fun json(source: String): JsonNode {

@@ -1,16 +1,15 @@
 package com.pawbridge.backend.animal.internal.shelter.infrastructure
 
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.PlatformTransactionManager
@@ -21,30 +20,36 @@ import org.springframework.transaction.support.TransactionTemplate
 class JdbcShelterObservationRecorderTest {
     @ParameterizedTest
     @ValueSource(ints = [3, 0])
-    fun given__new_or_already_observed_shelters__when__recording_today__then__execute_one_original_snapshot_and_return_insert_count(
+    fun `새 보호소이거나 이미 관측된 보호소일 때__오늘을 기록하면__원래 스냅샷을 한 번 실행하고 삽입 건수를 돌려준다`(
         inserted: Int,
     ) {
-        val jdbc = mock(JdbcTemplate::class.java)
-        val manager = mock(PlatformTransactionManager::class.java)
-        val status = mock(TransactionStatus::class.java)
-        `when`(manager.getTransaction(any())).thenReturn(status)
-        `when`(jdbc.update(anyString())).thenReturn(inserted)
+        // given
+        val jdbc = mockk<JdbcTemplate>()
+        val manager = mockk<PlatformTransactionManager>()
+        val status = mockk<TransactionStatus>()
         val transaction = TransactionTemplate(manager)
         transaction.timeout = 30
         val recorder = JdbcShelterObservationRecorder(jdbc, transaction)
 
-        assertThat(recorder.recordToday()).isEqualTo(inserted)
+        every { manager.getTransaction(any()) } returns status
+        every { jdbc.update(any<String>()) } returns inserted
+        justRun { manager.commit(any()) }
 
-        val definition = ArgumentCaptor.forClass(TransactionDefinition::class.java)
-        val sql = ArgumentCaptor.forClass(String::class.java)
-        val order = inOrder(manager, jdbc)
-        order.verify(manager).getTransaction(definition.capture())
-        order.verify(jdbc).update(sql.capture())
-        order.verify(manager).commit(status)
-        order.verifyNoMoreInteractions()
-        assertThat(definition.value.timeout).isEqualTo(30)
-        assertThat(definition.value.isReadOnly).isFalse()
-        assertThat(sql.value).contains(
+        // when
+        val result = recorder.recordToday()
+
+        // then
+        val definition = slot<TransactionDefinition>()
+        val sql = slot<String>()
+        assertThat(result).isEqualTo(inserted)
+        verifySequence {
+            manager.getTransaction(capture(definition))
+            jdbc.update(capture(sql))
+            manager.commit(status)
+        }
+        assertThat(definition.captured.timeout).isEqualTo(30)
+        assertThat(definition.captured.isReadOnly).isFalse()
+        assertThat(sql.captured).contains(
             "INSERT INTO pawbridge_animal.shelter_daily_observations",
             "(shelter_id, observation_date, observed_at, protected_count)",
             "SELECT s.id, (statement_timestamp() AT TIME ZONE 'Asia/Seoul')::date,",
@@ -57,23 +62,29 @@ class JdbcShelterObservationRecorderTest {
     }
 
     @Test
-    fun given__a_database_failure__when__recording_today__then__rollback_and_propagate_without_returning_success_or_retrying() {
-        val jdbc = mock(JdbcTemplate::class.java)
-        val manager = mock(PlatformTransactionManager::class.java)
-        val status = mock(TransactionStatus::class.java)
+    fun `데이터베이스가 실패할 때__오늘을 기록하면__성공을 돌려주거나 재시도하지 않고 롤백한 뒤 예외를 전파한다`() {
+        // given
+        val jdbc = mockk<JdbcTemplate>()
+        val manager = mockk<PlatformTransactionManager>()
+        val status = mockk<TransactionStatus>()
         val failure = DataAccessResourceFailureException("synthetic-observation-unavailable")
-        `when`(manager.getTransaction(any())).thenReturn(status)
-        `when`(jdbc.update(anyString())).thenThrow(failure)
         val transaction = TransactionTemplate(manager)
         transaction.timeout = 30
         val recorder = JdbcShelterObservationRecorder(jdbc, transaction)
 
-        assertThatThrownBy { recorder.recordToday() }.isSameAs(failure)
+        every { manager.getTransaction(any()) } returns status
+        every { jdbc.update(any<String>()) } throws failure
+        justRun { manager.rollback(any()) }
 
-        val order = inOrder(manager, jdbc)
-        order.verify(manager).getTransaction(transaction)
-        order.verify(jdbc).update(anyString())
-        order.verify(manager).rollback(status)
-        order.verifyNoMoreInteractions()
+        // when
+        val thrown = assertThatThrownBy { recorder.recordToday() }
+
+        // then
+        thrown.isSameAs(failure)
+        verifySequence {
+            manager.getTransaction(transaction)
+            jdbc.update(any<String>())
+            manager.rollback(status)
+        }
     }
 }

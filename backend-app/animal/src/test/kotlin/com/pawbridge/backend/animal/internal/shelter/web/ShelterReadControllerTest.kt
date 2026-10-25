@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.pawbridge.backend.animal.anyNonNull
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterNotFoundException
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.Details
@@ -17,19 +16,15 @@ import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.Pr
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.PublicInformation
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.Search
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads.Summary
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
@@ -45,7 +40,7 @@ import java.time.ZoneId
 import java.util.stream.Stream
 
 class ShelterReadControllerTest {
-    private val shelters: ShelterReads = mock(ShelterReads::class.java)
+    private val shelters: ShelterReads = mockk<ShelterReads>()
     private val mapper: ObjectMapper = ObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -57,14 +52,20 @@ class ShelterReadControllerTest {
         .build()
 
     @Test
-    fun givenOrdinaryList__whenListing__thenKeepDefaultPageSortFullPageMetadataAndSevenSummaryFields() {
+    fun `일반 목록일 때__목록을 조회하면__기본 페이지와 정렬과 전체 페이지 메타데이터와 요약 7개 필드를 유지한다`() {
+        // given
         val created = LocalDateTime.of(2026, 9, 29, 13, 4, 5)
-        `when`(shelters.search(anyNonNull<Search>(), anyNonNull<PageRequest>()))
-            .thenReturn(Page(listOf(Summary(4L, "reg-4", "센터", "02", "서울", "시청", created)), 1))
 
+        every { shelters.search(any(), any()) } returns
+            Page(listOf(Summary(4L, "reg-4", "센터", "02", "서울", "시청", created)), 1)
+
+        // when
         val actual: JsonNode = response("/api/v1/shelters")
 
-        verify(shelters).search(Search(null, null, null, null), PageRequest(0, 20, listOf(Order("name", true, false))))
+        // then
+        verify(exactly = 1) {
+            shelters.search(Search(null, null, null, null), PageRequest(0, 20, listOf(Order("name", true, false))))
+        }
         assertThat(actual.properties().map { entry -> entry.key }).containsExactlyInAnyOrder(
             "content", "pageable", "last", "totalPages", "totalElements",
             "size", "number", "sort", "first", "numberOfElements", "empty",
@@ -85,27 +86,34 @@ class ShelterReadControllerTest {
     }
 
     @Test
-    fun givenAllFiltersAndCustomPageSort__whenListing__thenForwardRawSearchTextAndAllOrdersWithoutCombiningFilters() {
-        `when`(shelters.search(anyNonNull<Search>(), anyNonNull<PageRequest>())).thenReturn(Page(listOf(), 0))
+    fun `모든 필터와 사용자 지정 페이지 정렬이 있을 때__목록을 조회하면__필터를 합치지 않고 원본 검색어와 모든 정렬을 전달한다`() {
+        // given
+        every { shelters.search(any(), any()) } returns Page(listOf(), 0)
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             get("/api/v1/shelters").param("name", "name").param("keyword", " 센터 ").param("address", " 서울 ")
                 .param("organizationName", "org").param("page", "2").param("size", "12")
                 .param("sort", "name,desc,ignorecase", "createdAt,asc"),
-        ).andExpect(status().isOk())
-
-        verify(shelters).search(
-            Search("name", " 서울 ", "org", " 센터 "),
-            PageRequest(
-                2,
-                12,
-                listOf(Order("name", false, true), Order("createdAt", true, false)),
-            ),
         )
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) {
+            shelters.search(
+                Search("name", " 서울 ", "org", " 센터 "),
+                PageRequest(
+                    2,
+                    12,
+                    listOf(Order("name", false, true), Order("createdAt", true, false)),
+                ),
+            )
+        }
     }
 
     @Test
-    fun givenDetailAndRegistrationLookup__whenReading__thenReturnAll14FieldsAndOriginalPublicInformation() {
+    fun `상세와 등록번호로 조회할 때__읽으면__14개 필드와 원래의 공개 정보를 모두 돌려준다`() {
+        // given
         val created = LocalDateTime.of(2026, 9, 29, 13, 4, 5)
         val updated = created.plusDays(1)
         val publicInformation = PublicInformation(
@@ -115,8 +123,6 @@ class ShelterReadControllerTest {
             4L, "reg-4", "센터", "02", "서울", "대표", "시청", "sample@example.test", "소개", "절차", "09-18",
             created, updated, publicInformation,
         )
-        `when`(shelters.findById(4L)).thenReturn(detail)
-        `when`(shelters.findByCareRegNo("reg-4")).thenReturn(detail)
         val expected: JsonNode = mapper.readTree(
             """
             {"id":4,"careRegNo":"reg-4","name":"센터","phone":"02","address":"서울","ownerName":"대표","organizationName":"시청",
@@ -128,25 +134,48 @@ class ShelterReadControllerTest {
             """.trimIndent(),
         )
 
-        assertThat(response("/api/v1/shelters/4")).isEqualTo(expected)
-        assertThat(response("/api/v1/shelters/by-care-reg-no/reg-4")).isEqualTo(expected)
+        every { shelters.findById(any()) } returns detail
+        every { shelters.findByCareRegNo(any()) } returns detail
+
+        // when
+        val byId = response("/api/v1/shelters/4")
+        val byRegistration = response("/api/v1/shelters/by-care-reg-no/reg-4")
+
+        // then
+        assertThat(byId).isEqualTo(expected)
+        assertThat(byRegistration).isEqualTo(expected)
+        verify(exactly = 1) { shelters.findById(4L) }
+        verify(exactly = 1) { shelters.findByCareRegNo("reg-4") }
     }
 
     @Test
-    fun givenNullableDetailFieldsAndScalarCount__whenReading__thenOmitNullsAndReturnLongWithoutEnvelope() {
-        `when`(shelters.findById(4L)).thenReturn(
-            Details(4L, "reg-4", "센터", null, null, null, null, null, null, null, null, null, null, null),
-        )
+    fun `상세의 선택 필드가 null이고 건수만 읽을 때__읽으면__null을 생략하고 봉투 없이 Long을 돌려준다`() {
+        // given
+        every { shelters.findById(any()) } returns
+            Details(4L, "reg-4", "센터", null, null, null, null, null, null, null, null, null, null, null)
 
-        assertThat(response("/api/v1/shelters/4"))
-            .isEqualTo(mapper.readTree("{\"id\":4,\"careRegNo\":\"reg-4\",\"name\":\"센터\"}"))
-        `when`(shelters.count()).thenReturn(9876543210L)
-        assertThat(response("/api/v1/shelters/count").asLong()).isEqualTo(9876543210L)
+        // when
+        val detail = response("/api/v1/shelters/4")
+
+        // then
+        assertThat(detail).isEqualTo(mapper.readTree("{\"id\":4,\"careRegNo\":\"reg-4\",\"name\":\"센터\"}"))
+        verify(exactly = 1) { shelters.findById(4L) }
+
+        // given
+        every { shelters.count() } returns 9876543210L
+
+        // when
+        val count = response("/api/v1/shelters/count")
+
+        // then
+        assertThat(count.asLong()).isEqualTo(9876543210L)
+        verify(exactly = 1) { shelters.count() }
     }
 
     @Test
-    fun givenDiscoveryDatesFiltersAndPage__whenDiscovering__thenBindOriginalInputsAndIncludeNullablePreviewFields() {
-        `when`(shelters.discover(anyString(), anyString(), any(), any(), anyInt(), anyInt())).thenReturn(
+    fun `탐색 날짜와 필터와 페이지가 있을 때__탐색하면__원래 입력을 바인딩하고 null 가능한 미리보기 필드를 포함한다`() {
+        // given
+        every { shelters.discover(any(), any(), any(), any(), any(), any()) } returns
             Page(
                 listOf(
                     Discovery(
@@ -155,15 +184,18 @@ class ShelterReadControllerTest {
                     ),
                 ),
                 99,
-            ),
-        )
+            )
 
+        // when
         val result = mvc.perform(
             get("/api/v1/shelters/discovery").param("intakeFrom", "2026-09-01").param("intakeTo", "2026-09-30")
                 .param("keyword", "보호소").param("address", "서울").param("page", "2"),
         ).andExpect(status().isOk()).andReturn().response
 
-        verify(shelters).discover("보호소", "서울", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 2, 12)
+        // then
+        verify(exactly = 1) {
+            shelters.discover("보호소", "서울", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30), 2, 12)
+        }
         val actual: JsonNode = mapper.readTree(result.getContentAsString(StandardCharsets.UTF_8))
         assertThat(actual.path("content").get(0)).isEqualTo(
             mapper.readTree(
@@ -180,98 +212,134 @@ class ShelterReadControllerTest {
     }
 
     @Test
-    fun givenNoIntakeDates__whenDiscovering__thenDefaultToInclusiveThirtyDaysEndingTodayInSeoul() {
-        `when`(shelters.discover(anyString(), anyString(), any(), any(), anyInt(), anyInt()))
-            .thenReturn(Page(listOf(), 0))
+    fun `접수일이 없을 때__탐색하면__서울 기준 오늘로 끝나는 30일 포함 구간을 기본으로 쓴다`() {
+        // given
+        every { shelters.discover(any(), any(), any(), any(), any(), any()) } returns Page(listOf(), 0)
 
+        // when
         response("/api/v1/shelters/discovery")
 
+        // then
         val today = LocalDate.now(ZoneId.of("Asia/Seoul"))
-        verify(shelters).discover("", "", today.minusDays(29), today, 0, 12)
+        verify(exactly = 1) { shelters.discover("", "", today.minusDays(29), today, 0, 12) }
     }
 
     @Test
-    fun givenOnlyOneIntakeBound__whenDiscovering__thenForwardNullOtherBoundForOriginalRangeValidation() {
-        `when`(shelters.discover(anyString(), anyString(), any(), any(), anyInt(), anyInt()))
-            .thenThrow(IllegalArgumentException("접수일은 시작일과 종료일을 함께 지정하고 최대 366일 이내로 선택해주세요."))
+    fun `접수일 한쪽 경계만 있을 때__탐색하면__원래의 구간 검증을 위해 다른 경계를 null로 전달한다`() {
+        // given
+        every { shelters.discover(any(), any(), any(), any(), any(), any()) } throws
+            IllegalArgumentException("접수일은 시작일과 종료일을 함께 지정하고 최대 366일 이내로 선택해주세요.")
 
-        mvc.perform(get("/api/v1/shelters/discovery").param("intakeFrom", "2026-09-01"))
-            .andExpect(status().isBadRequest())
+        // when
+        val result = mvc.perform(get("/api/v1/shelters/discovery").param("intakeFrom", "2026-09-01"))
 
-        verify(shelters).discover("", "", LocalDate.of(2026, 9, 1), null, 0, 12)
+        // then
+        result.andExpect(status().isBadRequest())
+        verify(exactly = 1) { shelters.discover("", "", LocalDate.of(2026, 9, 1), null, 0, 12) }
     }
 
     @ParameterizedTest
     @MethodSource("malformed")
-    fun givenMalformedDiscoveryParameter__whenBinding__thenKeepLocalEmpty400WithoutCallingApplication(
+    fun `탐색 파라미터가 잘못됐을 때__바인딩하면__애플리케이션을 호출하지 않고 로컬의 빈 400을 유지한다`(
         route: String,
         parameter: String?,
         value: String?,
     ) {
+        // given
         val request = get(route)
         if (parameter != null) {
             request.param(parameter, value)
         }
 
+        // when
         val result = mvc.perform(request).andExpect(status().isBadRequest()).andReturn().response
 
+        // then
         assertThat(result.contentAsString).isEmpty()
-        verifyNoInteractions(shelters)
+        confirmVerified(shelters)
     }
 
     @Test
-    fun givenRecordedObservationsOrEmptySeries__whenReading__thenKeepDateOffsetAndAbsentDaysWithoutZeroFill() {
+    fun `기록된 관측이 있거나 빈 시계열일 때__읽으면__날짜와 오프셋과 없는 날을 0으로 채우지 않고 유지한다`() {
+        // given
         val observed = Observation(LocalDate.of(2026, 9, 3), OffsetDateTime.parse("2026-09-03T10:11:12+09:00"), 8)
-        `when`(shelters.observations(4L, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30)))
-            .thenReturn(listOf(observed))
         val route = "/api/v1/shelters/4/observations?from=2026-09-01&to=2026-09-30"
 
-        assertThat(response(route)).isEqualTo(
+        every { shelters.observations(any(), any(), any()) } returns listOf(observed)
+
+        // when
+        val recorded = response(route)
+
+        // then
+        assertThat(recorded).isEqualTo(
             mapper.readTree("[{\"date\":\"2026-09-03\",\"observedAt\":\"2026-09-03T10:11:12+09:00\",\"protectedCount\":8}]"),
         )
-        `when`(shelters.observations(4L, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30))).thenReturn(listOf())
-        assertThat(response(route)).isEqualTo(mapper.createArrayNode())
+
+        // given
+        every { shelters.observations(any(), any(), any()) } returns listOf()
+
+        // when
+        val empty = response(route)
+
+        // then
+        assertThat(empty).isEqualTo(mapper.createArrayNode())
+        verify(exactly = 2) { shelters.observations(4L, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30)) }
     }
 
     @Test
-    fun givenMissingObservationDateParameter__whenBinding__thenKeepGlobal400Envelope() {
+    fun `관측 날짜 파라미터가 빠졌을 때__바인딩하면__전역 400 봉투를 유지한다`() {
+        // given
+        // when
         val result = mvc.perform(get("/api/v1/shelters/4/observations").param("to", "2026-09-30"))
             .andExpect(status().isBadRequest()).andReturn().response
 
+        // then
         assertThat(mapper.readTree(result.getContentAsString(StandardCharsets.UTF_8))).isEqualTo(
             mapper.createObjectNode().put("code", 400).put("message", "필수 요청 파라미터 'from'(이)가 누락되었습니다.").putNull("data"),
         )
-        verifyNoInteractions(shelters)
+        confirmVerified(shelters)
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun givenReadFailure__whenGetting__thenKeepSourceStatusAndSafeEnvelope(
+    fun `읽기가 실패할 때__조회하면__원래 상태와 안전한 응답 봉투를 유지한다`(
         failure: RuntimeException,
         observations: Boolean,
         code: Int,
         message: String,
     ) {
+        // given
         val route: String
         if (observations) {
-            `when`(shelters.observations(anyLong(), any(), any())).thenThrow(failure)
+            every { shelters.observations(any(), any(), any()) } throws failure
             route = "/api/v1/shelters/4/observations?from=2026-09-01&to=2026-09-30"
         } else {
-            `when`(shelters.findById(4L)).thenThrow(failure)
+            every { shelters.findById(any()) } throws failure
             route = "/api/v1/shelters/4"
         }
 
+        // when
         val result = mvc.perform(get(route)).andExpect(status().`is`(code)).andReturn().response
 
+        // then
         assertThat(mapper.readTree(result.getContentAsString(StandardCharsets.UTF_8)))
             .isEqualTo(mapper.createObjectNode().put("code", code).put("message", message).putNull("data"))
+        if (observations) {
+            verify(exactly = 1) { shelters.observations(4L, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30)) }
+        } else {
+            verify(exactly = 1) { shelters.findById(4L) }
+        }
     }
 
     @Test
-    fun givenMalformedOrdinaryDetailId__whenBinding__thenKeepGeneric500AndNoApplicationCall() {
-        mvc.perform(get("/api/v1/shelters/invalid")).andExpect(status().isInternalServerError())
+    fun `일반 상세 ID가 잘못됐을 때__바인딩하면__일반 500을 유지하고 애플리케이션을 호출하지 않는다`() {
+        // given
+        // when
+        val result = mvc.perform(get("/api/v1/shelters/invalid"))
 
-        verifyNoInteractions(shelters)
+        // then
+        result.andExpect(status().isInternalServerError())
+        confirmVerified(shelters)
     }
 
     private fun response(route: String): JsonNode {
