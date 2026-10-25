@@ -15,7 +15,8 @@ import java.sql.SQLException
 
 class CommentUpdateErrorLoggingTest {
     @Test
-    fun given__failure_with_sensitive_messages__when__handling__then__log_type_and_location_without_sensitive_details() {
+    fun `민감한 메시지를 가진 실패일 때__처리하면__민감 정보 없이 유형과 위치만 기록한다`() {
+        // given
         val cause = SQLException("jdbc:postgresql://example.test/db?password=synthetic-db-password")
         cause.stackTrace = arrayOf(
             StackTraceElement(
@@ -28,8 +29,10 @@ class CommentUpdateErrorLoggingTest {
         val failure = IllegalStateException("Bearer synthetic-jwt-secret; synthetic-private-comment", cause)
         failure.addSuppressed(RuntimeException("https://example.test/object?signature=synthetic-signed-url"))
 
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertThat(event.level).isEqualTo(Level.ERROR)
         assertThat(event.throwableProxy).isNull()
         assertThat(event.argumentArray).hasSize(1).allSatisfy { argument ->
@@ -55,7 +58,8 @@ class CommentUpdateErrorLoggingTest {
 
     @Test
     @Timeout(2)
-    fun given__cyclic_causes_and_many_frames__when__handling__then__diagnostics_remain_bounded() {
+    fun `순환 원인과 많은 프레임이 있을 때__처리하면__진단 정보가 한도 안에 머문다`() {
+        // given
         val failure = IllegalStateException("synthetic-private-message")
         val cause = IllegalArgumentException("synthetic-private-cause", failure)
         failure.initCause(cause)
@@ -70,8 +74,10 @@ class CommentUpdateErrorLoggingTest {
         failure.stackTrace = frames
         cause.stackTrace = frames
 
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertThat(event.throwableProxy).isNull()
         assertThat(event.formattedMessage).contains("IllegalStateException", "IllegalArgumentException")
             .doesNotContain("synthetic-private-message", "synthetic-private-cause")
@@ -80,15 +86,18 @@ class CommentUpdateErrorLoggingTest {
     }
 
     @Test
-    fun given__deep_cause_chain__when__handling__then__omit_causes_beyond_diagnostic_budget() {
+    fun `원인 사슬이 깊을 때__처리하면__진단 예산을 넘는 원인은 생략한다`() {
+        // given
         val last = IOException("synthetic-private-cause")
         val sql = SQLException("synthetic-private-sql", last)
         val unsupported = UnsupportedOperationException("synthetic-private-operation", sql)
         val invalid = IllegalArgumentException("synthetic-private-input", unsupported)
         val failure = IllegalStateException("synthetic-private-message", invalid)
 
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertThat(event.throwableProxy).isNull()
         assertThat(event.formattedMessage)
             .contains(
@@ -101,14 +110,17 @@ class CommentUpdateErrorLoggingTest {
     }
 
     @Test
-    fun given__long_source_metadata__when__handling__then__cap_diagnostic_text_length() {
+    fun `출처 메타데이터가 길 때__처리하면__진단 문자열 길이를 제한한다`() {
+        // given
         val failure = IllegalStateException("synthetic-private-message")
         failure.stackTrace = arrayOf(
             StackTraceElement("com.pawbridge." + "LongSourceLocation".repeat(400), "update", "Comment.java", 73),
         )
 
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertThat(event.throwableProxy).isNull()
         assertThat(event.argumentArray[0] as String).startsWith("java.lang.IllegalStateException")
             .hasSizeLessThanOrEqualTo(4096)

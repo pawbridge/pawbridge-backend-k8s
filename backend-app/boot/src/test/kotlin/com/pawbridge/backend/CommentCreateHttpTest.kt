@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.comment.application.CommentDetails
 import com.pawbridge.backend.community.internal.comment.application.CreateComment
@@ -18,9 +19,11 @@ import com.pawbridge.backend.community.internal.post.application.PostNotFoundExc
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
-import com.pawbridge.backend.support.eqValue
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
@@ -28,12 +31,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -41,7 +38,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -80,26 +76,28 @@ class CommentCreateHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var createComment: CreateComment
 
-    @MockitoBean
+    @MockkBean
     lateinit var listComments: ListComments
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER"])
-    fun given__signed_writer_and_spoofed_identity__when__creating_comment__then__use_verified_id_and_original_seven_fields(
+    fun `서명된 작성자와 위조 신원일 때__댓글을 만들면__검증된 ID와 원본 일곱 필드를 쓴다`(
         role: String,
     ) {
-        whenever(createComment.create(42, 7, "  댓글 본문  ")).thenReturn(details(7, "  댓글 본문  "))
+        // given
+        every { createComment.create(42, 7, "  댓글 본문  ") } returns details(7, "  댓글 본문  ")
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             post("/api/v1/comments/posts/42")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"  댓글 본문  \",\"authorId\":999,\"postId\":999}")
@@ -107,6 +105,9 @@ class CommentCreateHttpTest {
                 .header("X-User-Role", "ROLE_ADMIN")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, role)),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(header().doesNotExist("Location"))
@@ -120,43 +121,60 @@ class CommentCreateHttpTest {
             .andExpect(jsonPath("$.data.content").value("  댓글 본문  "))
             .andExpect(jsonPath("$.data.createdAt").value("2026-10-19T14:01:02.123456789"))
             .andExpect(jsonPath("$.data.updatedAt").value("2026-10-19T14:01:02.123456789"))
-        verify(createComment).create(42, 7, "  댓글 본문  ")
-        verifyNoInteractions(listComments, readPost, listPosts)
+        verify(exactly = 1) { createComment.create(42, 7, "  댓글 본문  ") }
+        confirmVerified(createComment, listComments, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("acceptedContents")
-    fun given__legacy_nonblank_content__when__creating_comment__then__preserve_unicode_whitespace_raw_content_and_no_maximum(
+    fun `비공백 내용일 때__댓글을 만들면__공백과 원문을 보존하고 최대 길이를 두지 않는다`(
         content: String,
     ) {
-        whenever(createComment.create(42, 7, content)).thenReturn(details(7, content))
+        // given
+        every { createComment.create(42, 7, content) } returns details(7, content)
 
-        mvc.perform(authenticatedPost("42").content(mapper.writeValueAsString(mapOf("content" to content))))
+        // when
+        val result = mvc.perform(authenticatedPost("42").content(mapper.writeValueAsString(mapOf("content" to content))))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.content").value(content))
-        verify(createComment).create(42, 7, content)
+        verify(exactly = 1) { createComment.create(42, 7, content) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{}", "{\"content\":null}", "{\"content\":\"\"}", "{\"content\":\" \"}", "{\"content\":\" \\t\\r\\n \"}"])
-    fun given__missing_null_or_ascii_blank_content__when__creating_comment__then__legacy_validation_returns_400_without_business_call(
+    fun `내용이 없거나 null이거나 ASCII 공백일 때__댓글을 만들면__업무 호출 없이 400을 돌려준다`(
         body: String,
     ) {
-        mvc.perform(authenticatedPost("42").content(body))
+        // given
+
+        // when
+        val result = mvc.perform(authenticatedPost("42").content(body))
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"content: 내용은 필수입니다\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "null", "{", "[]"])
-    fun given__missing_or_malformed_json_body__when__creating_comment__then__return_legacy_safe_400_without_business_call(
+    fun `본문이 없거나 JSON이 깨졌을 때__댓글을 만들면__업무 호출 없이 안전한 400을 돌려준다`(
         body: String,
     ) {
-        mvc.perform(authenticatedPost("42").content(body))
+        // given
+
+        // when
+        val result = mvc.perform(authenticatedPost("42").content(body))
+
+        // then
+        result
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json(
@@ -164,15 +182,16 @@ class CommentCreateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_untrusted_token_and_bad_request__when__creating_comment__then__authenticate_before_binding_or_business_calls(
+    fun `토큰이 없거나 믿을 수 없고 요청도 잘못됐을 때__댓글을 만들면__바인딩 전에 인증부터 거부한다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = post("/api/v1/comments/posts/not-a-number")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{")
@@ -182,7 +201,11 @@ class CommentCreateHttpTest {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -190,135 +213,172 @@ class CommentCreateHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        confirmVerified(createComment, listComments, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun given__signed_invalid_identity__when__creating_comment__then__reject_before_json_validation_or_business_call(
+    fun `서명됐지만 잘못된 신원일 때__댓글을 만들면__JSON 검증과 업무 호출 전에 거부한다`(
         claims: Map<String, Any>,
     ) {
+        // given
         val token = Jwts.builder()
             .claims(claims)
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             post("/api/v1/comments/posts/42")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{")
                 .header("Authorization", "Bearer $token"),
         )
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"토큰 파싱에 실패했습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     @Test
-    fun given__two_writers_then_anonymous_request__when__creating_comments__then__clear_previous_identity() {
-        whenever(createComment.create(eq(42L), anyLong(), eqValue("댓글")))
-            .thenAnswer { call -> details(call.getArgument<Long>(1), "댓글") }
-        for (userId in longArrayOf(7, 8)) {
-            mvc.perform(
+    fun `작성자 둘에 이어 익명 요청이 올 때__댓글을 만들면__이전 신원을 지운다`() {
+        // given
+        every { createComment.create(42, any(), "댓글") } answers { details(arg<Long>(1), "댓글") }
+
+        // when
+        val writerResults = longArrayOf(7, 8).map { userId ->
+            userId to mvc.perform(
                 post("/api/v1/comments/posts/42")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"content\":\"댓글\"}")
                     .header("Authorization", "Bearer " + F3TestInputs.token(userId, "ROLE_USER")),
             )
+        }
+        val anonymousResult = mvc.perform(
+            post("/api/v1/comments/posts/42").contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"댓글\"}"),
+        )
+
+        // then
+        for ((userId, result) in writerResults) {
+            result
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.authorId").value(userId.toInt()))
         }
-        mvc.perform(
-            post("/api/v1/comments/posts/42").contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"댓글\"}"),
-        ).andExpect(status().isUnauthorized())
-        verify(createComment).create(42, 7, "댓글")
-        verify(createComment).create(42, 8, "댓글")
-        verifyNoMoreInteractions(createComment)
+        anonymousResult.andExpect(status().isUnauthorized())
+        verify(exactly = 1) { createComment.create(42, 7, "댓글") }
+        verify(exactly = 1) { createComment.create(42, 8, "댓글") }
+        confirmVerified(createComment)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun given__unparseable_post_id_with_valid_identity__when__creating_comment__then__preserve_legacy_safe_500(
+    fun `파싱할 수 없는 글 ID와 유효한 신원일 때__댓글을 만들면__기존 안전한 500을 유지한다`(
         postId: String,
     ) {
-        mvc.perform(authenticatedPost(postId).content("{\"content\":\"댓글\"}"))
+        // given
+
+        // when
+        val result = mvc.perform(authenticatedPost(postId).content("{\"content\":\"댓글\"}"))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0, -1])
-    fun given__nonpositive_post_id__when__creating_comment__then__let_parent_lookup_decide_404(postId: Long) {
-        whenever(createComment.create(postId, 7, "댓글")).thenThrow(PostNotFoundException())
+    fun `0 이하의 글 ID일 때__댓글을 만들면__부모 조회가 404를 결정하게 한다`(postId: Long) {
+        // given
+        every { createComment.create(postId, 7, "댓글") } throws PostNotFoundException()
 
-        mvc.perform(authenticatedPost(postId.toString()).content("{\"content\":\"댓글\"}"))
+        // when
+        val result = mvc.perform(authenticatedPost(postId.toString()).content("{\"content\":\"댓글\"}"))
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verify(createComment).create(postId, 7, "댓글")
+        verify(exactly = 1) { createComment.create(postId, 7, "댓글") }
     }
 
     @ParameterizedTest
     @MethodSource("businessFailures")
-    fun given__failure_after_authentication__when__creating_comment__then__preserve_safe_error_contract_without_secret_logs(
+    fun `인증 뒤 업무 실패가 나면__댓글을 만들면__안전한 오류 계약을 지키고 비밀을 로그에 남기지 않는다`(
         status: Int,
         message: String,
         failure: RuntimeException,
     ) {
-        whenever(createComment.create(42, 7, "synthetic-private-comment")).thenThrow(failure)
+        // given
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
-        try {
+
+        every { createComment.create(42, 7, "synthetic-private-comment") } throws failure
+
+        // when
+        val result = try {
             mvc.perform(authenticatedPost("42").content("{\"content\":\"synthetic-private-comment\"}"))
-                .andExpect(status().`is`(status))
-                .andExpect(
-                    content().json(
-                        mapper.writeValueAsString(CommentReadController.Response<Void?>(status, message, null)),
-                        JsonCompareMode.STRICT,
-                    ),
-                )
-            assertThat(appender.list).allSatisfy { event ->
-                assertThat(event.throwableProxy).isNull()
-                assertThat(event.formattedMessage).doesNotContain(
-                    "synthetic-private-token",
-                    "synthetic-private-comment",
-                    "synthetic-private-password",
-                    "synthetic-private-url",
-                    "Bearer ",
-                    "jdbc:postgresql:",
-                )
-            }
         } finally {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(createComment).create(42, 7, "synthetic-private-comment")
+
+        // then
+        result
+            .andExpect(status().`is`(status))
+            .andExpect(
+                content().json(
+                    mapper.writeValueAsString(CommentReadController.Response<Void?>(status, message, null)),
+                    JsonCompareMode.STRICT,
+                ),
+            )
+        assertThat(appender.list).allSatisfy { event ->
+            assertThat(event.throwableProxy).isNull()
+            assertThat(event.formattedMessage).doesNotContain(
+                "synthetic-private-token",
+                "synthetic-private-comment",
+                "synthetic-private-password",
+                "synthetic-private-url",
+                "Bearer ",
+                "jdbc:postgresql:",
+            )
+        }
+        verify(exactly = 1) { createComment.create(42, 7, "synthetic-private-comment") }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__existing_public_reads_and_post_404__when__reading__then__comment_create_authentication_and_advice_remain_scoped() {
-        whenever(listComments.read(42)).thenReturn(listOf(details(7, "댓글")))
-        whenever(readPost.read(42)).thenThrow(PostNotFoundException())
+    fun `공개 읽기와 글 404가 있을 때__읽으면__댓글 작성의 인증과 오류 처리 범위가 유지된다`() {
+        // given
+        every { listComments.read(42) } returns listOf(details(7, "댓글"))
+        every { readPost.read(42) } throws PostNotFoundException()
 
-        mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
+        // when
+        val commentsResult = mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
+        val postResult = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        commentsResult
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].commentId").value(12))
-        mvc.perform(get("/api/v1/posts/read/42"))
+        postResult
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(createComment, listPosts)
+        confirmVerified(createComment, listPosts)
     }
 
     @ParameterizedTest
@@ -331,25 +391,37 @@ class CommentCreateHttpTest {
             "POST /api/v1/admin/comments/posts/42",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_business_calls(
+    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__업무 호출 없이 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        ).andExpect(status().isForbidden())
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        )
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["POST /api/v1/posts", "PUT /api/v1/posts/42", "DELETE /api/v1/posts/42"])
-    fun given__existing_post_write_without_token__when__requesting__then__preserve_jwt_authentication(request: String) {
+    fun `토큰 없는 기존 글 쓰기일 때__요청하면__JWT 인증을 유지한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // when
+        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(createComment, listComments, readPost, listPosts)
+        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     companion object {
