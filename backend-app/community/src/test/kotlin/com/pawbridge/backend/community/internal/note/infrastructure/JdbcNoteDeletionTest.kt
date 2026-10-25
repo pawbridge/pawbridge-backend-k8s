@@ -5,6 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.pawbridge.backend.community.internal.note.application.NoteChangeHints
 import com.pawbridge.backend.community.internal.note.application.NoteDeletion
+import com.pawbridge.backend.community.support.TestFaker
 import com.pawbridge.backend.community.support.uninitialized
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
@@ -44,16 +45,19 @@ class JdbcNoteDeletionTest {
 
     @ParameterizedTest
     @CsvSource("0, 0", "1, 1")
-    fun given__zero_or_one_deleted_rows__when__deleting__then__bind_two_distinct_times_delete_mailbox_before_orphan_and_hint_only_after_commit(
+    fun `삭제된 행이 0개 또는 1개일 때__쪽지를 삭제하면__서로 다른 두 시각을 바인딩하고 우편함을 고아 쪽지보다 먼저 지우며 커밋 뒤에만 힌트를 보낸다`(
         mailboxRows: Int,
         noteRows: Int,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.mailboxRows = mailboxRows
         fixture.jdbc.noteRows = noteRows
 
+        // when
         fixture.delete()
 
+        // then
         assertEquals(
             listOf(
                 "begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock",
@@ -82,9 +86,10 @@ class JdbcNoteDeletionTest {
 
     @ParameterizedTest
     @ValueSource(ints = [1, 2])
-    fun given__ownership_absence_before_or_after_a_zero_row_note_lock__when__deleting__then__roll_back_without_either_delete_or_hint(
+    fun `0행 쪽지 잠금 전이나 후에 소유가 없을 때__쪽지를 삭제하면__어떤 삭제도 힌트도 없이 롤백한다`(
         missingAt: Int,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.found.clear()
         if (missingAt == 2) {
@@ -93,8 +98,10 @@ class JdbcNoteDeletionTest {
         fixture.jdbc.found.add(false)
         fixture.jdbc.noteLockRows = 0
 
+        // when
         assertThrows(NoteDeletion.MissingOwnedNote::class.java) { fixture.delete() }
 
+        // then
         val expected = ArrayList(listOf("begin", "insert", "member-lock", "guard", "clock:1", "find:1"))
         if (missingAt == 2) {
             expected.addAll(listOf("note-lock", "clock:2", "find:2"))
@@ -112,9 +119,10 @@ class JdbcNoteDeletionTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__begin_member_guard_lock_either_delete_or_commit_failure__when__deleting__then__propagate_without_retry_or_any_hint(
+    fun `시작 회원 가드 잠금 삭제 또는 커밋이 실패할 때__쪽지를 삭제하면__재시도나 힌트 없이 예외를 전파한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic begin")
@@ -143,8 +151,11 @@ class JdbcNoteDeletionTest {
             }
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { fixture.delete() })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.delete() }
 
+        // then
+        assertSame(failure, thrown)
         val stages = listOf(
             "begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock",
             "clock:2", "find:2", "delete-mailbox", "delete-orphan", "commit",
@@ -173,7 +184,8 @@ class JdbcNoteDeletionTest {
     }
 
     @Test
-    fun given__private_hint_runtime_failure_after_commit__when__notifying__then__keep_success_and_log_only_type_without_private_messages() {
+    fun `커밋 뒤 비공개 힌트가 런타임 예외를 던질 때__알리면__성공을 유지하고 비공개 메시지 없이 예외 종류만 기록한다`() {
+        // given
         val fixture = Fixture()
         fixture.hintFailure = IllegalStateException("Bearer synthetic-private-token", SQLException("synthetic-private-SQL"))
         val logger = LoggerFactory.getLogger(JdbcNoteDeletion::class.java) as Logger
@@ -181,8 +193,10 @@ class JdbcNoteDeletionTest {
         appender.start()
         logger.addAppender(appender)
         try {
+            // when
             assertDoesNotThrow(Executable { fixture.delete() })
 
+            // then
             assertEquals(
                 listOf("commit", "hint:7", "cleanup"),
                 fixture.events.subList(fixture.events.size - 3, fixture.events.size),
@@ -374,7 +388,7 @@ class JdbcNoteDeletionTest {
     }
 
     private companion object {
-        val NOTE: UUID = UUID.fromString("f2800000-0000-0000-0000-000000000001")
+        val NOTE: UUID = TestFaker.uuid()
         val FIRST: Instant = Instant.parse("2031-01-01T00:00:00.123456Z")
         const val INSERT =
             "INSERT INTO pawbridge_community.private_note_members(member_id) VALUES (?) ON CONFLICT DO NOTHING"
