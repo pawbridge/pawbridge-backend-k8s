@@ -22,16 +22,10 @@ class UserNicknameController(private val nicknames: ChangeUserNickname) {
         return Response(200, "닉네임이 변경되었습니다.", null)
     }
 
-    // The Java record accessors stay for Java callers; the standard getters keep the JSON shape.
+    @JvmRecord
     data class Response<T>(
         val code: Int,
         val message: String?,
         val data: T?,
-    ) {
-        fun code(): Int = code
-
-        fun message(): String? = message
-
-        fun data(): T? = data
-    }
+    )
 }

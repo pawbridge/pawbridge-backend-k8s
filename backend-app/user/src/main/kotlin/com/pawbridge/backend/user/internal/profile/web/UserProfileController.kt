@@ -15,16 +15,10 @@ class UserProfileController(private val profiles: UserProfileQuery) {
     fun me(@AuthenticationPrincipal userId: Long?): Response<UserProfile> =
         Response(200, "요청이 성공적으로 처리되었습니다.", profiles.require(userId!!))
 
-    // The Java record accessors stay for Java callers; the standard getters keep the JSON shape.
+    @JvmRecord
     data class Response<T>(
         val code: Int,
         val message: String?,
         val data: T?,
-    ) {
-        fun code(): Int = code
-
-        fun message(): String? = message
-
-        fun data(): T? = data
-    }
+    )
 }

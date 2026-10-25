@@ -17,16 +17,10 @@ class FavoriteStatusController(private val favorites: FavoriteStatusQuery) {
         @PathVariable("animalId") animalId: Long,
     ): Response<Boolean> = Response(200, "요청이 성공적으로 처리되었습니다.", favorites.isFavorite(userId!!, animalId))
 
-    // The Java record accessors stay for Java callers; the standard getters keep the JSON shape.
+    @JvmRecord
     data class Response<T>(
         val code: Int,
         val message: String?,
         val data: T?,
-    ) {
-        fun code(): Int = code
-
-        fun message(): String? = message
-
-        fun data(): T? = data
-    }
+    )
 }
