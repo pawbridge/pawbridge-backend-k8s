@@ -62,6 +62,14 @@ dependencies {
 }
 
 tasks.named('bootJar') { archiveFileName = 'pawbridge-backend-app.jar' }
+
+// Boot is composition code that Java callers and tests drive directly, and Java never generated null checks
+// for parameters (for example the STOMP interceptor is called with a null MessageChannel). Kotlin's generated
+// parameter assertions are switched off for this module's main sources to keep that behavior.
+// Lazy name match: the Kotlin compile task exists only where the Kotlin plugin is applied.
+tasks.named { it == 'compileKotlin' }.configureEach {
+    compilerOptions.freeCompilerArgs.add('-Xno-param-assertions')
+}
 tasks.named('jar') { enabled = false }
 
 // TestKit has a Gradle logging provider; isolate it from Spring/compatibility tests.
