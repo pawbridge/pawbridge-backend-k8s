@@ -28,6 +28,7 @@ dependencies {
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.5'
 
     testImplementation 'org.mockito:mockito-core'
+    testImplementation 'org.springframework:spring-test'
     testRuntimeOnly 'org.eclipse.angus:angus-mail'
     testImplementation 'ch.qos.logback:logback-classic'
     testImplementation 'jakarta.servlet:jakarta.servlet-api'
