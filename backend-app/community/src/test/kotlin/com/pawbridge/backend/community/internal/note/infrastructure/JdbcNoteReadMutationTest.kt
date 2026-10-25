@@ -5,7 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.pawbridge.backend.community.internal.note.application.NoteChangeHints
 import com.pawbridge.backend.community.internal.note.application.NoteReadMutation
-import com.pawbridge.backend.community.support.uninitialized
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -43,14 +43,17 @@ class JdbcNoteReadMutationTest {
 
     @ParameterizedTest
     @ValueSource(ints = [0, 1])
-    fun given__zero_or_one_updated_mailbox__when__marking_read__then__bind_three_distinct_times_and_hint_only_after_manager_commit(
+    fun `갱신된 사서함이 0건이거나 1건일 때__읽음 처리를 하면__서로 다른 시각 세 개를 바인딩하고 매니저 커밋 뒤에만 힌트를 보낸다`(
         affected: Int,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.affected = affected
 
+        // when
         fixture.read()
 
+        // then
         assertEquals(
             listOf(
                 "begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock",
@@ -81,9 +84,10 @@ class JdbcNoteReadMutationTest {
 
     @ParameterizedTest
     @ValueSource(ints = [1, 2])
-    fun given__ownership_absence_before_or_after_a_zero_row_note_lock__when__marking_read__then__roll_back_without_update_or_hint(
+    fun `소유 쪽지가 0행 쪽지 잠금 앞이나 뒤에서 사라졌을 때__읽음 처리를 하면__갱신이나 힌트 없이 롤백한다`(
         missingAt: Int,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.found.clear()
         if (missingAt == 2) {
@@ -92,8 +96,10 @@ class JdbcNoteReadMutationTest {
         fixture.jdbc.found.add(false)
         fixture.jdbc.noteLockRows = 0
 
+        // when
         assertThrows(NoteReadMutation.MissingOwnedNote::class.java) { fixture.read() }
 
+        // then
         val expected = ArrayList(listOf("begin", "insert", "member-lock", "guard", "clock:1", "find:1"))
         if (missingAt == 2) {
             expected.addAll(listOf("note-lock", "clock:2", "find:2"))
@@ -111,9 +117,10 @@ class JdbcNoteReadMutationTest {
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__begin_member_guard_lock_update_or_commit_failure__when__marking_read__then__propagate_without_retry_or_any_hint(
+    fun `시작 회원 삽입 가드 잠금 갱신 또는 커밋이 실패할 때__읽음 처리를 하면__재시도나 힌트 없이 예외를 전파한다`(
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         val failure: RuntimeException = when (phase) {
             FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic begin")
@@ -140,8 +147,11 @@ class JdbcNoteReadMutationTest {
             }
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { fixture.read() })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.read() }
 
+        // then
+        assertSame(failure, thrown)
         val stages = listOf(
             "begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock",
             "clock:2", "find:2", "clock:3", "update", "commit",
@@ -169,7 +179,8 @@ class JdbcNoteReadMutationTest {
     }
 
     @Test
-    fun given__private_hint_runtime_failure_after_commit__when__notifying__then__keep_success_and_log_only_type_without_private_messages() {
+    fun `커밋 뒤 비공개 힌트가 런타임 예외를 낼 때__알림을 보내면__성공을 유지하고 비공개 메시지 없이 타입만 기록한다`() {
+        // given
         val fixture = Fixture()
         fixture.hintFailure = IllegalStateException("Bearer synthetic-private-token", SQLException("synthetic-private-SQL"))
         val logger = LoggerFactory.getLogger(JdbcNoteReadMutation::class.java) as Logger
@@ -177,8 +188,11 @@ class JdbcNoteReadMutationTest {
         appender.start()
         logger.addAppender(appender)
         try {
-            assertDoesNotThrow(Executable { fixture.read() })
+            // when
+            val action = Executable { fixture.read() }
 
+            // then
+            assertDoesNotThrow(action)
             assertEquals(
                 listOf("commit", "hint:7", "cleanup"),
                 fixture.events.subList(fixture.events.size - 3, fixture.events.size),
@@ -301,7 +315,7 @@ class JdbcNoteReadMutationTest {
                 return listOf()
             }
             try {
-                return listOf(mapper.mapRow(uninitialized<ResultSet>(), 0) as T)
+                return listOf(mapper.mapRow(mockk<ResultSet>(), 0) as T)
             } catch (failure: SQLException) {
                 throw AssertionError("Recording row mapper failed", failure)
             }
