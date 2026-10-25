@@ -1,6 +1,8 @@
 package com.pawbridge.backend.community.internal.note.infrastructure
 
 import com.pawbridge.backend.community.internal.note.application.PrivateNoteReader.StoredNote
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -11,8 +13,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -34,19 +34,25 @@ class JdbcPrivateNoteListReaderTest {
 
     @ParameterizedTest
     @MethodSource("queryInputs")
-    fun given__box_favorite_page_and_nullable_ten_column_row__when__counting_then_listing__then__bind_same_instant_and_long_offset_with_separate_read_only_transactions(
+    fun `상자와 즐겨찾기와 쪽 번호와 null 가능한 열 개짜리 행이 있을 때__개수를 센 뒤 목록을 읽으면__같은 시각과 long 오프셋을 별도의 읽기 전용 트랜잭션으로 바인딩한다`(
         box: String,
         favorites: Boolean,
         page: Int,
         note: StoredNote,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows = listOf(note)
 
-        assertEquals(5_000_000_000L, fixture.reader.count(7L, box, favorites, NOW))
-        assertFalse(fixture.transactions.active)
-        assertEquals(listOf(note), fixture.reader.read(7L, box, favorites, page, NOW))
+        // when
+        val counted = fixture.reader.count(7L, box, favorites, NOW)
+        val activeAfterCount = fixture.transactions.active
+        val listed = fixture.reader.read(7L, box, favorites, page, NOW)
 
+        // then
+        assertEquals(5_000_000_000L, counted)
+        assertFalse(activeAfterCount)
+        assertEquals(listOf(note), listed)
         assertEquals(listOf("begin", "count", "commit", "begin", "list", "commit"), fixture.events)
         assertEquals(2, fixture.jdbc.calls.size)
         val count = fixture.jdbc.calls[0]
@@ -68,11 +74,15 @@ class JdbcPrivateNoteListReaderTest {
     }
 
     @Test
-    fun given__empty_owner_scoped_result__when__listing__then__return_empty_after_commit_without_extra_count_or_find() {
+    fun `소유자 범위의 결과가 비어 있을 때__목록을 읽으면__추가 개수나 조회 없이 커밋 뒤 빈 목록을 돌려준다`() {
+        // given
         val fixture = Fixture()
 
-        assertEquals(listOf<StoredNote>(), fixture.reader.read(7L, "INBOX", false, 0, NOW))
+        // when
+        val listed = fixture.reader.read(7L, "INBOX", false, 0, NOW)
 
+        // then
+        assertEquals(listOf<StoredNote>(), listed)
         assertEquals(listOf("begin", "list", "commit"), fixture.events)
         assertEquals(1, fixture.jdbc.calls.size)
         assertFalse(fixture.transactions.active)
@@ -80,10 +90,11 @@ class JdbcPrivateNoteListReaderTest {
 
     @ParameterizedTest
     @MethodSource("representativeFailures")
-    fun given__begin_query_or_commit_failure_then_recovery__when__counting_or_listing__then__propagate_same_failure_without_zero_empty_or_user_wrapping(
+    fun `시작 질의 또는 커밋 실패 뒤 복구될 때__개수를 세거나 목록을 읽으면__0이나 빈 값이나 사용자 예외 감싸기 없이 같은 예외를 전파한다`(
         operation: Operation,
         phase: FailurePhase,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.rows = listOf(StoredNote(UUID(23L, 1L), 8L, 7L, " 原文 ", null, null, NOW, "INBOX", null, false))
         val failure: RuntimeException = when (phase) {
@@ -97,8 +108,11 @@ class JdbcPrivateNoteListReaderTest {
             FailurePhase.COMMIT -> fixture.transactions.completionFailure = failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { invoke(fixture.reader, operation) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { invoke(fixture.reader, operation) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(if (phase == FailurePhase.BEGIN) 0 else 1, fixture.jdbc.calls.size)
         assertEquals(if (phase == FailurePhase.QUERY) 1 else 0, fixture.transactions.rollbacks)
         assertFalse(fixture.transactions.active)
@@ -106,9 +120,13 @@ class JdbcPrivateNoteListReaderTest {
         fixture.transactions.completionFailure = null
         fixture.jdbc.failure = null
 
+        // when
+        val recovered = invoke(fixture.reader, operation)
+
+        // then
         assertEquals(
             if (operation == Operation.COUNT) fixture.jdbc.count else fixture.jdbc.rows,
-            invoke(fixture.reader, operation),
+            recovered,
         )
         assertEquals(if (phase == FailurePhase.BEGIN) 1 else 2, fixture.jdbc.calls.size)
         assertFalse(fixture.transactions.active)
@@ -154,19 +172,19 @@ class JdbcPrivateNoteListReaderTest {
             val result = ArrayList<T>()
             for (index in rows.indices) {
                 val value = rows[index]
-                val row = mock(ResultSet::class.java)
+                val row = mockk<ResultSet>()
                 try {
-                    whenever(row.getObject("note_id", UUID::class.java)).thenReturn(value.noteId)
-                    whenever(row.getObject("sender_id")).thenReturn(value.senderId)
-                    whenever(row.getObject("recipient_id")).thenReturn(value.recipientId)
-                    whenever(row.getString("body")).thenReturn(value.body)
-                    whenever(row.getString("context_type")).thenReturn(value.contextType)
-                    whenever(row.getObject("context_id")).thenReturn(value.contextId)
-                    whenever(row.getTimestamp("created_at")).thenReturn(Timestamp.from(value.createdAt))
-                    whenever(row.getString("direction")).thenReturn(value.direction)
-                    whenever(row.getTimestamp("read_at"))
-                        .thenReturn(if (value.readAt == null) null else Timestamp.from(value.readAt))
-                    whenever(row.getBoolean("favorite")).thenReturn(value.favorite)
+                    every { row.getObject("note_id", UUID::class.java) } returns value.noteId
+                    every { row.getObject("sender_id") } returns value.senderId
+                    every { row.getObject("recipient_id") } returns value.recipientId
+                    every { row.getString("body") } returns value.body
+                    every { row.getString("context_type") } returns value.contextType
+                    every { row.getObject("context_id") } returns value.contextId
+                    every { row.getTimestamp("created_at") } returns Timestamp.from(value.createdAt)
+                    every { row.getString("direction") } returns value.direction
+                    every { row.getTimestamp("read_at") } returns
+                        (if (value.readAt == null) null else Timestamp.from(value.readAt))
+                    every { row.getBoolean("favorite") } returns value.favorite
                     result.add(rowMapper.mapRow(row, index) as T)
                 } catch (exception: SQLException) {
                     throw AssertionError(exception)
