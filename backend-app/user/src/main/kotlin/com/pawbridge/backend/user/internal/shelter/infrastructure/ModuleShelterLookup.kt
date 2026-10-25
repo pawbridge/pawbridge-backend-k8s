@@ -8,6 +8,6 @@ class ModuleShelterLookup(private val shelters: AnimalShelterReads) : ShelterMem
 
     override fun find(careRegNo: String?): ShelterMembership.Shelter? {
         val result = shelters.findByCareRegNo(careRegNo) ?: return null
-        return ShelterMembership.Shelter(result.id(), result.careRegNo())
+        return ShelterMembership.Shelter(result.id, result.careRegNo)
     }
 }

@@ -68,8 +68,8 @@ class JpaShelterCommands(
         return writes.execute { _ ->
             val actor = currentActor(verifiedUserId)
             val shelter = lockedShelter(id)
-            if ("ROLE_ADMIN" != actor.role()) {
-                val actorCareRegNo = actor.careRegNo()
+            if ("ROLE_ADMIN" != actor.role) {
+                val actorCareRegNo = actor.careRegNo
                 if (actorCareRegNo == null || isBlank(actorCareRegNo) || actorCareRegNo != shelter.careRegNo) {
                     throw ShelterCommandForbiddenException()
                 }
@@ -110,10 +110,10 @@ class JpaShelterCommands(
         }
         val actor: Actor? = actors.find(verifiedUserId)
         if (actor == null ||
-            actor.userId() != verifiedUserId ||
-            !actor.active() ||
-            actor.deleted() ||
-            !("ROLE_ADMIN" == actor.role() || "ROLE_SHELTER" == actor.role())
+            actor.userId != verifiedUserId ||
+            !actor.active ||
+            actor.deleted ||
+            !("ROLE_ADMIN" == actor.role || "ROLE_SHELTER" == actor.role)
         ) {
             throw ShelterCommandForbiddenException()
         }
@@ -121,7 +121,7 @@ class JpaShelterCommands(
     }
 
     private fun requireAdministrator(actor: Actor) {
-        if ("ROLE_ADMIN" != actor.role()) {
+        if ("ROLE_ADMIN" != actor.role) {
             throw ShelterCommandForbiddenException()
         }
     }

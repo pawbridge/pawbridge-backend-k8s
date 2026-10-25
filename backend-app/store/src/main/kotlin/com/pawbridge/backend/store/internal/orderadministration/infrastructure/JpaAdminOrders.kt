@@ -164,10 +164,10 @@ class JpaAdminOrders internal constructor(
 
         private fun actor(user: Long, actor: StoreOrderAdministrators.Actor?) {
             if (actor == null ||
-                actor.userId() != user ||
-                !actor.active() ||
-                actor.deleted() ||
-                "ROLE_ADMIN" != actor.role()
+                actor.userId != user ||
+                !actor.active ||
+                actor.deleted ||
+                "ROLE_ADMIN" != actor.role
             ) {
                 throw AdministratorRejectedException()
             }

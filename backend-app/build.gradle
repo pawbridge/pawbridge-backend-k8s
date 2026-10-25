@@ -46,6 +46,9 @@ subprojects {
             jvmTarget = JvmTarget.JVM_21
             // Treat Spring's @NonNull/@Nullable (JSR-305) as real Kotlin nullability.
             freeCompilerArgs.add('-Xjsr305=strict')
+            // Write type-use annotations such as List<@NotNull UUID> to the class file like javac does;
+            // Bean Validation container element constraints are read from them.
+            freeCompilerArgs.add('-Xemit-jvm-type-annotations')
         }
     }
 

@@ -44,7 +44,7 @@ class JdbcAnimalCommandActors(private val jdbc: JdbcTemplate) : AnimalCommandAct
         )
         // As in ContactMember, active is existence without pending deletion, not a users table column.
         // Animal owns the authorization decision for the mechanically mapped role and shelter identity.
-        return AnimalCommandActors.Actor(actor.userId(), actor.role(), actor.careRegNo(), !pending, pending)
+        return AnimalCommandActors.Actor(actor.userId, actor.role, actor.careRegNo, !pending, pending)
     }
 
     private companion object {

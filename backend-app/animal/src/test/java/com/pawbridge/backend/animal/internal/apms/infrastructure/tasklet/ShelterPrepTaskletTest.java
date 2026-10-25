@@ -8,6 +8,8 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.search.Searc
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.batch.support.transaction.ResourcelessTransactionManager;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -24,14 +26,14 @@ class ShelterPrepTaskletTest {
         var snapshot=mock(ApmsAnimalSnapshot.class); var repository=mock(ShelterRepository.class);
         var search=mock(SearchDocumentWriter.class); var manager=new ObservedManager();
         when(snapshot.animals()).thenThrow(new IllegalStateException("provider error"));
-        assertThatThrownBy(() -> task(snapshot,repository,search,manager).execute(null,null)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> task(snapshot,repository,search,manager).execute(mock(StepContribution.class),mock(ChunkContext.class))).isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(repository,search); assertThat(manager.begins).isZero();
     }
     @Test void givenEmptySnapshot__whenPreparingShelters__thenCompleteWithoutWriting() {
         var snapshot=mock(ApmsAnimalSnapshot.class); var repository=mock(ShelterRepository.class);
         var search=mock(SearchDocumentWriter.class); var manager=new ObservedManager();
         when(snapshot.animals()).thenReturn(List.of());
-        assertThat(task(snapshot,repository,search,manager).execute(null,null)).isEqualTo(RepeatStatus.FINISHED);
+        assertThat(task(snapshot,repository,search,manager).execute(mock(StepContribution.class),mock(ChunkContext.class))).isEqualTo(RepeatStatus.FINISHED);
         verify(repository,never()).saveAll(any()); verifyNoInteractions(search);
         assertThat(manager.commits).isEqualTo(1); assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
     }
@@ -51,7 +53,7 @@ class ShelterPrepTaskletTest {
             List<Shelter> shelters=call.getArgument(0); shelters.forEach(s -> ReflectionTestUtils.setField(s,"id",51L)); return shelters;
         });
         doAnswer(call -> { assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue();return null; }).when(search).shelter(51L);
-        assertThat(task(snapshot,repository,search,manager).execute(null,null)).isEqualTo(RepeatStatus.FINISHED);
+        assertThat(task(snapshot,repository,search,manager).execute(mock(StepContribution.class),mock(ChunkContext.class))).isEqualTo(RepeatStatus.FINISHED);
         ArgumentCaptor<List<Shelter>> saved=ArgumentCaptor.forClass(List.class); verify(repository).saveAll(saved.capture());
         assertThat(saved.getValue()).extracting(Shelter::getCareRegNo).containsExactly("new-shelter");
         var order=inOrder(repository,search);order.verify(repository).flush();order.verify(search).shelter(51L);
@@ -61,7 +63,7 @@ class ShelterPrepTaskletTest {
     @Test void givenCallerWriterTransaction__whenPreparing__thenRejectBeforeSnapshotOrDatabaseWork() {
         var snapshot=mock(ApmsAnimalSnapshot.class);var repository=mock(ShelterRepository.class);var search=mock(SearchDocumentWriter.class);
         var manager=new ObservedManager();var prep=task(snapshot,repository,search,manager);
-        assertThatThrownBy(() -> new TransactionTemplate(manager).execute(status -> prep.execute(null,null)))
+        assertThatThrownBy(() -> new TransactionTemplate(manager).execute(status -> prep.execute(mock(StepContribution.class),mock(ChunkContext.class))))
                 .hasMessage("APMS preparation must start outside the writer transaction");
         verifyNoInteractions(snapshot,repository,search);assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
     }
@@ -70,7 +72,7 @@ class ShelterPrepTaskletTest {
         var manager=new ObservedManager();when(snapshot.animals()).thenReturn(List.of(animal("new-shelter")));
         when(repository.saveAll(anyList())).thenAnswer(call -> { List<Shelter> saved=call.getArgument(0);ReflectionTestUtils.setField(saved.getFirst(),"id",51L);return saved; });
         doThrow(new IllegalStateException("synthetic projection failure")).when(search).shelter(51L);
-        assertThatThrownBy(() -> task(snapshot,repository,search,manager).execute(null,null)).hasMessage("synthetic projection failure");
+        assertThatThrownBy(() -> task(snapshot,repository,search,manager).execute(mock(StepContribution.class),mock(ChunkContext.class))).hasMessage("synthetic projection failure");
         assertThat(manager.rollbacks).isEqualTo(1);assertThat(manager.commits).isZero();assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
     }
     private ShelterPrepTasklet task(ApmsAnimalSnapshot snapshot,ShelterRepository repository,SearchDocumentWriter search,ObservedManager manager) { return new ShelterPrepTasklet(search,snapshot,repository,manager,15); }

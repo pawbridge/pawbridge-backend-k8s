@@ -13,7 +13,7 @@ class ModuleUserAnimalLookup(private val animals: AnimalMemberReads) : UserAnima
 
     override fun shelter(careRegNo: String?): UserAnimalActivities.Shelter? {
         val result = animals.findByCareRegNo(careRegNo) ?: return null
-        return UserAnimalActivities.Shelter(result.id(), result.name())
+        return UserAnimalActivities.Shelter(result.id, result.name)
     }
 
     override fun byShelter(
@@ -24,15 +24,15 @@ class ModuleUserAnimalLookup(private val animals: AnimalMemberReads) : UserAnima
             shelterId,
             AnimalMemberReads.PageRequest(request.page, request.size, request.sort),
         ) ?: return null
-        val content = page.content()
+        val content = page.content
         // Existing HTTP maps Spring Page.number to an absent User.page field, leaving page=0.
         return UserAnimalActivities.AnimalPage(
             if (content == null) null else mapAnimals(content),
             0,
-            page.size(),
-            page.totalElements(),
-            page.totalPages(),
-            page.last(),
+            page.size,
+            page.totalElements,
+            page.totalPages,
+            page.last,
         )
     }
 
@@ -47,21 +47,21 @@ class ModuleUserAnimalLookup(private val animals: AnimalMemberReads) : UserAnima
             return null
         }
         return UserAnimalActivities.Animal(
-            row.id(),
-            row.apmsNoticeNo(),
-            row.species(),
-            row.breed(),
-            row.gender(),
-            row.birthYear(),
-            row.age(),
-            row.specialMark(),
-            row.status(),
-            row.noticeEndDate(),
-            row.imageUrl(),
-            row.favoriteCount(),
-            row.shelterId(),
-            row.shelterName(),
-            row.createdAt(),
+            row.id,
+            row.apmsNoticeNo,
+            row.species,
+            row.breed,
+            row.gender,
+            row.birthYear,
+            row.age,
+            row.specialMark,
+            row.status,
+            row.noticeEndDate,
+            row.imageUrl,
+            row.favoriteCount,
+            row.shelterId,
+            row.shelterName,
+            row.createdAt,
         )
     }
 }

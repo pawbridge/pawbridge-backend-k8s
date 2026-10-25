@@ -57,10 +57,10 @@ class AnimalImageService(
         // Commit the current-account lookup before storage I/O so the member row lock is not held.
         val actor: Actor? = writes.execute { _ -> actors.find(verifiedUserId) }
         if (actor == null ||
-            actor.userId() != verifiedUserId ||
-            !actor.active() ||
-            actor.deleted() ||
-            !("ROLE_ADMIN" == actor.role() || "ROLE_SHELTER" == actor.role())
+            actor.userId != verifiedUserId ||
+            !actor.active ||
+            actor.deleted ||
+            !("ROLE_ADMIN" == actor.role || "ROLE_SHELTER" == actor.role)
         ) {
             throw AnimalImageForbiddenException()
         }

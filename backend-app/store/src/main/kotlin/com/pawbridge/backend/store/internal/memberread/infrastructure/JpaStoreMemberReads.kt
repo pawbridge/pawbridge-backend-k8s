@@ -111,7 +111,7 @@ class JpaStoreMemberReads internal constructor(
             source.productImageUrl,
             source.productStatus,
             source.price,
-            source.options,
+            source.options?.toMutableMap(),
             source.categoryId,
             source.categoryName,
             source.createdAt,
@@ -182,16 +182,16 @@ class JpaStoreMemberReads internal constructor(
         private fun pageable(request: StoreMemberReads.Request, allowed: Set<String>): PageRequest {
             // Bound query joins before opening the reader transaction; aliases are exact literals only.
             if (request.size() > MAX_PAGE_SIZE || request.sort().size > MAX_SORT_TERMS || request.sort().stream()
-                    .anyMatch { order -> order.property() == null || !allowed.contains(order.property()) }
+                    .anyMatch { order -> order.property == null || !allowed.contains(order.property) }
             ) {
                 throw IllegalArgumentException("Store member sort is not supported")
             }
             val sort = Sort.by(
                 request.sort().stream().map { order ->
                     Sort.Order(
-                        if (order.ascending()) Sort.Direction.ASC else Sort.Direction.DESC,
-                        order.property(),
-                        order.ignoreCase(),
+                        if (order.ascending) Sort.Direction.ASC else Sort.Direction.DESC,
+                        order.property!!,
+                        order.ignoreCase,
                         Sort.NullHandling.NATIVE,
                     )
                 }.toList(),

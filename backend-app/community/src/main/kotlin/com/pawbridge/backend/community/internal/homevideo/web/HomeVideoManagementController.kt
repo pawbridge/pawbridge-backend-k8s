@@ -72,7 +72,7 @@ class HomeVideoManagementController(private val videos: HomeVideoManagement) {
 
     @PutMapping("/api/v1/admin/videos/order")
     fun order(@Valid @RequestBody request: HomeVideoOrderRequest): HomeVideoController.Response<Board> =
-        ok(videos.reorder(Order(request.ids(), request.revision())))
+        ok(videos.reorder(Order(request.ids, request.revision)))
 
     @PostMapping("/api/v1/admin/videos/{id}/recheck")
     fun recheck(

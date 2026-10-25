@@ -32,7 +32,7 @@ class LostGalleryFeedTest {
                 signedKeys.add(key); return signer().apply(key);
             };
             var feed = new LostGalleryFeed(null, mapper, signer, transaction(readActive), org.springframework.transaction.support.TransactionOperations.withoutTransaction()) {
-                @Override Content readContent() {
+                @Override protected Content readContent() {
                     assertTrue(readActive.get(), "v1 content must execute inside its explicit reader transaction");
                     return new Content(List.of(Map.of("id", 1, "species", "DOG", "source_sha256", sha, "status", "PROTECT",
                                     "happen_place", "상주시")),

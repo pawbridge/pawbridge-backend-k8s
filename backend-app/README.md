@@ -300,7 +300,7 @@ JAR는 현재 단계에서 기존 실제 발급기로 갱신한 합성 토큰과
 
 ### Kotlin 혼합 빌드
 
-- 루트 `build.gradle`이 모든 모듈에 Kotlin 1.9.25(Spring Boot 3.4.11 BOM의 `kotlin.version`), kotlin-spring(all-open), kotlin-jpa(no-arg)를 적용한다. JPA `@Entity`·`@MappedSuperclass`·`@Embeddable`도 all-open으로 Java처럼 non-final이다. JVM 대상은 21이고 `-Xjsr305=strict`를 쓴다. `kotlin-reflect`와 `jackson-module-kotlin`은 모든 모듈의 `implementation`에 있다.
+- 루트 `build.gradle`이 모든 모듈에 Kotlin 1.9.25(Spring Boot 3.4.11 BOM의 `kotlin.version`), kotlin-spring(all-open), kotlin-jpa(no-arg)를 적용한다. JPA `@Entity`·`@MappedSuperclass`·`@Embeddable`도 all-open으로 Java처럼 non-final이다. JVM 대상은 21이고 `-Xjsr305=strict`와 `-Xemit-jvm-type-annotations`를 쓴다. 뒤쪽 옵션은 `List<@NotNull UUID>` 같은 type-use 애노테이션(Bean Validation 컨테이너 요소 제약)을 javac처럼 class 파일에 기록한다. `kotlin-reflect`와 `jackson-module-kotlin`은 모든 모듈의 `implementation`에 있다.
 - 모듈 `build.gradle`에는 Kotlin plugin을 쓰지 않는다. 구조 TestKit fixture가 실제 모듈 스크립트를 Kotlin plugin 없는 루트에 복사해 적용하기 때문이다.
 - `.kt`는 `src/main/kotlin` 또는 `src/main/java`에 둘 수 있다. Kotlin이 먼저 컴파일되고 Java가 그 class를 본다. 같은 모듈의 Java Lombok 생성 멤버는 Kotlin에서 보이지 않으므로 Lombok class는 함께 Kotlin으로 옮기거나 일반 Java 접근자로 바꾼다.
 
