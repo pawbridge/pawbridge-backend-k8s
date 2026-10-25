@@ -7,14 +7,14 @@ import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.Po
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.TourApiClient
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.TourApiProperties
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
 import org.springframework.aop.framework.Advised
 import org.springframework.batch.core.Job
 import org.springframework.batch.core.job.SimpleJob
@@ -45,8 +45,14 @@ import java.util.function.Supplier
 
 class AnimalTravelCollectionConfigurationTest {
     @Test
-    fun givenExistingGalleryAndShelterAssembly__whenTravelCollectionIsAdded__thenMainStillRegistersAllThreeFeatures() {
-        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java }
+    fun `기존 갤러리와 보호소 조립이 있을 때__여행 수집을 추가하면__메인이 세 기능을 모두 등록한다`() {
+        // given
+        val application = PawBridgeApplication::class.java
+
+        // when
+        val imports = application.getAnnotation(Import::class.java).value.map { it.java }
+
+        // then
         assertThat(imports).contains(
             AnimalGalleryFeedConfiguration::class.java,
             ShelterCommandConfiguration::class.java,
@@ -70,18 +76,17 @@ class AnimalTravelCollectionConfigurationTest {
             .withBean("readClock", Clock::class.java, Supplier { CLOCK })
     }
 
-    private fun source(capacity: Int): HikariDataSource {
-        val source = mock(HikariDataSource::class.java)
-        whenever(source.maximumPoolSize).thenReturn(capacity)
-        return source
-    }
-
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "query-only", "schedule-only"])
-    fun givenCollectionDisabledOrOnlyQueryOrScheduleSelected__whenContextStarts__thenNoCollectionComponentsOrBorrow(
+    fun `수집이 꺼졌거나 조회와 스케줄만 선택됐을 때__컨텍스트가 시작되면__수집 구성요소도 연결 빌림도 없다`(
         selection: String,
     ) {
-        val source = source(1)
+        // given
+        val source = mockk<HikariDataSource>()
+
+        every { source.maximumPoolSize } returns 1
+        justRun { source.close() }
+
         var context = runner(source, JdbcTemplate(source), JdbcTransactionManager(source))
         if (selection == "false") {
             context = context.withPropertyValues("tourapi.enabled=false")
@@ -95,7 +100,10 @@ class AnimalTravelCollectionConfigurationTest {
         if (selection == "schedule-only") {
             context = context.withPropertyValues("tourapi.schedule-enabled=true")
         }
+
+        // when
         context.run { app ->
+            // then
             assertThat(app).hasNotFailed()
                 .doesNotHaveBean(TourApiClient::class.java)
                 .doesNotHaveBean(TourApiProperties::class.java)
@@ -105,17 +113,24 @@ class AnimalTravelCollectionConfigurationTest {
                 .doesNotHaveBean(Job::class.java)
                 .doesNotHaveBean(AnimalTravelCollectionSchedule::class.java)
                 .doesNotHaveBean(ThreadPoolTaskScheduler::class.java)
-            verify(source, never()).getConnection()
+            verify(exactly = 0) { source.connection }
         }
     }
 
     @Test
-    fun givenCollectionEnabledWithoutSchedule__whenContextStarts__thenExplicitPostgresqlBatchUsesSameWriterWithoutMetadataOrJobExecution() {
-        val source = source(2)
+    fun `수집만 켜고 스케줄은 껐을 때__시작하면__같은 기록 연결로 실행 없이 PostgreSQL 배치를 구성한다`() {
+        // given
+        val source = mockk<HikariDataSource>()
         val jdbc = JdbcTemplate(source)
         val manager = JdbcTransactionManager(source)
+
+        every { source.maximumPoolSize } returns 2
+        justRun { source.close() }
+
+        // when
         runner(source, jdbc, manager).withPropertyValues("tourapi.enabled=true", "tourapi.schedule-enabled=false")
             .run { app ->
+                // then
                 assertThat(app).hasNotFailed()
                     .hasSingleBean(TourApiClient::class.java)
                     .hasSingleBean(PostgresqlTravelCollectionCatalog::class.java)
@@ -160,47 +175,70 @@ class AnimalTravelCollectionConfigurationTest {
                 assertThat(ReflectionTestUtils.getField(step, "transactionManager")).isSameAs(manager)
                 val attribute = ReflectionTestUtils.getField(step, "transactionAttribute") as TransactionAttribute
                 assertThat(attribute.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED)
-                verify(source, never()).getConnection()
+                verify(exactly = 0) { source.connection }
             }
     }
 
     @Test
-    fun givenOnlyOneWriterConnection__whenCollectionEnabled__thenFailBeforeMetadataOrBorrow() {
-        val source = source(1)
+    fun `기록 연결이 하나뿐일 때__수집을 켜면__메타데이터나 연결 빌림 전에 실패한다`() {
+        // given
+        val source = mockk<HikariDataSource>()
+
+        every { source.maximumPoolSize } returns 1
+        justRun { source.close() }
+
+        // when
         runner(source, JdbcTemplate(source), JdbcTransactionManager(source))
             .withPropertyValues("tourapi.enabled=true").run { app ->
+                // then
                 assertThat(app).hasFailed()
                 assertThat(app.startupFailure).hasRootCauseMessage(
                     "Travel collection requires the same writer with capacity of at least two",
                 )
-                verify(source, never()).getConnection()
+                verify(exactly = 0) { source.connection }
             }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["jdbc", "transaction-manager"])
-    fun givenAnotherWriterDataSource__whenCollectionEnabled__thenRejectMixedOwnershipBeforeBorrow(mismatch: String) {
-        val source = source(2)
-        val other = source(2)
+    fun `다른 기록 데이터소스가 섞였을 때__수집을 켜면__연결을 빌리기 전에 혼용을 거절한다`(mismatch: String) {
+        // given
+        val source = mockk<HikariDataSource>()
+        val other = mockk<HikariDataSource>()
         val jdbc = JdbcTemplate(if (mismatch == "jdbc") other else source)
         val manager = JdbcTransactionManager(if (mismatch == "transaction-manager") other else source)
+
+        every { source.maximumPoolSize } returns 2
+        every { other.maximumPoolSize } returns 2
+        justRun { source.close() }
+        justRun { other.close() }
+
+        // when
         runner(source, jdbc, manager).withPropertyValues("tourapi.enabled=true").run { app ->
+            // then
             assertThat(app).hasFailed()
             assertThat(app.startupFailure).hasRootCauseMessage(
                 "Travel collection requires the same writer with capacity of at least two",
             )
-            verify(source, never()).getConnection()
-            verify(other, never()).getConnection()
+            verify(exactly = 0) { source.connection }
+            verify(exactly = 0) { other.connection }
         }
     }
 
     @Test
-    fun givenCollectionAndScheduleEnabled__whenContextStarts__thenOneNamedSeoulSchedulerWaitsOnNormalShutdownWithoutLaunchingJob() {
-        val source = source(2)
+    fun `수집과 스케줄을 모두 켰을 때__시작하면__작업 실행 없이 서울 스케줄러 하나가 정상 종료를 기다린다`() {
+        // given
+        val source = mockk<HikariDataSource>()
+
+        every { source.maximumPoolSize } returns 2
+        justRun { source.close() }
+
+        // when
         runner(source, JdbcTemplate(source), JdbcTransactionManager(source))
             // A future cron prevents this composition test from invoking the actual Job.
             .withPropertyValues("tourapi.enabled=true", "tourapi.schedule-enabled=true", "tourapi.collection-cron=0 0 0 1 1 *")
             .run { app ->
+                // then
                 assertThat(app).hasNotFailed()
                     .hasSingleBean(AnimalTravelCollectionSchedule::class.java)
                     .hasSingleBean(ThreadPoolTaskScheduler::class.java)
@@ -221,7 +259,7 @@ class AnimalTravelCollectionConfigurationTest {
                 val dependencies = AnimalTravelCollectionSchedule::class.java.getDeclaredMethod("tourApiCollectionScheduler")
                     .getAnnotation(DependsOn::class.java)
                 assertThat(dependencies.value).containsExactlyInAnyOrder("writeDataSource", "petTravelCollectionJob")
-                verify(source, never()).getConnection()
+                verify(exactly = 0) { source.connection }
             }
     }
 

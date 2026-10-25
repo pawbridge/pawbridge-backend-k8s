@@ -264,7 +264,7 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
     }
 
     @Test
-    fun givenOneFullyPopulatedOwnedAnimal__whenLookingUpItsApmsNumber__thenReturnAll28FieldsAndShelterJoinOr404UsingOnlyTheReader() {
+    fun `채워진 소유 동물 하나가 주어졌을 때__APMS 번호로 조회하면__28개 필드와 보호소 조인을 돌려준다`() {
         observed("APMS actual reader") {
             val own = seeds.first()
             insert(listOf(own))
@@ -290,7 +290,7 @@ class OwnedPostgresqlAnimalExtraDiscoveryTest {
     }
 
     @Test
-    fun givenSixRegisteredBoundaryRows__whenExpiringSoonIsPagedAndTheOwnedEligibleSubsetIsRemoved__thenKeepInclusiveFixedSortPage7AndTrueEmptyWithoutOriginalWrites() {
+    fun `경계 행 여섯이 주어졌을 때__곧 만료 목록을 페이지로 읽으면__고정 정렬과 포함 경계를 유지한다`() {
         observed("expiring actual reader") {
             insert(seeds)
             val withOwn = baseline(false)

@@ -10,6 +10,10 @@ import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.To
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.TourApiProperties
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.Called
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
@@ -24,10 +28,6 @@ import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.stubbing.Answer
 import org.slf4j.LoggerFactory
 import org.springframework.batch.core.BatchStatus
 import org.springframework.batch.core.Job
@@ -229,7 +229,7 @@ class OwnedPostgresqlTravelCollectionTest {
 
     @Test
     @Order(1)
-    fun givenTwoBulkRowsWithInvalidSecondIdentity__whenSavingOnePage__thenRollbackFirstInsertAndKeepCheckpoint() {
+    fun `잘못된 둘째 신원의 대량 행 둘이 주어졌을 때__한 페이지를 저장하면__첫 삽입을 롤백하고 체크포인트를 유지한다`() {
         contract("bulk page and checkpoint rollback") {
             val before = catalog.petCollectionState()
             val inserts = pool().petInserts.get()
@@ -261,7 +261,7 @@ class OwnedPostgresqlTravelCollectionTest {
 
     @Test
     @Order(2)
-    fun givenSyntheticBulkRegionsAndSyncRows__whenPartialJobAndFreshInvocationRun__thenPersistBudgetResumeAndServeExistingReader() {
+    fun `합성 지역과 동기화 행이 주어졌을 때__부분 작업 뒤 새 호출을 실행하면__예산을 저장하고 이어서 기존 리더를 제공한다`() {
         contract("actual Batch partial and catalog resume") {
             val client = syntheticClient(true, Checked { })
             val properties = properties(true)
@@ -349,7 +349,7 @@ class OwnedPostgresqlTravelCollectionTest {
 
     @Test
     @Order(3)
-    fun givenTwoPhysicalPostgresqlSessions__whenLockOwnerRollsBackAndCollectorIsBusy__thenRetainSessionLockUntilPhysicalClose() {
+    fun `PostgreSQL 물리 세션 둘이 주어졌을 때__잠금 소유자가 롤백하고 수집기가 바쁘면__물리 종료까지 세션 잠금을 유지한다`() {
         contract("two physical lock sessions and busy collector") {
             val before = fingerprint()
             val client = noCallsClient()
@@ -373,7 +373,7 @@ class OwnedPostgresqlTravelCollectionTest {
                         "TRAVEL_COLLECTION_BUSY",
                         Checked { collector(client, properties(false)).collect() },
                     )
-                    verifyNoInteractions(client)
+                    verify { client wasNot Called }
                     check(
                         fingerprint() == before,
                         "A busy collector must not start a catalog run, charge budget or write Batch metadata",
@@ -398,7 +398,7 @@ class OwnedPostgresqlTravelCollectionTest {
 
     @Test
     @Order(4)
-    fun givenAnInflightNamedSchedulerAndThenProviderFailure__whenShutdownAndFailureFinish__thenWaitAndReleaseWriterAndSessionLock() {
+    fun `진행 중 스케줄러와 제공자 실패가 주어졌을 때__종료와 실패가 끝나면__기다리고 쓰기 연결과 세션 잠금을 해제한다`() {
         contract("normal scheduler shutdown and failed run release") {
             val entered = CountDownLatch(1)
             val release = CountDownLatch(1)
@@ -484,14 +484,11 @@ class OwnedPostgresqlTravelCollectionTest {
             released()
             requireLockAvailable()
             val hiddenDetail = "synthetic-provider-detail-must-not-persist"
-            val unavailable = mock(TourApiClient::class.java)
-            doAnswer(
-                Answer<Any?> {
-                    observeClient("REGIONS_FAILURE")
-                    throw IllegalStateException(hiddenDetail)
-                },
-            )
-                .`when`(unavailable).fetch(TourApiClient.Operation.REGIONS, "")
+            val unavailable = mockk<TourApiClient>()
+            every { unavailable.fetch(TourApiClient.Operation.REGIONS, "") } answers {
+                observeClient("REGIONS_FAILURE")
+                throw IllegalStateException(hiddenDetail)
+            }
             val failed = run(unavailable, properties(false))
             requireExecution(failed, BatchStatus.FAILED, "FAILED")
             check(
@@ -516,7 +513,7 @@ class OwnedPostgresqlTravelCollectionTest {
 
     @Test
     @Order(5)
-    fun givenExhaustedBudgetAndThenOwnedRunningOrphan__whenInvokedAgain__thenKeepQuotaDistinctAndRefuseAutomaticOrphanRecovery() {
+    fun `소진된 예산과 소유 RUNNING 고아가 주어졌을 때__다시 호출하면__쿼터를 구분하고 자동 고아 복구를 거절한다`() {
         contract("quota distinction and retained RUNNING orphan") {
             val client = noCallsClient()
             val properties = properties(false)
@@ -524,7 +521,7 @@ class OwnedPostgresqlTravelCollectionTest {
             val budgets = budgetFingerprint()
             val quota = run(client, properties)
             requireExecution(quota, BatchStatus.COMPLETED, "QUOTA")
-            verifyNoInteractions(client)
+            verify { client wasNot Called }
             check(
                 budgetFingerprint() == budgets &&
                     jdbc.queryForObject(
@@ -546,7 +543,7 @@ class OwnedPostgresqlTravelCollectionTest {
                 "TRAVEL_ORPHAN_RUN",
                 Checked { collector(client, properties).collect() },
             )
-            verifyNoInteractions(client)
+            verify { client wasNot Called }
             check(
                 count("pet_travel_collection_runs") == runs && budgetFingerprint() == budgets &&
                     jdbc.queryForObject(
@@ -611,118 +608,94 @@ class OwnedPostgresqlTravelCollectionTest {
         released()
     }
 
-    private fun noCallsClient(): TourApiClient = mock(TourApiClient::class.java)
+    private fun noCallsClient(): TourApiClient = mockk<TourApiClient>()
 
     private fun syntheticClient(failFirstIntro: Boolean, beforeRegions: Checked): TourApiClient {
-        val client = mock(TourApiClient::class.java)
+        val client = mockk<TourApiClient>()
         val intros = AtomicInteger()
-        doAnswer(
-            Answer<Any?> {
-                observeClient("REGIONS")
-                beforeRegions.run()
-                listOf(mapOf("code" to AREA, "name" to "Owned region"))
-            },
-        )
-            .`when`(client).fetch(TourApiClient.Operation.REGIONS, "")
-        doAnswer(
-            Answer<Any?> {
-                observeClient("PET_BULK")
-                TourApiClient.Page(
-                    listOf(mapOf("contentid" to CONTENT, "acmpyNeedMtr" to "synthetic leash", "acmpyTypeCd" to "DOGS")),
-                    1,
-                )
-            },
-        )
-            .`when`(client).fetchPage(TourApiClient.Operation.PET_BULK, "", 1)
-        doAnswer(
-            Answer<Any?> {
-                observeClient("SYNC_HIDDEN")
-                TourApiClient.Page(listOf(), 0)
-            },
-        )
-            .`when`(client).fetchPage(TourApiClient.Operation.SYNC, "0", 1)
-        doAnswer(
-            Answer<Any?> {
-                observeClient("SYNC_SHOWN")
-                TourApiClient.Page(
-                    listOf(
-                        mapOf(
-                            "contentid" to CONTENT,
-                            "contenttypeid" to "12",
-                            "lDongRegnCd" to AREA,
-                            "modifiedtime" to REVISION,
-                            "showflag" to "1",
-                            "title" to "Owned travel place",
-                            "addr1" to "Owned address",
-                            "firstimage" to "https://tong.visitkorea.or.kr/cms/resource/77/OWNED.jpg",
-                            "cpyrhtDivCd" to "Type1",
-                        ),
-                    ),
-                    1,
-                )
-            },
-        )
-            .`when`(client).fetchPage(TourApiClient.Operation.SYNC, "1", 1)
-        doAnswer(
-            Answer<Any?> {
-                observeClient("COMMON")
+        every { client.fetch(TourApiClient.Operation.REGIONS, "") } answers {
+            observeClient("REGIONS")
+            beforeRegions.run()
+            listOf(mapOf("code" to AREA, "name" to "Owned region"))
+        }
+        every { client.fetchPage(TourApiClient.Operation.PET_BULK, "", 1) } answers {
+            observeClient("PET_BULK")
+            TourApiClient.Page(
+                listOf(mapOf("contentid" to CONTENT, "acmpyNeedMtr" to "synthetic leash", "acmpyTypeCd" to "DOGS")),
+                1,
+            )
+        }
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "0", 1) } answers {
+            observeClient("SYNC_HIDDEN")
+            TourApiClient.Page(listOf(), 0)
+        }
+        every { client.fetchPage(TourApiClient.Operation.SYNC, "1", 1) } answers {
+            observeClient("SYNC_SHOWN")
+            TourApiClient.Page(
                 listOf(
                     mapOf(
                         "contentid" to CONTENT,
+                        "contenttypeid" to "12",
+                        "lDongRegnCd" to AREA,
+                        "modifiedtime" to REVISION,
+                        "showflag" to "1",
                         "title" to "Owned travel place",
-                        "overview" to "Owned overview",
-                        "contenttypeid" to "12",
-                    ),
-                )
-            },
-        )
-            .`when`(client).fetch(TourApiClient.Operation.COMMON, CONTENT)
-        doAnswer(
-            Answer<Any?> {
-                observeClient("INTRO")
-                if (failFirstIntro && intros.getAndIncrement() == 0) {
-                    throw PetTravelException.unavailable()
-                }
-                listOf(
-                    mapOf(
-                        "contentid" to CONTENT,
-                        "contenttypeid" to "12",
-                        "infocenter" to "Owned center",
-                        "usetime" to "Owned hours",
-                    ),
-                )
-            },
-        )
-            .`when`(client).fetchDetail(TourApiClient.Operation.INTRO, CONTENT, "12")
-        doAnswer(
-            Answer<Any?> {
-                observeClient("INFO")
-                listOf(
-                    mapOf(
-                        "contentid" to CONTENT,
-                        "contenttypeid" to "12",
-                        "infoname" to "Owned information",
-                        "infotext" to "Owned information text",
-                    ),
-                )
-            },
-        )
-            .`when`(client).fetchDetail(TourApiClient.Operation.INFO, CONTENT, "12")
-        doAnswer(
-            Answer<Any?> {
-                observeClient("IMAGES")
-                listOf(
-                    mapOf(
-                        "contentid" to CONTENT,
-                        "serialnum" to "1",
-                        "imgname" to "Owned image",
-                        "originimgurl" to "https://tong.visitkorea.or.kr/cms/resource/77/OWNED.jpg",
+                        "addr1" to "Owned address",
+                        "firstimage" to "https://tong.visitkorea.or.kr/cms/resource/77/OWNED.jpg",
                         "cpyrhtDivCd" to "Type1",
                     ),
-                )
-            },
-        )
-            .`when`(client).fetchDetail(TourApiClient.Operation.IMAGES, CONTENT, "12")
+                ),
+                1,
+            )
+        }
+        every { client.fetch(TourApiClient.Operation.COMMON, CONTENT) } answers {
+            observeClient("COMMON")
+            listOf(
+                mapOf(
+                    "contentid" to CONTENT,
+                    "title" to "Owned travel place",
+                    "overview" to "Owned overview",
+                    "contenttypeid" to "12",
+                ),
+            )
+        }
+        every { client.fetchDetail(TourApiClient.Operation.INTRO, CONTENT, "12") } answers {
+            observeClient("INTRO")
+            if (failFirstIntro && intros.getAndIncrement() == 0) {
+                throw PetTravelException.unavailable()
+            }
+            listOf(
+                mapOf(
+                    "contentid" to CONTENT,
+                    "contenttypeid" to "12",
+                    "infocenter" to "Owned center",
+                    "usetime" to "Owned hours",
+                ),
+            )
+        }
+        every { client.fetchDetail(TourApiClient.Operation.INFO, CONTENT, "12") } answers {
+            observeClient("INFO")
+            listOf(
+                mapOf(
+                    "contentid" to CONTENT,
+                    "contenttypeid" to "12",
+                    "infoname" to "Owned information",
+                    "infotext" to "Owned information text",
+                ),
+            )
+        }
+        every { client.fetchDetail(TourApiClient.Operation.IMAGES, CONTENT, "12") } answers {
+            observeClient("IMAGES")
+            listOf(
+                mapOf(
+                    "contentid" to CONTENT,
+                    "serialnum" to "1",
+                    "imgname" to "Owned image",
+                    "originimgurl" to "https://tong.visitkorea.or.kr/cms/resource/77/OWNED.jpg",
+                    "cpyrhtDivCd" to "Type1",
+                ),
+            )
+        }
         return client
     }
 

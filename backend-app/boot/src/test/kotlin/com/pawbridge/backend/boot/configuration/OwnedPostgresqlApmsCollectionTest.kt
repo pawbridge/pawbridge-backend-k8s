@@ -299,7 +299,7 @@ class OwnedPostgresqlApmsCollectionTest {
 
     @Test
     @Order(1)
-    fun givenFreshAndThenExistingApmsAnimals__whenActualRunnerCompletes__thenUpsertAndSearchShareWriterTransactionsWithoutOutbox() {
+    fun `새 동물과 기존 동물이 주어졌을 때__실제 러너가 끝나면__업서트와 검색이 쓰기 트랜잭션을 공유한다`() {
         contract("normal APMS upsert") {
             scenario = 1
             requireCompleted(runner.run())
@@ -364,7 +364,7 @@ class OwnedPostgresqlApmsCollectionTest {
 
     @Test
     @Order(2)
-    fun givenTwoRowsInOneChunkAndNaturalBreedOverflow__whenRecoveryFails__thenKeepValidItemCommitAndRejectBadItem() {
+    fun `한 청크의 두 행과 품종 넘침이 주어졌을 때__복구가 실패하면__유효 항목만 커밋하고 나쁜 항목을 거절한다`() {
         contract("natural rollback and fault-tolerant partial recovery") {
             val originalAnimals = "SELECT count(*)::text||':'||md5(COALESCE(string_agg(row_to_json(t)::text,',' ORDER BY id),'')) " +
                 "FROM pawbridge_animal.animals t WHERE apms_desertion_no IN (?,?)"
@@ -437,7 +437,7 @@ class OwnedPostgresqlApmsCollectionTest {
 
     @Test
     @Order(3)
-    fun givenTwoPhysicalSessionsAndSlotKeyOne__whenRunnerIsBusy__thenNoFetchOrMetadataWriteAndPhysicalCloseReleasesSlot() {
+    fun `물리 세션 둘과 슬롯 키 1이 주어졌을 때__러너가 바쁘면__조회·메타 쓰기 없이 세션이 닫히면 슬롯이 풀린다`() {
         contract("physical APMS slot") {
             val before = allFingerprint()
             val calls = fetches.size
@@ -472,7 +472,7 @@ class OwnedPostgresqlApmsCollectionTest {
 
     @Test
     @Order(4)
-    fun givenRecentJobAndNewerStepHeartbeat__whenRecoveryCrossesExactTenMinuteCutoff__thenRejectRecentAndFailOnlyStaleMetadata() {
+    fun `최근 작업과 더 새로운 하트비트가 주어졌을 때__10분 경계를 지나 복구하면__최근은 거절하고 오래된 메타만 실패시킨다`() {
         contract("recent and stale metadata") {
             val execution = repository.createJobExecution(
                 JOB,
@@ -532,7 +532,7 @@ class OwnedPostgresqlApmsCollectionTest {
 
     @Test
     @Order(5)
-    fun givenInflightActualSchedule__whenNormalStopIsRequested__thenWaitForSynchronousJobAndSlotReleaseBeforeClosing() {
+    fun `실행 중인 실제 스케줄이 주어졌을 때__정상 중지를 요청하면__동기 작업과 슬롯 해제를 기다린 뒤 닫는다`() {
         contract("actual schedule normal stop") {
             scenario = 4
             fetchEntered = CountDownLatch(1)

@@ -1,15 +1,13 @@
 package com.pawbridge.backend.boot.configuration
 
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsBatchRunner
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.batch.core.BatchStatus
 import org.springframework.batch.core.JobExecution
 import org.springframework.core.task.TaskRejectedException
@@ -19,47 +17,56 @@ import java.util.concurrent.TimeUnit
 
 class ApmsCollectionScheduleTest {
     @Test
-    fun givenNeverStarted__whenStopped__thenNoRunnerCall() {
-        val runner = mock(ApmsBatchRunner::class.java)
+    fun `시작한 적이 없을 때__중지하면__러너를 호출하지 않는다`() {
+        // given
+        val runner = mockk<ApmsBatchRunner>()
         val schedule = ApmsCollectionSchedule(runner, "0 */30 * * * *")
+
+        // when
         schedule.stop()
+
+        // then
         assertThat(schedule.isRunning).isFalse()
-        verifyNoInteractions(runner)
+        confirmVerified(runner)
     }
 
     @Test
-    fun givenActiveScheduledRunner__whenStopped__thenWaitForRunnerReturnWithoutInterruptOrNewTick() {
-        val runner = mock(ApmsBatchRunner::class.java)
+    fun `예약된 러너가 실행 중일 때__중지하면__인터럽트나 새 틱 없이 러너가 돌아오길 기다린다`() {
+        // given
+        val runner = mockk<ApmsBatchRunner>()
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         val stopStarted = CountDownLatch(1)
         val stopped = CountDownLatch(1)
         val execution = JobExecution(1L)
         execution.status = BatchStatus.COMPLETED
-        whenever(runner.run()).thenAnswer(
-            Answer<JobExecution> {
-                entered.countDown()
-                release.await()
-                assertThat(Thread.currentThread().isInterrupted).isFalse()
-                execution
-            },
-        )
         val schedule = ApmsCollectionSchedule(runner, "* * * * * *")
         val stopping = Thread {
             stopStarted.countDown()
             schedule.stop()
             stopped.countDown()
         }
+
+        every { runner.run() } answers {
+            entered.countDown()
+            release.await()
+            assertThat(Thread.currentThread().isInterrupted).isFalse()
+            execution
+        }
+
         try {
+            // when
             schedule.start()
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue()
             stopping.start()
             assertThat(stopStarted.await(1, TimeUnit.SECONDS)).isTrue()
             assertThat(stopped.await(100, TimeUnit.MILLISECONDS)).isFalse()
             release.countDown()
+
+            // then
             assertThat(stopped.await(5, TimeUnit.SECONDS)).isTrue()
             assertThat(schedule.isRunning).isFalse()
-            verify(runner, times(1)).run()
+            verify(exactly = 1) { runner.run() }
         } finally {
             release.countDown()
             schedule.stop()
@@ -68,7 +75,8 @@ class ApmsCollectionScheduleTest {
     }
 
     @Test
-    fun givenOneWorkerAndFullBoundedQueue__whenAnotherTaskArrives__thenRejectWithoutCallerThreadExecution() {
+    fun `작업자가 하나이고 제한 큐가 가득 찼을 때__작업이 더 오면__호출자 스레드 실행 없이 거절한다`() {
+        // given
         val environment = MockEnvironment()
             .withProperty("apms.api.base-url", "https://provider.example.test")
             .withProperty("apms.api.service-key", "fixture-key")
@@ -77,6 +85,8 @@ class ApmsCollectionScheduleTest {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         val rejectedRan = CountDownLatch(1)
+
+        // when, then
         try {
             executor.execute {
                 entered.countDown()

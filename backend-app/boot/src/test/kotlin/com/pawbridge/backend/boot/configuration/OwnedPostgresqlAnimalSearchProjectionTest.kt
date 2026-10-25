@@ -196,7 +196,7 @@ class OwnedPostgresqlAnimalSearchProjectionTest {
 
     @Test
     @Order(1)
-    fun givenDirtyAnimalAndShelter__whenBothTypesAreRepaired__thenExistingKeywordSearchRecovers() {
+    fun `더티 동물과 보호소가 주어졌을 때__두 유형을 복구하면__기존 키워드 검색이 복구된다`() {
         contract("dirty search recovery") {
             expect(SearchProjectionPendingException::class.java) { search(1, "말티즈") }
             check(projector.refreshDirtyShelters(1) == 1, "The first bounded Shelter page repairs its dirty source")
@@ -210,7 +210,7 @@ class OwnedPostgresqlAnimalSearchProjectionTest {
 
     @Test
     @Order(2)
-    fun givenCleanMissingRevisionAndAnalyzerMismatch__whenAuditedOneRowPerPage__thenRepairEveryClassWithoutTreatingDirtyZeroAsCompletion() {
+    fun `리비전 누락과 분석기 불일치가 주어졌을 때__페이지당 한 행씩 감사하면__모든 종류를 복구한다`() {
         contract("bounded clean audit") {
             check(
                 projector.refreshDirtyAnimals(1) == 0 && projector.refreshDirtyShelters(1) == 0,
@@ -263,7 +263,7 @@ class OwnedPostgresqlAnimalSearchProjectionTest {
 
     @Test
     @Order(3)
-    fun givenAnotherPhysicalSessionLocksDirtySource__whenSkipLockedReturnsZero__thenPendingRemainsUntilUnlockAndRetry() {
+    fun `다른 세션이 더티 원본을 잠갔을 때__SKIP LOCKED가 0을 돌려주면__해제 뒤 재시도까지 대기로 남는다`() {
         contract("physical source locks") {
             for (table in listOf("animals", "shelters")) {
                 jdbc.update("UPDATE pawbridge_animal." + table + " SET search_dirty=true WHERE id=5")
@@ -304,7 +304,7 @@ class OwnedPostgresqlAnimalSearchProjectionTest {
 
     @Test
     @Order(4)
-    fun givenRoleWithoutDocumentWrite__whenRepairFails__thenRollbackLeavesDirtyAndDocumentsUnchangedAndWriterRetryRecovers() {
+    fun `문서 쓰기 권한이 없는 역할이 주어졌을 때__복구가 실패하면__롤백하고 쓰기 역할 재시도로 복구된다`() {
         contract("permission rollback and recovery") {
             for (table in listOf("shelters", "animals")) {
                 jdbc.update("UPDATE pawbridge_animal." + table + " SET search_dirty=true WHERE id=6")
@@ -340,7 +340,7 @@ class OwnedPostgresqlAnimalSearchProjectionTest {
 
     @Test
     @Order(5)
-    fun givenActualOuterTransaction__whenAnyRefreshIsCalled__thenRejectBeforeSqlAndPreserveEveryTable() {
+    fun `실제 바깥 트랜잭션이 주어졌을 때__새로고침을 호출하면__SQL 전에 거절하고 모든 테이블을 보존한다`() {
         contract("outer transaction refusal") {
             val before = allFingerprint()
             writes.executeWithoutResult {

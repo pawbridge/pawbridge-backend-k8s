@@ -85,29 +85,35 @@ class ImageUploadStorageHttpTest {
 
     @ParameterizedTest
     @ValueSource(ints = [3, ABOVE_SDK_RESET_BUFFER, 2 * 1024 * 1024])
-    fun given__product_image__when__uploading_through_shared_client__then__storage_receives_every_byte_and_call_returns(
+    fun `상품 이미지가 주어졌을 때__공유 클라이언트로 업로드하면__저장소가 모든 바이트를 받고 호출이 반환된다`(
         size: Int,
     ) {
+        // given
         val imageBytes = randomBytes(size)
         val images = S3ProductImages(client, BUCKET, "https://assets.invalid")
         val file = diskBackedFile("photo.png", "image/png", imageBytes)
 
+        // when
         val url = uploadWithTimeout(Supplier { images.uploadImage(file) })
 
+        // then
         assertStoredExactly(url, "/$BUCKET/products/", imageBytes, "image/png")
     }
 
     @ParameterizedTest
     @ValueSource(ints = [3, ABOVE_SDK_RESET_BUFFER, 2 * 1024 * 1024])
-    fun given__animal_image__when__uploading_through_shared_client__then__storage_receives_every_byte_and_call_returns(
+    fun `동물 이미지가 주어졌을 때__공유 클라이언트로 업로드하면__저장소가 모든 바이트를 받고 호출이 반환된다`(
         size: Int,
     ) {
+        // given
         val imageBytes = randomBytes(size)
         val images = S3AnimalImages(client, BUCKET, "https://assets.invalid")
         val file = diskBackedFile("photo.jpg", "image/jpeg", imageBytes)
 
+        // when
         val url = uploadWithTimeout(Supplier { images.uploadImage(file) })
 
+        // then
         assertStoredExactly(url, "/$BUCKET/animals/", imageBytes, "image/jpeg")
     }
 

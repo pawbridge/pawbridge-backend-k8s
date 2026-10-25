@@ -237,7 +237,7 @@ class OwnedPostgresqlStoreCartOrderTest {
     }
 
     @Test
-    fun givenTwoSkusAndVerifiedBuyer_whenManagingCartCheckingOutAndReadingOwnOrder_thenCommitSnapshotsStockSearchEventsAndClearOnlyOwnCart() {
+    fun `상품 둘과 검증된 구매자가 주어졌을 때__장바구니를 관리하고 결제해 주문을 읽으면__스냅샷·재고·검색·이벤트를 커밋하고 자기 장바구니만 비운다`() {
         http(pool()) { mvc, _ ->
             check(send(mvc, "GET", CART, token(BUYER), null, 200).isEmpty, "A new Cart must be empty")
             send(mvc, "POST", CART + "/items", token(BUYER), mapOf("skuId" to NORMAL, "quantity" to 2, "userId" to 990001), 200)
@@ -301,7 +301,7 @@ class OwnedPostgresqlStoreCartOrderTest {
     }
 
     @Test
-    fun givenDeferredCartClearFailureAndStaleItems_whenCheckingOutThenRetrying_thenRollbackEveryTableAndPreserveMissingOnlyCart() {
+    fun `지연된 장바구니 비우기 실패와 오래된 항목이 주어졌을 때__결제 후 재시도하면__모든 테이블을 롤백하고 누락 전용 장바구니를 보존한다`() {
         http(pool()) { mvc, _ ->
             send(mvc, "POST", CART + "/items", token(BUYER), mapOf("skuId" to NORMAL, "quantity" to 1), 200)
             val failed = body(BUYER, NORMAL, 1)
@@ -347,7 +347,7 @@ class OwnedPostgresqlStoreCartOrderTest {
     }
 
     @Test
-    fun givenTwoCheckoutPidsThenAnOrderedCheckoutAndAdd_whenRealLocksAreReleased_thenConsumeOnceAndRetainTheLaterAddition() {
+    fun `결제 PID 둘과 순서 있는 결제·추가가 주어졌을 때__실제 잠금이 풀리면__한 번만 소비하고 나중 추가분을 남긴다`() {
         http(pool()) { mvc, _ ->
             send(mvc, "POST", CART + "/items", token(BUYER), mapOf("skuId" to NORMAL, "quantity" to 1), 200)
             val workers = Executors.newFixedThreadPool(2)

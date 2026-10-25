@@ -166,7 +166,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenCurrentDatabaseAdministratorAndStaleUserJwt_whenCreating_thenPersistManualAuditAndSearch() {
+    fun `관리자 DB 권한과 오래된 사용자 JWT가 주어졌을 때__등록하면__수동 감사와 검색을 저장한다`() {
         http { mvc, _ ->
             val created = create(mvc, ADMIN, null, "owned-care-b", "synthetic breed")
             val id = created.path("id").asLong()
@@ -192,7 +192,7 @@ class OwnedPostgresqlAnimalCommandTest {
     @ParameterizedTest(name = "missingApmsNotice[{index}]")
     @NullAndEmptySource
     @ValueSource(strings = ["  "])
-    fun givenCurrentAdministratorOrShelterAndApmsSourceWithoutNotice_whenCreating_thenReturn400WithoutAnyMutation(
+    fun `APMS 출처에 공지가 없을 때__등록하면__400을 돌려주고 변경이 없다`(
         notice: String?,
     ) {
         http { mvc, _ ->
@@ -215,7 +215,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenCurrentOwningShelterAndApmsAnimal_whenUsingAllFourJsonCommands_thenKeepOriginalAuditAndSearchRevision() {
+    fun `소유 보호소와 APMS 동물이 주어졌을 때__JSON 명령 넷을 쓰면__원래 감사와 검색 판본을 유지한다`() {
         http { mvc, _ ->
             val notice = "OWNED-P8-FOUR-COMMANDS"
             val body = body(notice, "owned-care-a", "synthetic breed")
@@ -283,7 +283,7 @@ class OwnedPostgresqlAnimalCommandTest {
 
     @ParameterizedTest
     @ValueSource(longs = [910004, 910005, 910006, 910099])
-    fun givenCurrentUserPendingMissingOrUnboundShelterProfile_whenJwtClaimsAdmin_thenRejectWithoutAnyChange(
+    fun `대기·누락·미연결 보호소 프로필이 주어졌을 때__JWT가 관리자를 주장하면__변경 없이 거절한다`(
         member: Long,
     ) {
         http { mvc, _ ->
@@ -305,7 +305,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenAnotherCurrentShelter_whenCreatingUpdatingOrDeletingTheOwnersAnimal_thenRejectAllFourCommandsWithoutMutation() {
+    fun `다른 보호소가 주어졌을 때__소유자 동물을 등록·수정·삭제하면__네 명령 모두 변경 없이 거절한다`() {
         http { mvc, _ ->
             val id = create(mvc, SHELTER, "OWNED-P8-OWNER", "owned-care-a", "breed").path("id").asLong()
             val before = fingerprint()
@@ -340,7 +340,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenMissingOrInvalidJwtForgedIdentityOrInvalidDto_whenCallingJsonRoutes_thenAuthenticateBeforeBindingAndKeepNeighborClosed() {
+    fun `JWT가 없거나 위조 신원이나 잘못된 DTO가 주어졌을 때__JSON 경로를 호출하면__바인딩 전에 인증하고 이웃을 닫아 둔다`() {
         http { mvc, _ ->
             val before = fingerprint()
             send(mvc, "POST", ROOT, null, "not-json", 401)
@@ -364,7 +364,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenTheOriginalRollbackCharsetConstraint_whenCreatingFourByteText_thenReturn400AndRollBackEveryWrite() {
+    fun `원래 롤백 문자셋 제약이 주어졌을 때__4바이트 문자를 등록하면__400을 돌려주고 모든 쓰기를 롤백한다`() {
         http { mvc, _ ->
             val before = fingerprint()
             val body = body("OWNED-P8-CHARSET", "owned-care-a", "breed")
@@ -379,7 +379,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenTheOriginalChatbotForeignKey_whenAnAdministratorDeletesItsAnimal_thenReturn500AndPreserveTheForeignBaseline() {
+    fun `원래 챗봇 외래키가 주어졌을 때__관리자가 동물을 삭제하면__500을 돌려주고 외래키 기준을 보존한다`() {
         http { mvc, _ ->
             val before = fingerprint()
             send(mvc, "DELETE", ROOT + "/" + FOREIGN_ANIMAL, token(ADMIN), null, 500)
@@ -389,7 +389,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenTheActualServiceWriterTemplate_whenLockingTheCurrentUser_thenUseWritableReadCommittedAndOnePoolConnectionUntilCompletion() {
+    fun `실제 서비스 쓰기 템플릿이 주어졌을 때__현재 사용자를 잠그면__쓰기 READ_COMMITTED로 연결 하나를 유지한다`() {
         http { _, context ->
             val writes = ReflectionTestUtils.getField(context.getBean(AnimalCommandService::class.java), "writes")
                 as TransactionTemplate?
@@ -432,7 +432,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenACommittedCreateAndAResponseAssertionFailure_whenCleaning_thenFindThePreRegisteredExactKeyWithoutAResponseId() {
+    fun `커밋된 등록과 응답 단언 실패가 주어졌을 때__정리하면__응답 ID 없이 미리 등록한 키를 찾는다`() {
         http { mvc, _ ->
             val body = body(null, "owned-care-a", "response failure cleanup breed")
             val key = body["specialMark"] as String
@@ -454,7 +454,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenConcurrentStatusAndDescriptionFromDifferentActors_whenBothWaitOnAnimal_thenPreserveBothCommittedChanges() {
+    fun `서로 다른 행위자의 상태·설명 변경이 주어졌을 때__동물을 함께 기다리면__두 커밋 변경을 모두 보존한다`() {
         http { mvc, _ ->
             val id = create(mvc, SHELTER, "OWNED-P8-CONCURRENT-UPDATE", "owned-care-a", "breed").path("id").asLong()
             val responses = raceWhileLocked(
@@ -497,7 +497,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenDeletedMiddleManualNotice_whenCreatingAgain_thenAdvancePastLiveMaximum() {
+    fun `중간 수동 공지가 삭제됐을 때__다시 등록하면__현재 최댓값 뒤로 번호를 올린다`() {
         http { mvc, _ ->
             val first = create(mvc, SHELTER, null, "owned-care-a", "breed")
             val middle = create(mvc, SHELTER, null, "owned-care-a", "breed")
@@ -521,7 +521,7 @@ class OwnedPostgresqlAnimalCommandTest {
     }
 
     @Test
-    fun givenConcurrentManualCreatesFromDifferentActors_whenInsertionsOverlap_thenGenerateDistinctLiveNotices() {
+    fun `서로 다른 행위자의 동시 등록이 주어졌을 때__삽입이 겹치면__서로 다른 공지를 만든다`() {
         http { mvc, _ ->
             // Register both exact cleanup keys before dispatch; worker threads do not mutate owned-key sets.
             val firstBody = JSON.writeValueAsString(body(null, "owned-care-a", "breed"))

@@ -154,7 +154,7 @@ class OwnedPostgresqlShelterObservationTest {
 
     @Test
     @Order(1)
-    fun given__empty_mixed_and_preobserved_shelters__when__recording_twice_in_one_transaction__then__preserve_first_kst_snapshot_and_consumer_wire_and_rollback() {
+    fun `빈·혼합·기관측 보호소가 주어졌을 때__한 트랜잭션에서 두 번 기록하면__첫 KST 스냅샷과 소비자 응답을 보존하고 롤백한다`() {
         contract("snapshot-and-consumer") {
             val date = today()
             val first = observation(103, date)
@@ -220,7 +220,7 @@ class OwnedPostgresqlShelterObservationTest {
 
     @Test
     @Order(2)
-    fun given__actual_read_only_transaction_with_insert_privilege__when__same_recorder_writes__then__postgres_rejects_and_rolls_back_without_partial_rows() {
+    fun `INSERT 권한이 있는 읽기 전용 트랜잭션이 주어졌을 때__같은 기록기로 쓰면__Postgres가 거절하고 부분 행 없이 롤백한다`() {
         contract("server-read-only") {
             val readOnly = TransactionTemplate(manager)
             readOnly.isReadOnly = true

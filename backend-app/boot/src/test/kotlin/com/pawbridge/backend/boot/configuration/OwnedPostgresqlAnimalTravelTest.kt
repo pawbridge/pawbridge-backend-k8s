@@ -131,7 +131,7 @@ class OwnedPostgresqlAnimalTravelTest {
     }
 
     @Test
-    fun givenSyntheticRegionsAndPublishedAndPreparingRows_whenReadingThreePublicRoutes_thenPreserveFilteringCountRowsAndCompleteWire() {
+    fun `합성 지역과 공개·준비 중 행이 주어졌을 때__공개 경로 셋을 읽으면__필터·개수·행·전체 응답을 보존한다`() {
         http { mvc ->
             val regions = send(mvc, ROOT + "/regions", 200)
             check(
@@ -229,7 +229,7 @@ class OwnedPostgresqlAnimalTravelTest {
     }
 
     @Test
-    fun givenMinimumSelectPrivilegesAndOneReaderConnection_whenListAndErrorThenRecoveryRun_thenObservePhysicalReadOnlyRepeatableReadAndNoEscapedBinding() {
+    fun `최소 SELECT 권한과 연결 하나가 주어졌을 때__목록과 오류 뒤 복구를 실행하면__읽기 전용 격리와 바인딩 비노출을 확인한다`() {
         http { mvc ->
             send(mvc, ROOT + "?areaCode=20", 200)
             listObservation(true)

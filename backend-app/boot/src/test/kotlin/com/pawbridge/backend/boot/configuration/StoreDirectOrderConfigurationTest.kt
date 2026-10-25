@@ -10,6 +10,9 @@ import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.directorder.web.DirectOrderController
 import com.pawbridge.backend.store.internal.directorder.web.DirectOrderExceptionHandler
 import com.pawbridge.backend.store.internal.directorder.web.OrderReadController
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
@@ -17,8 +20,6 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -39,14 +40,18 @@ import javax.sql.DataSource
 class StoreDirectOrderConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on", "1", "unknown"])
-    fun given__orders_not_explicitly_true__when__assembling_without_database_inputs__then__create_no_order_auditing_or_writer_beans(
+    fun `주문이 명시적 true가 아닐 때__DB 입력 없이 조립하면__주문·감사·쓰기 빈을 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = runner()
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.store-direct-orders.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(EntityManagerFactory::class.java)
                 .doesNotHaveBean(DirectOrders::class.java)
@@ -63,12 +68,20 @@ class StoreDirectOrderConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["store", "animal", "both"])
-    fun given__selected_writer_features__when__assembling__then__share_one_auditing_registration_and_keep_store_on_its_single_writer_unit(
+    fun `쓰기 기능이 선택됐을 때__조립하면__감사 등록 하나를 공유하고 스토어는 단일 쓰기 유닛을 쓴다`(
         mode: String,
     ) {
-        val writer: DataSource = mock(DataSource::class.java)
-        val reader: DataSource = mock(DataSource::class.java)
-        val readerManager: PlatformTransactionManager = mock(PlatformTransactionManager::class.java)
+        // given
+        val writer = mockk<DataSource>()
+        val reader = mockk<DataSource>()
+        val readerManager = mockk<PlatformTransactionManager>()
+
+        excludeRecords {
+            writer.hashCode()
+            reader.hashCode()
+            readerManager.hashCode()
+        }
+
         val units = AtomicReference<List<EntityManagerFactory>>()
         val terms = AtomicReference<KoreanSearchTerms>()
         var runner = writerInputs(writer).withBean("dataSource", DataSource::class.java, Supplier { reader })
@@ -79,7 +92,10 @@ class StoreDirectOrderConfigurationTest {
         if (mode != "store") {
             runner = runner.withPropertyValues("pawbridge.animal-commands.enabled=true")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .hasSingleBean(JpaAuditingConfiguration::class.java)
                 .hasSingleBean(AuditingHandler::class.java)
@@ -156,7 +172,7 @@ class StoreDirectOrderConfigurationTest {
             if (mode == "store") {
                 assertThat(context).doesNotHaveBean(AnimalCommandService::class.java)
             }
-            verifyNoInteractions(writer, reader, readerManager)
+            confirmVerified(writer, reader, readerManager)
         }
         assertThat(units.get()).allSatisfy { factory -> assertThat(factory.isOpen).isFalse() }
         if (terms.get() != null) {
@@ -165,28 +181,45 @@ class StoreDirectOrderConfigurationTest {
     }
 
     @Test
-    fun given__user_actor_jdbc_uses_another_source__when__orders_enabled__then__reject_the_mismatched_writer_without_database_access() {
-        val writer: DataSource = mock(DataSource::class.java)
-        val other: DataSource = mock(DataSource::class.java)
+    fun `사용자 액터 JDBC가 다른 소스를 쓸 때__주문을 켜면__DB 접근 없이 불일치 쓰기 DB를 거절한다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val other = mockk<DataSource>()
+
+        excludeRecords {
+            writer.hashCode()
+            other.hashCode()
+        }
+
+        // when
         runner().withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(other) })
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .withPropertyValues("pawbridge.store-direct-orders.enabled=true").run { context ->
+                // then
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure)
                     .hasRootCauseMessage("Store order actors must use the same writer DataSource")
-                verifyNoInteractions(writer, other)
+                confirmVerified(writer, other)
             }
     }
 
     @Test
-    fun given__only_reader_inputs__when__orders_enabled__then__fail_instead_of_using_a_reader_for_orders() {
-        val reader: DataSource = mock(DataSource::class.java)
+    fun `리더 입력만 있을 때__주문을 켜면__리더로 주문을 처리하지 않고 실패한다`() {
+        // given
+        val reader = mockk<DataSource>()
+
+        excludeRecords {
+            reader.hashCode()
+        }
+
+        // when
         runner().withBean("dataSource", DataSource::class.java, Supplier { reader })
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .withPropertyValues("pawbridge.store-direct-orders.enabled=true").run { context ->
+                // then
                 assertThat(context).hasFailed()
-                verifyNoInteractions(reader)
+                confirmVerified(reader)
             }
     }
 

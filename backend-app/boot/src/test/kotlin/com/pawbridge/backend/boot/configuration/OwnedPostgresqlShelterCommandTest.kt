@@ -235,7 +235,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     @Test
-    fun givenCurrentDatabaseRoles_whenSecuredShelterWritesRun_thenKeepWireAndRejectForeignPendingForgedOrLinkedDeletion() {
+    fun `현재 DB 역할이 주어졌을 때__보호된 보호소 쓰기를 실행하면__응답을 유지하고 타 보호소·대기·위조·연결 삭제를 거절한다`() {
         http { mvc, _ ->
             val created = create(mvc)
             val afterCreate = fingerprint()
@@ -283,7 +283,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     @Test
-    fun givenOwnedShelterWithPreviousOrNullAudit_whenUpdatingThroughHttp_thenReturnFlushedAuditMatchingCommittedRow() {
+    fun `이전 감사나 null 감사 보호소가 주어졌을 때__HTTP로 수정하면__커밋된 행과 같은 감사를 돌려준다`() {
         http { mvc, _ ->
             val id = create(mvc)
             val care = care(id)
@@ -333,7 +333,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     @Test
-    fun givenClearShelterWithProjectionAndPublicInfo_whenActualDeleteFlushesInsideRollback_thenCascadeOnlyThoseRowsAndRetainObservationHistory() {
+    fun `관측 이력이 있는 보호소가 주어졌을 때__실제 삭제가 롤백 안에서 flush되면__해당 행만 연쇄 삭제하고 관측 이력은 남긴다`() {
         http { _, context ->
             val manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
             val tx = writer(manager)
@@ -365,7 +365,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     @Test
-    fun givenApprovalHoldingKeyShare_whenAnotherAdministratorDeletes_thenActualForUpdateBlocksAndCommittedMembershipReturns409() {
+    fun `승인이 KEY SHARE를 쥐었을 때__다른 관리자가 삭제하면__FOR UPDATE가 막고 커밋된 멤버십은 409를 돌려준다`() {
         http { mvc, context ->
             val shelter = create(mvc)
             val registration = care(shelter)
@@ -413,7 +413,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     @Test
-    fun givenDeleteHoldingNativeForUpdate_whenApprovalFinishesFullReadThenWaitsForKeyShare_thenDeletionCommitsAndApprovalRollsBackUnavailable() {
+    fun `삭제가 FOR UPDATE를 쥐었을 때__승인이 읽기를 마치고 KEY SHARE를 기다리면__삭제가 커밋되고 승인은 롤백된다`() {
         http { mvc, context ->
             val created = create(mvc)
             val care = care(created)
@@ -467,7 +467,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     @Test
-    fun givenInheritedRepeatableReadOrReadOnly_whenShelterWriteBegins_thenRejectBeforeBusinessAndRollBackAllTables() {
+    fun `상속된 REPEATABLE READ나 읽기 전용이 주어졌을 때__보호소 쓰기를 시작하면__업무 전에 거절하고 모든 테이블을 롤백한다`() {
         http { _, context ->
             val manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
             val commands = context.getBean(ShelterCommands::class.java)
@@ -492,7 +492,7 @@ class OwnedPostgresqlShelterCommandTest {
     }
 
     @Test
-    fun givenSupplementaryTextOnOwnedCreateAndUpdate_whenShelterWritesRejectRollbackCharset_thenReturnOriginal400WithoutPrivateDatabaseLogs() {
+    fun `보충 문자가 주어졌을 때__소유 보호소를 등록·수정하면__원래 400을 돌려주고 비공개 DB 로그는 없다`() {
         http { mvc, _ ->
             val created = create(mvc)
             val before = fingerprint()
