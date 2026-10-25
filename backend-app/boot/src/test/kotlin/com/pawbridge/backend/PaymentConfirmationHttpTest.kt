@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.payment.internal.confirmation.application.PaymentOrderAccessDeniedException
 import com.pawbridge.backend.payment.internal.confirmation.application.PaymentOrderNotPayableException
@@ -9,26 +10,21 @@ import com.pawbridge.backend.payment.internal.confirmation.application.dto.TossP
 import com.pawbridge.backend.payment.internal.confirmation.application.dto.TossPaymentResponse
 import com.pawbridge.backend.payment.internal.confirmation.web.PaymentController
 import com.pawbridge.backend.payment.internal.confirmation.web.PaymentInputExceptionHandler
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.capture
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.slot
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -53,12 +49,13 @@ class PaymentConfirmationHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var payments: Payments
 
     @Test
-    fun given__a_verified_member_and_forged_header__when__confirming__then__use_the_jwt_identity_and_bare_toss_response() {
-        whenever(payments.confirmPayment(eq(7L), anyNonNull<TossPaymentConfirmRequest>())).thenReturn(
+    fun `검증된 회원과 위조 헤더가 주어졌을 때__결제를 승인하면__JWT 신원과 토스 응답 원문을 쓴다`() {
+        // given
+        every { payments.confirmPayment(any(), any()) } returns
             TossPaymentResponse.builder()
                 .paymentKey("synthetic-payment-key")
                 .orderId("legacy-order-id")
@@ -67,23 +64,25 @@ class PaymentConfirmationHttpTest {
                 .totalAmount(200L)
                 .balanceAmount(200L)
                 .status("DONE")
-                .build(),
-        )
+                .build()
 
+        // when
         val result = mvc.perform(
             verified("POST", "/api/v1/payments/confirm")
                 .content("{\"paymentKey\":\"synthetic-payment-key\",\"orderId\":\"legacy-order-id\",\"amount\":200}"),
         )
+
+        // then
+        val response = result
             .andExpect(status().isOk())
             .andReturn()
-
-        val input: ArgumentCaptor<TossPaymentConfirmRequest> = ArgumentCaptor.forClass(TossPaymentConfirmRequest::class.java)
-        verify(payments).confirmPayment(eq(7L), capture(input))
-        assertThat(input.value.paymentKey).isEqualTo("synthetic-payment-key")
-        assertThat(input.value.orderId).isEqualTo("legacy-order-id")
-        assertThat(input.value.amount).isEqualTo(200L)
-        verifyNoMoreInteractions(payments)
-        val json = mapper.readTree(result.response.contentAsByteArray)
+        val input = slot<TossPaymentConfirmRequest>()
+        verify(exactly = 1) { payments.confirmPayment(7L, capture(input)) }
+        assertThat(input.captured.paymentKey).isEqualTo("synthetic-payment-key")
+        assertThat(input.captured.orderId).isEqualTo("legacy-order-id")
+        assertThat(input.captured.amount).isEqualTo(200L)
+        confirmVerified(payments)
+        val json = mapper.readTree(response.response.contentAsByteArray)
         assertThat(json.path("paymentKey").asText()).isEqualTo("synthetic-payment-key")
         assertThat(json.path("orderId").asText()).isEqualTo("legacy-order-id")
         assertThat(json.path("currency").asText()).isEqualTo("KRW")
@@ -96,19 +95,24 @@ class PaymentConfirmationHttpTest {
     }
 
     @Test
-    fun given__omitted_nullable_request_fields__when__confirming__then__preserve_the_original_dto_without_new_constraints() {
-        whenever(payments.confirmPayment(eq(7L), anyNonNull<TossPaymentConfirmRequest>()))
-            .thenReturn(TossPaymentResponse.builder().status("ABORTED").build())
+    fun `생략된 널 허용 요청 필드가 주어졌을 때__결제를 승인하면__새 제약 없이 원래 DTO를 유지한다`() {
+        // given
+        every { payments.confirmPayment(any(), any()) } returns TossPaymentResponse.builder().status("ABORTED").build()
+
+        // when
         val result = mvc.perform(verified("POST", "/api/v1/payments/confirm").content("{}"))
+
+        // then
+        val response = result
             .andExpect(status().isOk())
             .andReturn()
-        val input: ArgumentCaptor<TossPaymentConfirmRequest> = ArgumentCaptor.forClass(TossPaymentConfirmRequest::class.java)
-        verify(payments).confirmPayment(eq(7L), capture(input))
-        assertThat(input.value.paymentKey).isNull()
-        assertThat(input.value.orderId).isNull()
-        assertThat(input.value.amount).isNull()
-        verifyNoMoreInteractions(payments)
-        val json = mapper.readTree(result.response.contentAsByteArray)
+        val input = slot<TossPaymentConfirmRequest>()
+        verify(exactly = 1) { payments.confirmPayment(7L, capture(input)) }
+        assertThat(input.captured.paymentKey).isNull()
+        assertThat(input.captured.orderId).isNull()
+        assertThat(input.captured.amount).isNull()
+        confirmVerified(payments)
+        val json = mapper.readTree(response.response.contentAsByteArray)
         assertThat(json.path("status").asText()).isEqualTo("ABORTED")
         assertThat(json.has("data")).isFalse()
         assertThat(json.has("code")).isFalse()
@@ -121,62 +125,83 @@ class PaymentConfirmationHttpTest {
         "foreign,403,본인의 주문만 결제할 수 있습니다.",
         "not-pending,409,결제 대기 상태의 주문만 결제할 수 있습니다.",
     )
-    fun given__a_pre_provider_order_rejection__when__confirming__then__map_it_to_a_scoped_problem_response(
+    fun `제공자 호출 전 주문 거절이 주어졌을 때__결제를 승인하면__범위 한정 문제 응답으로 바꾼다`(
         kind: String,
         status: Int,
         detail: String,
     ) {
-        whenever(payments.confirmPayment(eq(7L), anyNonNull<TossPaymentConfirmRequest>())).thenThrow(
-            if (kind == "foreign") PaymentOrderAccessDeniedException() else PaymentOrderNotPayableException(),
-        )
+        // given
+        every { payments.confirmPayment(any(), any()) } throws
+            if (kind == "foreign") PaymentOrderAccessDeniedException() else PaymentOrderNotPayableException()
+
+        // when
         val result = mvc.perform(
             verified("POST", "/api/v1/payments/confirm")
                 .content("{\"paymentKey\":\"synthetic-payment-key\",\"orderId\":\"legacy-order-id\",\"amount\":200}"),
         )
+
+        // then
+        val response = result
             .andExpect(status().`is`(status))
             .andReturn()
-        val json = mapper.readTree(result.response.contentAsByteArray)
+        val json = mapper.readTree(response.response.contentAsByteArray)
         assertThat(json.path("status").asInt()).isEqualTo(status)
         assertThat(json.path("detail").asText()).isEqualTo(detail)
         // A non-owner (including on an already paid order) never receives a stored payment key.
         assertThat(json.has("paymentKey")).isFalse()
-        assertThat(result.response.contentAsString).doesNotContain("synthetic-payment-key")
+        assertThat(response.response.contentAsString).doesNotContain("synthetic-payment-key")
     }
 
     @Test
-    fun given__only_a_forged_identity_header__when__confirming__then__reject_before_the_payment_application() {
-        mvc.perform(command("POST", "/api/v1/payments/confirm").content("{}"))
-            .andExpect(status().isUnauthorized())
-        verifyNoInteractions(payments)
+    fun `위조 신원 헤더만 주어졌을 때__결제를 승인하면__결제 애플리케이션 전에 거부한다`() {
+        // given
+        val request = command("POST", "/api/v1/payments/confirm").content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(payments)
     }
 
     @Test
-    fun given__an_invalid_bearer_and_forged_header__when__confirming__then__reject_before_the_payment_application() {
-        mvc.perform(
-            command("POST", "/api/v1/payments/confirm")
-                .header("Authorization", "Bearer synthetic-invalid-token")
-                .content("{}"),
-        )
-            .andExpect(status().isUnauthorized())
-        verifyNoInteractions(payments)
+    fun `잘못된 베어러와 위조 헤더가 주어졌을 때__결제를 승인하면__결제 애플리케이션 전에 거부한다`() {
+        // given
+        val request = command("POST", "/api/v1/payments/confirm")
+            .header("Authorization", "Bearer synthetic-invalid-token")
+            .content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized())
+        confirmVerified(payments)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["paymentKey", "orderId"])
-    fun given__a_non_bmp_request_field__when__a_verified_member_confirms__then__use_the_existing_scoped_validation_response(
+    fun `BMP 밖 요청 필드가 주어졌을 때__검증된 회원이 승인하면__기존 범위 한정 검증 응답을 쓴다`(
         field: String,
     ) {
+        // given
         val body = mapper.createObjectNode()
             .put("paymentKey", "synthetic-payment-key")
             .put("orderId", "legacy-order-id")
             .put("amount", 200)
         body.put(field, "😀")
+
+        // when
         val result = mvc.perform(verified("POST", "/api/v1/payments/confirm").content(mapper.writeValueAsBytes(body)))
+
+        // then
+        val response = result
             .andExpect(status().isBadRequest())
             .andReturn()
-        val json = mapper.readTree(result.response.contentAsByteArray)
+        val json = mapper.readTree(response.response.contentAsByteArray)
         assertThat(json.path("detail").asText()).isEqualTo("일부 이모지 등 지원하지 않는 문자를 제외해 주세요.")
-        verifyNoInteractions(payments)
+        confirmVerified(payments)
     }
 
     @ParameterizedTest
@@ -189,12 +214,19 @@ class PaymentConfirmationHttpTest {
         "POST,/api/v1/payments",
         "POST,/api/v1/payments/confirm/extra",
     )
-    fun given__a_verified_member__when__using_an_unregistered_method_or_alias__then__deny_before_business(
+    fun `검증된 회원이 주어졌을 때__등록되지 않은 메서드나 별칭을 쓰면__업무 전에 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(verified(method, path).content("{}")).andExpect(status().isForbidden())
-        verifyNoInteractions(payments)
+        // given
+        val request = verified(method, path).content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(payments)
     }
 
     companion object {
@@ -223,14 +255,20 @@ class PaymentConfirmationDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var payments: Payments
 
     @Test
-    fun given__no_payment_flag__when__a_verified_member_confirms__then__deny_before_business() {
-        mvc.perform(PaymentConfirmationHttpTest.verified("POST", "/api/v1/payments/confirm").content("{}"))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(payments)
+    fun `결제 플래그가 없을 때__검증된 회원이 승인하면__업무 전에 거부한다`() {
+        // given
+        val request = PaymentConfirmationHttpTest.verified("POST", "/api/v1/payments/confirm").content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(payments)
     }
 }
 
@@ -250,13 +288,19 @@ class PaymentConfirmationAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var payments: Payments
 
     @Test
-    fun given__a_noncanonical_payment_flag__when__a_verified_member_confirms__then__deny_before_business() {
-        mvc.perform(PaymentConfirmationHttpTest.verified("POST", "/api/v1/payments/confirm").content("{}"))
-            .andExpect(status().isForbidden())
-        verifyNoInteractions(payments)
+    fun `정식이 아닌 결제 플래그가 주어졌을 때__검증된 회원이 승인하면__업무 전에 거부한다`() {
+        // given
+        val request = PaymentConfirmationHttpTest.verified("POST", "/api/v1/payments/confirm").content("{}")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(payments)
     }
 }

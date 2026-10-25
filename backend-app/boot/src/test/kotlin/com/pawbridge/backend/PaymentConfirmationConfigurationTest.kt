@@ -15,6 +15,8 @@ import com.pawbridge.backend.store.api.StorePaymentEvents
 import com.pawbridge.backend.store.api.StorePaymentOrders
 import com.pawbridge.backend.store.internal.payment.infrastructure.JdbcStorePaymentOrders
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.justRun
+import io.mockk.mockk
 import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
@@ -23,7 +25,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
@@ -47,14 +48,18 @@ import javax.sql.DataSource
 class PaymentConfirmationConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes"])
-    fun given__a_missing_or_non_true_payment_flag__when__assembling_without_secret__then__create_no_payment_resources(
+    fun `결제 플래그가 없거나 true가 아닐 때__비밀 없이 조립하면__결제 리소스를 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = WebApplicationContextRunner().withUserConfiguration(PaymentConfirmationConfiguration::class.java)
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.payments.enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(Payments::class.java)
                 .doesNotHaveBean(EntityManagerFactory::class.java)
@@ -65,37 +70,53 @@ class PaymentConfirmationConfigurationTest {
     }
 
     @Test
-    fun given__missing_secret_or_credential_bearing_endpoint__when__validating_configuration__then__reject_without_echoing_inputs() {
-        assertThatThrownBy { PaymentConfirmationConfiguration("", "https://api.tosspayments.com/v1") }
+    fun `비밀이 없거나 자격 증명이 든 엔드포인트가 주어졌을 때__설정을 검증하면__입력을 되풀이하지 않고 거부한다`() {
+        // given
+        val missingSecretEndpoint = "https://api.tosspayments.com/v1"
+        val credentialEndpoint = "https://synthetic-private-user@provider.invalid/v1"
+
+        // when
+        val missingSecret = assertThatThrownBy { PaymentConfirmationConfiguration("", missingSecretEndpoint) }
+        val credentialBearing = assertThatThrownBy { PaymentConfirmationConfiguration(SECRET, credentialEndpoint) }
+
+        // then
+        missingSecret
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessage("An explicit Toss secret key is required")
-        assertThatThrownBy {
-            PaymentConfirmationConfiguration(SECRET, "https://synthetic-private-user@provider.invalid/v1")
-        }
+        credentialBearing
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessage("An explicit Toss endpoint with /v1 is required")
     }
 
     @Test
-    fun given__payments_without_the_store_payment_business__when__assembling__then__fail_at_startup_instead_of_running_without_order_updates() {
-        val writer = mock(DataSource::class.java)
+    fun `스토어 결제 업무 없는 결제가 주어졌을 때__조립하면__주문 갱신 없이 실행하지 않고 시작 시 실패한다`() {
+        // given
+        val writer = mockk<DataSource>()
+        val reader = mockk<DataSource>()
+        val transactionManager = mockk<PlatformTransactionManager>()
+
+        // when
         WebApplicationContextRunner().withUserConfiguration(PaymentConfirmationConfiguration::class.java)
             .withPropertyValues("pawbridge.payments.enabled=true", "toss.secret-key=$SECRET")
             .withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(writer) })
-            .withBean("readJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(mock(DataSource::class.java)) })
+            .withBean("readJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(reader) })
             .withBean(
                 "readOnlyTransaction",
                 TransactionTemplate::class.java,
-                Supplier { TransactionTemplate(mock(PlatformTransactionManager::class.java)) },
+                Supplier { TransactionTemplate(transactionManager) },
             )
-            .run { context -> assertThat(context).hasFailed().failure.hasMessageContaining("StorePaymentEvents") }
+            .run { context ->
+                // then
+                assertThat(context).hasFailed().failure.hasMessageContaining("StorePaymentEvents")
+            }
     }
 
     @Test
-    fun given__actual_main_and_explicit_synthetic_payment__when__assembling_and_closing__then__share_named_resources_without_startup_io_or_secret_logs(
+    fun `실제 main과 명시적 가짜 결제가 주어졌을 때__조립하고 닫으면__시작 I-O와 비밀 로그 없이 자원을 공유한다`(
         output: CapturedOutput,
     ) {
+        // given
         val values = F3TestInputs.values()
         values["PAWBRIDGE_DB_URL"] = "jdbc:postgresql://127.0.0.1:1/pawbridge_payment_synthetic"
         val read = ReadDatabaseSettings.fromEnvironment { name -> values[name] }
@@ -103,6 +124,12 @@ class PaymentConfirmationConfigurationTest {
         val factoryRef = AtomicReference<EntityManagerFactory>()
         val clientRef = AtomicReference<HttpClient>()
         val poolsRef = AtomicReference<List<HikariDataSource>>()
+        val redisFactory = mockk<LettuceConnectionFactory>()
+
+        justRun { redisFactory.afterPropertiesSet() }
+        justRun { redisFactory.destroy() }
+
+        // when
         WebApplicationContextRunner()
             .withUserConfiguration(PawBridgeApplication::class.java, PaymentConfirmationConfiguration::class.java)
             .withInitializer { context ->
@@ -114,7 +141,7 @@ class PaymentConfirmationConfigurationTest {
                 StorePaymentTransportConfiguration.OwnedRedisFactory::class.java,
                 Supplier {
                     StorePaymentTransportConfiguration.OwnedRedisFactory { settings ->
-                        mock(LettuceConnectionFactory::class.java)
+                        redisFactory
                     }
                 },
             )
@@ -143,6 +170,7 @@ class PaymentConfirmationConfigurationTest {
                 "pawbridge.shelter-observations.schedule-enabled=false",
             )
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(Payments::class.java)
                     .hasSingleBean(PaymentController::class.java)

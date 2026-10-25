@@ -16,54 +16,86 @@ class PostTokenAuthenticatorTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_USER", "ROLE_ADMIN", "ROLE_SHELTER", "", " ", "ROLE_UNKNOWN", "ROLE_ADMIN "])
-    fun given__signed_access_identity__when__authenticating__then__use_claim_user_id_for_every_existing_role(role: String) {
-        assertThat(tokens.authenticate("Bearer " + F3TestInputs.token(7, role))).isEqualTo(7L)
+    fun `서명된 접근 신원이 주어졌을 때__인증하면__모든 기존 역할에서 클레임의 사용자 ID를 쓴다`(role: String) {
+        // given
+        val header = "Bearer " + F3TestInputs.token(7, role)
+
+        // when
+        val userId = tokens.authenticate(header)
+
+        // then
+        assertThat(userId).isEqualTo(7L)
     }
 
     @Test
-    fun given__missing_or_non_bearer_header__when__authenticating__then__keep_missing_token_message() {
-        for (header in arrayOf<String?>(null, "Basic ignored", "bearer ignored")) {
-            assertThatThrownBy { tokens.authenticate(header) }
+    fun `헤더가 없거나 베어러가 아닐 때__인증하면__토큰 필요 메시지를 유지한다`() {
+        // given
+        val headers = arrayOf<String?>(null, "Basic ignored", "bearer ignored")
+
+        // when
+        val failures = headers.map { header -> assertThatThrownBy { tokens.authenticate(header) } }
+
+        // then
+        for (failure in failures) {
+            failure
                 .isInstanceOf(PostTokenAuthenticator.Failure::class.java)
                 .hasMessage("인증 토큰이 필요합니다.")
         }
     }
 
     @Test
-    fun given__invalid_or_expired_signature__when__authenticating__then__do_not_echo_token_details() {
+    fun `서명이 잘못됐거나 만료됐을 때__인증하면__토큰 상세를 되풀이하지 않는다`() {
+        // given
         val expired = Jwts.builder()
             .claim("userId", 7)
             .claim("role", "ROLE_USER")
             .expiration(Date(1))
             .signWith(F3TestInputs.KEY)
             .compact()
-        for (token in arrayOf("", "private-token-detail", expired, "eyJhbGciOiJub25lIn0.eyJ1c2VySWQiOjd9.")) {
-            assertThatThrownBy { tokens.authenticate("Bearer $token") }
-                .hasMessage("유효하지 않거나 만료된 토큰입니다.")
+        val rejected = arrayOf("", "private-token-detail", expired, "eyJhbGciOiJub25lIn0.eyJ1c2VySWQiOjd9.")
+
+        // when
+        val failures = rejected.map { token -> assertThatThrownBy { tokens.authenticate("Bearer $token") } }
+
+        // then
+        for (failure in failures) {
+            failure.hasMessage("유효하지 않거나 만료된 토큰입니다.")
         }
     }
 
     @ParameterizedTest
     @MethodSource("invalidIdentity")
-    fun given__signed_but_invalid_identity__when__authenticating__then__reject_as_claim_parsing_failure(
+    fun `서명됐지만 잘못된 신원이 주어졌을 때__인증하면__클레임 파싱 실패로 거부한다`(
         claims: Map<String, Any>,
     ) {
+        // given
         val token = Jwts.builder()
             .claims(claims)
             .expiration(Date(System.currentTimeMillis() + 3_600_000))
             .signWith(F3TestInputs.KEY)
             .compact()
-        assertThatThrownBy { tokens.authenticate("Bearer $token") }.hasMessage("토큰 파싱에 실패했습니다.")
+
+        // when
+        val failure = assertThatThrownBy { tokens.authenticate("Bearer $token") }
+
+        // then
+        failure.hasMessage("토큰 파싱에 실패했습니다.")
     }
 
     @Test
-    fun givenSignedIdentityWithoutExpiry__whenAuthenticatingAnExistingRestContract__thenKeepItsOptionalExpiryPolicy() {
+    fun `만료 없는 서명 신원이 주어졌을 때__기존 REST 계약으로 인증하면__선택적 만료 정책을 유지한다`() {
+        // given
         val token = Jwts.builder()
             .claim("userId", 7)
             .claim("role", "ROLE_UNKNOWN")
             .signWith(F3TestInputs.KEY)
             .compact()
-        assertThat(tokens.authenticate("Bearer $token")).isEqualTo(7L)
+
+        // when
+        val userId = tokens.authenticate("Bearer $token")
+
+        // then
+        assertThat(userId).isEqualTo(7L)
     }
 
     companion object {
