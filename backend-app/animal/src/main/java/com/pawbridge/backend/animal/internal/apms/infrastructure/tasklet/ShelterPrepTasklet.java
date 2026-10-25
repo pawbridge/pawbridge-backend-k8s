@@ -6,8 +6,8 @@ import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsAnimal;
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Shelter;
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository;
 
-import lombok.extern.slf4j.Slf4j;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
@@ -26,8 +26,9 @@ import java.util.stream.Collectors;
  * - Chunk 트랜잭션 롤백과 무관하게 보호소 데이터 일관성 보장
  * - 이 Step이 FAILED이면 Step Flow에 의해 Job을 즉시 종료 (Step 1 실행 안 함)
  */
-@Slf4j
 public class ShelterPrepTasklet implements Tasklet {
+
+    private static final Logger log = LoggerFactory.getLogger(ShelterPrepTasklet.class);
 
     private final SearchDocumentWriter searchDocuments;
 

@@ -3,8 +3,6 @@ package com.pawbridge.backend.animal.internal.apms.infrastructure.reader;
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsAnimalSnapshot;
 import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsAnimal;
 
-import lombok.RequiredArgsConstructor;
-
 import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.StepExecutionListener;
@@ -13,10 +11,13 @@ import org.springframework.batch.item.ItemReader;
 import java.util.Collections;
 import java.util.Iterator;
 
-@RequiredArgsConstructor
 public class ApmsItemReader implements ItemReader<ApmsAnimal>, StepExecutionListener {
     private final ApmsAnimalSnapshot snapshot;
     private Iterator<ApmsAnimal> items = Collections.emptyIterator();
+
+    public ApmsItemReader(ApmsAnimalSnapshot snapshot) {
+        this.snapshot = snapshot;
+    }
 
     @Override
     public synchronized ApmsAnimal read() {
