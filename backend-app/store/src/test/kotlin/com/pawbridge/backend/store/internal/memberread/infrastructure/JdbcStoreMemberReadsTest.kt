@@ -2,28 +2,19 @@ package com.pawbridge.backend.store.internal.memberread.infrastructure
 
 import com.pawbridge.backend.store.api.StoreMemberReadUnavailableException
 import com.pawbridge.backend.store.api.StoreMemberReads
+import io.mockk.Called
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyMap
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.RETURNS_DEFAULTS
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.stubbing.Answer
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.ResultSetExtractor
 import org.springframework.jdbc.core.RowMapper
@@ -32,6 +23,8 @@ import org.springframework.transaction.CannotCreateTransactionException
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionCallback
 import org.springframework.transaction.support.TransactionOperations
+import java.lang.reflect.InvocationHandler
+import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import java.time.LocalDateTime
 import java.util.Queue
@@ -39,50 +32,19 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.stream.Stream
 
 class JdbcStoreMemberReadsTest {
-    private val jdbc: NamedParameterJdbcOperations = mock(NamedParameterJdbcOperations::class.java)
-    private val tx: TransactionOperations = mock(TransactionOperations::class.java)
+    private val jdbc: NamedParameterJdbcOperations = mockk<NamedParameterJdbcOperations>()
+    private val tx: TransactionOperations = mockk<TransactionOperations>()
     private val reads = JdbcStoreMemberReads(jdbc, tx)
     private val mapped: Queue<ResultSet> = java.util.ArrayDeque()
     private val extracted: Queue<ResultSet> = java.util.ArrayDeque()
     private val sql = ArrayList<String>()
     private val params = ArrayList<Map<String, *>>()
     private var active = false
-    private var count = 3L
     private val time: LocalDateTime = LocalDateTime.of(2026, 10, 20, 3, 4, 5, 123456000)
 
-    @BeforeEach
-    fun setup() {
-        `when`(tx.execute(any<TransactionCallback<Any>>())).thenAnswer { call ->
-            active = true
-            try {
-                call.getArgument<TransactionCallback<*>>(0).doInTransaction(SimpleTransactionStatus())
-            } finally {
-                active = false
-            }
-        }
-        `when`(jdbc.query(anyString(), anyMap<String, Any>(), any<RowMapper<Any>>())).thenAnswer { call ->
-            capture(call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            val rs = mapped.remove()
-            val mapper = call.getArgument<RowMapper<*>>(2)
-            val results = ArrayList<Any?>()
-            var n = 0
-            while (rs.next()) {
-                results.add(mapper.mapRow(rs, n++))
-            }
-            results
-        }
-        `when`(jdbc.query(anyString(), anyMap<String, Any>(), any<ResultSetExtractor<Any>>())).thenAnswer { call ->
-            capture(call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            call.getArgument<ResultSetExtractor<*>>(2).extractData(extracted.remove())
-        }
-        `when`(jdbc.queryForObject(anyString(), anyMap<String, Any>(), eq(Long::class.javaObjectType))).thenAnswer { call ->
-            capture(call.getArgument<String>(0), call.getArgument<Map<String, *>>(1))
-            count
-        }
-    }
-
     @Test
-    fun given__wishlist_page_and_options__when__reading__then__preserve_member_scope_parent_order_all_statuses_and_source_fields() {
+    fun `위시리스트 페이지와 옵션 행이 있을 때__읽으면__회원 범위와 부모 순서와 모든 상태와 원본 필드를 보존한다`() {
+        // given
         extracted.add(
             rows(
                 wish(11L, 21L, "HIDDEN", null, null, null, null, null),
@@ -91,8 +53,21 @@ class JdbcStoreMemberReadsTest {
             ),
         )
 
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Long::class.javaObjectType) } answers {
+            capture(firstArg<String>(), secondArg<Map<String, *>>())
+            3L
+        }
+
+        // when
         val result = reads.wishlists(7, request(0, 2))
 
+        // then
         assertEquals(
             listOf(
                 StoreMemberReads.Wishlist(
@@ -119,30 +94,54 @@ class JdbcStoreMemberReadsTest {
         assertEquals(2, sql.size)
         assertMember(7)
         assertFalse(active)
-        verify(tx, times(1)).execute(any<TransactionCallback<Any>>())
+        verify(exactly = 1) { tx.execute(any<TransactionCallback<Any>>()) }
     }
 
     @Test
-    fun given__no_first_page_wishlist__when__reading__then__empty_page_without_detail_or_count() {
+    fun `첫 페이지에 위시리스트가 없을 때__읽으면__상세나 개수 조회 없이 빈 페이지를 돌려준다`() {
+        // given
         extracted.add(rows())
 
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+
+        // when
+        val result = reads.wishlists(19, request(0, 20))
+
+        // then
         assertEquals(
             StoreMemberReads.Page<StoreMemberReads.Wishlist>(listOf(), 0, 20, 0L, request(0, 20).sort()),
-            reads.wishlists(19, request(0, 20)),
+            result,
         )
-
         assertEquals(1, sql.size)
         assertMember(19)
     }
 
     @Test
-    fun given__later_empty_wishlist_page__when__reading__then__retain_total_count_and_unsorted_request() {
-        count = 2
+    fun `위시리스트 뒷 페이지가 비어 있을 때__읽으면__전체 개수와 정렬 없는 요청을 유지한다`() {
+        // given
         extracted.add(rows())
         val request = StoreMemberReads.Request(3, 2, listOf())
 
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Long::class.javaObjectType) } answers {
+            capture(firstArg<String>(), secondArg<Map<String, *>>())
+            2L
+        }
+
+        // when
         val result = reads.wishlists(7, request)
 
+        // then
         assertEquals(2L, result.totalElements)
         assertEquals(listOf<StoreMemberReads.Order>(), result.sort)
         assertFalse(sql.first().contains("ORDER BY"))
@@ -151,15 +150,28 @@ class JdbcStoreMemberReadsTest {
     }
 
     @Test
-    fun given__partial_later_wishlist_page__when__reading__then__derive_total_without_count() {
+    fun `위시리스트 뒷 페이지가 일부만 찼을 때__읽으면__개수 조회 없이 총계를 계산한다`() {
+        // given
         extracted.add(rows(wish(11L, 21L, "ACTIVE", null, null, null, null, null)))
 
-        assertEquals(5L, reads.wishlists(7, request(2, 2)).totalElements)
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+
+        // when
+        val result = reads.wishlists(7, request(2, 2))
+
+        // then
+        assertEquals(5L, result.totalElements)
         assertEquals(1, sql.size)
     }
 
     @Test
-    fun given__two_order_headers_and_out_of_order_item_rows__when__reading__then__preserve_order_snapshots_and_page_boundaries() {
+    fun `주문 헤더 두 개와 순서가 뒤바뀐 항목 행이 있을 때__읽으면__주문 시점 스냅샷과 페이지 경계를 보존한다`() {
+        // given
         mapped.add(rows(purchase(9, "CANCELLED"), purchase(10, "FAILED")))
         extracted.add(
             rows(
@@ -174,8 +186,24 @@ class JdbcStoreMemberReadsTest {
             ),
         )
 
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+            mapRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<RowMapper<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+        every { jdbc.queryForObject(any<String>(), any<Map<String, *>>(), Long::class.javaObjectType) } answers {
+            capture(firstArg<String>(), secondArg<Map<String, *>>())
+            3L
+        }
+
+        // when
         val result = reads.orders(7, request(0, 2))
 
+        // then
         assertEquals(
             listOf(
                 StoreMemberReads.Purchase(
@@ -200,46 +228,98 @@ class JdbcStoreMemberReadsTest {
     }
 
     @Test
-    fun given__persisted_order_without_items__when__reading__then__preserve_order_with_empty_items_and_nullable_time() {
+    fun `항목 없는 저장 주문이 있을 때__읽으면__빈 항목과 null 가능한 시각으로 주문을 보존한다`() {
+        // given
         val header = purchase(9, "PENDING")
         header["created_at"] = null
         mapped.add(rows(header))
         extracted.add(rows())
 
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+            mapRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<RowMapper<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+
+        // when
+        val result = reads.orders(7, request(0, 20))
+
+        // then
         assertEquals(
             StoreMemberReads.Purchase(9L, "uuid9", 9007199254740993L, "PENDING", "주소", "READY", mutableListOf(), null),
-            reads.orders(7, request(0, 20)).content.first(),
+            result.content.first(),
         )
         assertEquals(2, sql.size)
     }
 
     @Test
-    fun given__absent_order_page__when__reading__then__empty_success_and_no_item_query() {
+    fun `주문 페이지가 없을 때__읽으면__빈 성공을 돌려주고 항목 조회를 하지 않는다`() {
+        // given
         mapped.add(rows())
 
-        assertEquals(listOf<StoreMemberReads.Purchase>(), reads.orders(7, request(0, 20)).content)
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+            mapRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<RowMapper<*>>())
+        }
+
+        // when
+        val result = reads.orders(7, request(0, 20))
+
+        // then
+        assertEquals(listOf<StoreMemberReads.Purchase>(), result.content)
         assertEquals(1, sql.size)
     }
 
     @Test
-    fun given__no_persisted_cart__when__reading__then__optional_empty_without_creation() {
+    fun `저장된 장바구니가 없을 때__읽으면__생성 없이 빈 Optional을 돌려준다`() {
+        // given
         extracted.add(rows())
 
-        assertTrue(reads.cart(7).isEmpty)
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+
+        // when
+        val result = reads.cart(7)
+
+        // then
+        assertTrue(result.isEmpty)
         assertEquals(1, sql.size)
         assertMember(7)
     }
 
     @Test
-    fun given__empty_persisted_cart__when__reading__then__present_cart_with_empty_items() {
+    fun `비어 있는 저장 장바구니가 있을 때__읽으면__항목 없는 장바구니를 돌려준다`() {
+        // given
         extracted.add(rows(map("cart_id", 8L, "user_id", 7L, "created_at", null, "item_id", null)))
 
-        assertEquals(StoreMemberReads.Cart(8L, 7L, mutableListOf(), null), reads.cart(7).orElseThrow())
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+
+        // when
+        val result = reads.cart(7)
+
+        // then
+        assertEquals(StoreMemberReads.Cart(8L, 7L, mutableListOf(), null), result.orElseThrow())
         assertMember(7)
     }
 
     @Test
-    fun given__live_and_missing_cart_sku__when__reading__then__use_product_sku_id_and_preserve_missing_item_and_original_money_math() {
+    fun `현재 SKU와 사라진 SKU가 섞여 있을 때__장바구니를 읽으면__상품 SKU ID를 쓰고 사라진 항목과 원래 금액 계산을 보존한다`() {
+        // given
         extracted.add(
             rows(
                 map(
@@ -255,6 +335,17 @@ class JdbcStoreMemberReadsTest {
             ),
         )
 
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+            extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+        }
+
+        // when
+        val result = reads.cart(7)
+
+        // then
         assertEquals(
             StoreMemberReads.Cart(
                 8L,
@@ -265,7 +356,7 @@ class JdbcStoreMemberReadsTest {
                 ),
                 time,
             ),
-            reads.cart(7).orElseThrow(),
+            result.orElseThrow(),
         )
         assertTrue(sql.first().contains("ON s.id=i.product_sku_id"))
         assertFalse(sql.first().contains("i.sku_id"))
@@ -275,35 +366,50 @@ class JdbcStoreMemberReadsTest {
 
     @ParameterizedTest
     @MethodSource("sorts")
-    fun given__supported_scalar_sort__when__reading__then__use_fixed_column_direction_and_jpa_string_ignore_case(
+    fun `지원하는 스칼라 정렬일 때__읽으면__고정된 컬럼과 방향과 JPA 문자열 대소문자 무시를 쓴다`(
         wishlist: Boolean,
         order: List<StoreMemberReads.Order>,
         expected: String,
     ) {
-        if (wishlist) {
-            extracted.add(rows())
-        } else {
-            mapped.add(rows())
-        }
+        // given
         val query = StoreMemberReads.Request(0, 20, order)
 
+        every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+            runInTransaction(firstArg<TransactionCallback<*>>())
+        }
+        if (wishlist) {
+            extracted.add(rows())
+            every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } answers {
+                extractRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<ResultSetExtractor<*>>())
+            }
+        } else {
+            mapped.add(rows())
+            every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } answers {
+                mapRows(firstArg<String>(), secondArg<Map<String, *>>(), thirdArg<RowMapper<*>>())
+            }
+        }
+
+        // when
         if (wishlist) {
             reads.wishlists(7, query)
         } else {
             reads.orders(7, query)
         }
 
+        // then
         assertTrue(sql.first().contains("$expected LIMIT"))
     }
 
     @ParameterizedTest
     @MethodSource("badSorts")
-    fun given__unknown_or_injected_sort__when__reading__then__reject_before_transaction_or_database(
+    fun `알 수 없거나 주입된 정렬일 때__읽으면__트랜잭션이나 데이터베이스 전에 거부한다`(
         wishlist: Boolean,
         property: String,
     ) {
+        // given
         val request = StoreMemberReads.Request(0, 20, listOf(StoreMemberReads.Order(property, true, false)))
 
+        // when
         assertThrows(IllegalArgumentException::class.java) {
             if (wishlist) {
                 reads.wishlists(7, request)
@@ -312,27 +418,37 @@ class JdbcStoreMemberReadsTest {
             }
         }
 
-        verifyNoInteractions(tx, jdbc)
+        // then
+        verify {
+            tx wasNot Called
+            jdbc wasNot Called
+        }
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__database_or_transaction_failure__when__reading__then__expose_jdk_api_failure_and_original_cause(
+    fun `데이터베이스나 트랜잭션이 실패했을 때__읽으면__JDK API 실패로 노출하고 원래 원인을 보존한다`(
         operation: String,
         transaction: Boolean,
     ) {
+        // given
         val failure: RuntimeException = if (transaction) {
             CannotCreateTransactionException("synthetic private details")
         } else {
             DataAccessResourceFailureException("synthetic private details")
         }
+
         if (transaction) {
-            doThrow(failure).`when`(tx).execute(any<TransactionCallback<Any>>())
+            every { tx.execute(any<TransactionCallback<Any>>()) } throws failure
         } else {
-            doThrow(failure).`when`(jdbc).query(anyString(), anyMap<String, Any>(), any<RowMapper<Any>>())
-            doThrow(failure).`when`(jdbc).query(anyString(), anyMap<String, Any>(), any<ResultSetExtractor<Any>>())
+            every { tx.execute(any<TransactionCallback<Any>>()) } answers {
+                runInTransaction(firstArg<TransactionCallback<*>>())
+            }
+            every { jdbc.query(any<String>(), any<Map<String, *>>(), any<RowMapper<Any>>()) } throws failure
+            every { jdbc.query(any<String>(), any<Map<String, *>>(), any<ResultSetExtractor<Any>>()) } throws failure
         }
 
+        // when
         val unavailable = assertThrows(StoreMemberReadUnavailableException::class.java) {
             if (operation == "wishlist") {
                 reads.wishlists(7, request(0, 20))
@@ -343,9 +459,35 @@ class JdbcStoreMemberReadsTest {
             }
         }
 
+        // then
         assertSame(failure, unavailable.cause)
         assertEquals("Store member information could not be read", unavailable.message)
         assertFalse(active)
+    }
+
+    private fun runInTransaction(callback: TransactionCallback<*>): Any? {
+        active = true
+        try {
+            return callback.doInTransaction(SimpleTransactionStatus())
+        } finally {
+            active = false
+        }
+    }
+
+    private fun mapRows(query: String, bound: Map<String, *>, mapper: RowMapper<*>): List<Any?> {
+        capture(query, bound)
+        val rs = mapped.remove()
+        val results = ArrayList<Any?>()
+        var n = 0
+        while (rs.next()) {
+            results.add(mapper.mapRow(rs, n++))
+        }
+        return results
+    }
+
+    private fun extractRows(query: String, bound: Map<String, *>, extractor: ResultSetExtractor<*>): Any? {
+        capture(query, bound)
+        return extractor.extractData(extracted.remove())
     }
 
     private fun capture(query: String, bound: Map<String, *>) {
@@ -435,25 +577,31 @@ class JdbcStoreMemberReadsTest {
 
         private fun rows(vararg rows: Map<String, Any?>): ResultSet {
             val i = AtomicInteger(-1)
-            return mock(
-                ResultSet::class.java,
-                Answer<Any?> { call ->
-                    val method = call.method.name
-                    if (method == "next") {
-                        return@Answer i.incrementAndGet() < rows.size
+            val handler = InvocationHandler { _, method, args ->
+                val name = method.name
+                if (name == "next") {
+                    return@InvocationHandler i.incrementAndGet() < rows.size
+                }
+                if (name.startsWith("get") && args != null && args[0] is String) {
+                    val value = rows[i.get()][args[0] as String]
+                    return@InvocationHandler when (name) {
+                        "getLong" -> if (value == null) 0L else (value as Number).toLong()
+                        "getInt" -> if (value == null) 0 else (value as Number).toInt()
+                        else -> value
                     }
-                    if (method.startsWith("get") && call.getArgument<Any?>(0) is String) {
-                        val column = call.getArgument<String>(0)
-                        val value = rows[i.get()][column]
-                        return@Answer when (method) {
-                            "getLong" -> if (value == null) 0L else (value as Number).toLong()
-                            "getInt" -> if (value == null) 0 else (value as Number).toInt()
-                            else -> value
-                        }
-                    }
-                    RETURNS_DEFAULTS.answer(call)
-                },
-            )
+                }
+                when (method.returnType) {
+                    java.lang.Boolean.TYPE -> false
+                    Integer.TYPE -> 0
+                    java.lang.Long.TYPE -> 0L
+                    else -> null
+                }
+            }
+            return Proxy.newProxyInstance(
+                ResultSet::class.java.classLoader,
+                arrayOf<Class<*>>(ResultSet::class.java),
+                handler,
+            ) as ResultSet
         }
     }
 }
