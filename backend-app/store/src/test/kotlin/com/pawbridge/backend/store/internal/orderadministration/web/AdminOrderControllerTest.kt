@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.pawbridge.backend.store.anyNonNull
 import com.pawbridge.backend.store.internal.directorder.application.DirectOrders
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrderNotFoundException
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrders
 import com.pawbridge.backend.store.internal.orderadministration.application.AdministratorRejectedException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.PersistenceException
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -20,12 +23,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
@@ -47,7 +44,7 @@ import java.time.LocalDateTime
 import java.util.stream.Stream
 
 class AdminOrderControllerTest {
-    val orders: AdminOrders = mock(AdminOrders::class.java)
+    val orders: AdminOrders = mockk<AdminOrders>()
     val json: ObjectMapper = ObjectMapper().registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
         .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -78,11 +75,14 @@ class AdminOrderControllerTest {
     }
 
     @Test
-    fun given__original_filters_and_sort_page__when__listing__then__original_page_wire_and_verified_caller_with_foreign_user_filter() {
+    fun `관리자 주문 목록 필터와 정렬 페이지가 지정됐을 때__검증된 호출자로 목록을 조회하면__원래의 페이지 응답과 외부 사용자 필터를 그대로 돌려준다`() {
+        // given
         current(7L)
         val query = AdminOrders.Query("PAID", "SHIPPING", 88L, " A%_ B ", "totalAmount", "ASC", 2, 3)
-        `when`(orders.list(7, query)).thenReturn(AdminOrders.Page(listOf(detail), 2, 3, 11, "totalAmount", true))
 
+        every { orders.list(any(), any()) } returns AdminOrders.Page(listOf(detail), 2, 3, 11, "totalAmount", true)
+
+        // when
         val bytes = mvc.perform(
             get("/api/v1/admin/orders").header("X-User-Id", "99").header("X-User-Role", "ROLE_ADMIN")
                 .param("status", "PAID").param("deliveryStatus", "SHIPPING").param("userId", "88")
@@ -90,6 +90,7 @@ class AdminOrderControllerTest {
                 .param("sortBy", "totalAmount").param("sortOrder", "ASC").param("page", "2").param("size", "3"),
         ).andExpect(status().isOk()).andReturn().response.contentAsByteArray
 
+        // then
         val page = json.readTree(bytes)
         assertFalse(page.has("data"))
         assertEquals(2, page.get("number").intValue())
@@ -102,115 +103,150 @@ class AdminOrderControllerTest {
         assertEquals(12, page.get("content").get(0).size())
         assertEquals(json.readTree(json.writeValueAsBytes(detail)), page.get("content").get(0))
         assertTrue(page.get("sort").get("sorted").booleanValue())
-        verify(orders).list(7, query)
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.list(7, query) }
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__default_query__when__listing__then__created_at_desc_default_twenty_and_empty_page() {
+    fun `조건 없이 요청했을 때__목록을 조회하면__생성일 내림차순 기본 20건의 빈 페이지를 돌려준다`() {
+        // given
         current(7L)
         val query = AdminOrders.Query(null, null, null, null, "createdAt", "desc", 0, 20)
-        `when`(orders.list(7, query)).thenReturn(AdminOrders.Page(listOf(), 0, 20, 0, "createdAt", false))
 
-        mvc.perform(request("list")).andExpect(status().isOk())
+        every { orders.list(any(), any()) } returns AdminOrders.Page(listOf(), 0, 20, 0, "createdAt", false)
+
+        // when
+        val result = mvc.perform(request("list"))
+
+        // then
+        result.andExpect(status().isOk())
             .andExpect(jsonPath("\$.content").isEmpty())
             .andExpect(jsonPath("\$.number").value(0))
             .andExpect(jsonPath("\$.size").value(20))
-
-        verify(orders).list(7, query)
+        verify(exactly = 1) { orders.list(7, query) }
     }
 
     @Test
-    fun given__verified_caller__when__reading_detail__then__raw_original_order_details() {
+    fun `검증된 호출자가 있을 때__주문 상세를 조회하면__원래의 주문 상세를 그대로 돌려준다`() {
+        // given
         current(7L)
-        `when`(orders.get(7, 33)).thenReturn(detail)
 
+        every { orders.get(any(), any()) } returns detail
+
+        // when
         val bytes = mvc.perform(request("get").header("X-User-Id", "99")).andExpect(status().isOk())
             .andReturn().response.contentAsByteArray
 
+        // then
         assertEquals(json.readTree(json.writeValueAsBytes(detail)), json.readTree(bytes))
-        verify(orders).get(7, 33)
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.get(7, 33) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["READY", "SHIPPING", "DELIVERED"])
-    fun given__delivery_enum_and_forged_other_fields__when__patching__then__only_delivery_and_verified_caller_are_forwarded(
+    fun `배송 상태 열거값과 위조된 다른 필드가 있을 때__배송 상태를 변경하면__배송 상태와 검증된 호출자만 넘긴다`(
         delivery: String,
     ) {
+        // given
         current(7L)
-        `when`(orders.updateDelivery(7, 33, delivery)).thenReturn(detail)
 
-        mvc.perform(
+        every { orders.updateDelivery(any(), any(), any()) } returns detail
+
+        // when
+        val result = mvc.perform(
             patch("/api/v1/admin/orders/33/delivery-status").header("X-User-Id", "99")
                 .header("X-User-Role", "ROLE_ADMIN").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"deliveryStatus\":\"" + delivery + "\",\"status\":\"PAID\",\"userId\":99}"),
-        ).andExpect(status().isOk()).andExpect(jsonPath("\$.status").value("PENDING"))
+        )
 
-        verify(orders).updateDelivery(7, 33, delivery)
-        verifyNoMoreInteractions(orders)
+        // then
+        result.andExpect(status().isOk()).andExpect(jsonPath("\$.status").value("PENDING"))
+        verify(exactly = 1) { orders.updateDelivery(7, 33, delivery) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @MethodSource("principals")
-    fun given__missing_or_non_long_principal_with_forged_admin_header__when__using_any_endpoint__then__unauthorized_without_application(
+    fun `주체가 없거나 숫자가 아니고 관리자 헤더가 위조됐을 때__어느 엔드포인트든 호출하면__애플리케이션 호출 없이 401을 돌려준다`(
         kind: String,
         op: String,
     ) {
+        // given
         if (kind == "text") {
             current("99")
         }
 
-        mvc.perform(request(op).header("X-User-Id", "99").header("X-User-Role", "ROLE_ADMIN"))
-            .andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        // when
+        val result = mvc.perform(request(op).header("X-User-Id", "99").header("X-User-Role", "ROLE_ADMIN"))
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["list", "get", "write"])
-    fun given__current_database_admin_rejected__when__using_any_endpoint__then__forbidden_without_private_details(op: String) {
+    fun `현재 DB 기준 관리자가 거부됐을 때__어느 엔드포인트든 호출하면__403과 C006 코드를 돌려준다`(op: String) {
+        // given
         current(7L)
         val failure = AdministratorRejectedException()
+
         if (op == "list") {
-            `when`(orders.list(eq(7L), anyNonNull<AdminOrders.Query>())).thenThrow(failure)
+            every { orders.list(any(), any()) } throws failure
         } else if (op == "get") {
-            `when`(orders.get(7, 33)).thenThrow(failure)
+            every { orders.get(any(), any()) } throws failure
         } else {
-            `when`(orders.updateDelivery(7, 33, "SHIPPING")).thenThrow(failure)
+            every { orders.updateDelivery(any(), any(), any()) } throws failure
         }
 
-        mvc.perform(request(op)).andExpect(status().isForbidden()).andExpect(jsonPath("\$.code").value("C006"))
+        // when
+        val result = mvc.perform(request(op))
+
+        // then
+        result.andExpect(status().isForbidden()).andExpect(jsonPath("\$.code").value("C006"))
     }
 
     @Test
-    fun given__missing_order__when__reading_and_patching__then__original_404_and_400_distinction() {
+    fun `없는 주문일 때__조회와 변경을 하면__원래의 404와 400 구분을 지킨다`() {
+        // given
         current(7L)
-        `when`(orders.get(7, 33)).thenThrow(AdminOrderNotFoundException())
-        `when`(orders.updateDelivery(7, 33, "SHIPPING")).thenThrow(IllegalArgumentException("private missing id"))
 
-        mvc.perform(request("get")).andExpect(status().isNotFound())
+        every { orders.get(any(), any()) } throws AdminOrderNotFoundException()
+        every { orders.updateDelivery(any(), any(), any()) } throws IllegalArgumentException("private missing id")
+
+        // when
+        val readResult = mvc.perform(request("get"))
+        val writeResult = mvc.perform(request("write"))
+
+        // then
+        readResult.andExpect(status().isNotFound())
             .andExpect(jsonPath("\$.code").value("O001"))
             .andExpect(jsonPath("\$.message").value("Order not found"))
-        mvc.perform(request("write")).andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C001"))
+        writeResult.andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C001"))
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["status", "deliveryStatus", "userId"])
-    fun given__wrong_query_type__when__listing__then__original_field_type_error_before_application(field: String) {
+    fun `목록 쿼리 타입이 잘못됐을 때__목록을 조회하면__애플리케이션 호출 전에 필드 타입 오류를 돌려준다`(field: String) {
+        // given
         current(7L)
 
-        mvc.perform(get("/api/v1/admin/orders").param(field, "bad")).andExpect(status().isBadRequest())
+        // when
+        val result = mvc.perform(get("/api/v1/admin/orders").param(field, "bad"))
+
+        // then
+        result.andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value(field))
             .andExpect(jsonPath("\$.errors[0].reason").value("typeMismatch"))
-
-        verifyNoInteractions(orders)
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["get", "write"])
-    fun given__wrong_order_id_type__when__accessing__then__original_bad_type_contract(op: String) {
+    fun `주문 ID 타입이 잘못됐을 때__접근하면__원래의 잘못된 타입 계약을 따른다`(op: String) {
+        // given
         current(7L)
         val call = if (op == "get") {
             get("/api/v1/admin/orders/bad")
@@ -219,156 +255,205 @@ class AdminOrderControllerTest {
                 .content("{\"deliveryStatus\":\"READY\"}")
         }
 
-        mvc.perform(call).andExpect(status().isBadRequest())
+        // when
+        val result = mvc.perform(call)
+
+        // then
+        result.andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value("orderId"))
-
-        verifyNoInteractions(orders)
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{}", "{\"deliveryStatus\":null}"])
-    fun given__null_delivery_value__when__patching__then__preserve_original_500_generic_failure_family(body: String) {
+    fun `배송 상태 값이 null일 때__배송 상태를 변경하면__원래의 500 일반 실패 계열을 유지한다`(body: String) {
+        // given
         current(7L)
-        `when`(orders.updateDelivery(7, 33, null)).thenThrow(IllegalStateException("Delivery status cannot be stored"))
 
+        every { orders.updateDelivery(any(), any(), any()) } throws IllegalStateException("Delivery status cannot be stored")
+
+        // when
         val response = mvc.perform(
             patch("/api/v1/admin/orders/33/delivery-status").contentType(MediaType.APPLICATION_JSON).content(body),
         ).andExpect(status().isInternalServerError())
             .andExpect(jsonPath("\$.code").value("C004")).andReturn().response.contentAsString
 
+        // then
         assertFalse(response.contains("private"))
-        verify(orders).updateDelivery(7, 33, null)
+        verify(exactly = 1) { orders.updateDelivery(7, 33, null) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{\"deliveryStatus\":\"UNKNOWN\"}", "{"])
-    fun given__invalid_enum_json_or_malformed_json__when__patching__then__original_generic_server_error_binding_family(
+    fun `잘못된 열거값 JSON이거나 깨진 JSON일 때__배송 상태를 변경하면__원래의 일반 서버 오류 바인딩 계열을 돌려준다`(
         body: String,
     ) {
+        // given
         current(7L)
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             patch("/api/v1/admin/orders/33/delivery-status").contentType(MediaType.APPLICATION_JSON).content(body),
-        ).andExpect(status().isInternalServerError()).andExpect(jsonPath("\$.code").value("C004"))
+        )
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isInternalServerError()).andExpect(jsonPath("\$.code").value("C004"))
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["query", "commit"])
-    fun given__database_or_commit_failure__when__patching__then__server_error_without_sql_or_order_details(kind: String) {
+    fun `DB나 커밋 실패가 났을 때__배송 상태를 변경하면__SQL이나 주문 정보 없이 500을 돌려준다`(kind: String) {
+        // given
         current(7L)
         val failure: RuntimeException = if (kind == "query") {
             PersistenceException("private query")
         } else {
             TransactionSystemException("private commit")
         }
-        `when`(orders.updateDelivery(7, 33, "SHIPPING")).thenThrow(failure)
 
+        every { orders.updateDelivery(any(), any(), any()) } throws failure
+
+        // when
         val body = mvc.perform(request("write")).andExpect(status().isInternalServerError())
             .andExpect(jsonPath("\$.code").value("C004"))
             .andReturn().response.contentAsString
 
+        // then
         assertFalse(body.contains("private"))
         assertFalse(body.contains("address"))
     }
 
     @Test
-    fun given__unported_payment_path__when__requesting__then__no_handler() {
+    fun `이식되지 않은 결제 경로일 때__요청하면__핸들러가 없어 404를 돌려준다`() {
+        // given
         current(7L)
 
-        mvc.perform(post("/api/v1/orders/33/payment")).andExpect(status().isNotFound())
+        // when
+        val result = mvc.perform(post("/api/v1/orders/33/payment"))
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isNotFound())
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["PENDING", "PAID", "COMPLETED", "CANCELLED", "FAILED"])
-    fun given__status_enum_and_forged_other_fields__when__patching_status__then__only_status_and_verified_caller_are_forwarded(
+    fun `주문 상태 열거값과 위조된 다른 필드가 있을 때__주문 상태를 변경하면__상태와 검증된 호출자만 넘긴다`(
         status: String,
     ) {
+        // given
         current(7L)
-        `when`(orders.updateStatus(7, 33, status)).thenReturn(detail)
 
+        every { orders.updateStatus(any(), any(), any()) } returns detail
+
+        // when
         val bytes = mvc.perform(
             patch("/api/v1/admin/orders/33/status").header("X-User-Id", "99").header("X-User-Role", "ROLE_ADMIN")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"" + status + "\",\"deliveryStatus\":\"DELIVERED\",\"userId\":99}"),
         ).andExpect(status().isOk()).andReturn().response.contentAsByteArray
 
+        // then
         assertEquals(json.readTree(json.writeValueAsBytes(detail)), json.readTree(bytes))
-        verify(orders).updateStatus(7, 33, status)
-        verifyNoMoreInteractions(orders)
+        verify(exactly = 1) { orders.updateStatus(7, 33, status) }
+        confirmVerified(orders)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "text"])
-    fun given__missing_or_non_long_principal__when__patching_status__then__unauthorized_without_application(kind: String) {
+    fun `주체가 없거나 숫자가 아닐 때__주문 상태를 변경하면__애플리케이션 호출 없이 401을 돌려준다`(kind: String) {
+        // given
         if (kind == "text") {
             current("99")
         }
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             patch("/api/v1/admin/orders/33/status").header("X-User-Role", "ROLE_ADMIN")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        ).andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        )
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isUnauthorized()).andExpect(content().string(""))
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__rejected_admin_or_missing_order__when__patching_status__then__original_403_and_400() {
+    fun `관리자가 거부됐거나 없는 주문일 때__주문 상태를 변경하면__원래의 403과 400을 돌려준다`() {
+        // given
         current(7L)
-        `when`(orders.updateStatus(7, 33, "PAID")).thenThrow(AdministratorRejectedException())
-        `when`(orders.updateStatus(7, 34, "PAID")).thenThrow(IllegalArgumentException("private missing id"))
 
-        mvc.perform(
+        every { orders.updateStatus(7, 33, "PAID") } throws AdministratorRejectedException()
+        every { orders.updateStatus(7, 34, "PAID") } throws IllegalArgumentException("private missing id")
+
+        // when
+        val rejected = mvc.perform(
             patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        ).andExpect(status().isForbidden()).andExpect(jsonPath("\$.code").value("C006"))
-        mvc.perform(
+        )
+        val missing = mvc.perform(
             patch("/api/v1/admin/orders/34/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        ).andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C001"))
+        )
+
+        // then
+        rejected.andExpect(status().isForbidden()).andExpect(jsonPath("\$.code").value("C006"))
+        missing.andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C001"))
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{}", "{\"status\":null}"])
-    fun given__null_status_value__when__patching__then__preserve_original_500_generic_failure_family(body: String) {
+    fun `주문 상태 값이 null일 때__주문 상태를 변경하면__원래의 500 일반 실패 계열을 유지한다`(body: String) {
+        // given
         current(7L)
-        `when`(orders.updateStatus(7, 33, null)).thenThrow(IllegalStateException("Order status cannot be stored"))
 
-        mvc.perform(patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content(body))
-            .andExpect(status().isInternalServerError())
+        every { orders.updateStatus(any(), any(), any()) } throws IllegalStateException("Order status cannot be stored")
+
+        // when
+        val result = mvc.perform(
+            patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content(body),
+        )
+
+        // then
+        result.andExpect(status().isInternalServerError())
             .andExpect(jsonPath("\$.code").value("C004"))
-
-        verify(orders).updateStatus(7, 33, null)
+        verify(exactly = 1) { orders.updateStatus(7, 33, null) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{\"status\":\"UNKNOWN\"}", "{"])
-    fun given__invalid_status_enum_or_malformed_json__when__patching__then__original_generic_server_error_binding_family(
+    fun `잘못된 상태 열거값이거나 깨진 JSON일 때__주문 상태를 변경하면__원래의 일반 서버 오류 바인딩 계열을 돌려준다`(
         body: String,
     ) {
+        // given
         current(7L)
 
-        mvc.perform(patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content(body))
-            .andExpect(status().isInternalServerError())
-            .andExpect(jsonPath("\$.code").value("C004"))
+        // when
+        val result = mvc.perform(
+            patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content(body),
+        )
 
-        verifyNoInteractions(orders)
+        // then
+        result.andExpect(status().isInternalServerError())
+            .andExpect(jsonPath("\$.code").value("C004"))
+        confirmVerified(orders)
     }
 
     @Test
-    fun given__wrong_order_id_type__when__patching_status__then__original_bad_type_contract() {
+    fun `주문 ID 타입이 잘못됐을 때__주문 상태를 변경하면__원래의 잘못된 타입 계약을 따른다`() {
+        // given
         current(7L)
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             patch("/api/v1/admin/orders/bad/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        ).andExpect(status().isBadRequest())
+        )
+
+        // then
+        result.andExpect(status().isBadRequest())
             .andExpect(jsonPath("\$.code").value("C005"))
             .andExpect(jsonPath("\$.errors[0].field").value("orderId"))
-
-        verifyNoInteractions(orders)
+        confirmVerified(orders)
     }
 
     companion object {
