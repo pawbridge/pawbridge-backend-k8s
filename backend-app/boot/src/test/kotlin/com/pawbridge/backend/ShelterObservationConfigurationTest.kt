@@ -5,18 +5,17 @@ import com.pawbridge.backend.boot.configuration.PostWriteSettings
 import com.pawbridge.backend.boot.configuration.ReadDatabaseSettings
 import com.pawbridge.backend.boot.configuration.ShelterObservationConfiguration
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.excludeRecords
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.boot.test.system.CapturedOutput
@@ -46,15 +45,19 @@ import javax.sql.DataSource
 class ShelterObservationConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "yes", "on"])
-    fun given__missing_or_non_true_schedule_flag__when__assembling_postgresql_web_context__then__create_no_producer_or_scheduler(
+    fun `일정 플래그가 없거나 true가 아닐 때__PostgreSQL 웹 컨텍스트를 구성하면__생산자와 스케줄러를 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var runner = WebApplicationContextRunner().withUserConfiguration(ShelterObservationConfiguration::class.java)
             .withPropertyValues(BACKEND)
         if (flag != "absent") {
             runner = runner.withPropertyValues("pawbridge.shelter-observations.schedule-enabled=$flag")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(JdbcShelterObservationRecorder::class.java)
                 .doesNotHaveBean(ShelterObservationConfiguration.ShelterObservationJob::class.java)
@@ -65,15 +68,19 @@ class ShelterObservationConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "elasticsearch"])
-    fun given__missing_or_other_query_backend__when__enabling_web_schedule__then__create_no_producer_or_scheduler(
+    fun `질의 백엔드가 없거나 다를 때__웹 일정을 켜면__생산자와 스케줄러를 만들지 않는다`(
         backend: String,
     ) {
+        // given
         var runner = WebApplicationContextRunner().withUserConfiguration(ShelterObservationConfiguration::class.java)
             .withPropertyValues(ENABLED)
         if (backend != "absent") {
             runner = runner.withPropertyValues("pawbridge.animal-query.backend=$backend")
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(JdbcShelterObservationRecorder::class.java)
                 .doesNotHaveBean(ThreadPoolTaskScheduler::class.java)
@@ -82,21 +89,26 @@ class ShelterObservationConfigurationTest {
     }
 
     @Test
-    fun given__a_non_web_process__when__both_flags_match__then__create_no_producer_or_scheduler() {
-        ApplicationContextRunner().withUserConfiguration(ShelterObservationConfiguration::class.java)
+    fun `웹이 아닌 프로세스일 때__두 플래그가 모두 맞아도__생산자와 스케줄러를 만들지 않는다`() {
+        // given
+        val runner = ApplicationContextRunner().withUserConfiguration(ShelterObservationConfiguration::class.java)
             .withPropertyValues(ENABLED, BACKEND)
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                    .doesNotHaveBean(JdbcShelterObservationRecorder::class.java)
-                    .doesNotHaveBean(ThreadPoolTaskScheduler::class.java)
-                    .doesNotHaveBean(ScheduledAnnotationBeanPostProcessor::class.java)
-            }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasNotFailed()
+                .doesNotHaveBean(JdbcShelterObservationRecorder::class.java)
+                .doesNotHaveBean(ThreadPoolTaskScheduler::class.java)
+                .doesNotHaveBean(ScheduledAnnotationBeanPostProcessor::class.java)
+        }
     }
 
     @Test
-    fun given__actual_main_and_explicit_observation_configuration__when__assembling_then_closing__then__reuse_writer_and_named_cron_without_startup_sql(
+    fun `실제 main과 명시적 관찰 설정이 주어졌을 때__구성하고 닫으면__시작 SQL 없이 writer와 이름 있는 크론을 재사용한다`(
         output: CapturedOutput,
     ) {
+        // given
         val values = F3TestInputs.values()
         values["PAWBRIDGE_DB_URL"] = "jdbc:postgresql://127.0.0.1:1/pawbridge_observation_synthetic"
         val read = ReadDatabaseSettings.fromEnvironment { name -> values[name] }
@@ -107,6 +119,8 @@ class ShelterObservationConfigurationTest {
         val schedulerRef = AtomicReference<ThreadPoolTaskScheduler>()
         val delayedRef = AtomicReference<ScheduledFuture<*>>()
         val poolsRef = AtomicReference<List<HikariDataSource>>()
+
+        // when
         WebApplicationContextRunner()
             .withUserConfiguration(PawBridgeApplication::class.java, ShelterObservationConfiguration::class.java)
             .withInitializer { context ->
@@ -137,6 +151,7 @@ class ShelterObservationConfigurationTest {
                 "pawbridge.home-videos.management-enabled=false",
             )
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(JdbcShelterObservationRecorder::class.java)
                     .hasSingleBean(ShelterObservationConfiguration.ShelterObservationJob::class.java)
@@ -204,47 +219,66 @@ class ShelterObservationConfigurationTest {
                 )
                 assertThat(output.all).doesNotContain("Shelter daily observations recorded:")
             }
+
+        // then
         assertThat(delayedRef.get().isCancelled).isTrue()
         assertThat(schedulerRef.get().scheduledThreadPoolExecutor.isTerminated).isTrue()
         assertThat(poolsRef.get()).hasSize(1).allSatisfy { pool -> assertThat(pool.isClosed).isTrue() }
     }
 
     @Test
-    fun given__another_writer_transaction_manager__when__enabling_observations__then__reject_before_borrowing() {
-        val source = mock(DataSource::class.java)
-        val other = mock(DataSource::class.java)
+    fun `다른 writer 트랜잭션 매니저가 주어졌을 때__관찰을 켜면__커넥션을 빌리기 전에 거부한다`() {
+        // given
+        val source = mockk<DataSource>()
+        val other = mockk<DataSource>()
+
+        // Spring registers the mocks as beans and may call hashCode(); that is not a data access.
+        excludeRecords {
+            source.hashCode()
+            other.hashCode()
+        }
+
+        // when
         WebApplicationContextRunner().withUserConfiguration(ShelterObservationConfiguration::class.java)
             .withBean("writeDataSource", DataSource::class.java, Supplier { source })
             .withBean("writeTransactionManager", JdbcTransactionManager::class.java, Supplier { JdbcTransactionManager(other) })
             .withPropertyValues(ENABLED, BACKEND)
             .run { context ->
+                // then
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure).hasRootCauseInstanceOf(IllegalArgumentException::class.java)
                     .hasStackTraceContaining("Shelter observations require the shared writer transaction manager")
-                verifyNoInteractions(source, other)
+                confirmVerified(source, other)
             }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__a_successful_or_failed_recorder__when__scheduled_adapter_runs__then__call_once_and_preserve_failure(
+    fun `기록기가 성공하거나 실패할 때__예약 어댑터가 실행되면__한 번 호출하고 실패는 그대로 전달한다`(
         fails: Boolean,
     ) {
-        val recorder = mock(JdbcShelterObservationRecorder::class.java)
+        // given
+        val recorder = mockk<JdbcShelterObservationRecorder>()
         val failure = IllegalStateException("synthetic-observation-unavailable")
-        if (fails) {
-            whenever(recorder.recordToday()).thenThrow(failure)
-        } else {
-            whenever(recorder.recordToday()).thenReturn(3)
-        }
         val job = ShelterObservationConfiguration.ShelterObservationJob(recorder)
+
         if (fails) {
-            assertThatThrownBy { job.record() }.isSameAs(failure)
+            every { recorder.recordToday() } throws failure
         } else {
-            job.record()
+            every { recorder.recordToday() } returns 3
         }
-        verify(recorder).recordToday()
-        verifyNoMoreInteractions(recorder)
+
+        // when
+        val thrown = runCatching { job.record() }.exceptionOrNull()
+
+        // then
+        if (fails) {
+            assertThat(thrown).isSameAs(failure)
+        } else {
+            assertThat(thrown).isNull()
+        }
+        verify(exactly = 1) { recorder.recordToday() }
+        confirmVerified(recorder)
     }
 
     companion object {

@@ -1,18 +1,18 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.animal.internal.sheltercommand.application.ShelterCommands
 import com.pawbridge.backend.animal.internal.sheltercommand.web.ShelterCommandController
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
+import io.mockk.confirmVerified
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
@@ -26,17 +26,24 @@ class ShelterCommandDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var commands: ShelterCommands
 
     @ParameterizedTest
     @CsvSource("POST,/api/v1/shelters", "PUT,/api/v1/shelters/7", "DELETE,/api/v1/shelters/7")
-    fun given__no_command_flag__when__verified_admin_uses_a_command_route__then__deny_before_business(
+    fun `명령 플래그가 없을 때__검증된 관리자가 명령 경로를 호출하면__비즈니스 호출 전에 거부한다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(commands)
+        // given
+        val request = command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(commands)
     }
 
     companion object {
@@ -62,16 +69,23 @@ class ShelterCommandAliasDisabledHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var commands: ShelterCommands
 
     @ParameterizedTest
     @CsvSource("POST,/api/v1/shelters", "PUT,/api/v1/shelters/7", "DELETE,/api/v1/shelters/7")
-    fun given__unowned_boolean_alias__when__verified_admin_uses_a_command_route__then__keep_the_owner_flag_closed(
+    fun `소유하지 않은 불리언 별칭이 주어졌을 때__검증된 관리자가 명령 경로를 호출하면__소유자 플래그를 닫아 둔다`(
         method: String,
         path: String,
     ) {
-        mvc.perform(ShelterCommandDisabledHttpTest.command(method, path)).andExpect(status().isForbidden())
-        verifyNoInteractions(commands)
+        // given
+        val request = ShelterCommandDisabledHttpTest.command(method, path)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(commands)
     }
 }

@@ -9,14 +9,13 @@ import com.pawbridge.backend.animal.internal.sheltercommand.application.ShelterC
 import com.pawbridge.backend.animal.internal.sheltercommand.web.ShelterCommandController
 import com.pawbridge.backend.boot.configuration.AnimalCommandConfiguration
 import com.pawbridge.backend.boot.configuration.ShelterCommandConfiguration
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -33,14 +32,18 @@ import javax.sql.DataSource
 class ShelterCommandConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "on", "yes", "1", "unknown"])
-    fun given__neither_writer_enabled__when__assembling_without_inputs__then__create_no_writer_or_auditing_or_routes(
+    fun `두 writer가 모두 꺼져 있을 때__입력 없이 구성하면__writer와 감사와 경로를 만들지 않는다`(
         flag: String,
     ) {
+        // given
         var selected = runner()
         if (flag != "absent") {
             selected = selected.withPropertyValues("pawbridge.shelter-commands.enabled=$flag")
         }
+
+        // when
         selected.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(EntityManagerFactory::class.java)
                 .doesNotHaveBean(JpaTransactionManager::class.java)
@@ -53,15 +56,19 @@ class ShelterCommandConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__shelter_writer_and_optional_animal_commands__when__assembling__then__share_one_bounded_writer_and_validate_joined_isolation(
+    fun `보호소 writer와 선택적 동물 명령이 주어졌을 때__구성하면__제한된 writer 하나를 공유하고 합류 격리를 검증한다`(
         animals: Boolean,
     ) {
-        val source = mock(DataSource::class.java)
+        // given
+        val source = mockk<DataSource>()
         val owned = AtomicReference<EntityManagerFactory>()
         val analyzer = AtomicReference<KoreanSearchAnalyzer>()
+
+        // when
         writer(source)
             .withPropertyValues("pawbridge.shelter-commands.enabled=TRUE", "pawbridge.animal-commands.enabled=$animals")
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(ShelterCommands::class.java)
                     .hasSingleBean(ShelterCommandController::class.java)
@@ -88,28 +95,32 @@ class ShelterCommandConfigurationTest {
                 assertThat(context.getBeansOfType(KoreanSearchAnalyzer::class.java)).hasSize(1)
                 assertThat(context.getBeansOfType(AuditingHandler::class.java)).hasSize(1)
                 analyzer.set(context.getBean(KoreanSearchAnalyzer::class.java))
-                verify(source, never()).getConnection()
+                verify(exactly = 0) { source.connection }
             }
         assertThat(owned.get()).isNotNull()
         assertThat(owned.get().isOpen).isFalse()
         assertThat(analyzer.get()).isNotNull()
-        verify(source, never()).getConnection()
+        verify(exactly = 0) { source.connection }
     }
 
     @Test
-    fun given__different_user_lookup_source__when__assembling_shelter_writes__then__reject_before_any_database_access() {
-        val source = mock(DataSource::class.java)
-        val other = mock(DataSource::class.java)
+    fun `사용자 조회 소스가 다를 때__보호소 쓰기를 구성하면__데이터베이스 접근 전에 거부한다`() {
+        // given
+        val source = mockk<DataSource>()
+        val other = mockk<DataSource>()
+
+        // when
         runner().withPropertyValues("pawbridge.shelter-commands.enabled=true")
             .withBean("writeDataSource", DataSource::class.java, Supplier { source })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(other) })
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .run { context ->
+                // then
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure).hasRootCauseInstanceOf(IllegalArgumentException::class.java)
             }
-        verify(source, never()).getConnection()
-        verify(other, never()).getConnection()
+        verify(exactly = 0) { source.connection }
+        verify(exactly = 0) { other.connection }
     }
 
     companion object {
