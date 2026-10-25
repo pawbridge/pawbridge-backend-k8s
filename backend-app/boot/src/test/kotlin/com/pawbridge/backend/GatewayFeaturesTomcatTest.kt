@@ -65,20 +65,32 @@ class GatewayFeaturesTomcatTest {
     }
 
     @Test
-    fun given__small_upload__when__posting__then__reaches_the_controller() {
-        assertThat(post("/api/v1/animals/lost-candidates", 1).body()).isEqualTo("reached-controller")
+    fun `작은 업로드일 때__게시하면__컨트롤러에 닿는다`() {
+        // given
+        val path = "/api/v1/animals/lost-candidates"
+
+        // when
+        val response = post(path, 1)
+
+        // then
+        assertThat(response.body()).isEqualTo("reached-controller")
     }
 
     @Test
-    fun given__oversized_upload__when__posting_any_spelling_of_the_path__then__413_before_the_controller() {
+    fun `큰 업로드일 때__경로를 어떻게 적어 게시해도__컨트롤러 전에 413을 돌려준다`() {
+        // given
         val paths = arrayOf(
             "/api/v1/animals/lost-candidates",
             "/api/v1/animals/lost-%63andidates",
             "/api/v1/animals/%6cost-%63andidates",
             "/api/v1/animals/lost-candidates;jsessionid=x",
         )
+
         for (path in paths) {
+            // when
             val response = post(path, 200)
+
+            // then
             assertThat(response.statusCode()).`as`(path).isEqualTo(413)
             assertThat(response.body()).`as`(path).doesNotContain("reached-controller")
         }
