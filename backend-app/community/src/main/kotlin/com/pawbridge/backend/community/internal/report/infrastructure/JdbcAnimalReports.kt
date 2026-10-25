@@ -130,7 +130,9 @@ class JdbcAnimalReports(
                 if (authorId == null || authorId <= 0) {
                     throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
                 }
-                val images = uploads.upload(photos)
+                // validate() has already rejected null elements, so the unchecked cast is safe.
+                @Suppress("UNCHECKED_CAST")
+                val images = uploads.upload(photos as List<PostUpload>?)
                 try {
                     val draft = request!!
                     val next = normalized(
@@ -476,11 +478,11 @@ class JdbcAnimalReports(
         private fun javaTrim(value: String): String = value.trim { it <= ' ' }
 
         private fun validatePhoto(photo: PostUpload?) {
-            if (photo == null || photo.size() == 0L || photo.size() > MAX_PHOTO_BYTES) {
+            if (photo == null || photo.size == 0L || photo.size > MAX_PHOTO_BYTES) {
                 throw ResponseStatusException(HttpStatus.BAD_REQUEST, "사진은 각 10MB 이하로 첨부해 주세요.")
             }
-            val type = photo.contentType()
-            val name = photo.originalFilename()
+            val type = photo.contentType
+            val name = photo.originalFilename
             if (type == null || name == null) {
                 throw ResponseStatusException(HttpStatus.BAD_REQUEST, "사진 형식을 확인해 주세요.")
             }
@@ -495,7 +497,7 @@ class JdbcAnimalReports(
                 throw ResponseStatusException(HttpStatus.BAD_REQUEST, "JPG, PNG, WebP 사진만 첨부할 수 있습니다.")
             }
             try {
-                photo.content().open().use { stream ->
+                photo.content.open().use { stream ->
                     val header = stream.readNBytes(12)
                     val jpeg = type.equals("image/jpeg", ignoreCase = true) &&
                         header.size >= 3 &&
