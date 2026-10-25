@@ -186,6 +186,8 @@ jobs:
           bash ./gradlew --version | tee build/ci/gradle-version.txt
           grep -Fx 'Gradle 8.14.3' build/ci/gradle-version.txt
 
+      # The hosted runner has 4 vCPUs; the daemon heap and the Kotlin daemon heap are set in
+      # backend-app/gradle.properties so that four workers fit in 16 GB.
       - name: Check modules, boundaries, unit tests and executable JAR
         run: bash ./gradlew projects check :boot:bootJar --max-workers=4 -Dorg.gradle.parallel=true
 
