@@ -3,14 +3,15 @@ package com.pawbridge.backend.boot.configuration
 import com.pawbridge.backend.PawBridgeApplication
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.PostgresqlSearchProjector
 import com.pawbridge.backend.animal.internal.discovery.infrastructure.KoreanSearchAnalyzer
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.context.annotation.Import
@@ -27,8 +28,12 @@ import javax.sql.DataSource
 class AnimalSearchProjectionConfigurationTest {
     @ParameterizedTest
     @ValueSource(strings = ["missing", "false", "on", "yes", "backend", "analyzed"])
-    fun missing_or_nonliteral_inputs_do_not_create_a_job_or_borrow_a_connection(missing: String) {
-        val source: DataSource = mock(DataSource::class.java)
+    fun `입력이 빠졌거나 문자 그대로 true가 아닐 때__조립하면__작업을 만들거나 연결을 빌리지 않는다`(missing: String) {
+        // given
+        val source: DataSource = mockk<DataSource>()
+
+        excludeRecords { source.hashCode() }
+
         var runner: WebApplicationContextRunner = runner(source)
         if (missing == "backend") {
             runner = runner.withPropertyValues(ENABLED, ANALYZED, "pawbridge.animal-query.backend=elasticsearch")
@@ -43,20 +48,28 @@ class AnimalSearchProjectionConfigurationTest {
                 "pawbridge.animal-query.projection-schedule-enabled=$missing",
             )
         }
+
+        // when
         runner.run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .doesNotHaveBean(PostgresqlSearchProjector::class.java)
                 .doesNotHaveBean(AnimalSearchProjectionJobs::class.java)
                 .doesNotHaveBean("animalSearchProjectionScheduler")
-            verifyNoInteractions(source)
+            confirmVerified(source)
         }
     }
 
     @Test
-    fun non_web_process_does_not_schedule_projection_work() {
-        ApplicationContextRunner().withUserConfiguration(AnimalSearchProjectionConfiguration::class.java)
+    fun `웹이 아닌 프로세스일 때__조립하면__투영 작업을 예약하지 않는다`() {
+        // given
+        val runner = ApplicationContextRunner().withUserConfiguration(AnimalSearchProjectionConfiguration::class.java)
             .withPropertyValues(ENABLED, BACKEND, ANALYZED)
+
+        // when
+        runner
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .doesNotHaveBean(PostgresqlSearchProjector::class.java)
                     .doesNotHaveBean(AnimalSearchProjectionJobs::class.java)
@@ -64,10 +77,15 @@ class AnimalSearchProjectionConfigurationTest {
     }
 
     @Test
-    fun enabled_servlet_context_uses_existing_resources_and_one_named_scheduler() {
-        val source: DataSource = mock(DataSource::class.java)
-        whenever(source.connection).thenThrow(SQLException("owned-test-unavailable"))
+    fun `서블릿 컨텍스트에서 켜졌을 때__조립하면__기존 자원과 이름 있는 스케줄러 하나를 쓴다`() {
+        // given
+        val source: DataSource = mockk<DataSource>()
+
+        every { source.connection } throws SQLException("owned-test-unavailable")
+
+        // when
         runner(source).withPropertyValues(ENABLED, BACKEND, ANALYZED).run { context ->
+            // then
             assertThat(context).hasNotFailed()
                 .hasSingleBean(PostgresqlSearchProjector::class.java)
                 .hasSingleBean(AnimalSearchProjectionJobs::class.java)
@@ -83,12 +101,17 @@ class AnimalSearchProjectionConfigurationTest {
     }
 
     @Test
-    fun existing_feature_and_projection_imports_share_one_real_analyzer() {
-        val source: DataSource = mock(DataSource::class.java)
-        whenever(source.connection).thenThrow(SQLException("owned-test-unavailable"))
+    fun `기능 구성과 투영 구성을 함께 import할 때__조립하면__실제 분석기 하나를 공유한다`() {
+        // given
+        val source: DataSource = mockk<DataSource>()
+
+        every { source.connection } throws SQLException("owned-test-unavailable")
+
+        // when
         runner(source).withUserConfiguration(AnimalSearchConfiguration::class.java)
             .withPropertyValues(ENABLED, BACKEND, ANALYZED, "pawbridge.animal-commands.enabled=true")
             .run { context ->
+                // then
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(KoreanSearchAnalyzer::class.java)
                     .hasSingleBean(PostgresqlSearchProjector::class.java)
@@ -98,20 +121,30 @@ class AnimalSearchProjectionConfigurationTest {
     }
 
     @Test
-    fun other_writer_manager_is_rejected_before_a_connection_is_borrowed() {
-        val source: DataSource = mock(DataSource::class.java)
-        val other: DataSource = mock(DataSource::class.java)
-        assertThatIllegalArgumentException().isThrownBy {
+    fun `다른 기록 매니저가 주어졌을 때__투영기를 만들면__연결을 빌리기 전에 거절한다`() {
+        // given
+        val source: DataSource = mockk<DataSource>()
+        val other: DataSource = mockk<DataSource>()
+        val analyzer = mockk<KoreanSearchAnalyzer>()
+
+        // when
+        val creation = {
             AnimalSearchProjectionConfiguration()
-                .animalSearchProjector(source, JdbcTransactionManager(other), mock(KoreanSearchAnalyzer::class.java))
+                .animalSearchProjector(source, JdbcTransactionManager(other), analyzer)
         }
-        verifyNoInteractions(source, other)
+
+        // then
+        assertThatIllegalArgumentException().isThrownBy { creation() }
+        confirmVerified(source, other)
     }
 
     @Test
-    fun scheduler_worker_is_daemon_and_shutdown_cancels_delayed_work() {
+    fun `스케줄러가 주어졌을 때__종료하면__작업자는 데몬이고 지연 작업은 취소된다`() {
+        // given
         val scheduler = AnimalSearchProjectionConfiguration().animalSearchProjectionScheduler()
         scheduler.initialize()
+
+        // when, then
         try {
             assertThat(scheduler.submit(Callable { Thread.currentThread().isDaemon }).get(2, TimeUnit.SECONDS)).isTrue()
             assertThat(scheduler.scheduledThreadPoolExecutor.continueExistingPeriodicTasksAfterShutdownPolicy).isFalse()
@@ -130,8 +163,15 @@ class AnimalSearchProjectionConfigurationTest {
     }
 
     @Test
-    fun main_keeps_existing_archive_and_collection_imports_when_adding_maintenance() {
-        assertThat(PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java })
+    fun `메인 import가 주어졌을 때__유지보수를 추가해도__기존 아카이브와 수집 import를 유지한다`() {
+        // given
+        val application = PawBridgeApplication::class.java
+
+        // when
+        val imports = application.getAnnotation(Import::class.java).value.map { it.java }
+
+        // then
+        assertThat(imports)
             .contains(
                 AnimalSearchProjectionConfiguration::class.java,
                 AnimalPhotoArchiveConfiguration::class.java,

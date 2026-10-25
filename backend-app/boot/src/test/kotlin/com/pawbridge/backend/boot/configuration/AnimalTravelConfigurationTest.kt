@@ -3,16 +3,16 @@ package com.pawbridge.backend.boot.configuration
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.animal.internal.travel.application.PetTravel
 import com.pawbridge.backend.animal.internal.travel.web.PetTravelController
-import com.pawbridge.backend.support.anyValue
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -33,12 +33,16 @@ class AnimalTravelConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "on", "yes", "1", "unknown"])
-    fun feature_is_default_off_and_aliases_do_not_instantiate_any_catalog_or_require_reader_inputs(flag: String) {
+    fun `기능이 기본 꺼짐이거나 별칭일 때__조립하면__카탈로그를 만들지 않고 조회 입력도 요구하지 않는다`(flag: String) {
+        // given
         var context = runner()
         if (flag != "absent") {
             context = context.withPropertyValues("pawbridge.animal-travel.enabled=$flag")
         }
+
+        // when
         context.run { app ->
+            // then
             assertThat(app).hasNotFailed()
                 .doesNotHaveBean(PetTravel::class.java)
                 .doesNotHaveBean(PetTravelController::class.java)
@@ -50,12 +54,16 @@ class AnimalTravelConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "elasticsearch", "mysql", "unknown"])
-    fun enabled_feature_requires_explicit_postgresql_before_reader_access(backend: String) {
+    fun `기능이 켜졌지만 백엔드가 PostgreSQL이 아닐 때__조립하면__조회 접근 전에 명시 선택을 요구하며 실패한다`(backend: String) {
+        // given
         var context = runner().withPropertyValues("pawbridge.animal-travel.enabled=true")
         if (backend != "absent") {
             context = context.withPropertyValues("pawbridge.animal-query.backend=$backend")
         }
+
+        // when
         context.run { app ->
+            // then
             assertThat(app).hasFailed()
             assertThat(app.startupFailure)
                 .hasRootCauseMessage("Travel catalog requires explicit PostgreSQL selection")
@@ -63,14 +71,20 @@ class AnimalTravelConfigurationTest {
     }
 
     @Test
-    fun catalog_reuses_existing_reader_and_copies_only_list_isolation_without_new_pools_or_models() {
-        val source: DataSource = mock(DataSource::class.java)
-        val manager: JdbcTransactionManager = mock(JdbcTransactionManager::class.java)
+    fun `기존 조회 자원이 있을 때__카탈로그를 조립하면__새 풀이나 모델 없이 목록에만 격리 수준을 복사한다`() {
+        // given
+        val source: DataSource = mockk<DataSource>()
+        val manager: JdbcTransactionManager = mockk<JdbcTransactionManager>()
         val jdbc = JdbcTemplate(source)
         jdbc.queryTimeout = 3
         val reads = TransactionTemplate(manager)
         reads.isReadOnly = true
         reads.timeout = 3
+
+        excludeRecords { source.hashCode() }
+        justRun { manager.afterPropertiesSet() }
+
+        // when
         runner().withBean("dataSource", DataSource::class.java, Supplier { source })
             .withBean("transactionManager", JdbcTransactionManager::class.java, Supplier { manager })
             .withBean("readJdbc", JdbcTemplate::class.java, Supplier { jdbc })
@@ -78,6 +92,7 @@ class AnimalTravelConfigurationTest {
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
             .withPropertyValues("pawbridge.animal-travel.enabled=TrUe", "pawbridge.animal-query.backend=postgresql")
             .run { app ->
+                // then
                 assertThat(app).hasNotFailed()
                     .hasSingleBean(PetTravel::class.java)
                     .hasSingleBean(PetTravelController::class.java)
@@ -99,8 +114,8 @@ class AnimalTravelConfigurationTest {
                 assertThat(ReflectionTestUtils.getField(service, "repeatableReads")).isSameAs(list)
                 val repository: Any = ReflectionTestUtils.getField(service, "repository")!!
                 assertThat(ReflectionTestUtils.getField(repository, "jdbc")).isSameAs(jdbc)
-                verifyNoInteractions(source)
-                verify(manager, never()).getTransaction(anyValue<TransactionDefinition>())
+                confirmVerified(source)
+                verify(exactly = 0) { manager.getTransaction(any()) }
             }
     }
 }

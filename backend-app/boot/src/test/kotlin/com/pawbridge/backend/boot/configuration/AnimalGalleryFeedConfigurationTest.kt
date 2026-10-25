@@ -5,6 +5,9 @@ import com.pawbridge.backend.animal.internal.gallery.infrastructure.LostGalleryF
 import com.pawbridge.backend.animal.internal.gallery.infrastructure.LostGallerySnapshots
 import com.pawbridge.backend.animal.internal.gallery.web.LostGalleryFeedController
 import com.pawbridge.backend.animal.internal.gallery.web.LostGalleryPagesController
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -12,8 +15,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -44,12 +45,16 @@ class AnimalGalleryFeedConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "on", "yes", "1", "unknown"])
-    fun givenNonTrueFlag_whenAssembling_thenNoKeyPoolSignerOrFilesystemIsRequired(flag: String) {
+    fun `플래그가 true가 아닐 때__조립하면__키 풀이나 서명기나 파일시스템을 요구하지 않는다`(flag: String) {
+        // given
         var context = runner()
         if (flag != "absent") {
             context = context.withPropertyValues("lost-gallery-feed.enabled=$flag")
         }
+
+        // when
         context.run { app ->
+            // then
             assertThat(app).hasNotFailed()
                 .doesNotHaveBean(LostGalleryFeed::class.java)
                 .doesNotHaveBean(LostGallerySnapshots::class.java)
@@ -59,8 +64,13 @@ class AnimalGalleryFeedConfigurationTest {
     }
 
     @Test
-    fun givenMissingKey_whenEnabled_thenRejectBeforeReaderSignerOrDirectory() {
-        runner().withPropertyValues("lost-gallery-feed.enabled=true").run { app ->
+    fun `키가 없을 때__켜면__리더와 서명기와 디렉터리 전에 거절한다`() {
+        // given
+        val runner = runner().withPropertyValues("lost-gallery-feed.enabled=true")
+
+        // when
+        runner.run { app ->
+            // then
             assertThat(app).hasFailed()
             assertThat(app.startupFailure).hasRootCauseMessage("Gallery feed authentication is required")
             assertThat(root.resolve("snapshots")).doesNotExist()
@@ -78,7 +88,8 @@ class AnimalGalleryFeedConfigurationTest {
             "not a URI",
         ],
     )
-    fun givenNonDedicatedEndpoint_whenConfiguring_thenRejectWithoutEchoOrCause(address: String) {
+    fun `전용이 아닌 엔드포인트가 주어졌을 때__설정하면__에코나 원인 없이 거절한다`(address: String) {
+        // given, when, then
         assertThatThrownBy {
             AnimalGalleryFeedConfiguration(
                 "synthetic-internal", address, "synthetic-access", "synthetic-secret", root.toString(),
@@ -90,12 +101,15 @@ class AnimalGalleryFeedConfigurationTest {
     }
 
     @Test
-    fun givenBlankRelativeOrUnnormalizedDirectory_whenConfiguring_thenRejectBeforeFilesystemMutation() {
+    fun `빈 값이거나 상대 경로이거나 정규화되지 않은 디렉터리일 때__설정하면__파일시스템 변경 전에 거절한다`() {
+        // given
         val directories = listOf(
             "", "   ", "snapshots", "./snapshots", "/",
             Path.of("").toAbsolutePath().normalize().toString(),
             root.resolve("child/../snapshots").toString(),
         )
+
+        // when, then
         for (directory in directories) {
             assertThatThrownBy {
                 AnimalGalleryFeedConfiguration(
@@ -118,14 +132,20 @@ class AnimalGalleryFeedConfigurationTest {
 
     @Test
     @Suppress("UNCHECKED_CAST")
-    fun givenExplicitOfflineInputs_whenAssembling_thenReuseReaderSignExactGetAndReleaseDirectoryOwnership() {
-        val source: DataSource = mock(DataSource::class.java)
+    fun `명시한 오프라인 입력이 주어졌을 때__조립하면__리더를 재사용하고 정확한 GET에 서명하며 디렉터리 소유권을 해제한다`() {
+        // given
+        val source: DataSource = mockk<DataSource>()
+
+        excludeRecords { source.hashCode() }
+
         val jdbc = JdbcTemplate(source)
         jdbc.queryTimeout = 3
         val manager = JdbcTransactionManager(source)
         manager.isEnforceReadOnly = true
         val directory: Path = root.resolve("snapshots")
         val mapper = ObjectMapper()
+
+        // when
         runner().withBean("dataSource", DataSource::class.java, Supplier { source })
             .withBean("readJdbc", JdbcTemplate::class.java, Supplier { jdbc })
             .withBean("transactionManager", JdbcTransactionManager::class.java, Supplier { manager })
@@ -139,6 +159,7 @@ class AnimalGalleryFeedConfigurationTest {
                 "lost-gallery-feed.snapshot-directory=$directory",
             )
             .run { app ->
+                // then
                 assertThat(app).hasNotFailed()
                     .hasSingleBean(DataSource::class.java)
                     .hasSingleBean(JdbcTransactionManager::class.java)
@@ -174,7 +195,7 @@ class AnimalGalleryFeedConfigurationTest {
                         Clock.systemUTC(),
                     )
                 }.isInstanceOf(RuntimeException::class.java)
-                verifyNoInteractions(source)
+                confirmVerified(source)
             }
         LostGallerySnapshots(
             mapper,
@@ -185,21 +206,24 @@ class AnimalGalleryFeedConfigurationTest {
         ).use {
             assertThat(directory.resolve("owner.lock")).isRegularFile()
         }
-        verifyNoInteractions(source)
+        confirmVerified(source)
     }
 
     @Test
-    fun givenDifferentReaderBindings_whenCreatingFeed_thenRejectBeforeConnectionOrSigning() {
-        val first = mock(DataSource::class.java)
-        val other = mock(DataSource::class.java)
-        val signer = mock(S3Presigner::class.java)
+    fun `서로 다른 리더 바인딩이 주어졌을 때__피드를 만들면__연결이나 서명 전에 거절한다`() {
+        // given
+        val first = mockk<DataSource>()
+        val other = mockk<DataSource>()
+        val signer = mockk<S3Presigner>()
         val config = AnimalGalleryFeedConfiguration(
             "synthetic-internal", "https://synthetic.r2.cloudflarestorage.com",
             "synthetic-access", "synthetic-secret", root.toString(),
         )
+
+        // when, then
         assertThatThrownBy {
             config.animalGalleryFeed(JdbcTemplate(first), first, JdbcTransactionManager(other), ObjectMapper(), signer)
         }.hasMessage("Gallery reads must use the existing reader DataSource and transaction manager")
-        verifyNoInteractions(first, other, signer)
+        confirmVerified(first, other, signer)
     }
 }

@@ -7,13 +7,13 @@ import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoAr
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveStore
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveWorker
 import com.zaxxer.hikari.HikariDataSource
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -33,14 +33,26 @@ class AnimalPhotoArchiveConfigurationTest {
         .withUserConfiguration(AnimalPhotoArchiveConfiguration::class.java)
 
     @Test
-    fun givenActualMainAssembly__whenImportsAreRead__thenPhotoProducerIsRegistered() {
-        assertThat(PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java })
+    fun `실제 메인 조립이 주어졌을 때__import를 읽으면__사진 생산자가 등록되어 있다`() {
+        // given
+        val application = PawBridgeApplication::class.java
+
+        // when
+        val imports = application.getAnnotation(Import::class.java).value.map { it.java }
+
+        // then
+        assertThat(imports)
             .contains(AnimalPhotoArchiveConfiguration::class.java)
     }
 
     @Test
-    fun givenMissingFlag__whenContextStarts__thenNoWriterOrExternalClientsAreRequired() {
-        context.withPropertyValues("apms-photo-archive.optimizer-url=invalid").run { app ->
+    fun `플래그가 없을 때__컨텍스트가 시작되면__기록기나 외부 클라이언트가 필요하지 않다`() {
+        // given
+        val runner = context.withPropertyValues("apms-photo-archive.optimizer-url=invalid")
+
+        // when
+        runner.run { app ->
+            // then
             assertThat(app).hasNotFailed()
                 .doesNotHaveBean(PhotoArchiveWorker::class.java)
                 .doesNotHaveBean(PhotoArchiveSchedule::class.java)
@@ -51,15 +63,25 @@ class AnimalPhotoArchiveConfigurationTest {
     }
 
     @Test
-    fun givenExplicitOff__whenContextStarts__thenNoArchiveBeansAreCreated() {
-        context.withPropertyValues("apms-photo-archive.enabled=false").run { app ->
+    fun `명시적으로 꺼져 있을 때__컨텍스트가 시작되면__아카이브 빈을 만들지 않는다`() {
+        // given
+        val runner = context.withPropertyValues("apms-photo-archive.enabled=false")
+
+        // when
+        runner.run { app ->
+            // then
             assertThat(app).hasNotFailed().doesNotHaveBean(PhotoArchiveStore::class.java)
         }
     }
 
     @Test
-    fun givenExplicitSettings__whenComposed__thenShareWriterAndCreateNoPublicS3ClientOrConnection() {
-        enabled().run { app ->
+    fun `명시 설정이 주어졌을 때__조립하면__기록 연결을 공유하고 공개 S3 클라이언트나 연결을 만들지 않는다`() {
+        // given
+        val runner = enabled()
+
+        // when
+        runner.run { app ->
+            // then
             assertThat(app).hasNotFailed()
                 .hasSingleBean(PhotoArchiveWorker::class.java)
                 .hasSingleBean(PhotoArchiveSchedule::class.java)
@@ -75,37 +97,52 @@ class AnimalPhotoArchiveConfigurationTest {
             assertThat(transactions.timeout).isEqualTo(15)
             assertThat(app.getBean(PhotoArchiveProperties::class.java).bucket).isEqualTo("pawbridge-animal-originals")
             assertThat(app.getBean(PhotoArchiveHttpClient::class.java)).isInstanceOf(AutoCloseable::class.java)
-            verify(app.getBean(HikariDataSource::class.java), never()).getConnection()
+            verify(exactly = 0) { app.getBean(HikariDataSource::class.java).connection }
         }
     }
 
     @Test
-    fun givenDifferentBucket__whenEnabled__thenRejectBeforeCreatingArchiveClients() {
-        enabled().withPropertyValues("apms-photo-archive.bucket=some-other-bucket").run { app ->
+    fun `다른 버킷이 주어졌을 때__켜면__아카이브 클라이언트를 만들기 전에 거절한다`() {
+        // given
+        val runner = enabled().withPropertyValues("apms-photo-archive.bucket=some-other-bucket")
+
+        // when
+        runner.run { app ->
+            // then
             assertThat(app.startupFailure).hasRootCauseMessage("Photo archive must use the existing gallery bucket")
         }
     }
 
     @Test
-    fun givenOnlyPublicUploadCredentials__whenEnabled__thenDedicatedCredentialsRemainRequired() {
-        enabled().withPropertyValues(
+    fun `공개 업로드 자격 증명만 있을 때__켜면__전용 자격 증명이 계속 필요하다`() {
+        // given
+        val runner = enabled().withPropertyValues(
             "apms-photo-archive.storage.access-key-id=",
             "spring.cloud.aws.credentials.access-key=public-fixture",
             "spring.cloud.aws.credentials.secret-key=public-fixture",
-        ).run { app ->
+        )
+
+        // when
+        runner.run { app ->
+            // then
             assertThat(app.startupFailure).hasRootCauseMessage("Dedicated APMS photo storage configuration is required")
         }
     }
 
     @Test
-    fun givenMixedWriter__whenCreatingStore__thenFailBeforeBorrowingConnection() {
-        val source = mock(HikariDataSource::class.java)
-        whenever(source.jdbcUrl).thenReturn("jdbc:postgresql://127.0.0.1:1/synthetic")
-        val manager = mock(JpaTransactionManager::class.java)
-        whenever(manager.dataSource).thenReturn(source)
+    fun `섞인 기록 연결이 주어졌을 때__저장소를 만들면__연결을 빌리기 전에 실패한다`() {
+        // given
+        val source = mockk<HikariDataSource>()
+        val manager = mockk<JpaTransactionManager>()
+        val otherSource = mockk<HikariDataSource>()
+
+        every { source.jdbcUrl } returns "jdbc:postgresql://127.0.0.1:1/synthetic"
+        every { manager.dataSource } returns source
+
+        // when, then
         assertThatThrownBy {
             AnimalPhotoArchiveConfiguration().apmsPhotoArchiveStore(
-                JdbcTemplate(mock(HikariDataSource::class.java)), source, manager, properties(), storage(),
+                JdbcTemplate(otherSource), source, manager, properties(), storage(),
             )
         }.hasMessage("Photo archive requires the same existing PostgreSQL writer")
     }
@@ -143,9 +180,10 @@ class AnimalPhotoArchiveConfigurationTest {
     class WriterFixture {
         @Bean
         fun writeDataSource(): HikariDataSource {
-            val source = mock(HikariDataSource::class.java)
-            whenever(source.jdbcUrl).thenReturn("jdbc:postgresql://127.0.0.1:1/synthetic")
-            whenever(source.maximumPoolSize).thenReturn(2)
+            val source = mockk<HikariDataSource>()
+            every { source.jdbcUrl } returns "jdbc:postgresql://127.0.0.1:1/synthetic"
+            every { source.maximumPoolSize } returns 2
+            justRun { source.close() }
             return source
         }
 

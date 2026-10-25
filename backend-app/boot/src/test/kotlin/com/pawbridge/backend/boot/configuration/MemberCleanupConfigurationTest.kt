@@ -5,39 +5,46 @@ import com.pawbridge.backend.community.internal.chat.application.MemberChatHints
 import com.pawbridge.backend.community.internal.chat.application.MemberChatModels.Signal
 import com.pawbridge.backend.community.internal.note.application.ContactMemberCleanupStore
 import com.pawbridge.backend.community.internal.note.web.PrivateNoteStreamRegistry
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.anyValue
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.internal.deletion.application.UserDeletion
 import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker
+import io.mockk.clearMocks
+import io.mockk.confirmVerified
+import io.mockk.excludeRecords
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.clearInvocations
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.support.DefaultListableBeanFactory
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.util.function.LongConsumer
 import java.util.function.Supplier
 
 class MemberCleanupConfigurationTest {
-    private val jdbc = mock(JdbcTemplate::class.java)
-    private val manager = mock(JdbcTransactionManager::class.java)
-    private val members = mock(ContactMemberQuery::class.java)
-    private val streams = mock(PrivateNoteStreamRegistry::class.java)
+    private val jdbc = mockk<JdbcTemplate>()
+    private val manager = mockk<JdbcTransactionManager>()
+    private val members = mockk<ContactMemberQuery>()
+    private val streams = mockk<PrivateNoteStreamRegistry>()
+
+    init {
+        // Spring hashes the beans it registers; that is not an interaction with the collaborator.
+        excludeRecords {
+            jdbc.hashCode()
+            manager.hashCode()
+            members.hashCode()
+            streams.hashCode()
+        }
+    }
 
     private fun runner(): ApplicationContextRunner {
         return ApplicationContextRunner().withUserConfiguration(MemberCleanupConfiguration::class.java)
@@ -49,9 +56,10 @@ class MemberCleanupConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "canonical-false-over-alias-true"])
-    fun given__disabled_or_unspecified_chat__when__assembling__then__reuse_writer_and_registry_for_both_transactions_and_ordered_callbacks(
+    fun `채팅이 꺼졌거나 지정되지 않았을 때__조립하면__두 트랜잭션이 기록 연결과 레지스트리를 재사용하고 콜백이 순서대로 실행된다`(
         flag: String,
     ) {
+        // given
         var context = runner()
         if (flag == "false") {
             context = context.withPropertyValues("pawbridge.chat.enabled=false")
@@ -59,7 +67,18 @@ class MemberCleanupConfigurationTest {
         if (flag == "canonical-false-over-alias-true") {
             context = context.withPropertyValues("pawbridge.chat.enabled=false", "MEMBER_CHAT_ENABLED=true")
         }
+
+        justRun { jdbc.afterPropertiesSet() }
+        justRun { manager.afterPropertiesSet() }
+        justRun { streams.closeMember(any()) }
+        justRun { streams.resyncAll() }
+        every { streams.isAutoStartup } returns false
+        every { streams.isRunning } returns false
+        every { streams.phase } returns 0
+
+        // when
         context.run { application ->
+            // then
             assertThat(application).hasNotFailed()
                 .hasSingleBean(ContactMemberCleanup::class.java)
                 .hasSingleBean(ContactMemberCleanupStore::class.java)
@@ -80,77 +99,121 @@ class MemberCleanupConfigurationTest {
                 assertThat(transaction.isReadOnly).isFalse()
             }
             // Only the injected callback is exercised here; this is not an actual commit or SSE test.
-            clearInvocations(streams)
+            clearMocks(streams, answers = false)
             (ReflectionTestUtils.getField(store, "committedCleanup") as LongConsumer).accept(8)
-            val sequence = inOrder(streams)
-            sequence.verify(streams).closeMember(8)
-            sequence.verify(streams).resyncAll()
-            verifyNoMoreInteractions(streams)
-            verifyNoInteractions(members)
+            verifySequence {
+                streams.closeMember(8)
+                streams.resyncAll()
+            }
+            confirmVerified(members)
         }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["pawbridge.chat.enabled=true", "MEMBER_CHAT_ENABLED=true"])
-    fun given__enabled_chat_without_redis_withdrawal_wiring__when__assembling__then__fail_before_any_cleanup_transaction(
+    fun `Redis 탈퇴 연결 없이 채팅을 켰을 때__조립하면__정리 트랜잭션 전에 실패한다`(
         property: String,
     ) {
-        runner().withPropertyValues(property).run { context ->
+        // given
+        val runner = runner().withPropertyValues(property)
+
+        justRun { jdbc.afterPropertiesSet() }
+        justRun { manager.afterPropertiesSet() }
+        every { streams.isAutoStartup } returns false
+        every { streams.isRunning } returns false
+        every { streams.phase } returns 0
+
+        // when
+        runner.run { context ->
+            // then
             assertThat(context).hasFailed()
             assertThat(context.startupFailure)
                 .hasRootCauseMessage("Member cleanup with chat enabled requires verified Redis withdrawal wiring")
-            verify(manager, never()).getTransaction(anyValue<TransactionDefinition>())
-            verifyNoInteractions(members)
+            verify(exactly = 0) { manager.getTransaction(any()) }
+            confirmVerified(members)
         }
     }
 
     @Test
-    fun given__wired_chat__when__committed_cleanup_callback_runs__then__publish_withdrawal_before_note_close_even_if_redis_hint_fails() {
-        val hints = mock(MemberChatHints::class.java)
-        runner().withBean(MemberChatHints::class.java, Supplier { hints })
+    fun `채팅이 연결되었을 때__커밋된 정리 콜백이 실행되면__Redis 힌트가 실패해도 탈퇴를 먼저 게시하고 노트를 닫는다`() {
+        // given
+        val hints = mockk<MemberChatHints>()
+
+        excludeRecords { hints.hashCode() }
+        val runner = runner().withBean(MemberChatHints::class.java, Supplier { hints })
             .withPropertyValues("pawbridge.chat.enabled=true")
+
+        justRun { jdbc.afterPropertiesSet() }
+        justRun { manager.afterPropertiesSet() }
+        justRun { hints.publish(any()) }
+        justRun { streams.closeMember(any()) }
+        justRun { streams.resyncAll() }
+        every { streams.isAutoStartup } returns false
+        every { streams.isRunning } returns false
+        every { streams.phase } returns 0
+
+        // when
+        runner
             .run { context ->
                 assertThat(context).hasNotFailed()
                 val store = context.getBean(ContactMemberCleanupStore::class.java)
                 val callback = ReflectionTestUtils.getField(store, "committedCleanup") as LongConsumer
                 // Exclude context initialization calls from this injected callback contract.
-                clearInvocations(streams, jdbc, manager, members)
+                clearMocks(streams, jdbc, manager, members, answers = false)
                 callback.accept(8)
-                val ordered = inOrder(hints, streams)
-                ordered.verify(hints).publish(Signal(8, "WITHDRAWN", null, 0))
-                ordered.verify(streams).closeMember(8)
-                ordered.verify(streams).resyncAll()
-                verifyNoMoreInteractions(hints, streams)
-                clearInvocations(hints, streams)
-                doThrow(IllegalStateException("synthetic private transport failure")).`when`(hints)
-                    .publish(anyNonNull<Signal>())
+
+                // then
+                verifySequence {
+                    hints.publish(Signal(8, "WITHDRAWN", null, 0))
+                    streams.closeMember(8)
+                    streams.resyncAll()
+                }
+
+                // given (the Redis hint now fails)
+                clearMocks(hints, streams, answers = false)
+                every { hints.publish(any()) } throws IllegalStateException("synthetic private transport failure")
+
+                // when
                 callback.accept(8)
-                val failedHintOrder = inOrder(hints, streams)
-                failedHintOrder.verify(hints).publish(Signal(8, "WITHDRAWN", null, 0))
-                failedHintOrder.verify(streams).closeMember(8)
-                failedHintOrder.verify(streams).resyncAll()
-                verifyNoInteractions(jdbc, manager, members)
+
+                // then
+                verifySequence {
+                    hints.publish(Signal(8, "WITHDRAWN", null, 0))
+                    streams.closeMember(8)
+                    streams.resyncAll()
+                }
+                confirmVerified(jdbc, manager, members)
             }
     }
 
     @Test
-    fun given__public_community_cleanup__when__wiring_user_deletion__then__consume_only_that_api_without_a_module_cycle_or_outer_transaction() {
-        val cleanup = mock(ContactMemberCleanup::class.java)
+    fun `공개 커뮤니티 정리가 주어졌을 때__회원 삭제를 연결하면__모듈 순환이나 바깥 트랜잭션 없이 그 API만 쓴다`() {
+        // given
+        val cleanup = mockk<ContactMemberCleanup>()
+
+        justRun { cleanup.remove(any()) }
+
+        // when
         val deletion = MemberCleanupConfiguration(false).userDeletion(jdbc, manager, cleanup, sessions(null))
         (ReflectionTestUtils.getField(deletion, "communityCleanup") as LongConsumer).accept(Long.MAX_VALUE)
-        verify(cleanup).remove(Long.MAX_VALUE)
-        verifyNoMoreInteractions(cleanup)
-        verifyNoInteractions(jdbc, manager)
+
+        // then
+        verify(exactly = 1) { cleanup.remove(Long.MAX_VALUE) }
+        confirmVerified(cleanup, jdbc, manager)
         assertThat(ReflectionTestUtils.getField(deletion, "sessions")).isSameAs(UserSessionRevoker.NONE)
     }
 
     @Test
-    fun given__auth_sessions_enabled__when__wiring_user_deletion__then__revoke_through_the_session_store() {
+    fun `인증 세션이 켜졌을 때__회원 삭제를 연결하면__세션 저장소를 통해 세션을 끊는다`() {
+        // given
         val revoker = UserSessionRevoker { }
+        val cleanup = mockk<ContactMemberCleanup>()
 
+        // when
         val deletion = MemberCleanupConfiguration(false)
-            .userDeletion(jdbc, manager, mock(ContactMemberCleanup::class.java), sessions(revoker))
+            .userDeletion(jdbc, manager, cleanup, sessions(revoker))
 
+        // then
         assertThat(ReflectionTestUtils.getField(deletion, "sessions")).isSameAs(revoker)
     }
 
