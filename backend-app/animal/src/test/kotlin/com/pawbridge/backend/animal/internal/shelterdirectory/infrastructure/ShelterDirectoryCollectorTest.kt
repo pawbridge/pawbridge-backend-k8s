@@ -1,114 +1,192 @@
 package com.pawbridge.backend.animal.internal.shelterdirectory.infrastructure
 
-import com.pawbridge.backend.animal.anyNonNull
-import com.pawbridge.backend.animal.eqNonNull
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.SQLException
-import java.time.LocalDateTime
 import javax.sql.DataSource
 
 class ShelterDirectoryCollectorTest {
-    private val source: DataSource = mock(DataSource::class.java)
-    private val connection: Connection = mock(Connection::class.java)
-    private val client: ShelterDirectoryClient = mock(ShelterDirectoryClient::class.java)
-    private val store: ShelterDirectoryStore = mock(ShelterDirectoryStore::class.java)
-    private val statement: PreparedStatement = mock(PreparedStatement::class.java)
-    private val result: ResultSet = mock(ResultSet::class.java)
+    private val source: DataSource = mockk<DataSource>()
+    private val connection: Connection = mockk<Connection>()
+    private val client: ShelterDirectoryClient = mockk<ShelterDirectoryClient>()
+    private val store: ShelterDirectoryStore = mockk<ShelterDirectoryStore>()
+    private val statement: PreparedStatement = mockk<PreparedStatement>()
+    private val result: ResultSet = mockk<ResultSet>()
     private val collector = ShelterDirectoryCollector(source, client, store)
 
-    @BeforeEach
-    fun setup() {
-        `when`(source.connection).thenReturn(connection)
-        `when`(connection.prepareStatement(anyString())).thenReturn(statement)
-        `when`(statement.executeQuery()).thenReturn(result)
-        `when`(result.next()).thenReturn(true)
-        `when`(result.getObject(1)).thenReturn(1)
+    @Test
+    fun `동물 작업이 잠금을 쥐고 있을 때__수집하면__API 호출이나 쓰기를 하지 않는다`() {
+        // given
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { connection.close() }
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns result
+        justRun { statement.close() }
+        every { result.next() } returns true
+        every { result.getObject(1) } returns 0
+        justRun { result.close() }
+
+        // when
+        val thrown = assertThatThrownBy { collector.collect() }
+
+        // then
+        thrown.hasMessage("SHELTER_DIRECTORY_BUSY")
+        confirmVerified(client, store)
+        verify(exactly = 0) { connection.commit() }
+        verify(exactly = 1) { connection.prepareStatement(ACQUIRE) }
+        verify(exactly = 1) { statement.setInt(1, 1) }
     }
 
     @Test
-    fun givenAnimalJobOwnsLock_whenCollecting_thenDoesNotCallApiOrWrite() {
-        `when`(result.getObject(1)).thenReturn(0)
+    fun `잠금 쿼리가 실패할 때__수집하면__API 호출이나 쓰기 없이 연결을 폐기한다`() {
+        // given
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { connection.abort(any()) }
+        justRun { connection.close() }
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } throws SQLException("lock failure")
+        justRun { statement.close() }
 
-        assertThatThrownBy { collector.collect() }.hasMessage("SHELTER_DIRECTORY_BUSY")
+        // when
+        val thrown = assertThatThrownBy { collector.collect() }
 
-        verifyNoInteractions(client, store)
-        verify(connection, never()).commit()
-        verify(connection).prepareStatement(ACQUIRE)
-        verify(statement).setInt(1, 1)
+        // then
+        thrown.isInstanceOf(SQLException::class.java)
+        verify(exactly = 1) { connection.abort(any()) }
+        confirmVerified(client, store)
     }
 
     @Test
-    fun givenLockQueryFailure_whenCollecting_thenDiscardsConnectionWithoutApiOrWrite() {
-        `when`(statement.executeQuery()).thenThrow(SQLException("lock failure"))
+    fun `API가 실패할 때__수집하면__쓰기 없이 잠금을 해제한다`() {
+        // given
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { connection.close() }
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns result
+        justRun { statement.close() }
+        every { result.next() } returns true
+        every { result.getObject(1) } returns 1
+        justRun { result.close() }
+        every { client.collect() } throws ShelterDirectoryClient.unavailable()
 
-        assertThatThrownBy { collector.collect() }.isInstanceOf(SQLException::class.java)
+        // when
+        val thrown = assertThatThrownBy { collector.collect() }
 
-        verify(connection).abort(any())
-        verifyNoInteractions(client, store)
+        // then
+        thrown.hasMessage("SHELTER_DIRECTORY_UNAVAILABLE")
+        confirmVerified(store)
+        verify(exactly = 1) { connection.prepareStatement(RELEASE) }
+        verify(exactly = 0) { connection.commit() }
     }
 
     @Test
-    fun givenApiFailure_whenCollecting_thenNoWritesAndLockReleased() {
-        `when`(client.collect()).thenThrow(ShelterDirectoryClient.unavailable())
-
-        assertThatThrownBy { collector.collect() }.hasMessage("SHELTER_DIRECTORY_UNAVAILABLE")
-
-        verifyNoInteractions(store)
-        verify(connection).prepareStatement(RELEASE)
-        verify(connection, never()).commit()
-    }
-
-    @Test
-    fun givenWriteFailure_whenCollecting_thenRollsBackEntireSnapshot() {
-        `when`(client.collect()).thenReturn(listOf(mapOf("careRegNo" to "123456789012345")))
-        doThrow(SQLException("write failure")).`when`(store)
-            .save(eqNonNull(connection), anyNonNull<List<Map<String, String>>>(), anyNonNull<LocalDateTime>())
-
-        assertThatThrownBy { collector.collect() }.isInstanceOf(SQLException::class.java)
-
-        verify(connection).rollback()
-        verify(connection, never()).commit()
-    }
-
-    @Test
-    fun givenSnapshot_whenCollecting_thenCommitsBeforeReleasingLock() {
+    fun `쓰기가 실패할 때__수집하면__스냅샷 전체를 롤백한다`() {
+        // given
         val rows = listOf(mapOf("careRegNo" to "123456789012345"))
-        `when`(client.collect()).thenReturn(rows)
 
-        assertThat(collector.collect()).isEqualTo(1)
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { connection.autoCommit = any() }
+        justRun { connection.rollback() }
+        justRun { connection.close() }
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns result
+        justRun { statement.close() }
+        every { result.next() } returns true
+        every { result.getObject(1) } returns 1
+        justRun { result.close() }
+        every { client.collect() } returns rows
+        every { store.save(any(), any(), any()) } throws SQLException("write failure")
 
-        val ordered = inOrder(store, connection)
-        ordered.verify(connection).autoCommit = false
-        ordered.verify(store).save(eqNonNull(connection), eqNonNull(rows), anyNonNull<LocalDateTime>())
-        ordered.verify(connection).commit()
-        ordered.verify(connection).autoCommit = true
-        ordered.verify(connection).prepareStatement(RELEASE)
-        verify(connection, never()).abort(any())
+        // when
+        val thrown = assertThatThrownBy { collector.collect() }
+
+        // then
+        thrown.isInstanceOf(SQLException::class.java)
+        verify(exactly = 1) { store.save(connection, rows, any()) }
+        verify(exactly = 1) { connection.rollback() }
+        verify(exactly = 0) { connection.commit() }
     }
 
     @Test
-    fun givenUnconfirmedRelease_whenCollecting_thenDiscardsConnection() {
-        `when`(client.collect()).thenReturn(listOf(mapOf("careRegNo" to "123456789012345")))
-        `when`(result.getObject(1)).thenReturn(1, 0)
+    fun `스냅샷이 있을 때__수집하면__잠금을 해제하기 전에 커밋한다`() {
+        // given
+        val rows = listOf(mapOf("careRegNo" to "123456789012345"))
 
-        assertThat(collector.collect()).isEqualTo(1)
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { connection.autoCommit = any() }
+        justRun { connection.commit() }
+        justRun { connection.close() }
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns result
+        justRun { statement.close() }
+        every { result.next() } returns true
+        every { result.getObject(1) } returns 1
+        justRun { result.close() }
+        every { client.collect() } returns rows
+        justRun { store.save(any(), any(), any()) }
 
-        verify(connection).abort(any())
+        // when
+        val count = collector.collect()
+
+        // then
+        assertThat(count).isEqualTo(1)
+        verifyOrder {
+            connection.autoCommit = false
+            store.save(connection, rows, any())
+            connection.commit()
+            connection.autoCommit = true
+            connection.prepareStatement(RELEASE)
+        }
+        verify(exactly = 0) { connection.abort(any()) }
+    }
+
+    @Test
+    fun `잠금 해제가 확인되지 않을 때__수집하면__연결을 폐기한다`() {
+        // given
+        val rows = listOf(mapOf("careRegNo" to "123456789012345"))
+
+        every { source.connection } returns connection
+        every { connection.prepareStatement(any<String>()) } returns statement
+        justRun { connection.autoCommit = any() }
+        justRun { connection.commit() }
+        justRun { connection.abort(any()) }
+        justRun { connection.close() }
+        justRun { statement.setInt(any(), any()) }
+        justRun { statement.queryTimeout = any() }
+        every { statement.executeQuery() } returns result
+        justRun { statement.close() }
+        every { result.next() } returns true
+        every { result.getObject(1) } returnsMany listOf(1, 0)
+        justRun { result.close() }
+        every { client.collect() } returns rows
+        justRun { store.save(any(), any(), any()) }
+
+        // when
+        val count = collector.collect()
+
+        // then
+        assertThat(count).isEqualTo(1)
+        verify(exactly = 1) { connection.abort(any()) }
     }
 
     companion object {

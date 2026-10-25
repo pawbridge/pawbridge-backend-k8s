@@ -4,21 +4,19 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.pawbridge.backend.animal.anyNonNull
 import com.pawbridge.backend.animal.internal.sheltercommand.application.ShelterCommandConflictException
 import com.pawbridge.backend.animal.internal.sheltercommand.application.ShelterCommandForbiddenException
 import com.pawbridge.backend.animal.internal.sheltercommand.application.ShelterCommands
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import jakarta.persistence.EntityNotFoundException
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.core.MethodParameter
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -36,7 +34,7 @@ import java.nio.charset.StandardCharsets
 import java.time.LocalDateTime
 
 class ShelterCommandControllerTest {
-    private val shelters: ShelterCommands = mock(ShelterCommands::class.java)
+    private val shelters: ShelterCommands = mockk<ShelterCommands>()
     private val mapper: ObjectMapper = ObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -67,9 +65,11 @@ class ShelterCommandControllerTest {
     )
 
     @Test
-    fun givenFullCreate__whenPosting__thenUseVerifiedPrincipalAndReturnOriginal201ThirteenFields() {
-        `when`(shelters.create(eq(10L), anyNonNull())).thenReturn(result)
+    fun `전체 생성 요청일 때__POST하면__검증된 주체를 쓰고 원래의 201과 13개 필드를 돌려준다`() {
+        // given
+        every { shelters.create(any(), any()) } returns result
 
+        // when
         val response = mvc.perform(
             post("/api/v1/shelters")
                 .header("X-User-Id", "999")
@@ -83,81 +83,107 @@ class ShelterCommandControllerTest {
                 ),
         ).andExpect(status().isCreated()).andReturn().response
 
+        // then
         val body: JsonNode = mapper.readTree(response.getContentAsString(StandardCharsets.UTF_8))
         assertThat(body.size()).isEqualTo(13)
         assertThat(body.path("id").asLong()).isEqualTo(7L)
         assertThat(body.path("createdAt").asText()).isEqualTo("2026-10-21T03:00:00")
         assertThat(body.has("publicInformation")).isFalse()
-        verify(shelters).create(
-            10L,
-            ShelterCommands.Create("care-7", "센터", "02", "서울", "대표", "기관", "a@example.test", "소개", "절차", "09-18"),
-        )
+        verify(exactly = 1) {
+            shelters.create(
+                10L,
+                ShelterCommands.Create("care-7", "센터", "02", "서울", "대표", "기관", "a@example.test", "소개", "절차", "09-18"),
+            )
+        }
     }
 
     @Test
-    fun givenEmptyPut__whenUpdating__thenForwardFiveNullsAndOmitNullResponseFields() {
-        `when`(shelters.update(eq(10L), eq(7L), anyNonNull())).thenReturn(
-            ShelterCommands.Details(7L, "care-7", "센터", null, null, null, null, null, null, null, null, now, null),
-        )
+    fun `빈 PUT 요청일 때__수정하면__null 다섯 개를 전달하고 null 응답 필드는 생략한다`() {
+        // given
+        every { shelters.update(any(), any(), any()) } returns
+            ShelterCommands.Details(7L, "care-7", "센터", null, null, null, null, null, null, null, null, now, null)
 
+        // when
         val body = mapper.readTree(
             mvc.perform(put("/api/v1/shelters/7").contentType("application/json").content("{}"))
                 .andExpect(status().isOk()).andReturn().response.getContentAsString(StandardCharsets.UTF_8),
         )
 
+        // then
         assertThat(body.has("phone")).isFalse()
         assertThat(body.has("updatedAt")).isFalse()
-        verify(shelters).update(10L, 7L, ShelterCommands.Update(null, null, null, null, null))
+        verify(exactly = 1) { shelters.update(10L, 7L, ShelterCommands.Update(null, null, null, null, null)) }
     }
 
     @Test
-    fun givenValidDelete__whenDeleting__thenReturn204WithoutBody() {
+    fun `유효한 삭제 요청일 때__삭제하면__본문 없이 204를 돌려준다`() {
+        // given
+        justRun { shelters.delete(any(), any()) }
+
+        // when
         val response = mvc.perform(delete("/api/v1/shelters/7")).andExpect(status().isNoContent()).andReturn().response
 
+        // then
         assertThat(response.contentAsByteArray).isEmpty()
-        verify(shelters).delete(10L, 7L)
+        verify(exactly = 1) { shelters.delete(10L, 7L) }
     }
 
     @Test
-    fun givenSpoofedHeadersWithoutPrincipal__whenDeleting__thenNeverUseHeaderIdentityOrRole() {
+    fun `주체 없이 헤더만 위조됐을 때__삭제하면__헤더의 신원이나 역할을 쓰지 않는다`() {
+        // given
         principal = null
-        doThrow(ShelterCommandForbiddenException()).`when`(shelters).delete(null, 7L)
 
-        mvc.perform(delete("/api/v1/shelters/7").header("X-User-Id", "10").header("X-User-Role", "ROLE_ADMIN"))
-            .andExpect(status().isForbidden())
-        verify(shelters).delete(null, 7L)
+        every { shelters.delete(any(), any()) } throws ShelterCommandForbiddenException()
+
+        // when
+        val result = mvc.perform(delete("/api/v1/shelters/7").header("X-User-Id", "10").header("X-User-Role", "ROLE_ADMIN"))
+
+        // then
+        result.andExpect(status().isForbidden())
+        verify(exactly = 1) { shelters.delete(null, 7L) }
     }
 
     @Test
-    fun givenReferenceConflict__whenDeleting__thenReturnFixed409Body() {
-        doThrow(ShelterCommandConflictException()).`when`(shelters).delete(10L, 7L)
+    fun `참조 충돌이 있을 때__삭제하면__고정된 409 본문을 돌려준다`() {
+        // given
+        every { shelters.delete(any(), any()) } throws ShelterCommandConflictException()
 
+        // when
         val body = mapper.readTree(
             mvc.perform(delete("/api/v1/shelters/7")).andExpect(status().isConflict()).andReturn().response
                 .getContentAsString(StandardCharsets.UTF_8),
         )
 
+        // then
         assertThat(body.path("code").asInt()).isEqualTo(409)
         assertThat(body.path("message").asText()).isEqualTo(ShelterCommandConflictException().message)
         assertThat(body.path("data").isNull()).isTrue()
+        verify(exactly = 1) { shelters.delete(10L, 7L) }
     }
 
     @Test
-    fun givenMissingEntity__whenDeleting__thenKeepOriginal500WithoutInternalMessage() {
-        doThrow(EntityNotFoundException("secret-table-detail")).`when`(shelters).delete(10L, 7L)
+    fun `엔티티가 없을 때__삭제하면__내부 메시지 없이 원래의 500을 유지한다`() {
+        // given
+        every { shelters.delete(any(), any()) } throws EntityNotFoundException("secret-table-detail")
 
+        // when
         val response = mvc.perform(delete("/api/v1/shelters/7"))
             .andExpect(status().isInternalServerError()).andReturn().response
 
+        // then
         assertThat(response.contentAsString).doesNotContain("secret-table-detail")
+        verify(exactly = 1) { shelters.delete(10L, 7L) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["{broken", "[]"])
-    fun givenMalformedBody__whenCreating__thenReturn400WithoutCallingService(body: String) {
-        mvc.perform(post("/api/v1/shelters").contentType("application/json").content(body))
-            .andExpect(status().isBadRequest())
+    fun `본문이 잘못됐을 때__생성하면__서비스를 호출하지 않고 400을 돌려준다`(body: String) {
+        // given
+        // when
+        val result = mvc.perform(post("/api/v1/shelters").contentType("application/json").content(body))
 
-        verifyNoInteractions(shelters)
+        // then
+        result.andExpect(status().isBadRequest())
+        confirmVerified(shelters)
     }
 }
