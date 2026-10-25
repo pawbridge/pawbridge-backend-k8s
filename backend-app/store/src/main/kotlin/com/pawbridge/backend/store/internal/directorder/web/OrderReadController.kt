@@ -35,17 +35,17 @@ class OrderReadController(private val orders: DirectOrders) {
         )
         val page = orders.list(current(current), status?.name, request)
         val sort = Sort.by(
-            page.sort().map { order ->
+            page.sort.map { order ->
                 Sort.Order(
-                    if (order.ascending()) Sort.Direction.ASC else Sort.Direction.DESC,
-                    order.property(),
-                    order.ignoreCase(),
+                    if (order.ascending) Sort.Direction.ASC else Sort.Direction.DESC,
+                    order.property!!,
+                    order.ignoreCase,
                     Sort.NullHandling.NATIVE,
                 )
             },
         )
         return ResponseEntity.ok(
-            PageImpl(page.content(), PageRequest.of(page.number(), page.size(), sort), page.totalElements()),
+            PageImpl(page.content, PageRequest.of(page.number, page.size, sort), page.totalElements),
         )
     }
 

@@ -48,7 +48,7 @@ class JdbcStoreMemberReads(
                                 rs.getString("image_url"),
                                 rs.getString("status"),
                                 rs.getLong("price"),
-                                HashMap<String, String>(),
+                                HashMap<String?, String?>(),
                                 rs.getObject("category_id", Long::class.javaObjectType),
                                 rs.getString("category_name"),
                                 rs.getObject("created_at", LocalDateTime::class.java),
@@ -56,7 +56,7 @@ class JdbcStoreMemberReads(
                             result[id] = item
                         }
                         if (rs.getObject("option_value_id") != null) {
-                            item.options().put(rs.getString("group_name"), rs.getString("value_name"))
+                            item.options!!.put(rs.getString("group_name"), rs.getString("value_name"))
                         }
                     }
                     ArrayList(result.values)
@@ -90,7 +90,7 @@ class JdbcStoreMemberReads(
                 },
             )
             if (headers.isNotEmpty()) {
-                params["ids"] = headers.stream().map { it.orderId() }.toList()
+                params["ids"] = headers.stream().map { it.orderId }.toList()
                 val items: Map<Long, List<StoreMemberReads.OrderItem>> = jdbc.query(
                     ORDER_ITEMS,
                     params,
@@ -112,7 +112,7 @@ class JdbcStoreMemberReads(
                     },
                 )!!
                 for (header in headers) {
-                    header.items().addAll(items.getOrDefault(header.orderId(), listOf()))
+                    header.items!!.addAll(items.getOrDefault(header.orderId, listOf()))
                 }
             }
             MemberReadPages.page(headers, request, LongSupplier { count("orders", memberId) })
@@ -135,7 +135,7 @@ class JdbcStoreMemberReads(
                                 ArrayList<StoreMemberReads.CartItem>(),
                                 rs.getObject("created_at", LocalDateTime::class.java),
                             )
-                        } else if (cart.cartId() != id) {
+                        } else if (cart.cartId != id) {
                             throw IllegalStateException("Multiple carts for one member")
                         }
                         if (rs.getObject("item_id") == null) {
@@ -144,7 +144,7 @@ class JdbcStoreMemberReads(
                         val exists = rs.getObject("live_sku_id") != null
                         val price = if (exists) rs.getLong("price") else 0L
                         val quantity = rs.getInt("quantity")
-                        cart.items().add(
+                        cart.items!!.add(
                             StoreMemberReads.CartItem(
                                 rs.getLong("item_id"),
                                 rs.getLong("product_sku_id"),
@@ -195,10 +195,10 @@ class JdbcStoreMemberReads(
         val result = ArrayList<String>()
         for (order in request.sort()) {
             // The immutable Java map rejects a null property with NullPointerException, as before.
-            val column = columns.get(order.property())
-                ?: throw IllegalArgumentException("Unsupported Store member sort property: " + order.property())
-            val expression = if (order.ignoreCase() && column.text) "lower(" + column.sql + ")" else column.sql
-            result.add(expression + (if (order.ascending()) " ASC" else " DESC"))
+            val column = columns.get(order.property)
+                ?: throw IllegalArgumentException("Unsupported Store member sort property: " + order.property)
+            val expression = if (order.ignoreCase && column.text) "lower(" + column.sql + ")" else column.sql
+            result.add(expression + (if (order.ascending) " ASC" else " DESC"))
         }
         return if (result.isEmpty()) "" else " ORDER BY " + result.joinToString(",")
     }

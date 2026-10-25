@@ -146,7 +146,7 @@ class JpaDirectOrders internal constructor(
         if (request.size() > 100 ||
             request.offset() > Int.MAX_VALUE ||
             requestedSort.size > 4 ||
-            requestedSort.any { order -> order.property() == null || !HISTORY_SORTS.contains(order.property()) }
+            requestedSort.any { order -> order.property == null || !HISTORY_SORTS.contains(order.property) }
         ) {
             throw IllegalArgumentException("Order history page or sort is not supported")
         }
@@ -154,9 +154,9 @@ class JpaDirectOrders internal constructor(
         val sort = Sort.by(
             requestedSort.map { order ->
                 Sort.Order(
-                    if (order.ascending()) Sort.Direction.ASC else Sort.Direction.DESC,
-                    order.property(),
-                    order.ignoreCase(),
+                    if (order.ascending) Sort.Direction.ASC else Sort.Direction.DESC,
+                    order.property!!,
+                    order.ignoreCase,
                     Sort.NullHandling.NATIVE,
                 )
             },
@@ -198,7 +198,7 @@ class JpaDirectOrders internal constructor(
         )
 
         private fun requireActor(verified: Long, actor: StoreOrderActors.Actor?) {
-            if (actor == null || actor.userId() != verified || !actor.active() || actor.deleted()) {
+            if (actor == null || actor.userId != verified || !actor.active || actor.deleted) {
                 throw OrderActorRejectedException()
             }
         }

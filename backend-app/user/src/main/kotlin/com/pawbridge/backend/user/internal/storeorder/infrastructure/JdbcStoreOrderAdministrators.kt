@@ -55,7 +55,7 @@ class JdbcStoreOrderAdministrators(private val jdbc: JdbcTemplate) : StoreOrderA
             "User deletion observation is unavailable",
         )
         val actor = found.first()
-        return StoreOrderAdministrators.Actor(actor.userId(), !pending, pending, actor.role())
+        return StoreOrderAdministrators.Actor(actor.userId, !pending, pending, actor.role)
     }
 
     private companion object {

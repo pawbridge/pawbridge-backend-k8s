@@ -31,15 +31,15 @@ class ModuleStoreMyPage(
         try {
             return page(Objects.requireNonNull(store.wishlists(currentUserId, request(request)))) { item ->
                 Wishlist(
-                    item.wishlistId(),
-                    item.productId(),
-                    item.productName(),
-                    item.productDescription(),
-                    item.productImageUrl(),
-                    item.productStatus(),
-                    item.categoryId(),
-                    item.categoryName(),
-                    item.createdAt(),
+                    item.wishlistId,
+                    item.productId,
+                    item.productName,
+                    item.productDescription,
+                    item.productImageUrl,
+                    item.productStatus,
+                    item.categoryId,
+                    item.categoryName,
+                    item.createdAt,
                 )
             }
         } catch (unavailable: Exception) {
@@ -52,23 +52,23 @@ class ModuleStoreMyPage(
         try {
             return page(Objects.requireNonNull(store.orders(currentUserId, request(request)))) { item ->
                 Purchase(
-                    item.orderId(),
-                    item.orderUuid(),
-                    item.totalAmount(),
-                    item.status(),
-                    item.deliveryAddress(),
-                    item.deliveryStatus(),
-                    map(item.items()) { value ->
+                    item.orderId,
+                    item.orderUuid,
+                    item.totalAmount,
+                    item.status,
+                    item.deliveryAddress,
+                    item.deliveryStatus,
+                    map(item.items) { value ->
                         OrderItem(
-                            value.orderItemId(),
-                            value.productSkuId(),
-                            value.productName(),
-                            value.skuCode(),
-                            value.price(),
-                            value.quantity(),
+                            value.orderItemId,
+                            value.productSkuId,
+                            value.productName,
+                            value.skuCode,
+                            value.price,
+                            value.quantity,
                         )
                     },
-                    item.createdAt(),
+                    item.createdAt,
                 )
             }
         } catch (unavailable: Exception) {
@@ -81,22 +81,22 @@ class ModuleStoreMyPage(
         try {
             val source: StoreMemberReads.Cart = Objects.requireNonNull(store.cart(currentUserId)).orElse(null)
                 ?: return null
-            Objects.requireNonNull(source.items())
+            Objects.requireNonNull(source.items)
             return Cart(
-                source.cartId(),
-                source.userId(),
-                map(source.items()) { item ->
+                source.cartId,
+                source.userId,
+                map(source.items) { item ->
                     CartItem(
-                        item.cartItemId(),
-                        item.productSkuId(),
-                        item.productName(),
-                        item.skuCode(),
-                        item.price(),
-                        item.quantity(),
-                        item.totalPrice(),
+                        item.cartItemId,
+                        item.productSkuId,
+                        item.productName,
+                        item.skuCode,
+                        item.price,
+                        item.quantity,
+                        item.totalPrice,
                     )
                 },
-                source.createdAt(),
+                source.createdAt,
             )
         } catch (unavailable: Exception) {
             throw IllegalStateException("Store cart lookup failed", unavailable)
@@ -153,22 +153,22 @@ class ModuleStoreMyPage(
         }
 
         private fun <T, R> page(source: StoreMemberReads.Page<T>, mapper: (T) -> R): Page<R> {
-            val content = map(source.content(), mapper)
+            val content = map(source.content, mapper)
             // Fixed Store Feign SortJacksonModule serializes an array, so the existing User array branch retains each order.
             val normalizedSort = Sort.by(
-                source.sort().stream().map { order ->
+                source.sort.stream().map { order ->
                     Sort.Order(
-                        if (order.ascending()) Sort.Direction.ASC else Sort.Direction.DESC,
-                        order.property(),
-                        order.ignoreCase(),
+                        if (order.ascending) Sort.Direction.ASC else Sort.Direction.DESC,
+                        order.property!!,
+                        order.ignoreCase,
                         Sort.NullHandling.NATIVE,
                     )
                 }.toList(),
             )
             // PageImpl rejects a null content list, as the Java code did.
             val checkedContent = requireNotNull(content) { "Content must not be null" }
-            val normalized: org.springframework.data.domain.Page<R> = if (source.size() > 0) {
-                PageImpl(checkedContent, PageRequest.of(source.number(), source.size(), normalizedSort), source.totalElements())
+            val normalized: org.springframework.data.domain.Page<R> = if (source.size > 0) {
+                PageImpl(checkedContent, PageRequest.of(source.number, source.size, normalizedSort), source.totalElements)
             } else {
                 PageImpl(checkedContent)
             }

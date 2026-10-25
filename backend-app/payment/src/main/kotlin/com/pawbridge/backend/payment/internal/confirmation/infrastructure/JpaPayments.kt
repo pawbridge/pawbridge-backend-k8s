@@ -77,7 +77,7 @@ class JpaPayments internal constructor(
         // A. Outside any transaction: owner first (no stored payment is revealed to another member),
         // then existing DONE re-response, then amount/state checks before the provider.
         val order = storeServiceClient.getOrder(orderId)
-        if (order.userId() == null || order.userId() != verifiedUserId) {
+        if (order.userId == null || order.userId != verifiedUserId) {
             throw PaymentOrderAccessDeniedException()
         }
         val existing = reads.execute { doneFor(orderId) }
@@ -88,10 +88,10 @@ class JpaPayments internal constructor(
             }
             return stored(payment)
         }
-        if (order.totalAmount() == null || order.totalAmount() != amount) {
+        if (order.totalAmount == null || order.totalAmount != amount) {
             throw IllegalStateException("Payment Amount Mismatch")
         }
-        if (order.status() != "PENDING") {
+        if (order.status != "PENDING") {
             throw PaymentOrderNotPayableException()
         }
 
@@ -171,7 +171,7 @@ class JpaPayments internal constructor(
                     ranking = null
                     val total = response.totalAmount ?: -1L
                     val completed = storePayments.completePayment(response.orderId, total)
-                    val completion = completed.completion()
+                    val completion = completed.completion
                     val done = doneFor(response.orderId)
                     if (done.isPresent) {
                         if (done.get().paymentKey == response.paymentKey) {
@@ -198,7 +198,7 @@ class JpaPayments internal constructor(
                         .build()
                     payment.approve(response.approvedAt?.toLocalDateTime())
                     paymentRepository.saveAndFlush(payment)
-                    ranking = completed.afterCommit()
+                    ranking = completed.afterCommit
                     Applied.ACCEPTED
                 }
             }

@@ -80,7 +80,7 @@ class JpaCartOrders internal constructor(
                 throw IllegalStateException("An active checkout writer transaction is required")
             }
             val actor = actors.currentForWrite(verifiedUserId)
-            if (actor == null || actor.userId() != verifiedUserId || !actor.active() || actor.deleted()) {
+            if (actor == null || actor.userId != verifiedUserId || !actor.active || actor.deleted) {
                 throw OrderActorRejectedException()
             }
             val cart = carts.findByUserId(verifiedUserId)

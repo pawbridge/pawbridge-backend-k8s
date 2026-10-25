@@ -74,16 +74,16 @@ class JdbcAnimalMemberReads : AnimalMemberReads {
             return reads.execute {
                 // A null request throws NPE inside the transaction callback, so it is wrapped like in Java.
                 val checked = request!!
-                if (checked.page() < 0 || checked.size() < 1) {
+                if (checked.page < 0 || checked.size < 1) {
                     throw IllegalArgumentException("Invalid effective pageable")
                 }
-                val offset = checked.page().toLong() * checked.size()
+                val offset = checked.page.toLong() * checked.size
                 if (offset > Integer.MAX_VALUE) {
                     throw IllegalArgumentException("Page offset exceeds Integer.MAX_VALUE (2147483647)")
                 }
-                val sorting = sorting(checked.sort())
+                val sorting = sorting(checked.sort)
                 val parameters = MapSqlParameterSource("shelterId", shelterId)
-                    .addValue("limit", checked.size()).addValue("offset", offset)
+                    .addValue("limit", checked.size).addValue("offset", offset)
                 var content: List<Animal> = jdbc.query(
                     "SELECT " + COLUMNS + FROM + sorting.joins +
                         " WHERE a.shelter_id=:shelterId AND a.api_source='MANUAL'" + sorting.orderBy +
@@ -94,12 +94,12 @@ class JdbcAnimalMemberReads : AnimalMemberReads {
                 if (sorting.collectionJoin) {
                     // Hibernate6 root identity deduplication happens AFTER SQL LIMIT/OFFSET.
                     val roots = LinkedHashMap<Long?, Animal>()
-                    content.forEach { animal -> roots.putIfAbsent(animal.id(), animal) }
+                    content.forEach { animal -> roots.putIfAbsent(animal.id, animal) }
                     content = ArrayList(roots.values)
                 }
                 var total: Long
                 // PageableExecutionUtils skips count on a partial nonempty page, or any partial first page.
-                if (content.size < checked.size() && (checked.page() == 0 || content.isNotEmpty())) {
+                if (content.size < checked.size && (checked.page == 0 || content.isNotEmpty())) {
                     total = offset + content.size
                 } else {
                     total = jdbc.queryForObject(
@@ -110,11 +110,11 @@ class JdbcAnimalMemberReads : AnimalMemberReads {
                     )!!
                 }
                 // PageImpl adapts stale count only for a nonempty final page.
-                if (content.isNotEmpty() && offset + checked.size() > total) {
+                if (content.isNotEmpty() && offset + checked.size > total) {
                     total = offset + content.size
                 }
-                val totalPages = Math.ceil(total.toDouble() / checked.size()).toInt()
-                Page(content, checked.page(), checked.size(), total, totalPages, checked.page() + 1 >= totalPages)
+                val totalPages = Math.ceil(total.toDouble() / checked.size).toInt()
+                Page(content, checked.page, checked.size, total, totalPages, checked.page + 1 >= totalPages)
             }!!
         } catch (failure: RuntimeException) {
             throw AnimalMemberReadUnavailableException(failure)

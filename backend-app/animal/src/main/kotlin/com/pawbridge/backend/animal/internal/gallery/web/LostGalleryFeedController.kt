@@ -32,8 +32,8 @@ class LostGalleryFeedController(
         }
         try {
             val result = feed.snapshot(etag)
-            return ResponseEntity.status(if (result.body() == null) 304 else 200)
-                .header("Cache-Control", "no-store").eTag(result.etag()).body(result.body())
+            return ResponseEntity.status(if (result.body == null) 304 else 200)
+                .header("Cache-Control", "no-store").eTag(result.etag).body(result.body)
         } catch (error: Exception) {
             // Do not expose signed URLs, storage credentials, SQL details or partial responses.
             return unavailable()

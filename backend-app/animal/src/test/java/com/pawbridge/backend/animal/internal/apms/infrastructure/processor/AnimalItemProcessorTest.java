@@ -10,6 +10,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.batch.core.StepExecution;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -17,7 +18,7 @@ class AnimalItemProcessorTest {
     @Test void givenNewApmsRowAndExistingTypedShelter__whenProcessing__thenUseTheExistingAnimalModelAndOriginalSourceMapping() throws Exception {
         var animals=mock(AnimalRepository.class);var shelters=mock(ShelterRepository.class);
         var shelter=Shelter.builder().id(10L).careRegNo("owned").build();when(shelters.findAll()).thenReturn(List.of(shelter));
-        var processor=new AnimalItemProcessor(animals,shelters);processor.beforeStep(null);clearInvocations(animals,shelters);
+        var processor=new AnimalItemProcessor(animals,shelters);processor.beforeStep(mock(StepExecution.class));clearInvocations(animals,shelters);
         var row=processor.process(dto("new"));
         assertThat(row.getId()).isNull();assertThat(row.getShelter()).isSameAs(shelter);assertThat(row.getApiSource()).isEqualTo(ApiSource.APMS_ANIMAL);
         assertThat(row.getApmsDesertionNo()).isEqualTo("new");assertThat(row.getSpecies()).isEqualTo(Species.DOG);
@@ -31,14 +32,14 @@ class AnimalItemProcessorTest {
         var animals=mock(AnimalRepository.class);var shelters=mock(ShelterRepository.class);
         when(animals.findAllApmsDesertionNoAndId()).thenReturn(List.<Object[]>of(new Object[]{"old",41L}));
         when(shelters.findAll()).thenReturn(List.of(Shelter.builder().id(10L).careRegNo("owned").build()));
-        var processor=new AnimalItemProcessor(animals,shelters);processor.beforeStep(null);clearInvocations(animals,shelters);
+        var processor=new AnimalItemProcessor(animals,shelters);processor.beforeStep(mock(StepExecution.class));clearInvocations(animals,shelters);
         var row=processor.process(dto("old"));assertThat(row.getId()).isEqualTo(41L);assertThat(row.getImageUrl()).isEqualTo("owned-image");
         assertThat(row.getApmsDesertionNo()).isNull();assertThat(row.getDescription()).isNull();verifyNoInteractions(animals,shelters);
     }
 
     @Test void givenMissingPreparedShelter__whenProcessing__thenFailInsteadOfSilentlyFiltering() {
         var animals=mock(AnimalRepository.class);var shelters=mock(ShelterRepository.class);
-        var processor=new AnimalItemProcessor(animals,shelters);processor.beforeStep(null);
+        var processor=new AnimalItemProcessor(animals,shelters);processor.beforeStep(mock(StepExecution.class));
         assertThatThrownBy(() -> processor.process(dto("new"))).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("shelterCache miss");
     }
     private ApmsAnimal dto(String id) { return ApmsAnimal.builder().desertionNo(id).careRegNo("owned").upKindCd("417000")

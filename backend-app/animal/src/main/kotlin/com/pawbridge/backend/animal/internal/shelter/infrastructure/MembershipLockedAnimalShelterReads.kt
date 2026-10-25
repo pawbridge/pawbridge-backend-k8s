@@ -39,9 +39,9 @@ class MembershipLockedAnimalShelterReads(
         } catch (failure: RuntimeException) {
             throw AnimalShelterReadUnavailableException(failure)
         }
-        if (locked.size != 1 || found.id() != locked.first().id() ||
-            found.careRegNo() != locked.first().careRegNo() ||
-            careRegNo != locked.first().careRegNo()
+        if (locked.size != 1 || found.id != locked.first().id ||
+            found.careRegNo != locked.first().careRegNo ||
+            careRegNo != locked.first().careRegNo
         ) {
             throw unavailable()
         }

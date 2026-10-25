@@ -150,7 +150,7 @@ class JpaCarts internal constructor(
         }
 
         private fun actor(user: Long, actor: StoreOrderActors.Actor?) {
-            if (actor == null || actor.userId() != user || !actor.active() || actor.deleted()) {
+            if (actor == null || actor.userId != user || !actor.active || actor.deleted) {
                 throw CartActorRejectedException()
             }
         }

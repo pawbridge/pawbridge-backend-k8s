@@ -33,9 +33,9 @@ class LostGalleryPagesController(
     ): ResponseEntity<*> {
         return handle(supplied) {
             val value = snapshots.create(requestId)
-            val tag = "\"" + value.snapshotSha256() + "\""
+            val tag = "\"" + value.snapshotSha256 + "\""
             if (tag == etag) {
-                snapshots.release(value.snapshotId())
+                snapshots.release(value.snapshotId)
                 ResponseEntity.status(304).eTag(tag).build<Any>()
             } else {
                 ResponseEntity.ok().eTag(tag).body(value)

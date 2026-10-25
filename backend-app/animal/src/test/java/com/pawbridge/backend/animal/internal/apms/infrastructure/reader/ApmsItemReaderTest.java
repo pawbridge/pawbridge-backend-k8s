@@ -4,6 +4,7 @@ import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsAnimalSnaps
 import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsAnimal;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.batch.core.StepExecution;
 
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -20,7 +21,7 @@ class ApmsItemReaderTest {
         var animals = IntStream.range(0, 2000).mapToObj(i -> ApmsAnimal.builder().desertionNo("id-" + i).build()).toList();
         when(snapshot.animals()).thenReturn(animals);
         var reader = new ApmsItemReader(snapshot);
-        reader.beforeStep(null);
+        reader.beforeStep(mock(StepExecution.class));
         var pool = Executors.newFixedThreadPool(4);
         try {
             List<Callable<ApmsAnimal>> calls = IntStream.range(0, 2000).mapToObj(i -> (Callable<ApmsAnimal>) reader::read).toList();
@@ -39,11 +40,11 @@ class ApmsItemReaderTest {
         var two = ApmsAnimal.builder().desertionNo("two").build();
         when(snapshot.animals()).thenReturn(List.of(one, two));
         var reader = new ApmsItemReader(snapshot);
-        reader.beforeStep(null);
+        reader.beforeStep(mock(StepExecution.class));
         assertThat(reader.read()).isSameAs(one);
-        reader.afterStep(null);
+        reader.afterStep(mock(StepExecution.class));
         assertThat(reader.read()).isNull();
-        reader.beforeStep(null);
+        reader.beforeStep(mock(StepExecution.class));
         assertThat(reader.read()).isSameAs(one);
         assertThat(reader.read()).isSameAs(two);
         assertThat(reader.read()).isNull();

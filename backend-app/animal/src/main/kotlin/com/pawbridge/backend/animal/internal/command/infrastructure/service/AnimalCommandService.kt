@@ -66,10 +66,10 @@ class AnimalCommandService(
         }
         val actor: Actor? = actors.find(verifiedUserId)
         if (actor == null ||
-            actor.userId() != verifiedUserId ||
-            !actor.active() ||
-            actor.deleted() ||
-            !("ROLE_ADMIN" == actor.role() || "ROLE_SHELTER" == actor.role())
+            actor.userId != verifiedUserId ||
+            !actor.active ||
+            actor.deleted ||
+            !("ROLE_ADMIN" == actor.role || "ROLE_SHELTER" == actor.role)
         ) {
             throw AnimalCommandForbiddenException()
         }
@@ -85,10 +85,10 @@ class AnimalCommandService(
     }
 
     private fun requireShelter(actor: Actor, careRegNo: String?) {
-        if ("ROLE_ADMIN" == actor.role()) {
+        if ("ROLE_ADMIN" == actor.role) {
             return
         }
-        val actorCareRegNo = actor.careRegNo()
+        val actorCareRegNo = actor.careRegNo
         if (actorCareRegNo == null || isBlank(actorCareRegNo) || actorCareRegNo != careRegNo) {
             throw AnimalCommandForbiddenException()
         }
