@@ -224,6 +224,7 @@ def workflow_contract(raw):
         require(name is not None and 'continue-on-error' not in body, 'unknown-workflow')
         name = name.group(1)
         if key == 'check':
+            # A sharded check name never matches: no single shard job proves the full recipe.
             expression = re.fullmatch(r"\$\{\{ matrix.profile == 'full' && '([^']+)' \|\| '[^']+' \}\}", name)
             require(expression is not None, 'unknown-workflow')
             name = expression.group(1)

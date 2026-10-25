@@ -274,6 +274,10 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('fail-fast: false', check)
         self.assertIn('profile: ${{ fromJSON(needs.selection.outputs.profiles) }}', check)
         self.assertIn('Java 21 build and isolated PostgreSQL/S3 HTTP contracts', check)
+        shards = sorted(backend_contract_profile.SHARDS)
+        self.assertIn('        shard: [' + ', '.join(str(shard) for shard in shards) + ']\n', check)
+        self.assertIn('(shard ${{ matrix.shard }}/' + str(len(shards)) + ')', check)
+        self.assertIn('CONTRACT_SHARD: ${{ matrix.shard }}', check)
         self.assertEqual(1, WORKFLOW.read_text().count('bash ./gradlew projects check :boot:bootJar'))
         self.assertNotIn('continue-on-error', check + package)
         self.assertIn('jar_sha256: ${{ steps.package.outputs.jar_sha256 }}', package)
@@ -283,7 +287,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertNotIn('github-token:', check)
         self.assertIn("name: backend-app-candidate-${{ github.run_id }}-${{ github.run_attempt }}", package)
         self.assertIn("name: backend-app-candidate-${{ github.run_id }}-${{ github.run_attempt }}", check)
-        self.assertIn('name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}', check)
+        self.assertIn('name: backend-app-check-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.profile }}'
+                      '-shard-${{ matrix.shard }}\n', check)
         evidence = package.split('      - name: Preserve shared unit and architecture evidence even on failure', 1)[1]
         self.assertIn('if: always()', evidence)
         self.assertIn('TEST-*.xml', evidence)
@@ -293,48 +298,104 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)
         found, conditional = [], []
         modes = (backend_contract_profile.FULL, backend_contract_profile.PILOT)
-        selected = {mode: [] for mode in modes}
-        full_only = "${{ matrix.profile == 'full' }}"
+        shards = backend_contract_profile.SHARDS
+        last = str(backend_contract_profile.CONTRACT_SHARD)
+        selected = {(mode, shard): [] for mode in modes for shard in shards}
+        smoke_conditions, token_conditions = {}, {}
+        reproduced = []
+        full_only = "matrix.profile == 'full'"
+
+        def shard_of(key):
+            return next(shard for shard, keys in shards.items() if key in keys)
+
+        def runs_from(shard):
+            # A shard re-provisions every fixture stage up to its last smoke, so a stage's
+            # preparation runs in its own shard and in every later one.
+            return [] if shard == 1 else ['${{ matrix.shard >= ' + str(shard) + ' }}']
+
         allowed_conditions = {
-            'Add only refresh logout column rights on the exact administrator fixture': full_only,
-            'Compare refresh logout transactions and one Seoul expiry storage boundary': full_only,
+            'Add pinned User and installed chat tables only after fixed source preparation':
+                '${{ matrix.shard >= ' + last + ' }}',
+            'Add only administrator role and care registration column rights after member fixture preparation':
+                '${{ matrix.shard >= ' + last + ' }}',
+            'Add only refresh logout column rights on the exact administrator fixture':
+                '${{ ' + full_only + ' && matrix.shard >= ' + last + ' }}',
+            'Compare refresh logout transactions and one Seoul expiry storage boundary':
+                '${{ ' + full_only + ' && matrix.shard >= ' + last + ' }}',
             'Always restore only auth column rights and verify the prior administrator fixture':
                 "${{ always() && matrix.profile == 'full' && (steps.fixture_auth_sessions.outcome == 'success' "
                 "|| steps.fixture_auth_sessions.outcome == 'failure') }}",
             'Remove only the owned disposable fixture': 'always()',
             'Reject missing, failed or falsely skipped runtime contracts': 'always()',
             'Preserve tests and bounded runtime evidence': 'always()',
-            'Preserve the verified executable JAR': "${{ success() && matrix.profile == 'full' }}",
+            'Preserve the verified executable JAR':
+                "${{ success() && matrix.profile == 'full' && matrix.shard == " + last + " }}",
         }
         for part in parts[1:]:
             name = part.splitlines()[0].removeprefix('      - name: ')
             conditions = re.findall(r'^        if: (.+)$', part, re.MULTILINE)
             smoke = re.findall(r'^\s*(?:run: )?python3 scripts/(f[0-9]+)_ci.py smoke\s*$', part, re.MULTILINE)
             member = re.findall(r'^\s*(?:run: )?python3 scripts/f29_ci.py member-cleanup-smoke\s*$', part, re.MULTILINE)
+            prepare = re.search(r'^        id: fixture_post_unrelated_f([0-9]+)$', part, re.MULTILINE)
+            state = re.search(r'^        id: (' + '|'.join(backend_contract_profile.STATE_STEPS.values()) + ')$',
+                              part, re.MULTILINE)
+            token = re.fullmatch(r'Issue synthetic JWTs for (F[0-9]+|member cleanup)', name)
             if smoke or member:
                 self.assertEqual(1, len(smoke) + len(member))
                 key = 'jar_f31' if member else 'jar_' + smoke[0]
                 found.append(key)
                 self.assertIn('        id: ' + key + '\n', part)
-                self.assertIn(conditions, ([], [full_only]), 'Every JAR runs in full and only declared pilot skips.')
-                if conditions:
+                shard = shard_of(key)
+                every_profile = '${{ matrix.shard == ' + str(shard) + ' }}'
+                pilot_skip = '${{ ' + full_only + ' && matrix.shard == ' + str(shard) + ' }}'
+                self.assertIn(conditions, ([every_profile], [pilot_skip]),
+                              'Every JAR runs once in its own shard and only declared pilot skips.')
+                if conditions == [pilot_skip]:
                     conditional.append(key)
-                for mode in modes if not conditions else (backend_contract_profile.FULL,):
-                    selected[mode].append(key)
-            elif name.startswith('Issue synthetic JWTs for '):
-                # A token step follows its smoke: unconditional, or full-only before a pilot-skipped JAR.
-                self.assertIn(conditions, ([], [full_only]), name)
+                for mode in modes if conditions == [every_profile] else (backend_contract_profile.FULL,):
+                    selected[(mode, shard)].append(key)
+                smoke_conditions[key] = conditions
+            elif token:
+                # A token step precedes its smoke and runs exactly when that smoke runs.
+                stage = token.group(1)
+                key = 'jar_f31' if stage == 'member cleanup' else 'jar_' + stage.lower()
+                token_conditions[key] = conditions
+            elif prepare:
+                key = 'jar_f' + prepare.group(1)
+                self.assertEqual(runs_from(shard_of(key)), conditions, name)
+            elif state:
+                # A smoke that leaves state for later steps is followed directly by the step that
+                # reproduces that state in every shard after the one that runs the smoke.
+                key = next(smoke for smoke, step in backend_contract_profile.STATE_STEPS.items()
+                           if step == state.group(1))
+                self.assertEqual(key, found[-1], name)
+                self.assertEqual(['${{ matrix.shard >= ' + str(shard_of(key) + 1) + ' }}'], conditions, name)
+                reproduced.append(key)
             elif conditions:
                 self.assertEqual([allowed_conditions.get(name)], conditions, name)
         self.assertEqual(list(backend_contract_profile.ALL_SMOKES), found)
         self.assertEqual(list(backend_contract_profile.PILOT_SKIPS), conditional)
-        for mode, actual in selected.items():
-            self.assertEqual(list(backend_contract_profile.expected_smokes(mode)), actual)
+        self.assertEqual(sorted(backend_contract_profile.STATE_STEPS), sorted(reproduced))
+        shape = next(part for part in parts if '        id: shape_f4\n' in part)
+        self.assertIn('run: python3 scripts/f4_ci.py prepare-shape\n', shape)
+        for (mode, shard), actual in selected.items():
+            self.assertEqual(list(backend_contract_profile.expected_smokes(mode, shard)), actual)
+        self.assertEqual(['jar_f' + str(n) for n in (12, 13, 14) + tuple(range(17, 30))] + ['jar_f31'],
+                         sorted(token_conditions, key=backend_contract_profile.ALL_SMOKES.index))
+        for key, conditions in token_conditions.items():
+            self.assertEqual(smoke_conditions[key], conditions, key)
+        base_token = check.split('      - name: Issue synthetic JWTs for the base F3 role and rejection set\n', 1)[1]
+        self.assertNotIn('        if:', base_token.split('      - name:', 1)[0])
         audit = check.split('      - name: Reject missing, failed or falsely skipped runtime contracts', 1)[1]
         audit = audit.split('      - name:', 1)[0]
         self.assertIn('if: always()', audit)
         self.assertIn('CONTRACT_STEPS_JSON: ${{ toJSON(steps) }}', audit)
         self.assertIn('--mode audit --profile "$CONTRACT_PROFILE"', audit)
+        self.assertIn('--shard "$CONTRACT_SHARD"', audit)
+        plan = check.split('      - name: Bind the execution plan to this profile and candidate', 1)[1]
+        plan = plan.split('      - name:', 1)[0]
+        self.assertIn('--mode plan --profile "$CONTRACT_PROFILE"', plan)
+        self.assertIn('--shard "$CONTRACT_SHARD"', plan)
         self.assertLess(check.index('id: owned_cleanup'), check.index('--mode audit'))
         for path in ('.github/scripts/backend_contract_profile.py', '.github/scripts/ci_branch_policy.py'):
             self.assertIn('            ' + path + '\n', check)

@@ -214,13 +214,18 @@ class PostmergeProofTest(unittest.TestCase):
                 self.assertEqual([10, 11, 12], data.archive_calls)
                 self.assertFalse(any('ls-remote' in args or 'fetch' in args for args in data.git_calls))
 
-    def test_given_the_current_workflow__when_interpreting_the_full_recipe__then_accept_every_condition(self):
+    def test_given_the_current_sharded_workflow__when_interpreting_the_full_recipe__then_refuse_reuse(self):
+        # Each check shard runs a different subset of the recipe, so no single job proves the full run
+        # and a dev push keeps executing every shard itself.
         raw = (Path(__file__).resolve().parents[1] / 'workflows' / 'backend-app-check.yml').read_bytes()
-        contract = proof.workflow_contract(raw)
-        self.assertEqual('Java 21 build and isolated PostgreSQL/S3 HTTP contracts', contract['check'][0])
-        self.assertIn('Always restore only auth column rights and verify the prior administrator fixture',
-                      contract['check'][1])
-        self.assertEqual({'package', 'check', 'ci-result', 'proof'}, set(contract))
+        with self.assertRaises(proof.Unavailable) as refused:
+            proof.workflow_contract(raw)
+        self.assertEqual('unknown-workflow', str(refused.exception))
+        unsharded = raw.replace(b' (shard ${{ matrix.shard }}/4)\n', b'\n', 1)
+        self.assertNotEqual(raw, unsharded)
+        with self.assertRaises(proof.Unavailable) as refused:
+            proof.workflow_contract(unsharded)
+        self.assertEqual('unknown-workflow-condition', str(refused.exception))
 
     def test_given_any_pr_including_fork__when_deciding__then_execute_validation_without_api_or_token(self):
         data = self.fixture();data.env.update(GITHUB_EVENT_NAME='pull_request', GITHUB_REF='refs/pull/7/merge')
