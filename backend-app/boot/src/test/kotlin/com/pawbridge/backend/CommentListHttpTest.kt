@@ -3,6 +3,7 @@ package com.pawbridge.backend
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.comment.application.CommentDetails
 import com.pawbridge.backend.community.internal.comment.application.ListComments
@@ -13,21 +14,20 @@ import com.pawbridge.backend.community.internal.post.application.PostNotFoundExc
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -56,28 +56,23 @@ class CommentListHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var listComments: ListComments
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "malformed", "forged"])
-    fun given__public_comments_with_untrusted_identity__when__getting_list__then__return_original_seven_fields(
+    fun `신뢰할 수 없는 신원의 공개 댓글일 때__목록을 조회하면__원본 일곱 필드를 돌려준다`(
         authorization: String,
     ) {
+        // given
         val created = LocalDateTime.of(2026, 10, 19, 0, 1, 2, 123456000)
         val updated = LocalDateTime.of(2026, 10, 19, 1, 2)
-        whenever(listComments.read(42)).thenReturn(
-            listOf(
-                CommentDetails(12, 42, 7, "작성자", "댓글 내용", created, updated),
-                CommentDetails(11, 42, 8, null, "다른 댓글", created.minusDays(1), updated),
-            ),
-        )
         val request = get("/api/v1/comments/posts/read/42")
             .param("page", "invalid")
             .param("size", "0")
@@ -92,7 +87,16 @@ class CommentListHttpTest {
             request.header("Authorization", "Bearer " + F3TestInputs.token(999, "ROLE_ADMIN") + "forged")
         }
 
-        mvc.perform(request)
+        every { listComments.read(42) } returns listOf(
+            CommentDetails(12, 42, 7, "작성자", "댓글 내용", created, updated),
+            CommentDetails(11, 42, 8, null, "다른 댓글", created.minusDays(1), updated),
+        )
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(jsonPath("$.code").value(200))
@@ -111,16 +115,21 @@ class CommentListHttpTest {
             .andExpect(jsonPath("$.data[1].commentId").value(11))
             .andExpect(jsonPath("$.data[1].authorId").value(8))
             .andExpect(content().string(Matchers.containsString("\"authorNickname\":null")))
-        verify(listComments).read(42)
-        verifyNoInteractions(readPost, listPosts)
+        verify(exactly = 1) { listComments.read(42) }
+        confirmVerified(readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__no_comments__when__getting_list__then__return_empty_array_without_post_lookup_or_page_envelope() {
-        whenever(listComments.read(404)).thenReturn(listOf())
+    fun `댓글이 없을 때__목록을 조회하면__글 조회와 페이지 봉투 없이 빈 배열을 돌려준다`() {
+        // given
+        every { listComments.read(404) } returns listOf()
 
-        mvc.perform(get("/api/v1/comments/posts/read/404"))
+        // when
+        val result = mvc.perform(get("/api/v1/comments/posts/read/404"))
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -128,62 +137,80 @@ class CommentListHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(listComments).read(404)
-        verifyNoInteractions(readPost, listPosts)
+        verify(exactly = 1) { listComments.read(404) }
+        confirmVerified(readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun given__unparseable_post_id__when__getting_comments__then__preserve_legacy_safe_500(postId: String) {
-        mvc.perform(get("/api/v1/comments/posts/read/$postId"))
+    fun `파싱할 수 없는 글 ID일 때__댓글을 조회하면__기존 안전한 500을 유지한다`(postId: String) {
+        // given
+
+        // when
+        val result = mvc.perform(get("/api/v1/comments/posts/read/$postId"))
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verifyNoInteractions(listComments, readPost, listPosts)
+        confirmVerified(listComments, readPost, listPosts)
     }
 
     @Test
-    fun given__comment_failure_with_sensitive_details__when__getting_list__then__return_safe_500_without_secret_logs() {
+    fun `댓글 조회가 민감 정보와 함께 실패할 때__목록을 조회하면__비밀 로그 없이 안전한 500을 돌려준다`() {
+        // given
         val failure = IllegalStateException(
             "Bearer synthetic-private-token; synthetic-private-comment",
             java.sql.SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password"),
         )
-        whenever(listComments.read(42)).thenThrow(failure)
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
-        try {
+
+        every { listComments.read(42) } throws failure
+
+        // when
+        val result = try {
             mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer synthetic-private-header"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-            assertThat(appender.list).allSatisfy { event ->
-                assertThat(event.throwableProxy).isNull()
-                assertThat(event.formattedMessage).doesNotContain(
-                    "synthetic-private-token",
-                    "synthetic-private-comment",
-                    "synthetic-private-password",
-                    "synthetic-private-header",
-                    "jdbc:postgresql:",
-                )
-            }
         } finally {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(listComments).read(42)
-        verifyNoInteractions(readPost, listPosts)
+
+        // then
+        result
+            .andExpect(status().isInternalServerError())
+            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
+        assertThat(appender.list).allSatisfy { event ->
+            assertThat(event.throwableProxy).isNull()
+            assertThat(event.formattedMessage).doesNotContain(
+                "synthetic-private-token",
+                "synthetic-private-comment",
+                "synthetic-private-password",
+                "synthetic-private-header",
+                "jdbc:postgresql:",
+            )
+        }
+        verify(exactly = 1) { listComments.read(42) }
+        confirmVerified(readPost, listPosts)
     }
 
     @Test
-    fun given__missing_post_on_existing_read_path__when__getting_post__then__comment_advice_preserves_post_404() {
-        whenever(readPost.read(42)).thenThrow(PostNotFoundException())
+    fun `기존 읽기 경로에 없는 글일 때__글을 조회하면__댓글 오류 처리가 글 404를 유지한다`() {
+        // given
+        every { readPost.read(42) } throws PostNotFoundException()
 
-        mvc.perform(get("/api/v1/posts/read/42"))
+        // when
+        val result = mvc.perform(get("/api/v1/posts/read/42"))
+
+        // then
+        result
             .andExpect(status().isNotFound())
             .andExpect(
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(listComments, listPosts)
+        confirmVerified(listComments, listPosts)
     }
 
     @ParameterizedTest
@@ -197,25 +224,37 @@ class CommentListHttpTest {
             "PATCH /api/v1/comments/posts/read/42", "DELETE /api/v1/comments/posts/read/42",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting__then__deny_without_comment_or_post_lookup(
+    fun `노출되지 않은 메서드나 인접 경로일 때__요청하면__댓글과 글 조회 없이 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // when
+        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(listComments, readPost, listPosts)
+        confirmVerified(listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["POST /api/v1/posts", "PUT /api/v1/posts/42", "DELETE /api/v1/posts/42"])
-    fun given__existing_post_write_without_token__when__requesting__then__preserve_jwt_authentication(request: String) {
+    fun `토큰 없는 기존 글 쓰기일 때__요청하면__JWT 인증을 유지한다`(request: String) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // when
+        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.code").value(401))
-        verifyNoInteractions(listComments, readPost, listPosts)
+        confirmVerified(listComments, readPost, listPosts)
     }
 }

@@ -1,33 +1,29 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.AdminPostReadConfiguration
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.PostPageReader
 import com.pawbridge.backend.community.internal.post.application.ReadAdminPosts
 import com.pawbridge.backend.community.internal.post.application.ReadPost
-import com.pawbridge.backend.support.anyNonNull
 import com.pawbridge.backend.user.internal.directory.application.UserDirectoryQuery
 import com.pawbridge.backend.user.internal.directory.web.AdminUserDirectoryController
 import com.pawbridge.backend.user.internal.profile.application.UserProfile
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.isNull
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -55,23 +51,24 @@ class AdminUserDirectoryHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var users: UserDirectoryQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var posts: ReadAdminPosts
 
-    @MockitoBean
+    @MockkBean
     lateinit var post: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var postPages: PostPageReader
 
     @ParameterizedTest
     @ValueSource(strings = ["", "/search"])
-    fun given__an_admin_and_forged_identity__when__reading_default_pages__then__return_exact_source_page_and_seven_fields_without_password(
+    fun `관리자와 위조 신원__기본 페이지를 조회하면__원본 페이지와 비밀번호 없는 일곱 필드를 그대로 돌려준다`(
         suffix: String,
     ) {
+        // given
         val row = UserProfile(
             Long.MAX_VALUE,
             "fixture@example.invalid",
@@ -81,115 +78,156 @@ class AdminUserDirectoryHttpTest {
             "ROLE_USER",
             LocalDateTime.parse("2026-10-20T01:02:03.123456"),
         )
-        whenever(users.page(isNull(), isNull(), anyNonNull<UserDirectoryQuery.Request>()))
-            .thenReturn(UserDirectoryQuery.Slice(listOf(row), 41))
-        mvc.perform(
+
+        every { users.page(any(), any(), any()) } returns UserDirectoryQuery.Slice(listOf(row), 41)
+
+        // when
+        val result = mvc.perform(
             get(ROOT + suffix)
                 .header("Authorization", admin())
                 .header("X-User-Id", "999")
                 .header("X-User-Role", "ROLE_USER"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(content().json(EXPECTED, JsonCompareMode.STRICT))
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
-        verify(users).page(null, null, request(0, 20))
-        verifyNoMoreInteractions(users)
+        verify(exactly = 1) { users.page(null, null, request(0, 20)) }
+        confirmVerified(users)
         assertCleared()
     }
 
     @Test
-    fun given__raw_keyword_role_and_repeated_sorts__when__searching__then__bind_exact_values_and_source_sort_order() {
-        whenever(users.page(any<String>(), any<String>(), anyNonNull<UserDirectoryQuery.Request>()))
-            .thenReturn(UserDirectoryQuery.Slice(listOf(), 0))
-        mvc.perform(
+    fun `원문 키워드 역할 반복 정렬__검색하면__정확한 값과 원본 정렬 순서로 바인딩한다`() {
+        // given
+        every { users.page(any(), any(), any()) } returns UserDirectoryQuery.Slice(listOf(), 0)
+
+        // when
+        val result = mvc.perform(
             get("$ROOT/search")
                 .param("keyword", " %_\\한글 ")
                 .param("role", "ROLE_SHELTER")
                 .param("sort", "name,email,desc,ignorecase", "userId,asc")
                 .header("Authorization", admin()),
-        ).andExpect(status().isOk())
-        verify(users).page(
-            " %_\\한글 ",
-            "ROLE_SHELTER",
-            UserDirectoryQuery.Request(
-                0,
-                20,
-                listOf(
-                    UserDirectoryQuery.Order("name", false, true),
-                    UserDirectoryQuery.Order("email", false, true),
-                    UserDirectoryQuery.Order("userId", true, false),
-                ),
-            ),
         )
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) {
+            users.page(
+                " %_\\한글 ",
+                "ROLE_SHELTER",
+                UserDirectoryQuery.Request(
+                    0,
+                    20,
+                    listOf(
+                        UserDirectoryQuery.Order("name", false, true),
+                        UserDirectoryQuery.Order("email", false, true),
+                        UserDirectoryQuery.Order("userId", true, false),
+                    ),
+                ),
+            )
+        }
     }
 
     @ParameterizedTest
     @CsvSource("bad,zero,0,20", "2147483647,3000,2147483647,2000")
-    fun given__malformed_or_large_paging__when__binding__then__retain_existing_fallback_and_resource_cap(
+    fun `잘못되었거나 큰 페이징__바인딩하면__기존 대체값과 자원 상한을 유지한다`(
         page: String,
         size: String,
         number: Int,
         cap: Int,
     ) {
-        whenever(users.page(any<String>(), any<String>(), anyNonNull<UserDirectoryQuery.Request>()))
-            .thenReturn(UserDirectoryQuery.Slice(listOf(), 0))
-        mvc.perform(get(ROOT).param("page", page).param("size", size).header("Authorization", admin()))
-            .andExpect(status().isOk())
-        verify(users).page(null, null, request(number, cap))
+        // given
+        every { users.page(any(), any(), any()) } returns UserDirectoryQuery.Slice(listOf(), 0)
+
+        // when
+        val result = mvc.perform(get(ROOT).param("page", page).param("size", size).header("Authorization", admin()))
+
+        // then
+        result.andExpect(status().isOk())
+        verify(exactly = 1) { users.page(null, null, request(number, cap)) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["role_user", "UNKNOWN"])
-    fun given__invalid_role__when__an_admin_binds_search__then__retain_original_runtime_500_without_query(role: String) {
-        mvc.perform(get("$ROOT/search").param("role", role).header("Authorization", admin()))
+    fun `잘못된 역할__관리자가 검색을 바인딩하면__조회 없이 원래 런타임 500을 유지한다`(role: String) {
+        // given
+        val request = get("$ROOT/search").param("role", role).header("Authorization", admin())
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
-        verifyNoInteractions(users)
+        confirmVerified(users)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "invalid"])
-    fun given__missing_or_invalid_bearer__when__search_role_is_invalid__then__authenticate_before_binding(mode: String) {
+    fun `없거나 잘못된 Bearer__검색 역할이 잘못되면__바인딩 전에 인증한다`(mode: String) {
+        // given
         val request = get("$ROOT/search").param("role", "UNKNOWN").header("X-User-Role", "ROLE_ADMIN")
         if (mode == "invalid") {
             request.header("Authorization", "Bearer invalid")
         }
-        mvc.perform(request).andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"))
-        verifyNoInteractions(users)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result.andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"))
+        confirmVerified(users)
         assertCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["", "/search"])
-    fun given__a_user_and_forged_admin_header__when__reading__then__deny_before_the_query(suffix: String) {
-        mvc.perform(
-            get(ROOT + suffix)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN"),
-        )
+    fun `사용자와 위조 관리자 헤더__조회하면__질의 전에 거부한다`(suffix: String) {
+        // given
+        val request = get(ROOT + suffix)
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Role", "ROLE_ADMIN")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(users)
+        confirmVerified(users)
         assertCleared()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["storage", "commit", "unsupported-sort"])
-    fun given__query_commit_or_known_sort_rejection__when__listing__then__reuse_safe_source_generic_500(phase: String) {
+    fun `질의 커밋 또는 알려진 정렬 거부__목록을 조회하면__안전한 원본 일반 500을 재사용한다`(phase: String) {
+        // given
         val failure: RuntimeException = when (phase) {
             "storage" -> DataAccessResourceFailureException("synthetic-private-password")
             "commit" -> TransactionSystemException("synthetic-private-password")
             else -> IllegalArgumentException("synthetic-private-password")
         }
-        whenever(users.page(any<String>(), any<String>(), anyNonNull<UserDirectoryQuery.Request>())).thenThrow(failure)
-        mvc.perform(
+
+        every { users.page(any(), any(), any()) } throws failure
+
+        // when
+        val result = mvc.perform(
             get(ROOT)
                 .param("sort", if (phase == "unsupported-sort") "password,asc" else "createdAt,desc")
                 .header("Authorization", admin()),
         )
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
             .andExpect(header().string("Cache-Control", CACHE))
@@ -198,10 +236,18 @@ class AdminUserDirectoryHttpTest {
     }
 
     @Test
-    fun given__neighboring_paths_or_write_methods__when__an_admin_requests_them__then__keep_default_deny() {
-        mvc.perform(get("$ROOT/search/extra").header("Authorization", admin())).andExpect(status().isForbidden())
-        mvc.perform(post(ROOT).header("Authorization", admin())).andExpect(status().isForbidden())
-        verifyNoInteractions(users)
+    fun `이웃 경로나 쓰기 메서드__관리자가 요청하면__기본 거부를 유지한다`() {
+        // given
+        val token = admin()
+
+        // when
+        val neighbor = mvc.perform(get("$ROOT/search/extra").header("Authorization", token))
+        val write = mvc.perform(post(ROOT).header("Authorization", token))
+
+        // then
+        neighbor.andExpect(status().isForbidden())
+        write.andExpect(status().isForbidden())
+        confirmVerified(users)
     }
 
     companion object {

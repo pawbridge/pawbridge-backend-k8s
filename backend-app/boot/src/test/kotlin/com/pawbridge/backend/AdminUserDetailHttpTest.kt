@@ -1,21 +1,21 @@
 package com.pawbridge.backend
 
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
 import com.pawbridge.backend.user.internal.profile.application.UserProfile
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.profile.web.AdminUserDetailController
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -23,7 +23,6 @@ import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -51,30 +50,33 @@ class AdminUserDetailHttpTest {
     @Autowired
     lateinit var mvc: MockMvc
 
-    @MockitoBean
+    @MockkBean
     lateinit var profiles: UserProfileQuery
 
     @Test
-    fun given__admin_and_spoofed_identity__when__reading_another_member__then__bind_only_the_path_and_reuse_exact_seven_fields() {
-        whenever(profiles.require(Long.MAX_VALUE)).thenReturn(
-            UserProfile(
-                Long.MAX_VALUE,
-                "member@fixture.invalid",
-                "Synthetic name",
-                "Synthetic nickname",
-                "GOOGLE",
-                "ROLE_USER",
-                LocalDateTime.parse("2026-10-19T01:02:03.123456"),
-            ),
+    fun `관리자와 위조 신원__다른 회원을 조회하면__경로만 바인딩하고 정확히 일곱 필드를 재사용한다`() {
+        // given
+        every { profiles.require(any()) } returns UserProfile(
+            Long.MAX_VALUE,
+            "member@fixture.invalid",
+            "Synthetic name",
+            "Synthetic nickname",
+            "GOOGLE",
+            "ROLE_USER",
+            LocalDateTime.parse("2026-10-19T01:02:03.123456"),
         )
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             get(PATH + Long.MAX_VALUE)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
                 .header("X-User-Id", "8")
                 .header("X-User-Role", "ROLE_USER")
                 .param("userId", "8"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -89,58 +91,75 @@ class AdminUserDetailHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(profiles).require(Long.MAX_VALUE)
-        verifyNoMoreInteractions(profiles)
+        verify(exactly = 1) { profiles.require(Long.MAX_VALUE) }
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__signed_user_and_spoofed_admin_header__when__reading_a_malformed_target__then__deny_before_binding_or_query() {
-        mvc.perform(
-            get(PATH + "not-a-number")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN"),
-        )
+    fun `서명된 사용자와 위조 관리자 헤더__잘못된 대상을 조회하면__바인딩이나 조회 전에 거부한다`() {
+        // given
+        val request = get(PATH + "not-a-number")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
+            .header("X-User-Role", "ROLE_ADMIN")
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(profiles)
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("rejectedTokens")
-    fun given__missing_or_invalid_bearer__when__reading_a_malformed_target__then__reject_before_query_and_clear_context(
+    fun `없거나 잘못된 Bearer__잘못된 대상을 조회하면__조회 전에 거부하고 컨텍스트를 비운다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = get(PATH + "not-a-number").header("X-User-Role", "ROLE_ADMIN")
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
-        mvc.perform(request)
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(profiles)
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("failures")
-    fun given__missing_member_or_query_failure__when__admin_reads__then__reuse_existing_safe_user_advice(
+    fun `없는 회원 또는 조회 실패__관리자가 조회하면__기존 안전한 사용자 어드바이스를 재사용한다`(
         failure: RuntimeException,
         status: Int,
         message: String,
     ) {
-        whenever(profiles.require(8)).thenThrow(failure)
-        mvc.perform(get(PATH + 8).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+        // given
+        every { profiles.require(any()) } throws failure
+
+        // when
+        val result = mvc.perform(get(PATH + 8).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+
+        // then
+        result
             .andExpect(status().`is`(status))
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
@@ -150,8 +169,8 @@ class AdminUserDetailHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-        verify(profiles).require(8)
-        verifyNoMoreInteractions(profiles)
+        verify(exactly = 1) { profiles.require(8) }
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
@@ -163,34 +182,48 @@ class AdminUserDetailHttpTest {
             "PUT /api/v1/admin/users/8/extra",
         ],
     )
-    fun given__an_unported_reserved_collection_or_method__when__admin_requests_it__then__keep_generic_default_deny(
+    fun `이식되지 않은 예약 컬렉션이나 메서드__관리자가 요청하면__일반 기본 거부를 유지한다`(
         wire: String,
     ) {
+        // given
         val parts = wire.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
         )
+
+        // then
+        result
             .andExpect(status().isForbidden())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(profiles)
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__admin_with_malformed_long__when__binding_before_query__then__retain_original_runtime_error_envelope() {
-        mvc.perform(get(PATH + "not-a-number").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
+    fun `관리자와 잘못된 Long__조회 전에 바인딩하면__원래 런타임 오류 봉투를 유지한다`() {
+        // given
+        val request = get(PATH + "not-a-number")
+            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
+
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        verifyNoInteractions(profiles)
+        confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 

@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.ReadPost
@@ -16,16 +17,15 @@ import com.pawbridge.backend.user.internal.profile.application.UserNotFoundExcep
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.profile.web.UserProfileController
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -34,7 +34,6 @@ import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -70,26 +69,28 @@ class FavoriteStatusHttpTest {
     @Autowired
     lateinit var mapper: ObjectMapper
 
-    @MockitoBean
+    @MockkBean
     lateinit var favorites: FavoriteStatusQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var profiles: UserProfileQuery
 
-    @MockitoBean
+    @MockkBean
     lateinit var readPost: ReadPost
 
-    @MockitoBean
+    @MockkBean
     lateinit var listPosts: ListPosts
 
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun given__verified_principal_with_spoofed_ids__when__checking_favorite__then__use_principal_and_path_ids_and_return_exact_boolean_envelope(
+    fun `검증된 주체와 위조된 ID일 때__즐겨찾기를 확인하면__주체와 경로 ID를 쓰고 정확한 불리언 봉투를 돌려준다`(
         exists: Boolean,
     ) {
-        whenever(favorites.isFavorite(7, 42)).thenReturn(exists)
+        // given
+        every { favorites.isFavorite(7, 42) } returns exists
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             get("/api/v1/favorites/42/check")
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
                 .header("X-User-Id", "999")
@@ -99,6 +100,9 @@ class FavoriteStatusHttpTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userId\":999,\"animalId\":999}"),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
@@ -107,24 +111,27 @@ class FavoriteStatusHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(favorites).isFavorite(7, 42)
-        verifyNoMoreInteractions(favorites)
-        verifyNoInteractions(profiles, readPost, listPosts)
+        verify(exactly = 1) { favorites.isFavorite(7, 42) }
+        confirmVerified(favorites, profiles, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0, -1, Long.MIN_VALUE, Long.MAX_VALUE])
-    fun given__zero_negative_or_long_boundary_animal_id__when__checking__then__original_long_reaches_query_without_new_positive_id_policy(
+    fun `0이나 음수나 Long 경계의 동물 ID일 때__확인하면__새 양수 규칙 없이 원래 Long이 조회에 닿는다`(
         animalId: Long,
     ) {
-        whenever(favorites.isFavorite(7, animalId)).thenReturn(false)
+        // given
+        every { favorites.isFavorite(7, animalId) } returns false
 
-        mvc.perform(
+        // when
+        val result = mvc.perform(
             get("/api/v1/favorites/{animalId}/check", animalId)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isOk())
             .andExpect(
                 content().json(
@@ -132,46 +139,58 @@ class FavoriteStatusHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verify(favorites).isFavorite(7, animalId)
-        verifyNoInteractions(profiles, readPost, listPosts)
+        verify(exactly = 1) { favorites.isFavorite(7, animalId) }
+        confirmVerified(profiles, readPost, listPosts)
     }
 
     @Test
-    fun given__two_principals_then_anonymous_request__when__checking__then__each_uses_its_own_identity_and_anonymous_cannot_reuse_it() {
-        whenever(favorites.isFavorite(7, 42)).thenReturn(true)
-        whenever(favorites.isFavorite(8, 42)).thenReturn(false)
-        for (id in longArrayOf(7, 8)) {
-            mvc.perform(
+    fun `주체 둘에 이어 익명 요청이 올 때__확인하면__각자 자기 신원을 쓰고 익명은 재사용할 수 없다`() {
+        // given
+        every { favorites.isFavorite(7, 42) } returns true
+        every { favorites.isFavorite(8, 42) } returns false
+
+        // when
+        val principalResults = longArrayOf(7, 8).map { id ->
+            id to mvc.perform(
                 get("/api/v1/favorites/42/check").header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")),
             )
+        }
+        val anonymousResult = mvc.perform(get("/api/v1/favorites/42/check"))
+
+        // then
+        for ((id, result) in principalResults) {
+            result
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").value(id == 7L))
         }
-        mvc.perform(get("/api/v1/favorites/42/check"))
+        anonymousResult
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json("{\"code\":401,\"message\":\"인증 토큰이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-
-        verify(favorites).isFavorite(7, 42)
-        verify(favorites).isFavorite(8, 42)
-        verifyNoMoreInteractions(favorites)
+        verify(exactly = 1) { favorites.isFavorite(7, 42) }
+        verify(exactly = 1) { favorites.isFavorite(8, 42) }
+        confirmVerified(favorites)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("rejectedAuthorizations")
-    fun given__missing_or_invalid_token_and_malformed_id__when__checking__then__authentication_precedes_long_conversion_and_query(
+    fun `토큰이 없거나 잘못되고 ID도 깨졌을 때__확인하면__Long 변환과 조회 전에 인증부터 거부한다`(
         authorization: String?,
         message: String,
     ) {
+        // given
         val request = get("/api/v1/favorites/abc/check").header("X-User-Id", "7")
         if (authorization != null) {
             request.header("Authorization", authorization)
         }
 
-        mvc.perform(request)
+        // when
+        val result = mvc.perform(request)
+
+        // then
+        result
             .andExpect(status().isUnauthorized())
             .andExpect(
                 content().json(
@@ -179,72 +198,90 @@ class FavoriteStatusHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-
-        verifyNoInteractions(favorites, profiles, readPost, listPosts)
+        confirmVerified(favorites, profiles, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "1.5", "9223372036854775808", "-9223372036854775809"])
-    fun given__authenticated_nonlong_or_overflowing_id__when__checking__then__preserve_original_runtime_500_before_query(
+    fun `Long이 아니거나 넘치는 ID일 때__인증된 채 확인하면__조회 전에 기존 런타임 500을 유지한다`(
         animalId: String,
     ) {
-        mvc.perform(
+        // given
+
+        // when
+        val result = mvc.perform(
             get("/api/v1/favorites/{animalId}/check", animalId)
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
         )
+
+        // then
+        result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-
-        verifyNoInteractions(favorites, profiles, readPost, listPosts)
+        confirmVerified(favorites, profiles, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
     @MethodSource("queryFailures")
-    fun given__sql_or_transaction_failure__when__checking__then__safe_500_is_not_false_or_authentication_failure_and_private_messages_are_not_logged(
+    fun `SQL이나 트랜잭션 실패일 때__확인하면__false나 인증 실패가 아닌 안전한 500을 주고 비밀을 남기지 않는다`(
         failure: RuntimeException,
     ) {
-        whenever(favorites.isFavorite(7, 42)).thenThrow(failure)
+        // given
         val logger = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
-        try {
+
+        every { favorites.isFavorite(7, 42) } throws failure
+
+        // when
+        val result = try {
             mvc.perform(
                 get("/api/v1/favorites/42/check").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
             )
-                .andExpect(status().isInternalServerError())
-                .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-            assertThat(appender.list).isNotEmpty()
-            assertThat(appender.list).allSatisfy { event ->
-                assertThat(event.throwableProxy).isNull()
-                assertThat(event.formattedMessage).doesNotContain("synthetic-private", "Bearer ", "jdbc:")
-            }
         } finally {
             logger.detachAppender(appender)
             appender.stop()
         }
-        verify(favorites).isFavorite(7, 42)
-        verifyNoMoreInteractions(favorites)
+
+        // then
+        result
+            .andExpect(status().isInternalServerError())
+            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
+        assertThat(appender.list).isNotEmpty()
+        assertThat(appender.list).allSatisfy { event ->
+            assertThat(event.throwableProxy).isNull()
+            assertThat(event.formattedMessage).doesNotContain("synthetic-private", "Bearer ", "jdbc:")
+        }
+        verify(exactly = 1) { favorites.isFavorite(7, 42) }
+        confirmVerified(favorites)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
-    fun given__existing_profile_missing_and_public_post_list__when__requesting__then__favorite_advice_and_authentication_leave_their_contracts_intact() {
-        whenever(profiles.require(7)).thenThrow(UserNotFoundException())
-        whenever(listPosts.read()).thenReturn(listOf())
+    fun `프로필이 없고 공개 글 목록이 있을 때__요청하면__즐겨찾기 오류 처리와 인증이 각자 계약을 유지한다`() {
+        // given
+        every { profiles.require(7) } throws UserNotFoundException()
+        every { listPosts.read() } returns listOf()
 
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
+        // when
+        val profileResult = mvc.perform(
+            get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
+        )
+        val postsResult = mvc.perform(get("/api/v1/posts/read").header("Authorization", "Bearer invalid"))
+
+        // then
+        profileResult
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"존재하지 않는 회원입니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        mvc.perform(get("/api/v1/posts/read").header("Authorization", "Bearer invalid"))
+        postsResult
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data").isArray())
-
-        verifyNoInteractions(favorites)
+        confirmVerified(favorites)
     }
 
     @ParameterizedTest
@@ -256,16 +293,21 @@ class FavoriteStatusHttpTest {
             "PUT /api/v1/favorites/42/check", "POST /api/v1/favorites/42", "DELETE /api/v1/favorites/42",
         ],
     )
-    fun given__unexposed_method_or_adjacent_path__when__requesting_with_valid_token__then__deny_without_favorite_query(
+    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__즐겨찾기 조회 없이 거부한다`(
         request: String,
     ) {
+        // given
         val parts = request.split(" ", limit = 2)
-        mvc.perform(
+
+        // when
+        val result = mvc.perform(
             request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
                 .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        ).andExpect(status().isForbidden())
+        )
 
-        verifyNoInteractions(favorites, profiles, readPost, listPosts)
+        // then
+        result.andExpect(status().isForbidden())
+        confirmVerified(favorites, profiles, readPost, listPosts)
     }
 
     companion object {

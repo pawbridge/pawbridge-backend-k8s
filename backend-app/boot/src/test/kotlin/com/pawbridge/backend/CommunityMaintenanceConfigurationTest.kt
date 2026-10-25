@@ -3,20 +3,16 @@ package com.pawbridge.backend
 import com.pawbridge.backend.boot.configuration.CommunityMaintenanceConfiguration
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostSearchRebuild
 import com.pawbridge.backend.community.internal.post.infrastructure.JdbcPostWriter
-import com.pawbridge.backend.support.anyNonNull
-import com.pawbridge.backend.support.anyVarargs
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doReturn
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when` as whenever
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
@@ -34,51 +30,83 @@ import java.util.function.Supplier
 import javax.sql.DataSource
 
 class CommunityMaintenanceConfigurationTest {
+    // Spring runs the InitializingBean callback when it registers these as beans, so a strict mock must accept it.
+    private fun jdbcTemplate(): JdbcTemplate {
+        val bean = mockk<JdbcTemplate>()
+        justRun { bean.afterPropertiesSet() }
+        return bean
+    }
+
+    // Spring runs the InitializingBean callback when it registers these as beans, so a strict mock must accept it.
+    private fun transactionManager(): JdbcTransactionManager {
+        val bean = mockk<JdbcTransactionManager>()
+        justRun { bean.afterPropertiesSet() }
+        return bean
+    }
+
     @ParameterizedTest
     @ValueSource(strings = ["false", "true"])
-    fun given__feature_disabled_or_jobs_not_explicitly_enabled__when__starting__then__create_no_workers_or_scheduler(
+    fun `기능이 꺼졌거나 작업이 켜지지 않았을 때__기동하면__작업자와 스케줄러를 만들지 않는다`(
         enabled: String,
     ) {
-        ApplicationContextRunner().withUserConfiguration(CommunityMaintenanceConfiguration::class.java)
+        // given
+        val runner = ApplicationContextRunner()
+            .withUserConfiguration(CommunityMaintenanceConfiguration::class.java)
             .withPropertyValues("pawbridge.community-maintenance.enabled=$enabled")
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                assertThat(context.getBeansOfType(JdbcPostSearchRebuild::class.java)).isEmpty()
-                assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).isEmpty()
-            }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasNotFailed()
+            assertThat(context.getBeansOfType(JdbcPostSearchRebuild::class.java)).isEmpty()
+            assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).isEmpty()
+        }
     }
 
     @Test
-    fun given__canonical_jobs_enabled_but_feature_missing__when__starting__then__do_not_claim_the_existing_scheduler_ownership() {
-        ApplicationContextRunner().withUserConfiguration(CommunityMaintenanceConfiguration::class.java)
+    fun `정식 작업은 켜졌지만 기능 설정이 없을 때__기동하면__기존 스케줄러 소유권을 가져가지 않는다`() {
+        // given
+        val runner = ApplicationContextRunner()
+            .withUserConfiguration(CommunityMaintenanceConfiguration::class.java)
             .withPropertyValues("pawbridge.jobs.cleanup-enabled=true", "pawbridge.search.rebuild-enabled=true")
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                assertThat(context.getBeansOfType(JdbcPostSearchRebuild::class.java)).isEmpty()
-                assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).isEmpty()
-            }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasNotFailed()
+            assertThat(context.getBeansOfType(JdbcPostSearchRebuild::class.java)).isEmpty()
+            assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).isEmpty()
+        }
     }
 
     @Test
-    fun given__both_jobs_explicitly_enabled__when__assembling_without_running_tasks__then__reuse_writer_and_write_transaction() {
-        val jdbc = mock(JdbcTemplate::class.java)
-        val manager = mock(JdbcTransactionManager::class.java)
+    fun `두 작업이 명시적으로 켜졌을 때__작업 실행 없이 조립하면__작성기와 쓰기 트랜잭션을 재사용한다`() {
+        // given
+        val jdbc = jdbcTemplate()
+        val manager = transactionManager()
         val write = TransactionTemplate(manager)
         write.timeout = 10
-        val writer = mock(JdbcPostWriter::class.java)
-        val scheduler = mock(ThreadPoolTaskScheduler::class.java)
-        val future = mock(ScheduledFuture::class.java)
-        whenever(scheduler.clock).thenReturn(Clock.systemUTC())
-        doReturn(future).`when`(scheduler).schedule(anyNonNull<Runnable>(), anyNonNull<Trigger>())
-        doReturn(future).`when`(scheduler).scheduleWithFixedDelay(anyNonNull<Runnable>(), anyNonNull<Duration>())
-        doReturn(future).`when`(scheduler)
-            .scheduleWithFixedDelay(anyNonNull<Runnable>(), anyNonNull<Instant>(), anyNonNull<Duration>())
-        ApplicationContextRunner().withUserConfiguration(CommunityMaintenanceConfiguration::class.java)
+        val writer = mockk<JdbcPostWriter>()
+        val scheduler = mockk<ThreadPoolTaskScheduler>()
+        val future = mockk<ScheduledFuture<*>>()
+        val dataSource = mockk<DataSource>()
+
+        every { scheduler.clock } returns Clock.systemUTC()
+        // The registered singleton is also managed as a lifecycle bean, so a strict mock must answer these callbacks.
+        every { scheduler.isAutoStartup } returns false
+        every { scheduler.schedule(any<Runnable>(), any<Trigger>()) } returns future
+        every { scheduler.scheduleWithFixedDelay(any<Runnable>(), any<Duration>()) } returns future
+        every {
+            scheduler.scheduleWithFixedDelay(any<Runnable>(), any<Instant>(), any<Duration>())
+        } returns future
+
+        val runner = ApplicationContextRunner()
+            .withUserConfiguration(CommunityMaintenanceConfiguration::class.java)
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { jdbc })
             .withBean("writeTransactionManager", JdbcTransactionManager::class.java, Supplier { manager })
             .withBean("writeTransaction", TransactionTemplate::class.java, Supplier { write })
             .withBean("postWriter", JdbcPostWriter::class.java, Supplier { writer })
-            .withBean("writeDataSource", DataSource::class.java, Supplier { mock(DataSource::class.java) })
+            .withBean("writeDataSource", DataSource::class.java, Supplier { dataSource })
             .withInitializer { context ->
                 context.addBeanFactoryPostProcessor(
                     BeanFactoryPostProcessor { factory ->
@@ -91,27 +119,37 @@ class CommunityMaintenanceConfigurationTest {
                 "pawbridge.jobs.cleanup-enabled=true",
                 "pawbridge.search.rebuild-enabled=true",
             )
-            .run { context ->
-                assertThat(context).hasNotFailed()
-                val rebuild = context.getBean(JdbcPostSearchRebuild::class.java)
-                assertThat(ReflectionTestUtils.getField(rebuild, "jdbc")).isSameAs(jdbc)
-                assertThat(ReflectionTestUtils.getField(rebuild, "transactions")).isSameAs(write)
-                assertThat(ReflectionTestUtils.getField(rebuild, "projection")).isSameAs(writer)
-                assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).hasSize(1)
-                assertThat(context.getBeansOfType(CommunityMaintenanceConfiguration.SearchRebuildJob::class.java)).hasSize(1)
-                verify(jdbc, never()).queryForList(anyString(), *anyVarargs())
-                verify(jdbc, never()).update(anyString(), *anyVarargs())
-                verify(jdbc, never()).update(anyNonNull<PreparedStatementCreator>())
-            }
+
+        // when
+        runner.run { context ->
+            // then
+            assertThat(context).hasNotFailed()
+            val rebuild = context.getBean(JdbcPostSearchRebuild::class.java)
+            assertThat(ReflectionTestUtils.getField(rebuild, "jdbc")).isSameAs(jdbc)
+            assertThat(ReflectionTestUtils.getField(rebuild, "transactions")).isSameAs(write)
+            assertThat(ReflectionTestUtils.getField(rebuild, "projection")).isSameAs(writer)
+            assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).hasSize(1)
+            assertThat(context.getBeansOfType(CommunityMaintenanceConfiguration.SearchRebuildJob::class.java)).hasSize(1)
+            verify(exactly = 0) { jdbc.queryForList(any<String>(), *anyVararg<Any>()) }
+            verify(exactly = 0) { jdbc.update(any<String>(), *anyVararg<Any>()) }
+            verify(exactly = 0) { jdbc.update(any<PreparedStatementCreator>()) }
+        }
     }
 
     @Test
-    fun given__a_job_failure__when__invoked__then__propagate_it_to_the_scheduler_without_continuing_other_work() {
-        val rebuild = mock(JdbcPostSearchRebuild::class.java)
+    fun `작업이 실패했을 때__호출하면__다른 작업을 이어가지 않고 스케줄러로 전파한다`() {
+        // given
+        val rebuild = mockk<JdbcPostSearchRebuild>()
         val failure = IllegalStateException("synthetic maintenance failure")
-        whenever(rebuild.rebuildPage(100)).thenThrow(failure)
-        assertThatThrownBy { CommunityMaintenanceConfiguration.SearchRebuildJob(rebuild).rebuild() }.isSameAs(failure)
-        verify(rebuild).rebuildPage(100)
-        verifyNoMoreInteractions(rebuild)
+
+        every { rebuild.rebuildPage(100) } throws failure
+
+        // when
+        val thrown = assertThatThrownBy { CommunityMaintenanceConfiguration.SearchRebuildJob(rebuild).rebuild() }
+
+        // then
+        thrown.isSameAs(failure)
+        verify(exactly = 1) { rebuild.rebuildPage(100) }
+        confirmVerified(rebuild)
     }
 }
