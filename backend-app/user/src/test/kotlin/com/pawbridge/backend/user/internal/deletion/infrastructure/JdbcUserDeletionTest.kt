@@ -3,6 +3,8 @@ package com.pawbridge.backend.user.internal.deletion.infrastructure
 import com.pawbridge.backend.user.internal.deletion.application.MemberCleanupUnavailableException
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
 import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -14,8 +16,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -32,11 +32,14 @@ import java.util.function.LongConsumer
 
 class JdbcUserDeletionTest {
     @Test
-    fun givenUser__whenDeleting__thenCommitPendingBeforeCommunityAndEraseOnlyAfterCommunityOutsideEitherTransaction() {
+    fun `회원이 있을 때__삭제하면__대기 표시를 먼저 커밋하고 커뮤니티 정리 뒤 두 트랜잭션 밖에서만 계정을 지운다`() {
+        // given
         val f = Fixture()
 
+        // when
         f.deletion.delete(7)
 
+        // then
         assertEquals(
             listOf(
                 "begin", "lock", "pending", "commit", "cleanup", "community",
@@ -53,7 +56,8 @@ class JdbcUserDeletionTest {
     }
 
     @Test
-    fun givenAuthSessions__whenDeletionStarts__thenRevokeEverySessionInThePendingMarkerTransaction() {
+    fun `인증 세션이 있을 때__삭제를 시작하면__대기 표시 트랜잭션 안에서 모든 세션을 끊는다`() {
+        // given
         val f = Fixture()
         val tx = TransactionTemplate(f.manager)
         tx.timeout = 15
@@ -67,8 +71,10 @@ class JdbcUserDeletionTest {
             },
         )
 
+        // when
         deletion.delete(7)
 
+        // then
         assertEquals(
             listOf(
                 "begin", "lock", "pending", "revoke-7", "commit", "cleanup", "community",
@@ -81,14 +87,17 @@ class JdbcUserDeletionTest {
 
     @ParameterizedTest
     @ValueSource(longs = [-1, 0, 7])
-    fun givenAbsentIdIncludingNonpositiveId__whenDeleting__thenQueryTheOriginalIdAndFailMissingWithoutCommunityOrPending(
+    fun `존재하지 않는 id이거나 양수가 아닌 id일 때__삭제하면__원래 id로 조회하고 커뮤니티 정리와 대기 표시 없이 회원 없음으로 실패한다`(
         id: Long,
     ) {
+        // given
         val f = Fixture()
         f.state.user = false
 
+        // when
         assertThrows(UserNotFoundException::class.java) { f.deletion.delete(id) }
 
+        // then
         assertEquals(listOf("begin", "lock", "rollback", "cleanup"), f.events)
         assertEquals(listOf(id), f.jdbc.ids)
         assertFalse(f.state.pending)
@@ -97,12 +106,15 @@ class JdbcUserDeletionTest {
     }
 
     @Test
-    fun givenCommunityFailureAfterPendingCommit__whenAuthorizedRetrySucceeds__thenKeepPendingAndResumeWithoutReactivation() {
+    fun `대기 표시 커밋 뒤 커뮤니티 정리가 실패했을 때__승인된 재시도가 성공하면__재활성화 없이 대기 표시를 유지한 채 이어서 삭제한다`() {
+        // given
         val f = Fixture()
         f.communityFails = true
 
+        // when
         val failure = assertThrows(MemberCleanupUnavailableException::class.java) { f.deletion.delete(7) }
 
+        // then
         assertEquals("쪽지 정리가 완료되지 않았습니다. 회원 삭제를 다시 시도해 주세요.", failure.message)
         assertNull(failure.cause)
         assertEquals(listOf("begin", "lock", "pending", "commit", "cleanup", "community"), f.events)
@@ -127,13 +139,17 @@ class JdbcUserDeletionTest {
     }
 
     @Test
-    fun givenPendingCommitFailure__whenDeleting__thenPropagateItBeforeCommunityWithoutClaimingDatabaseRollback() {
+    fun `대기 표시 커밋이 실패했을 때__삭제하면__데이터베이스 롤백을 단정하지 않고 커뮤니티 정리 전에 예외를 전파한다`() {
+        // given
         val f = Fixture()
         val failure = TransactionSystemException("private-pending-commit")
         f.manager.commitFailure = failure
 
-        assertSame(failure, assertThrows(TransactionSystemException::class.java) { f.deletion.delete(7) })
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { f.deletion.delete(7) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(0, f.communityCalls)
         assertEquals(listOf("begin", "lock", "pending", "commit", "cleanup"), f.events)
         // A commit exception alone cannot determine the database's committed state.
@@ -142,16 +158,20 @@ class JdbcUserDeletionTest {
 
     @ParameterizedTest
     @EnumSource(FinalDelete::class)
-    fun givenFinalAccountSqlFailure__whenRetryingAfterTheSameFailurePropagates__thenPreserveCommittedPendingAndResumeBothSteps(
+    fun `최종 계정 SQL이 실패했을 때__같은 실패가 전파된 뒤 재시도하면__커밋된 대기 표시를 보존하고 두 단계를 이어서 수행한다`(
         phase: FinalDelete,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.failedDelete = phase
         val failure = DataAccessResourceFailureException("private-final-sql")
         f.jdbc.failure = failure
 
-        assertSame(failure, assertThrows(DataAccessResourceFailureException::class.java) { f.deletion.delete(7) })
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { f.deletion.delete(7) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, f.manager.commits)
         assertEquals(1, f.manager.rollbacks)
         assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.applications)
@@ -168,12 +188,15 @@ class JdbcUserDeletionTest {
     }
 
     @Test
-    fun givenMissingUserAtFinalLookup__whenFinishingAfterCommunity__thenKeepOriginalNoopSuccessWithoutFinalDelete() {
+    fun `최종 조회에서 회원이 없을 때__커뮤니티 정리 뒤 마무리하면__최종 삭제 없이 원래의 무동작 성공을 유지한다`() {
+        // given
         val f = Fixture()
         f.jdbc.finalLookupMissing = true
 
+        // when
         f.deletion.delete(7)
 
+        // then
         assertEquals(
             listOf(
                 "begin", "lock", "pending", "commit", "cleanup", "community",
@@ -187,12 +210,15 @@ class JdbcUserDeletionTest {
     }
 
     @Test
-    fun givenUserFoundButFinalDeleteAffectsZeroRows__whenFinishingAfterCommunity__thenRollbackFinalTransactionAsStale() {
+    fun `회원은 찾았지만 최종 삭제가 0행일 때__커뮤니티 정리 뒤 마무리하면__최종 트랜잭션을 낡은 상태로 보고 롤백한다`() {
+        // given
         val f = Fixture()
         f.jdbc.finalDeleteCount = 0
 
+        // when
         assertThrows(OptimisticLockingFailureException::class.java) { f.deletion.delete(7) }
 
+        // then
         assertEquals(1, f.manager.commits)
         assertEquals(1, f.manager.rollbacks)
         assertTrue(f.state.user && f.state.pending && f.state.favorites && f.state.applications)
@@ -289,8 +315,8 @@ class JdbcUserDeletionTest {
                 return mutableListOf()
             }
             try {
-                val row = mock(ResultSet::class.java)
-                `when`(row.getLong(1)).thenReturn(args[0] as Long)
+                val row = mockk<ResultSet>()
+                every { row.getLong(1) } returns args[0] as Long
                 return mutableListOf(rowMapper.mapRow(row, 0) as T)
             } catch (failure: SQLException) {
                 throw AssertionError(failure)

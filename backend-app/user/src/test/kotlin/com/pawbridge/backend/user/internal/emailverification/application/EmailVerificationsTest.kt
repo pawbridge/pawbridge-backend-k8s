@@ -32,11 +32,14 @@ class EmailVerificationsTest {
     private val verifications = EmailVerifications(store, mails)
 
     @Test
-    fun given__signup_send__when__sending__then__count_then_mail_then_code_with_five_minutes_and_attempts_reset() {
+    fun `회원가입 발송일 때__보내면__횟수 집계 다음 메일 순서로 처리하고 코드는 5분 유효에 시도 횟수를 초기화한다`() {
+        // given
         store.values["email:attempts:a@b.c"] = "3"
 
+        // when
         verifications.sendVerificationCode("a@b.c")
 
+        // then
         assertEquals(listOf("count:email:send:count:a@b.c:5:300", "mail:signup:a@b.c"), events)
         val code = codes[0]
         assertTrue(code.matches(Regex("\\d{6}")))
@@ -46,33 +49,43 @@ class EmailVerificationsTest {
     }
 
     @Test
-    fun given__mail_failure__when__sending__then__no_code_is_stored() {
+    fun `메일 발송이 실패했을 때__보내면__코드를 저장하지 않는다`() {
+        // given
         failMail = true
 
+        // when
         assertThrows(EmailSendingException::class.java) { verifications.sendVerificationCode("a@b.c") }
 
+        // then
         assertNull(store.values["email:code:a@b.c"])
     }
 
     @Test
-    fun given__five_sends__when__sending_a_sixth__then__too_many_send_attempts() {
+    fun `이미 다섯 번 보냈을 때__여섯 번째로 보내면__발송 횟수 초과로 거부한다`() {
+        // given
         for (i in 0 until 5) {
             verifications.sendVerificationCode("a@b.c")
         }
 
+        // when
         val failure = assertThrows(TooManyAttemptsException::class.java) { verifications.sendVerificationCode("a@b.c") }
 
+        // then
         assertEquals(TooManyAttemptsException.Kind.SEND, failure.kind())
         assertEquals(5, codes.size)
     }
 
     @Test
-    fun given__matching_code__when__verifying__then__verified_for_one_hour_and_code_and_attempts_removed() {
+    fun `코드가 일치할 때__검증하면__한 시간 동안 인증된 상태가 되고 코드와 시도 횟수는 지워진다`() {
+        // given
         store.values["email:code:a@b.c"] = "123456"
         store.values["email:attempts:a@b.c"] = "2"
 
-        assertTrue(verifications.verifyCode("a@b.c", "123456"))
+        // when
+        val verified = verifications.verifyCode("a@b.c", "123456")
 
+        // then
+        assertTrue(verified)
         assertTrue(verifications.isVerified("a@b.c"))
         assertEquals(3600L, store.ttl["email:verified:a@b.c"])
         assertNull(store.values["email:code:a@b.c"])
@@ -82,30 +95,37 @@ class EmailVerificationsTest {
     }
 
     @Test
-    fun given__missing_or_wrong_code__when__verifying__then__expired_or_invalid_with_attempt_count() {
+    fun `코드가 없거나 틀렸을 때__검증하면__만료 또는 불일치로 거부하고 시도 횟수를 센다`() {
+        // given
         assertThrows(ExpiredCodeException::class.java) { verifications.verifyCode("a@b.c", "111111") }
         store.values["email:code:a@b.c"] = "123456"
         for (i in 0 until 5) {
             assertThrows(InvalidCodeException::class.java) { verifications.verifyCode("a@b.c", "000000") }
         }
 
+        // when
         val failure = assertThrows(TooManyAttemptsException::class.java) { verifications.verifyCode("a@b.c", "123456") }
 
+        // then
         assertEquals(TooManyAttemptsException.Kind.VERIFY, failure.kind())
         assertEquals("5", store.values["email:attempts:a@b.c"])
         assertEquals(300L, store.ttl["email:attempts:a@b.c"])
     }
 
     @Test
-    fun given__password_reset__when__sending_and_verifying__then__separate_keys_and_no_signup_verification() {
+    fun `비밀번호 재설정일 때__보내고 검증하면__키를 분리해 쓰고 회원가입 인증은 만들지 않는다`() {
+        // given
         verifications.sendPasswordResetCode("a@b.c")
         val code = codes[0]
         assertEquals("mail:reset:a@b.c", events[1])
         assertEquals(code, store.values["password:reset:code:a@b.c"])
         assertNull(store.values["email:code:a@b.c"])
 
-        assertTrue(verifications.verifyPasswordResetCode("a@b.c", code))
+        // when
+        val verified = verifications.verifyPasswordResetCode("a@b.c", code)
 
+        // then
+        assertTrue(verified)
         assertEquals("true", store.values["password:reset:verified:a@b.c"])
         assertFalse(verifications.isVerified("a@b.c"))
         verifications.clearPasswordResetVerification("a@b.c")

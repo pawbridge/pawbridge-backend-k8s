@@ -2,6 +2,11 @@ package com.pawbridge.backend.user.internal.password.infrastructure
 
 import com.pawbridge.backend.user.internal.password.application.StoredCredentials
 import com.pawbridge.backend.user.internal.session.application.UserSessionRevoker
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
@@ -9,14 +14,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
 import org.springframework.jdbc.UncategorizedSQLException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementCreator
@@ -33,14 +30,20 @@ import java.util.function.Supplier
 
 class JdbcUserPasswordStoreTest {
     @Test
-    fun given__present_then_missing_user__when__looking_up__then__provider_and_raw_hash_are_projected_without_other_columns() {
+    fun `회원이 있을 때와 없을 때__조회하면__다른 컬럼 없이 제공자와 원본 해시만 투영한다`() {
+        // given
         val jdbc = RecordingJdbc()
-        `when`(jdbc.rows.next()).thenReturn(true, false)
-        `when`(jdbc.rows.getString("provider")).thenReturn("LOCAL")
-        `when`(jdbc.rows.getString("password")).thenReturn("\$2a\$10\$synthetic")
         val store = JdbcUserPasswordStore(jdbc)
 
-        assertEquals(Optional.of(StoredCredentials("LOCAL", "\$2a\$10\$synthetic")), store.findCredentials(52L))
+        every { jdbc.rows.next() } returnsMany listOf(true, false)
+        every { jdbc.rows.getString("provider") } returns "LOCAL"
+        every { jdbc.rows.getString("password") } returns "\$2a\$10\$synthetic"
+
+        // when
+        val present = store.findCredentials(52L)
+
+        // then
+        assertEquals(Optional.of(StoredCredentials("LOCAL", "\$2a\$10\$synthetic")), present)
 
         assertEquals("SELECT user_id, provider, password FROM pawbridge_user.users WHERE user_id = ?", normalized(jdbc.querySql!!))
         assertArrayEquals(arrayOf<Any?>(52L), jdbc.arguments)
@@ -48,57 +51,97 @@ class JdbcUserPasswordStoreTest {
     }
 
     @Test
-    fun given__social_member_without_password__when__looking_up__then__null_hash_is_preserved() {
+    fun `비밀번호 없는 소셜 회원일 때__조회하면__널 해시를 보존한다`() {
+        // given
         val jdbc = RecordingJdbc()
-        `when`(jdbc.rows.next()).thenReturn(true)
-        `when`(jdbc.rows.getString("provider")).thenReturn("GOOGLE")
         val store = JdbcUserPasswordStore(jdbc)
 
-        assertEquals(Optional.of(StoredCredentials("GOOGLE", null)), store.findCredentials(52L))
+        every { jdbc.rows.next() } returns true
+        every { jdbc.rows.getString("provider") } returns "GOOGLE"
+        every { jdbc.rows.getString("password") } returns null
+
+        // when
+        val result = store.findCredentials(52L)
+
+        // then
+        assertEquals(Optional.of(StoredCredentials("GOOGLE", null)), result)
     }
 
     @Test
-    fun given__encoded_password_and_auditing_time__when__updating__then__only_password_and_updated_at_are_bound_with_utc_calendar() {
+    fun `인코딩된 비밀번호와 감사 시각일 때__갱신하면__비밀번호와 updated_at만 UTC 캘린더로 바인딩한다`() {
+        // given
         val jdbc = RecordingJdbc()
         val store = JdbcUserPasswordStore(jdbc, Supplier { UPDATED })
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        justRun { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) }
+        justRun { jdbc.statement.setLong(any(), any()) }
+
+        // when
         store.updatePassword(52L, "\$2a\$10\$synthetic.new")
 
+        // then
+        val calendar = slot<Calendar>()
         assertEquals("UPDATE pawbridge_user.users SET password = ?, updated_at = ? WHERE user_id = ?", normalized(jdbc.updateSql!!))
-        verify(jdbc.statement).setString(1, "\$2a\$10\$synthetic.new")
-        val calendar = ArgumentCaptor.forClass(Calendar::class.java)
-        verify(jdbc.statement).setTimestamp(eq(2), eq(Timestamp.valueOf(UPDATED)), calendar.capture())
-        assertEquals("UTC", calendar.value.timeZone.id)
-        verify(jdbc.statement).setLong(3, 52L)
+        verify(exactly = 1) { jdbc.statement.setString(1, "\$2a\$10\$synthetic.new") }
+        verify(exactly = 1) { jdbc.statement.setTimestamp(2, Timestamp.valueOf(UPDATED), capture(calendar)) }
+        assertEquals("UTC", calendar.captured.timeZone.id)
+        verify(exactly = 1) { jdbc.statement.setLong(3, 52L) }
     }
 
     @ParameterizedTest
     @ValueSource(ints = [0, 2])
-    fun given__unexpected_update_count__when__updating__then__unexpected_failure_is_not_success(count: Int) {
+    fun `예상 밖의 갱신 행 수일 때__갱신하면__성공이 아닌 예기치 않은 실패로 처리한다`(count: Int) {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.changed = count
         val store = JdbcUserPasswordStore(jdbc, Supplier { UPDATED })
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        justRun { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) }
+        justRun { jdbc.statement.setLong(any(), any()) }
+
+        // when
+        // then
         assertThrows(IllegalStateException::class.java) { store.updatePassword(52L, "\$2a\$10\$synthetic.new") }
     }
 
     @Test
-    fun given__parameter_binding_failure__when__updating__then__statement_is_closed_before_jdbc_propagates_failure() {
+    fun `파라미터 바인딩이 실패했을 때__갱신하면__JDBC가 실패를 전파하기 전에 문장을 닫는다`() {
+        // given
         val jdbc = RecordingJdbc()
         val failure = SQLException("synthetic private binding failure")
-        doThrow(failure).`when`(jdbc.statement).setTimestamp(eq(2), any(Timestamp::class.java), any(Calendar::class.java))
         val store = JdbcUserPasswordStore(jdbc, Supplier { UPDATED })
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        every { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) } throws failure
+        justRun { jdbc.statement.close() }
+
+        // when
         val thrown = assertThrows(UncategorizedSQLException::class.java) {
             store.updatePassword(52L, "\$2a\$10\$synthetic.new")
         }
 
+        // then
         assertSame(failure, thrown.sqlException)
-        verify(jdbc.statement).close()
+        verify(exactly = 1) { jdbc.statement.close() }
     }
 
     @Test
-    fun given__a_successful_password_write__when__updating__then__revoke_every_session_of_the_member_afterwards() {
+    fun `비밀번호 쓰기에 성공했을 때__갱신하면__그 뒤에 회원의 모든 세션을 폐기한다`() {
+        // given
         val jdbc = RecordingJdbc()
         val revoked = ArrayList<Long>()
         val store = JdbcUserPasswordStore(
@@ -113,20 +156,41 @@ class JdbcUserPasswordStoreTest {
             },
         )
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        justRun { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) }
+        justRun { jdbc.statement.setLong(any(), any()) }
+
+        // when
         store.updatePassword(52L, "\$2a\$10\$synthetic.new")
 
+        // then
         assertEquals(listOf(52L), revoked)
     }
 
     @Test
-    fun given__an_unexpected_update_count__when__updating__then__do_not_revoke_sessions() {
+    fun `예상 밖의 갱신 행 수일 때__갱신하면__세션을 폐기하지 않는다`() {
+        // given
         val jdbc = RecordingJdbc()
         jdbc.changed = 0
         val revoked = ArrayList<Long>()
         val store = JdbcUserPasswordStore(jdbc, Supplier { UPDATED }, UserSessionRevoker { userId -> revoked.add(userId) })
 
+        every { jdbc.connection.prepareStatement(any<String>()) } answers {
+            jdbc.updateSql = firstArg()
+            jdbc.statement
+        }
+        justRun { jdbc.statement.setString(any(), any()) }
+        justRun { jdbc.statement.setTimestamp(any(), any(), any<Calendar>()) }
+        justRun { jdbc.statement.setLong(any(), any()) }
+
+        // when
         assertThrows(IllegalStateException::class.java) { store.updatePassword(52L, "\$2a\$10\$synthetic.new") }
 
+        // then
         assertEquals(listOf<Long>(), revoked)
     }
 
@@ -135,20 +199,13 @@ class JdbcUserPasswordStoreTest {
     }
 
     private class RecordingJdbc : JdbcTemplate() {
-        val rows: ResultSet = mock(ResultSet::class.java)
-        val connection: Connection = mock(Connection::class.java)
-        val statement: PreparedStatement = mock(PreparedStatement::class.java)
+        val rows = mockk<ResultSet>()
+        val connection = mockk<Connection>()
+        val statement = mockk<PreparedStatement>()
         var querySql: String? = null
         var updateSql: String? = null
         var arguments: Array<out Any?>? = null
         var changed = 1
-
-        init {
-            `when`(connection.prepareStatement(anyString())).thenAnswer { invocation ->
-                updateSql = invocation.getArgument(0, String::class.java)
-                statement
-            }
-        }
 
         override fun <T> query(sql: String, rse: ResultSetExtractor<T>, vararg args: Any?): T? {
             querySql = sql

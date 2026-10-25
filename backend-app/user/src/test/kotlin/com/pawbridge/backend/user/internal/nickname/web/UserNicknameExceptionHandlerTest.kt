@@ -26,14 +26,17 @@ class UserNicknameExceptionHandlerTest {
     private val handler = UserNicknameExceptionHandler()
 
     @Test
-    fun given__structured_user_charset_failure_wrapped_at_commit__when__handling__then__fixed_charset_bad_request_is_returned() {
+    fun `구조화된 사용자 문자셋 실패가 커밋에서 감싸졌을 때__처리하면__고정된 문자셋 400 응답을 돌려준다`() {
+        // given
         val failure = TransactionSystemException(
             "synthetic private commit text",
             error("23514", "pawbridge_user", "ck_rollback_charset_users"),
         )
 
+        // when
         val response = handler.serverError(failure)
 
+        // then
         assertEquals(400, response.statusCode.value())
         assertEquals(
             UserNicknameController.Response<Void>(400, "일부 이모지 등 지원하지 않는 문자를 제외해 주세요.", null),
@@ -42,28 +45,35 @@ class UserNicknameExceptionHandlerTest {
     }
 
     @Test
-    fun given__user_charset_metadata_in_jdbc_next_exception__when__handling__then__nested_batch_metadata_is_recognized() {
+    fun `사용자 문자셋 메타데이터가 JDBC 다음 예외에 있을 때__처리하면__중첩된 배치 메타데이터를 인식한다`() {
+        // given
         val batch = BatchUpdateException("synthetic private batch text", "23514", IntArray(0))
         batch.nextException = error("23514", "pawbridge_user", "ck_rollback_charset_users")
 
+        // when
         val response = handler.serverError(DataIntegrityViolationException("synthetic private SQL", batch))
 
+        // then
         assertEquals(400, response.statusCode.value())
     }
 
     @ParameterizedTest
     @MethodSource("nonCharsetFailures")
-    fun given__other_database_or_unstructured_failure__when__handling__then__safe_server_error_is_preserved(
+    fun `문자셋이 아닌 다른 데이터베이스 실패나 구조 없는 실패일 때__처리하면__안전한 서버 오류를 유지한다`(
         failure: RuntimeException,
     ) {
+        // given
+        // when
         val response = handler.serverError(failure)
 
+        // then
         assertEquals(500, response.statusCode.value())
         assertEquals(UserNicknameController.Response<Void>(500, "서버 에러!", null), response.body)
     }
 
     @Test
-    fun given__sensitive_failure_messages_and_suppressed_text__when__handling__then__logs_contain_only_type_and_source_location() {
+    fun `민감한 실패 메시지와 억제된 예외 문구가 있을 때__처리하면__로그에는 타입과 소스 위치만 담긴다`() {
+        // given
         val cause = SQLException("jdbc:postgresql://fixture.invalid/db?password=synthetic-private-password")
         cause.stackTrace = arrayOf(
             StackTraceElement(
@@ -76,8 +86,11 @@ class UserNicknameExceptionHandlerTest {
         val failure = IllegalStateException("Bearer synthetic-private-token synthetic-private-member", cause)
         failure.addSuppressed(RuntimeException("https://fixture.invalid/object?signature=synthetic-private-signature"))
 
+
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertNull(event.throwableProxy)
         assertEquals(1, event.argumentArray.size)
         assertInstanceOf(String::class.java, event.argumentArray[0])
@@ -92,7 +105,8 @@ class UserNicknameExceptionHandlerTest {
 
     @Test
     @Timeout(2)
-    fun given__cyclic_causes_with_many_frames__when__handling__then__classification_and_diagnostics_finish_with_bounded_output() {
+    fun `순환 원인과 많은 프레임이 있을 때__처리하면__분류와 진단이 제한된 출력으로 끝난다`() {
+        // given
         val failure = IllegalStateException("synthetic-private-member")
         val cause = SQLException("synthetic-private-cause", "23514")
         failure.initCause(cause)
@@ -108,8 +122,10 @@ class UserNicknameExceptionHandlerTest {
         failure.stackTrace = frames
         cause.stackTrace = frames
 
+        // when
         val event = handleAndCapture(failure)
 
+        // then
         assertNull(event.throwableProxy)
         assertTrue(event.formattedMessage.length < 4300)
         assertTrue(event.formattedMessage.lines().size < 30)
@@ -117,15 +133,19 @@ class UserNicknameExceptionHandlerTest {
     }
 
     @Test
-    fun given__deep_cause_chain_and_long_source_metadata__when__handling__then__diagnostic_depth_and_length_budgets_are_respected() {
+    fun `깊은 원인 사슬과 긴 소스 메타데이터가 있을 때__처리하면__진단 깊이와 길이 한도를 지킨다`() {
+        // given
         val last = IOException("synthetic-private-cause")
         val fourth = SQLException("synthetic-private-SQL", last)
         val third = UnsupportedOperationException("synthetic-private-operation", fourth)
         val second = IllegalArgumentException("synthetic-private-input", third)
         val failure = IllegalStateException("synthetic-private-member", second)
 
+
+        // when
         val deep = handleAndCapture(failure)
 
+        // then
         assertTrue(deep.formattedMessage.contains("java.sql.SQLException"))
         assertFalse(deep.formattedMessage.contains("java.io.IOException"))
         failure.stackTrace = arrayOf(
