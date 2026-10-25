@@ -5,20 +5,16 @@ import com.pawbridge.backend.animal.internal.apms.infrastructure.dto.ApmsAnimal
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Shelter
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.justRun
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
+import io.mockk.verifyOrder
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyList
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.doThrow
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.batch.core.StepContribution
 import org.springframework.batch.core.scope.context.ChunkContext
 import org.springframework.batch.repeat.RepeatStatus
@@ -31,76 +27,91 @@ import org.springframework.transaction.support.TransactionTemplate
 
 class ShelterPrepTaskletTest {
     @Test
-    fun givenSnapshotFailure__whenPreparingShelters__thenFailBeforeDatabaseAccess() {
-        val snapshot = mock(ApmsAnimalSnapshot::class.java)
-        val repository = mock(ShelterRepository::class.java)
-        val search = mock(SearchDocumentWriter::class.java)
+    fun `스냅샷 조회가 실패할 때__보호소를 준비하면__데이터베이스 접근 전에 실패한다`() {
+        // given
+        val snapshot = mockk<ApmsAnimalSnapshot>()
+        val repository = mockk<ShelterRepository>()
+        val search = mockk<SearchDocumentWriter>()
         val manager = ObservedManager()
-        `when`(snapshot.animals()).thenThrow(IllegalStateException("provider error"))
 
-        assertThatThrownBy {
-            task(snapshot, repository, search, manager).execute(mock(StepContribution::class.java), mock(ChunkContext::class.java))
-        }.isInstanceOf(IllegalStateException::class.java)
+        every { snapshot.animals() } throws IllegalStateException("provider error")
 
-        verifyNoInteractions(repository, search)
+        // when
+        val thrown = assertThatThrownBy {
+            task(snapshot, repository, search, manager).execute(mockk<StepContribution>(), mockk<ChunkContext>())
+        }
+
+        // then
+        thrown.isInstanceOf(IllegalStateException::class.java)
+        confirmVerified(repository, search)
         assertThat(manager.begins).isZero()
     }
 
     @Test
-    fun givenEmptySnapshot__whenPreparingShelters__thenCompleteWithoutWriting() {
-        val snapshot = mock(ApmsAnimalSnapshot::class.java)
-        val repository = mock(ShelterRepository::class.java)
-        val search = mock(SearchDocumentWriter::class.java)
+    fun `스냅샷이 비어 있을 때__보호소를 준비하면__아무것도 쓰지 않고 완료한다`() {
+        // given
+        val snapshot = mockk<ApmsAnimalSnapshot>()
+        val repository = mockk<ShelterRepository>()
+        val search = mockk<SearchDocumentWriter>()
         val manager = ObservedManager()
-        `when`(snapshot.animals()).thenReturn(listOf())
 
-        assertThat(
-            task(snapshot, repository, search, manager).execute(mock(StepContribution::class.java), mock(ChunkContext::class.java)),
-        ).isEqualTo(RepeatStatus.FINISHED)
+        every { snapshot.animals() } returns listOf()
+        every { repository.findByCareRegNoIn(any()) } returns listOf()
 
-        verify(repository, never()).saveAll(any<Iterable<Shelter>>())
-        verifyNoInteractions(search)
+        // when
+        val status = task(snapshot, repository, search, manager).execute(mockk<StepContribution>(), mockk<ChunkContext>())
+
+        // then
+        assertThat(status).isEqualTo(RepeatStatus.FINISHED)
+        verify(exactly = 0) { repository.saveAll(any<Iterable<Shelter>>()) }
+        confirmVerified(search)
         assertThat(manager.commits).isEqualTo(1)
         assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()
     }
 
     @Test
-    @Suppress("UNCHECKED_CAST")
-    fun givenOldAnimalWithNewShelterInUpdatedSnapshot__whenPreparing__thenFetchOutsideAndSaveAndSearchInsideOneExplicitTransaction() {
-        val snapshot = mock(ApmsAnimalSnapshot::class.java)
-        val repository = mock(ShelterRepository::class.java)
-        val search = mock(SearchDocumentWriter::class.java)
+    fun `갱신된 스냅샷에 기존 동물의 새 보호소가 있을 때__준비하면__조회는 트랜잭션 밖에서 하고 저장과 검색 반영은 하나의 명시적 트랜잭션 안에서 한다`() {
+        // given
+        val snapshot = mockk<ApmsAnimalSnapshot>()
+        val repository = mockk<ShelterRepository>()
+        val search = mockk<SearchDocumentWriter>()
         val manager = ObservedManager()
         manager.defaultTimeout = 7
-        `when`(snapshot.animals()).thenAnswer {
+
+        every { snapshot.animals() } answers {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()
             assertThat(manager.begins).isZero()
             listOf(animal("new-shelter"), animal("existing-shelter"))
         }
-        `when`(repository.findByCareRegNoIn(anyList())).thenAnswer {
+        every { repository.findByCareRegNoIn(any()) } answers {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
             listOf(Shelter.builder().id(50L).careRegNo("existing-shelter").name("Existing management").build())
         }
-        `when`(repository.saveAll(anyList<Shelter>())).thenAnswer { call ->
-            val shelters: List<Shelter> = call.getArgument(0)
+        every { repository.saveAll(any<List<Shelter>>()) } answers {
+            val shelters = firstArg<List<Shelter>>()
             shelters.forEach { shelter -> ReflectionTestUtils.setField(shelter, "id", 51L) }
             shelters
         }
-        doAnswer {
+        justRun { repository.flush() }
+        every { search.shelter(any()) } answers {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()
-            null
-        }.`when`(search).shelter(51L)
+            Unit
+        }
 
-        assertThat(
-            task(snapshot, repository, search, manager).execute(mock(StepContribution::class.java), mock(ChunkContext::class.java)),
-        ).isEqualTo(RepeatStatus.FINISHED)
+        // when
+        val status = task(snapshot, repository, search, manager).execute(mockk<StepContribution>(), mockk<ChunkContext>())
 
-        val saved = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<Shelter>>
-        verify(repository).saveAll(saved.capture())
-        assertThat(saved.value.map { shelter -> shelter.careRegNo }).containsExactly("new-shelter")
-        val order = inOrder(repository, search)
-        order.verify(repository).flush()
-        order.verify(search).shelter(51L)
+        // then
+        val saved = slot<List<Shelter>>()
+        assertThat(status).isEqualTo(RepeatStatus.FINISHED)
+        verify(exactly = 1) { repository.saveAll(capture(saved)) }
+        assertThat(saved.captured.map { shelter -> shelter.careRegNo }).containsExactly("new-shelter")
+        verifyOrder {
+            repository.flush()
+            search.shelter(51L)
+        }
+        verify(exactly = 1) { repository.flush() }
+        verify(exactly = 1) { search.shelter(51L) }
         assertThat(manager.begins).isEqualTo(1)
         assertThat(manager.timeout).isEqualTo(15)
         assertThat(manager.commits).isEqualTo(1)
@@ -109,41 +120,53 @@ class ShelterPrepTaskletTest {
     }
 
     @Test
-    fun givenCallerWriterTransaction__whenPreparing__thenRejectBeforeSnapshotOrDatabaseWork() {
-        val snapshot = mock(ApmsAnimalSnapshot::class.java)
-        val repository = mock(ShelterRepository::class.java)
-        val search = mock(SearchDocumentWriter::class.java)
+    fun `호출자가 쓰기 트랜잭션 안에 있을 때__준비하면__스냅샷이나 데이터베이스 작업 전에 거부한다`() {
+        // given
+        val snapshot = mockk<ApmsAnimalSnapshot>()
+        val repository = mockk<ShelterRepository>()
+        val search = mockk<SearchDocumentWriter>()
         val manager = ObservedManager()
         val prep = task(snapshot, repository, search, manager)
 
-        assertThatThrownBy {
+        // when
+        val thrown = assertThatThrownBy {
             TransactionTemplate(manager).execute { status ->
-                prep.execute(mock(StepContribution::class.java), mock(ChunkContext::class.java))
+                prep.execute(mockk<StepContribution>(), mockk<ChunkContext>())
             }
-        }.hasMessage("APMS preparation must start outside the writer transaction")
+        }
 
-        verifyNoInteractions(snapshot, repository, search)
+        // then
+        thrown.hasMessage("APMS preparation must start outside the writer transaction")
+        confirmVerified(snapshot, repository, search)
         assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()
     }
 
     @Test
-    fun givenSearchFailureAfterShelterSave__whenPreparing__thenRollbackTheSameTransactionAndPropagate() {
-        val snapshot = mock(ApmsAnimalSnapshot::class.java)
-        val repository = mock(ShelterRepository::class.java)
-        val search = mock(SearchDocumentWriter::class.java)
+    fun `보호소 저장 뒤 검색 반영이 실패할 때__준비하면__같은 트랜잭션을 롤백하고 예외를 전파한다`() {
+        // given
+        val snapshot = mockk<ApmsAnimalSnapshot>()
+        val repository = mockk<ShelterRepository>()
+        val search = mockk<SearchDocumentWriter>()
         val manager = ObservedManager()
-        `when`(snapshot.animals()).thenReturn(listOf(animal("new-shelter")))
-        `when`(repository.saveAll(anyList<Shelter>())).thenAnswer { call ->
-            val saved: List<Shelter> = call.getArgument(0)
+
+        every { snapshot.animals() } returns listOf(animal("new-shelter"))
+        every { repository.findByCareRegNoIn(any()) } returns listOf()
+        every { repository.saveAll(any<List<Shelter>>()) } answers {
+            val saved = firstArg<List<Shelter>>()
             ReflectionTestUtils.setField(saved.first(), "id", 51L)
             saved
         }
-        doThrow(IllegalStateException("synthetic projection failure")).`when`(search).shelter(51L)
+        justRun { repository.flush() }
+        every { search.shelter(any()) } throws IllegalStateException("synthetic projection failure")
 
-        assertThatThrownBy {
-            task(snapshot, repository, search, manager).execute(mock(StepContribution::class.java), mock(ChunkContext::class.java))
-        }.hasMessage("synthetic projection failure")
+        // when
+        val thrown = assertThatThrownBy {
+            task(snapshot, repository, search, manager).execute(mockk<StepContribution>(), mockk<ChunkContext>())
+        }
 
+        // then
+        thrown.hasMessage("synthetic projection failure")
+        verify(exactly = 1) { search.shelter(51L) }
         assertThat(manager.rollbacks).isEqualTo(1)
         assertThat(manager.commits).isZero()
         assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse()

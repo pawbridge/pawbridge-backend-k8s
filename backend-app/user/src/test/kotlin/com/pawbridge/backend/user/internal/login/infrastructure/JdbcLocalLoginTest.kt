@@ -1,10 +1,13 @@
 package com.pawbridge.backend.user.internal.login.infrastructure
 
-import com.pawbridge.backend.user.anyNonNull
 import com.pawbridge.backend.user.internal.login.application.LocalLogin
 import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken
 import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore
 import com.pawbridge.backend.user.internal.session.infrastructure.JwtSessionTokens
+import io.mockk.Called
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -15,10 +18,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.NullAndEmptySource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.IncorrectResultSizeDataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -36,14 +35,17 @@ class JdbcLocalLoginTest {
     @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = ["OAuth2", "synthetic-hash"])
-    fun given__stored_password_without_provider_filter__when__finding_casefold_email__then__return_original_account_without_transaction(
+    fun `저장된 비밀번호가 있고 제공자 필터가 없을 때__대소문자 무시 이메일로 찾으면__트랜잭션 없이 원래의 계정을 돌려준다`(
         password: String?,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.password = password
 
+        // when
         val account = f.login.findByEmail("MIXED@fixture.invalid").orElseThrow()
 
+        // then
         assertEquals(password, account.password)
         assertEquals(7L, account.userId)
         assertEquals("ROLE_SHELTER", account.role)
@@ -54,15 +56,18 @@ class JdbcLocalLoginTest {
         assertArrayEquals(arrayOf<Any?>("MIXED@fixture.invalid"), f.jdbc.lastArgs)
         assertEquals(listOf("user-query"), f.events)
         assertEquals("LocalLogin.Account", account.toString())
-        verifyNoInteractions(f.tokens)
+        verify { f.tokens wasNot Called }
     }
 
     @ParameterizedTest
     @ValueSource(ints = [0, 2])
-    fun given__absent_or_nonunique_email__when__finding__then__preserve_optional_or_single_result_failure(count: Int) {
+    fun `이메일이 없거나 유일하지 않을 때__찾으면__옵셔널 또는 단일 결과 실패를 그대로 유지한다`(count: Int) {
+        // given
         val f = Fixture()
         f.jdbc.userRows = count
 
+        // when
+        // then
         if (count == 0) {
             assertTrue(f.login.findByEmail("synthetic@fixture.invalid").isEmpty)
         } else {
@@ -71,68 +76,79 @@ class JdbcLocalLoginTest {
             }
         }
         assertEquals(listOf("user-query"), f.events)
-        verifyNoInteractions(f.tokens)
+        verify { f.tokens wasNot Called }
     }
 
     @Test
-    fun given__authenticated_account__when__completing__then__issue_access_first_and_create_a_session_in_one_transaction() {
+    fun `인증된 계정일 때__완료하면__액세스 토큰을 먼저 발급하고 한 트랜잭션에서 세션을 만든다`() {
+        // given
         val f = Fixture()
         val issued = IssuedRefreshToken("synthetic-session-token", 1_209_600)
-        `when`(f.sessions.create(7L)).thenAnswer {
+
+        every { f.tokens.access(any()) } answers {
+            f.events.add("access")
+            "safe-access"
+        }
+        every { f.sessions.create(any()) } answers {
             assertTrue(f.tx.active)
             f.events.add("create-session")
             issued
         }
 
+        // when
         val result = f.login.complete(ACCOUNT)
 
+        // then
         assertEquals("safe-access", result.accessToken)
         assertSame(issued, result.refreshToken)
         assertEquals("LocalLogin.CompletedLogin", result.toString())
         assertEquals(listOf("access", "begin", "create-session", "commit"), f.events)
-        verify(f.tokens).access(JwtSessionTokens.UserClaims(7, ACCOUNT.email, ACCOUNT.name, ACCOUNT.role, ACCOUNT.careRegNo))
+        verify(exactly = 1) {
+            f.tokens.access(JwtSessionTokens.UserClaims(7, ACCOUNT.email, ACCOUNT.name, ACCOUNT.role, ACCOUNT.careRegNo))
+        }
         assertFalse(f.tx.active)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__session_write_or_commit_failure__when__completing__then__propagate_without_retry_or_success_result(
+    fun `세션 쓰기나 커밋이 실패했을 때__완료하면__재시도나 성공 결과 없이 예외를 전파한다`(
         commit: Boolean,
     ) {
+        // given
         val f = Fixture()
         val failure: RuntimeException = if (commit) {
             TransactionSystemException("synthetic commit")
         } else {
             DataAccessResourceFailureException("synthetic write")
         }
+
+        every { f.tokens.access(any()) } answers {
+            f.events.add("access")
+            "safe-access"
+        }
         if (commit) {
             f.tx.commitFailure = failure
-            `when`(f.sessions.create(7L)).thenReturn(IssuedRefreshToken("synthetic-session-token", 1))
+            every { f.sessions.create(any()) } returns IssuedRefreshToken("synthetic-session-token", 1)
         } else {
-            `when`(f.sessions.create(7L)).thenThrow(failure)
+            every { f.sessions.create(any()) } throws failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { f.login.complete(ACCOUNT) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { f.login.complete(ACCOUNT) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(listOf("access", "begin", if (commit) "commit" else "rollback"), f.events)
-        verify(f.sessions).create(7L)
+        verify(exactly = 1) { f.sessions.create(7L) }
     }
 
     private class Fixture {
         val events = ArrayList<String>()
         val tx = Tx(events)
         val jdbc = RecordingJdbc(tx, events)
-        val tokens: JwtSessionTokens = mock(JwtSessionTokens::class.java)
-        val sessions: JdbcAuthSessionStore = mock(JdbcAuthSessionStore::class.java)
-        val login: JdbcLocalLogin
-
-        init {
-            `when`(tokens.access(anyNonNull<JwtSessionTokens.UserClaims>())).thenAnswer {
-                events.add("access")
-                "safe-access"
-            }
-            login = JdbcLocalLogin(jdbc, TransactionTemplate(tx), tokens, sessions)
-        }
+        val tokens = mockk<JwtSessionTokens>()
+        val sessions = mockk<JdbcAuthSessionStore>()
+        val login: JdbcLocalLogin = JdbcLocalLogin(jdbc, TransactionTemplate(tx), tokens, sessions)
     }
 
     private class RecordingJdbc(
@@ -153,13 +169,13 @@ class JdbcLocalLoginTest {
                 if (sql.contains("FROM pawbridge_user.users")) {
                     events.add("user-query")
                     for (i in 0 until userRows) {
-                        val row = mock(ResultSet::class.java)
-                        `when`(row.getLong("user_id")).thenReturn(7L)
-                        `when`(row.getString("email")).thenReturn(ACCOUNT.email)
-                        `when`(row.getString("name")).thenReturn(ACCOUNT.name)
-                        `when`(row.getString("password")).thenReturn(password)
-                        `when`(row.getString("role")).thenReturn(ACCOUNT.role)
-                        `when`(row.getString("care_reg_no")).thenReturn(ACCOUNT.careRegNo)
+                        val row = mockk<ResultSet>()
+                        every { row.getLong("user_id") } returns 7L
+                        every { row.getString("email") } returns ACCOUNT.email
+                        every { row.getString("name") } returns ACCOUNT.name
+                        every { row.getString("password") } returns password
+                        every { row.getString("role") } returns ACCOUNT.role
+                        every { row.getString("care_reg_no") } returns ACCOUNT.careRegNo
                         result.add(rowMapper.mapRow(row, i)!!)
                     }
                 } else {

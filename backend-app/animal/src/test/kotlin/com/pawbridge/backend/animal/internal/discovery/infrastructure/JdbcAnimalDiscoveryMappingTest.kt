@@ -9,17 +9,14 @@ import com.pawbridge.backend.animal.internal.discovery.application.AnimalDiscove
 import com.pawbridge.backend.animal.internal.discovery.application.AnimalDiscovery.Summary
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
+import java.lang.reflect.Proxy
 import java.sql.ResultSet
 import java.time.LocalDate
 
 class JdbcAnimalDiscoveryMappingTest {
     @Test
-    fun detail_preserves_every_source_mapper_field_and_local_timestamp_precision() {
+    fun `모든 원본 매퍼 필드가 채워진 행일 때__상세를 매핑하면__필드를 모두 보존하고 로컬 타임스탬프 정밀도를 유지한다`() {
+        // given
         val start = LocalDate.of(2026, 9, 1)
         val end = start.plusDays(10)
         val intake = start.minusDays(1)
@@ -56,7 +53,11 @@ class JdbcAnimalDiscoveryMappingTest {
             "updated_at" to updated,
         )
 
-        assertThat(JdbcAnimalDiscovery.detail(row(values), 0)).isEqualTo(
+        // when
+        val detail = JdbcAnimalDiscovery.detail(row(values), 0)
+
+        // then
+        assertThat(detail).isEqualTo(
             Details(
                 72L, "서울-강남-2026-1", Species.DOG,
                 "말티즈", Gender.FEMALE, NeuterStatus.YES, 2022, LocalDate.now().year - 2022, "3.5(Kg)", "흰색",
@@ -68,7 +69,8 @@ class JdbcAnimalDiscoveryMappingTest {
     }
 
     @Test
-    fun nullable_values_stay_null_and_future_birth_year_keeps_source_age_arithmetic() {
+    fun `널 값이 있고 출생연도가 미래인 행일 때__상세와 요약을 매핑하면__널은 널로 두고 원본의 나이 산술을 유지한다`() {
+        // given
         val values: MutableMap<String, Any?> = linkedMapOf(
             "id" to 72L,
             "species" to "ETC",
@@ -79,26 +81,52 @@ class JdbcAnimalDiscoveryMappingTest {
             "shelter_id" to 8L,
         )
 
+        // when
         val detail: Details = JdbcAnimalDiscovery.detail(row(values), 0)
+        val summary: Summary = JdbcAnimalDiscovery.summary(row(values), 0)
 
+        // then
         assertThat(detail.age).isNull()
         assertThat(detail.birthYear).isNull()
         assertThat(detail.updatedAt).isNull()
         assertThat(detail.imageUrl2).isNull()
         assertThat(detail.favoriteCount).isNull()
-        val summary: Summary = JdbcAnimalDiscovery.summary(row(values), 0)
         assertThat(summary.age).isNull()
         assertThat(summary.createdAt).isNull()
         values["birth_year"] = LocalDate.now().year + 1
         assertThat(JdbcAnimalDiscovery.summary(row(values), 0).age).isEqualTo(-1)
     }
 
+    /**
+     * A hand-written in-memory ResultSet over one row (a data fake, not a mock): `get*` with a column name reads the
+     * map at call time, and every other method returns the type's zero value.
+     */
     private fun row(values: Map<String, Any?>): ResultSet {
-        val row = mock(ResultSet::class.java)
-        `when`(row.getLong(anyString())).thenAnswer { call -> values[call.getArgument<String>(0)] as Long? }
-        `when`(row.getString(anyString())).thenAnswer { call -> values[call.getArgument<String>(0)] as String? }
-        doAnswer { call -> values[call.getArgument<String>(0)] }
-            .`when`(row).getObject(anyString(), any(Class::class.java))
-        return row
+        return Proxy.newProxyInstance(
+            ResultSet::class.java.classLoader,
+            arrayOf(ResultSet::class.java),
+        ) { proxy, method, args ->
+            val name = method.name
+            if (method.declaringClass == Any::class.java) {
+                return@newProxyInstance when (name) {
+                    "equals" -> proxy === args[0]
+                    "hashCode" -> System.identityHashCode(proxy)
+                    else -> "InMemoryResultSet"
+                }
+            }
+            if (name.startsWith("get") && args != null && args[0] is String) {
+                val value = values[args[0] as String]
+                return@newProxyInstance when (name) {
+                    "getLong" -> (value as Long?) ?: 0L
+                    else -> value
+                }
+            }
+            when (method.returnType) {
+                java.lang.Boolean.TYPE -> false
+                java.lang.Integer.TYPE -> 0
+                java.lang.Long.TYPE -> 0L
+                else -> null
+            }
+        } as ResultSet
     }
 }

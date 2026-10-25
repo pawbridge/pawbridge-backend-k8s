@@ -18,9 +18,15 @@ import com.pawbridge.backend.animal.internal.chatbot.infrastructure.repository.C
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Animal
 import com.pawbridge.backend.animal.internal.command.infrastructure.enums.Species
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -32,18 +38,6 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.NullSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyList
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -57,15 +51,15 @@ import java.util.Optional
 import java.util.stream.Stream
 
 class ChatbotServiceTest {
-    private val animals: AnimalRepository = mock(AnimalRepository::class.java)
-    private val sessions: ChatbotSessionRepository = mock(ChatbotSessionRepository::class.java)
-    private val messages: ChatbotMessageRepository = mock(ChatbotMessageRepository::class.java)
-    private val blocks: ChatbotBlockLogRepository = mock(ChatbotBlockLogRepository::class.java)
-    private val cookies: ChatbotCookieService = mock(ChatbotCookieService::class.java)
-    private val ips: ChatbotClientIpResolver = mock(ChatbotClientIpResolver::class.java)
-    private val hashes: ChatbotIpHashService = mock(ChatbotIpHashService::class.java)
-    private val quota: ChatbotRateLimitService = mock(ChatbotRateLimitService::class.java)
-    private val ai: PythonChatbotClient = mock(PythonChatbotClient::class.java)
+    private val animals = mockk<AnimalRepository>()
+    private val sessions = mockk<ChatbotSessionRepository>()
+    private val messages = mockk<ChatbotMessageRepository>()
+    private val blocks = mockk<ChatbotBlockLogRepository>()
+    private val cookies = mockk<ChatbotCookieService>()
+    private val ips = mockk<ChatbotClientIpResolver>()
+    private val hashes = mockk<ChatbotIpHashService>()
+    private val quota = mockk<ChatbotRateLimitService>()
+    private val ai = mockk<PythonChatbotClient>()
     private val events = ArrayList<String>()
     private val saved = ArrayList<ChatbotMessage>()
     private val rejected = ArrayList<ChatbotBlockLog>()
@@ -95,72 +89,6 @@ class ChatbotServiceTest {
         service = ChatbotService(
             animals, sessions, messages, blocks, cookies, ips, hashes, quota, ChatbotGuardService(), ai, KEY, reads, writes,
         )
-        `when`(cookies.resolveAnonymousSessionId(request, response)).thenAnswer {
-            outside()
-            events.add("cookie")
-            ANON
-        }
-        `when`(ips.resolve(request)).thenAnswer {
-            outside()
-            events.add("ip")
-            "127.0.0.2"
-        }
-        `when`(hashes.hash("127.0.0.2")).thenAnswer {
-            outside()
-            events.add("hash")
-            "fixture-ip-hash"
-        }
-        `when`(animals.findWithShelterById(41L)).thenAnswer {
-            transaction(true)
-            events.add("animal")
-            Optional.of(animal)
-        }
-        `when`(sessions.save(any())).thenAnswer { call ->
-            transaction(false)
-            events.add("session-save")
-            val entity: ChatbotSession = call.getArgument(0)
-            ReflectionTestUtils.setField(entity, "id", SESSION)
-            entity
-        }
-        `when`(sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(SESSION, ANON, 41L)).thenAnswer {
-            transaction(true)
-            events.add("session-read")
-            Optional.of(session)
-        }
-        doAnswer {
-            outside()
-            events.add("quota")
-            null
-        }.`when`(quota).check(ANON, "fixture-ip-hash")
-        `when`(messages.countBySession(any())).thenAnswer {
-            transaction(true)
-            events.add("count")
-            0L
-        }
-        `when`(messages.findTop6BySessionOrderByCreatedAtDesc(any())).thenAnswer {
-            transaction(true)
-            events.add("history")
-            listOf<ChatbotMessage>()
-        }
-        `when`(ai.createChatbotMessage(eq(KEY), any())).thenAnswer {
-            outside()
-            events.add("ai")
-            answer
-        }
-        `when`(messages.saveAll(anyList())).thenAnswer { call ->
-            transaction(false)
-            events.add("messages-save")
-            val rows: List<ChatbotMessage> = call.getArgument(0)
-            saved.addAll(rows)
-            rows
-        }
-        `when`(blocks.save(any())).thenAnswer { call ->
-            transaction(false)
-            events.add("block-save")
-            val row: ChatbotBlockLog = call.getArgument(0)
-            rejected.add(row)
-            row
-        }
     }
 
     @AfterEach
@@ -169,7 +97,8 @@ class ChatbotServiceTest {
     }
 
     @Test
-    fun given__owned_conversation_and_latest_six_rows__when__asking__then__preserve_cookie_quota_history_ai_and_two_row_commit_order() {
+    fun `본인 대화이고 최근 메시지 여섯 건이 있을 때__질문하면__쿠키와 한도와 이력과 AI와 두 행 커밋 순서를 유지한다`() {
+        // given
         val recent = listOf(
             ChatbotMessage.assistant(session, "six", null, null),
             ChatbotMessage.user(session, "five"),
@@ -178,12 +107,27 @@ class ChatbotServiceTest {
             ChatbotMessage.assistant(session, "two", null, null),
             ChatbotMessage.user(session, "one"),
         )
-        doAnswer {
-            transaction(true)
-            events.add("history")
-            recent
-        }.`when`(messages).findTop6BySessionOrderByCreatedAtDesc(any())
 
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", ANON) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(41L) } answers { inTransaction("animal", true, Optional.of(animal)) }
+        every { sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(any(), any(), any()) } answers {
+            inTransaction("session-read", true, Optional.of(session))
+        }
+        every { quota.check(any(), any()) } answers { external("quota", Unit) }
+        every { messages.countBySession(any()) } answers { inTransaction("count", true, 0L) }
+        every { messages.findTop6BySessionOrderByCreatedAtDesc(any()) } answers {
+            inTransaction("history", true, recent)
+        }
+        every { ai.createChatbotMessage(any(), any()) } answers { external("ai", answer) }
+        every { messages.saveAll(any<List<ChatbotMessage>>()) } answers {
+            val rows = firstArg<List<ChatbotMessage>>()
+            saved.addAll(rows)
+            inTransaction("messages-save", false, rows)
+        }
+
+        // when
         val result = service.createMessage(
             41L,
             ChatbotMessageRequest(SESSION, " 입양 문의 010-1234-5678 friend@example.com "),
@@ -191,22 +135,23 @@ class ChatbotServiceTest {
             response,
         )
 
+        // then
+        val input = slot<PythonChatbotMessageRequest>()
         assertEquals(ChatbotMessageResponse(SESSION, answer.answer, answer.safetyNotice, answer.provider), result)
-        val input: ArgumentCaptor<PythonChatbotMessageRequest> = ArgumentCaptor.forClass(PythonChatbotMessageRequest::class.java)
-        verify(ai).createChatbotMessage(eq(KEY), input.capture())
+        verify(exactly = 1) { ai.createChatbotMessage(KEY, capture(input)) }
         assertEquals(
             AnimalChatbotContext("DOG", "mix", "2023년생", "5(Kg)", "white", null, null, "calm", "보호중"),
-            input.value.animalContext,
+            input.captured.animalContext,
         )
         assertEquals(
             listOf("one", "two", "three", "four", "five", "six"),
-            input.value.recentMessages!!.map { message -> message.content },
+            input.captured.recentMessages!!.map { message -> message.content },
         )
         assertEquals(
             listOf("user", "assistant", "user", "assistant", "user", "assistant"),
-            input.value.recentMessages!!.map { message -> message.role },
+            input.captured.recentMessages!!.map { message -> message.role },
         )
-        assertEquals("입양 문의 [PHONE] [EMAIL]", input.value.question)
+        assertEquals("입양 문의 [PHONE] [EMAIL]", input.captured.question)
         assertEquals(2, saved.size)
         assertEquals(ChatbotMessageRole.USER, saved[0].role)
         assertEquals("입양 문의 [PHONE] [EMAIL]", saved[0].content)
@@ -225,21 +170,47 @@ class ChatbotServiceTest {
             ),
             events,
         )
-        verifyNoInteractions(blocks)
-        verify(sessions, never()).save(any())
+        verify(exactly = 1) { sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(SESSION, ANON, 41L) }
+        verify(exactly = 1) { quota.check(ANON, "fixture-ip-hash") }
+        confirmVerified(blocks)
+        verify(exactly = 0) { sessions.save(any<ChatbotSession>()) }
     }
 
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = ["", "   "])
-    fun given__absent_or_blank_session_id__when__asking__then__create_session_before_quota_and_keep_both_saved_rows_on_that_session(
+    fun `세션 ID가 없거나 비어 있을 때__질문하면__한도 확인 전에 세션을 만들고 저장한 두 행을 그 세션에 묶는다`(
         sessionId: String?,
     ) {
+        // given
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", ANON) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(41L) } answers { inTransaction("animal", true, Optional.of(animal)) }
+        every { sessions.save(any<ChatbotSession>()) } answers {
+            val entity = firstArg<ChatbotSession>()
+            ReflectionTestUtils.setField(entity, "id", SESSION)
+            inTransaction("session-save", false, entity)
+        }
+        every { quota.check(any(), any()) } answers { external("quota", Unit) }
+        every { messages.countBySession(any()) } answers { inTransaction("count", true, 0L) }
+        every { messages.findTop6BySessionOrderByCreatedAtDesc(any()) } answers {
+            inTransaction("history", true, listOf<ChatbotMessage>())
+        }
+        every { ai.createChatbotMessage(any(), any()) } answers { external("ai", answer) }
+        every { messages.saveAll(any<List<ChatbotMessage>>()) } answers {
+            val rows = firstArg<List<ChatbotMessage>>()
+            saved.addAll(rows)
+            inTransaction("messages-save", false, rows)
+        }
+
+        // when
         val result = service.createMessage(41L, ChatbotMessageRequest(sessionId, "입양 문의"), request, response)
 
+        // then
         assertEquals(SESSION, result.sessionId)
-        verify(sessions).save(any())
-        verify(sessions, never()).findByIdAndAnonymousSessionIdAndAnimal_Id(anyString(), anyString(), anyLong())
+        verify(exactly = 1) { sessions.save(any<ChatbotSession>()) }
+        verify(exactly = 0) { sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(any(), any(), any()) }
         assertEquals(2, saved.size)
         assertSame(saved.first().session, saved.last().session)
         assertEquals(ANON, saved.first().session!!.anonymousSessionId)
@@ -249,57 +220,65 @@ class ChatbotServiceTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["foreign-session", "foreign-cookie", "foreign-animal"])
-    fun given__session_ownership_triple_not_found__when__continuing__then__reject_before_quota_history_or_messages(
+    fun `세션과 쿠키와 동물의 소유 조합이 맞지 않을 때__이어서 질문하면__한도와 이력과 메시지 처리 전에 거부한다`(
         mismatch: String,
     ) {
+        // given
         val suppliedSession = if (mismatch == "foreign-session") "foreign-session" else SESSION
         val browser = if (mismatch == "foreign-cookie") "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" else ANON
         val animalId = if (mismatch == "foreign-animal") 42L else 41L
-        if (mismatch == "foreign-cookie") {
-            doAnswer {
-                outside()
-                events.add("cookie")
-                browser
-            }.`when`(cookies).resolveAnonymousSessionId(request, response)
-        }
-        if (mismatch == "foreign-animal") {
-            doAnswer {
-                transaction(true)
-                events.add("animal")
-                Optional.of(Animal.builder().id(42L).build())
-            }.`when`(animals).findWithShelterById(42L)
-        }
-        doAnswer {
-            transaction(true)
-            events.add("session-read")
-            Optional.empty<ChatbotSession>()
-        }.`when`(sessions).findByIdAndAnonymousSessionIdAndAnimal_Id(anyString(), anyString(), anyLong())
+        val requested = if (mismatch == "foreign-animal") Animal.builder().id(42L).build() else animal
 
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", browser) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(animalId) } answers {
+            inTransaction("animal", true, Optional.of(requested))
+        }
+        every { sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(any(), any(), any()) } answers {
+            inTransaction("session-read", true, Optional.empty<ChatbotSession>())
+        }
+
+        // when
         val failure = assertThrows(IllegalArgumentException::class.java) {
             service.createMessage(animalId, ChatbotMessageRequest(suppliedSession, "입양 문의"), request, response)
         }
 
+        // then
         assertEquals("Invalid chatbot session", failure.message)
-        verify(sessions).findByIdAndAnonymousSessionIdAndAnimal_Id(suppliedSession, browser, animalId)
-        verify(sessions, never()).save(any())
-        verifyNoInteractions(quota, messages, blocks, ai)
+        verify(exactly = 1) { sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(suppliedSession, browser, animalId) }
+        verify(exactly = 0) { sessions.save(any<ChatbotSession>()) }
+        confirmVerified(quota, messages, blocks, ai)
         assertEquals("rollback:R", events.last())
     }
 
     @ParameterizedTest
     @ValueSource(longs = [20, 21])
-    fun given__twenty_or_more_persisted_message_rows__when__asking__then__quota_precedes_cap_and_only_block_log_is_saved(
+    fun `저장된 메시지가 스무 건 이상일 때__질문하면__한도 확인이 상한 확인보다 먼저고 차단 기록만 저장한다`(
         rows: Long,
     ) {
-        doAnswer {
-            transaction(true)
-            events.add("count")
-            rows
-        }.`when`(messages).countBySession(any())
+        // given
         val question = " " + "입양".repeat(110) + " "
 
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", ANON) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(41L) } answers { inTransaction("animal", true, Optional.of(animal)) }
+        every { sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(any(), any(), any()) } answers {
+            inTransaction("session-read", true, Optional.of(session))
+        }
+        every { quota.check(any(), any()) } answers { external("quota", Unit) }
+        every { messages.countBySession(any()) } answers { inTransaction("count", true, rows) }
+        every { blocks.save(any<ChatbotBlockLog>()) } answers {
+            val row = firstArg<ChatbotBlockLog>()
+            rejected.add(row)
+            inTransaction("block-save", false, row)
+        }
+
+        // when
         val result = service.createMessage(41L, ChatbotMessageRequest(SESSION, question), request, response)
 
+        // then
         assertEquals("guard", result.provider)
         assertEquals("이 대화에서 사용할 수 있는 메시지 수를 초과했습니다. 새로고침 후 새 대화를 시작해주세요.", result.answer)
         assertEquals(1, rejected.size)
@@ -311,24 +290,42 @@ class ChatbotServiceTest {
         assertSame(animal, log.animal)
         assertEquals(ANON, log.anonymousSessionId)
         assertEquals("fixture-ip-hash", log.ipHash)
-        verify(quota).check(ANON, "fixture-ip-hash")
+        verify(exactly = 1) { quota.check(ANON, "fixture-ip-hash") }
         assertTrue(events.indexOf("quota") < events.indexOf("count"))
-        verifyNoInteractions(ai)
-        verify(messages, never()).findTop6BySessionOrderByCreatedAtDesc(any())
-        verify(messages, never()).saveAll(anyList())
+        confirmVerified(ai)
+        verify(exactly = 0) { messages.findTop6BySessionOrderByCreatedAtDesc(any()) }
+        verify(exactly = 0) { messages.saveAll(any<List<ChatbotMessage>>()) }
         assertTrue(saved.isEmpty())
     }
 
     @ParameterizedTest
     @MethodSource("guardRejections")
-    fun given__original_guard_rejection__when__asking__then__return_guard_200_shape_and_preserve_sensitive_preview_rule_without_ai(
+    fun `원래의 가드 거부 사유에 해당할 때__질문하면__AI 호출 없이 가드 200 응답을 돌려주고 민감 정보 미리보기 규칙을 유지한다`(
         question: String,
         category: String,
         reason: String,
         sensitive: Boolean,
     ) {
+        // given
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", ANON) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(41L) } answers { inTransaction("animal", true, Optional.of(animal)) }
+        every { sessions.findByIdAndAnonymousSessionIdAndAnimal_Id(any(), any(), any()) } answers {
+            inTransaction("session-read", true, Optional.of(session))
+        }
+        every { quota.check(any(), any()) } answers { external("quota", Unit) }
+        every { messages.countBySession(any()) } answers { inTransaction("count", true, 0L) }
+        every { blocks.save(any<ChatbotBlockLog>()) } answers {
+            val row = firstArg<ChatbotBlockLog>()
+            rejected.add(row)
+            inTransaction("block-save", false, row)
+        }
+
+        // when
         val result = service.createMessage(41L, ChatbotMessageRequest(SESSION, question), request, response)
 
+        // then
         assertEquals("guard", result.provider)
         assertFalse(result.safetyNotice!!.isBlank())
         assertFalse(result.answer!!.isBlank())
@@ -337,79 +334,116 @@ class ChatbotServiceTest {
         assertEquals(reason, rejected.first().reason)
         assertEquals(if (sensitive) null else question.trim(), rejected.first().questionPreview)
         assertEquals(question.length, rejected.first().questionLength)
-        verifyNoInteractions(ai)
-        verify(messages, never()).findTop6BySessionOrderByCreatedAtDesc(any())
-        verify(messages, never()).saveAll(anyList())
+        confirmVerified(ai)
+        verify(exactly = 0) { messages.findTop6BySessionOrderByCreatedAtDesc(any()) }
+        verify(exactly = 0) { messages.saveAll(any<List<ChatbotMessage>>()) }
     }
 
     @Test
-    fun given__new_session_then_quota_rejection__when__asking__then__early_session_commit_survives_and_no_message_or_block_is_saved() {
-        doAnswer {
+    fun `새 세션을 만든 뒤 한도에 걸릴 때__질문하면__앞서 커밋한 세션은 남고 메시지나 차단 기록은 저장하지 않는다`() {
+        // given
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", ANON) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(41L) } answers { inTransaction("animal", true, Optional.of(animal)) }
+        every { sessions.save(any<ChatbotSession>()) } answers {
+            val entity = firstArg<ChatbotSession>()
+            ReflectionTestUtils.setField(entity, "id", SESSION)
+            inTransaction("session-save", false, entity)
+        }
+        every { quota.check(any(), any()) } answers {
             outside()
             events.add("quota")
             throw ChatbotRateLimitExceededException()
-        }.`when`(quota).check(ANON, "fixture-ip-hash")
+        }
 
-        assertThrows(ChatbotRateLimitExceededException::class.java) {
+        // when
+        val thrown = assertThrows(ChatbotRateLimitExceededException::class.java) {
             service.createMessage(41L, ChatbotMessageRequest(null, "입양 문의"), request, response)
         }
 
+        // then
+        assertNotNull(thrown)
         assertEquals(
             listOf("cookie", "ip", "hash", "begin:R", "animal", "commit:R", "begin:W", "session-save", "commit:W", "quota"),
             events,
         )
-        verify(sessions).save(any())
-        verifyNoInteractions(messages, blocks, ai)
+        verify(exactly = 1) { sessions.save(any<ChatbotSession>()) }
+        confirmVerified(messages, blocks, ai)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["ai", "save"])
-    fun given__upstream_or_message_save_failure_after_session_commit__when__asking__then__propagate_without_compensating_early_session_or_quota(
+    fun `세션 커밋 뒤 상류나 메시지 저장이 실패할 때__질문하면__앞서 만든 세션이나 한도 소비를 보상하지 않고 예외를 전파한다`(
         stage: String,
     ) {
+        // given
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", ANON) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(41L) } answers { inTransaction("animal", true, Optional.of(animal)) }
+        every { sessions.save(any<ChatbotSession>()) } answers {
+            val entity = firstArg<ChatbotSession>()
+            ReflectionTestUtils.setField(entity, "id", SESSION)
+            inTransaction("session-save", false, entity)
+        }
+        every { quota.check(any(), any()) } answers { external("quota", Unit) }
+        every { messages.countBySession(any()) } answers { inTransaction("count", true, 0L) }
+        every { messages.findTop6BySessionOrderByCreatedAtDesc(any()) } answers {
+            inTransaction("history", true, listOf<ChatbotMessage>())
+        }
         if (stage == "ai") {
-            doAnswer {
+            every { ai.createChatbotMessage(any(), any()) } answers {
                 outside()
                 events.add("ai")
                 throw IllegalStateException("synthetic upstream failure")
-            }.`when`(ai).createChatbotMessage(eq(KEY), any())
+            }
         } else {
-            doAnswer {
+            every { ai.createChatbotMessage(any(), any()) } answers { external("ai", answer) }
+            every { messages.saveAll(any<List<ChatbotMessage>>()) } answers {
                 transaction(false)
                 events.add("messages-save")
                 throw DataAccessResourceFailureException("synthetic save failure")
-            }.`when`(messages).saveAll(anyList())
+            }
         }
 
-        assertThrows(RuntimeException::class.java) {
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
             service.createMessage(41L, ChatbotMessageRequest(null, "입양 문의"), request, response)
         }
 
+        // then
+        assertNotNull(thrown)
         assertTrue(events.contains("commit:W"))
         assertEquals(if (stage == "ai") "ai" else "rollback:W", events.last())
-        verify(sessions).save(any())
-        verify(quota).check(ANON, "fixture-ip-hash")
-        verifyNoInteractions(blocks)
+        verify(exactly = 1) { sessions.save(any<ChatbotSession>()) }
+        verify(exactly = 1) { quota.check(ANON, "fixture-ip-hash") }
+        confirmVerified(blocks)
         if (stage == "ai") {
-            verify(messages, never()).saveAll(anyList())
+            verify(exactly = 0) { messages.saveAll(any<List<ChatbotMessage>>()) }
         }
         assertTrue(saved.isEmpty())
     }
 
     @Test
-    fun given__missing_animal__when__asking__then__cookie_ip_hash_precede_404_and_no_session_or_quota_work_occurs() {
-        doAnswer {
-            transaction(true)
-            events.add("animal")
-            Optional.empty<Animal>()
-        }.`when`(animals).findWithShelterById(41L)
+    fun `동물이 없을 때__질문하면__쿠키와 IP와 해시 뒤에 404를 내고 세션이나 한도 작업은 하지 않는다`() {
+        // given
+        every { cookies.resolveAnonymousSessionId(request, response) } answers { external("cookie", ANON) }
+        every { ips.resolve(request) } answers { external("ip", "127.0.0.2") }
+        every { hashes.hash("127.0.0.2") } answers { external("hash", "fixture-ip-hash") }
+        every { animals.findWithShelterById(41L) } answers {
+            inTransaction("animal", true, Optional.empty<Animal>())
+        }
 
-        assertThrows(ChatbotAnimalNotFoundException::class.java) {
+        // when
+        val thrown = assertThrows(ChatbotAnimalNotFoundException::class.java) {
             service.createMessage(41L, ChatbotMessageRequest(null, "입양 문의"), request, response)
         }
 
+        // then
+        assertNotNull(thrown)
         assertEquals(listOf("cookie", "ip", "hash", "begin:R", "animal", "rollback:R"), events)
-        verifyNoInteractions(sessions, quota, messages, blocks, ai)
+        confirmVerified(sessions, quota, messages, blocks, ai)
     }
 
     private fun outside() {
@@ -419,6 +453,20 @@ class ChatbotServiceTest {
     private fun transaction(readOnly: Boolean) {
         assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
         assertEquals(readOnly, TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+    }
+
+    /** Records a call that must happen outside any transaction, then hands back the value the mock returns. */
+    private fun <T> external(event: String, value: T): T {
+        outside()
+        events.add(event)
+        return value
+    }
+
+    /** Records a call that must happen inside a transaction of the given kind, then hands back the value the mock returns. */
+    private fun <T> inTransaction(event: String, readOnly: Boolean, value: T): T {
+        transaction(readOnly)
+        events.add(event)
+        return value
     }
 
     private inner class Manager : AbstractPlatformTransactionManager() {

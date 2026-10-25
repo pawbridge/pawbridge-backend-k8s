@@ -1,5 +1,8 @@
 package com.pawbridge.backend.user.internal.shelter.infrastructure
 
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -9,14 +12,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.eq
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.ConnectionHolder
@@ -25,10 +20,10 @@ import java.sql.Connection
 import javax.sql.DataSource
 
 class JdbcAnimalShelterMembersTest {
-    private val source: DataSource = mock(DataSource::class.java)
-    private val other: DataSource = mock(DataSource::class.java)
-    private val jdbc: JdbcTemplate = mock(JdbcTemplate::class.java)
-    private val binding = ConnectionHolder(mock(Connection::class.java))
+    private val source: DataSource = mockk<DataSource>()
+    private val other: DataSource = mockk<DataSource>()
+    private val jdbc: JdbcTemplate = mockk<JdbcTemplate>()
+    private val binding = ConnectionHolder(mockk<Connection>())
     private val members = JdbcAnimalShelterMembers(jdbc)
 
     @BeforeEach
@@ -37,7 +32,6 @@ class JdbcAnimalShelterMembersTest {
         TransactionSynchronizationManager.setActualTransactionActive(true)
         TransactionSynchronizationManager.setCurrentTransactionReadOnly(false)
         TransactionSynchronizationManager.bindResource(source, binding)
-        `when`(jdbc.dataSource).thenReturn(source)
     }
 
     @AfterEach
@@ -49,23 +43,33 @@ class JdbcAnimalShelterMembersTest {
 
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun given__any_still_present_association__when__observing__then__bind_raw_registration_without_role_or_pending_filter(
+    fun `보호소 회원 연관이 남아 있거나 없을 때__관찰하면__역할이나 대기 조건 없이 원본 등록번호를 바인딩한다`(
         exists: Boolean,
     ) {
-        `when`(jdbc.queryForObject(SQL, Boolean::class.javaObjectType, " care ")).thenReturn(exists)
+        // given
+        every { jdbc.dataSource } returns source
+        every { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, any<Any>()) } returns exists
 
-        assertEquals(exists, members.exists(" care "))
+        // when
+        val observed = members.exists(" care ")
 
-        verify(jdbc).queryForObject(SQL, Boolean::class.javaObjectType, " care ")
+        // then
+        assertEquals(exists, observed)
+        verify(exactly = 1) { jdbc.queryForObject(SQL, Boolean::class.javaObjectType, " care ") }
         assertSame(binding, TransactionSynchronizationManager.getResource(source))
         assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
         assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly())
-        verifyNoInteractions(source, other)
+        // The strict mocks fail on any call; hashCode is only used by the transaction resource map.
+        verify(exactly = 0) { source.connection }
+        verify(exactly = 0) { other.connection }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["inactive", "readOnly", "other", "missingSource"])
-    fun given__no_matching_writer_scope__when__observing__then__reject_before_user_sql(mode: String) {
+    fun `일치하는 쓰기 범위가 없을 때__관찰하면__사용자 SQL 전에 거부한다`(mode: String) {
+        // given
+        every { jdbc.dataSource } returns if (mode == "missingSource") null else source
+
         when (mode) {
             "inactive" -> TransactionSynchronizationManager.setActualTransactionActive(false)
             "readOnly" -> TransactionSynchronizationManager.setCurrentTransactionReadOnly(true)
@@ -73,29 +77,37 @@ class JdbcAnimalShelterMembersTest {
                 TransactionSynchronizationManager.unbindResource(source)
                 TransactionSynchronizationManager.bindResource(other, binding)
             }
-            else -> `when`(jdbc.dataSource).thenReturn(null)
         }
 
+        // when
         assertThrows(IllegalStateException::class.java) { members.exists("care") }
 
-        verify(jdbc, never()).queryForObject(anyString(), eq(Boolean::class.javaObjectType), any())
+        // then
+        verify(exactly = 0) { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, any<Any>()) }
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["null", "sql"])
-    fun given__unavailable_observation__when__reading__then__fail_instead_of_allowing_deletion(mode: String) {
+    fun `관찰 결과를 얻을 수 없을 때__읽으면__삭제를 허용하지 않고 실패한다`(mode: String) {
+        // given
         val failure = DataAccessResourceFailureException("Synthetic member observation failure")
+
+        every { jdbc.dataSource } returns source
         if (mode == "sql") {
-            `when`(jdbc.queryForObject(SQL, Boolean::class.javaObjectType, "care")).thenThrow(failure)
+            every { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, any<Any>()) } throws failure
         } else {
-            `when`(jdbc.queryForObject(SQL, Boolean::class.javaObjectType, "care")).thenReturn(null)
+            every { jdbc.queryForObject(any<String>(), Boolean::class.javaObjectType, any<Any>()) } returns null
         }
 
+        // when
         if (mode == "sql") {
             assertSame(failure, assertThrows(DataAccessResourceFailureException::class.java) { members.exists("care") })
         } else {
             assertThrows(NullPointerException::class.java) { members.exists("care") }
         }
+
+        // then
+        verify(exactly = 1) { jdbc.queryForObject(SQL, Boolean::class.javaObjectType, "care") }
         assertSame(binding, TransactionSynchronizationManager.getResource(source))
     }
 

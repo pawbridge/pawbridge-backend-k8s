@@ -22,14 +22,18 @@ import org.springframework.transaction.support.TransactionTemplate
 class JdbcFavoriteStatusQueryTest {
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun given__matching_or_absent_favorite__when__checking__then__two_id_exists_query_returns_boolean_after_read_only_commit(
+    fun `즐겨찾기가 있거나 없을 때__확인하면__읽기 전용 커밋 뒤 두 id의 존재 쿼리가 불리언을 돌려준다`(
         exists: Boolean,
     ) {
+        // given
         val fixture = Fixture()
         fixture.jdbc.exists = exists
 
-        assertEquals(exists, fixture.query.isFavorite(52L, 73L))
+        // when
+        val result = fixture.query.isFavorite(52L, 73L)
 
+        // then
+        assertEquals(exists, result)
         assertEquals(
             "SELECT EXISTS ( SELECT 1 FROM pawbridge_user.favorites WHERE user_id = ? AND animal_id = ? )",
             fixture.jdbc.sql!!.replace(Regex("\\s+"), " ").trim(),
@@ -43,13 +47,17 @@ class JdbcFavoriteStatusQueryTest {
 
     @ParameterizedTest
     @ValueSource(longs = [0L, -1L, Long.MIN_VALUE, Long.MAX_VALUE])
-    fun given__zero_negative_or_boundary_animal_id__when__checking__then__exact_long_is_queried_without_positive_validation(
+    fun `동물 id가 0이거나 음수이거나 경계값일 때__확인하면__양수 검증 없이 정확한 long 값으로 조회한다`(
         animalId: Long,
     ) {
+        // given
         val fixture = Fixture()
 
-        assertFalse(fixture.query.isFavorite(52L, animalId))
+        // when
+        val result = fixture.query.isFavorite(52L, animalId)
 
+        // then
+        assertFalse(result)
         assertArrayEquals(arrayOf<Any?>(52L, animalId), fixture.jdbc.arguments)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
@@ -57,13 +65,17 @@ class JdbcFavoriteStatusQueryTest {
     }
 
     @Test
-    fun given__jdbc_failure_then_recovery__when__checking__then__failure_rolls_back_without_false_fallback_and_next_query_commits() {
+    fun `JDBC 실패 뒤 복구될 때__확인하면__실패는 거짓으로 대체되지 않고 롤백되며 다음 조회는 커밋한다`() {
+        // given
         val fixture = Fixture()
         val failure = DataAccessResourceFailureException("synthetic-private-sql")
         fixture.jdbc.failure = failure
 
-        assertSame(failure, assertThrows(DataAccessResourceFailureException::class.java) { fixture.query.isFavorite(52L, 73L) })
+        // when
+        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { fixture.query.isFavorite(52L, 73L) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(0, fixture.transactions.commits)
         assertEquals(1, fixture.transactions.rollbacks)
@@ -77,13 +89,17 @@ class JdbcFavoriteStatusQueryTest {
     }
 
     @Test
-    fun given__transaction_start_failure_then_recovery__when__checking__then__no_query_precedes_failure_and_next_query_commits() {
+    fun `트랜잭션 시작 실패 뒤 복구될 때__확인하면__실패 전에 쿼리가 없고 다음 조회는 커밋한다`() {
+        // given
         val fixture = Fixture()
         val failure = CannotCreateTransactionException("synthetic-private-start")
         fixture.transactions.startFailure = failure
 
-        assertSame(failure, assertThrows(CannotCreateTransactionException::class.java) { fixture.query.isFavorite(52L, 73L) })
+        // when
+        val thrown = assertThrows(CannotCreateTransactionException::class.java) { fixture.query.isFavorite(52L, 73L) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(0, fixture.jdbc.queries)
         assertEquals(0, fixture.transactions.commits)
         assertEquals(0, fixture.transactions.rollbacks)
@@ -96,13 +112,17 @@ class JdbcFavoriteStatusQueryTest {
     }
 
     @Test
-    fun given__transaction_completion_failure_then_recovery__when__checking__then__no_boolean_is_returned_before_successful_completion() {
+    fun `트랜잭션 완료 실패 뒤 복구될 때__확인하면__완료에 성공하기 전에는 불리언을 돌려주지 않는다`() {
+        // given
         val fixture = Fixture()
         val failure = TransactionSystemException("synthetic-private-completion")
         fixture.transactions.completionFailure = failure
 
-        assertSame(failure, assertThrows(TransactionSystemException::class.java) { fixture.query.isFavorite(52L, 73L) })
+        // when
+        val thrown = assertThrows(TransactionSystemException::class.java) { fixture.query.isFavorite(52L, 73L) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(1, fixture.jdbc.queries)
         assertEquals(1, fixture.transactions.commits)
         assertFalse(fixture.transactions.active)

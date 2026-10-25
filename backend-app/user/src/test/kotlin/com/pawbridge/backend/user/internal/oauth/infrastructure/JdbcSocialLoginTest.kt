@@ -4,6 +4,11 @@ import com.pawbridge.backend.user.internal.oauth.application.SocialLogin.SocialU
 import com.pawbridge.backend.user.internal.oauth.application.SocialLoginRejectedException
 import com.pawbridge.backend.user.internal.session.application.IssuedRefreshToken
 import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore
+import io.mockk.Called
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -13,17 +18,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyInt
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.nullable
-import org.mockito.Mockito.doAnswer
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.IncorrectResultSizeDataAccessException
@@ -49,9 +43,10 @@ import java.util.function.Supplier
 class JdbcSocialLoginTest {
     @ParameterizedTest
     @ValueSource(strings = ["unsupported", "missing-email", "empty-email"])
-    fun given__unsupported_provider_or_missing_email__when__loading__then__reject_before_any_account_transaction(
+    fun `지원하지 않는 제공자이거나 이메일이 없을 때__불러오면__계정 트랜잭션 전에 거부한다`(
         example: String,
     ) {
+        // given
         val f = Fixture()
         val attributes = HashMap<String, Any?>(ATTRIBUTES)
         if (example == "missing-email") {
@@ -61,51 +56,61 @@ class JdbcSocialLoginTest {
             attributes["email"] = ""
         }
 
+        // when
         assertThrows(SocialLoginRejectedException::class.java) {
             f.login.load(if (example == "unsupported") "other" else "google", attributes)
         }
 
+        // then
         assertTrue(f.events.isEmpty())
         assertTrue(f.jdbc.bindings.isEmpty())
         assertEquals(0, f.nicknames)
-        verifyNoInteractions(f.sessions)
+        verify { f.sessions wasNot Called }
     }
 
     @Test
-    fun given__existing_google_user__when__loading_again__then__preserve_stored_profile_role_and_skip_local_lookup_nickname_or_update() {
+    fun `이미 있는 구글 회원일 때__다시 불러오면__저장된 프로필과 역할을 보존하고 로컬 조회와 닉네임과 갱신을 건너뛴다`() {
+        // given
         val f = Fixture()
         f.jdbc.google = listOf(EXISTING)
 
-        assertEquals(EXISTING, f.login.load("GOOGLE", ATTRIBUTES))
+        // when
+        val user = f.login.load("GOOGLE", ATTRIBUTES)
 
+        // then
+        assertEquals(EXISTING, user)
         assertEquals(listOf("begin", "user:GOOGLE", "commit", "cleanup"), f.events)
         assertEquals(0, f.nicknames)
         assertTrue(f.jdbc.bindings.isEmpty())
-        verifyNoInteractions(f.sessions)
+        verify { f.sessions wasNot Called }
     }
 
     @Test
-    fun given__local_account_with_same_email__when__loading_google__then__reject_without_linking_or_inserting() {
+    fun `같은 이메일의 로컬 계정이 있을 때__구글로 불러오면__연결이나 삽입 없이 거부한다`() {
+        // given
         val f = Fixture()
         f.jdbc.local = listOf(EXISTING)
 
-        assertEquals(
-            "이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.",
-            assertThrows(SocialLoginRejectedException::class.java) { f.login.load("google", ATTRIBUTES) }.message,
-        )
+        // when
+        val rejected = assertThrows(SocialLoginRejectedException::class.java) { f.login.load("google", ATTRIBUTES) }
 
+        // then
+        assertEquals("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.", rejected.message)
         assertEquals(listOf("begin", "user:GOOGLE", "user:LOCAL", "rollback", "cleanup"), f.events)
         assertEquals(0, f.nicknames)
         assertTrue(f.jdbc.bindings.isEmpty())
-        verifyNoInteractions(f.sessions)
+        verify { f.sessions wasNot Called }
     }
 
     @Test
-    fun given__new_google_account__when__loading__then__insert_source_defaults_provider_id_and_one_audit_time_without_issuing_tokens() {
+    fun `새 구글 계정일 때__불러오면__원본 기본값과 제공자 id와 하나의 감사 시각으로 삽입하고 토큰은 발급하지 않는다`() {
+        // given
         val f = Fixture()
 
+        // when
         val user = f.login.load("google", ATTRIBUTES)
 
+        // then
         assertEquals(SocialUser(19, "social@example.test", "Social", "ROLE_USER", null, "GOOGLE"), user)
         assertEquals(
             listOf("begin", "user:GOOGLE", "user:LOCAL", "nickname", "insert-user", "commit", "cleanup"),
@@ -126,17 +131,21 @@ class JdbcSocialLoginTest {
         assertTrue(values.containsKey(6))
         assertNull(values[6])
         assertEquals(listOf("UTC", "UTC"), f.jdbc.calendarZones)
-        verifyNoInteractions(f.sessions)
+        verify { f.sessions wasNot Called }
     }
 
     @Test
-    fun given__integrity_failure_on_both_attempts__when__creating__then__rollback_and_cleanup_each_transaction_and_propagate_without_a_third_attempt() {
+    fun `두 번 모두 무결성 실패가 났을 때__생성하면__각 트랜잭션을 롤백하고 정리한 뒤 세 번째 시도 없이 전파한다`() {
+        // given
         val f = Fixture()
         val failure = DataIntegrityViolationException("synthetic unique")
         f.jdbc.userFailure = failure
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { f.login.load("google", ATTRIBUTES) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { f.login.load("google", ATTRIBUTES) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(2, f.nicknames)
         assertEquals(
             listOf(
@@ -145,14 +154,15 @@ class JdbcSocialLoginTest {
             ),
             f.events,
         )
-        verifyNoInteractions(f.sessions)
+        verify { f.sessions wasNot Called }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__first_integrity_failure__when__retrying__then__finish_rollback_before_reloading_and_reuse_a_raced_account_or_generate_one_more_nickname(
+    fun `첫 무결성 실패가 났을 때__재시도하면__롤백을 끝낸 뒤 다시 조회해 경합으로 생긴 계정을 재사용하거나 닉네임을 하나 더 생성한다`(
         racedAccount: Boolean,
     ) {
+        // given
         val f = Fixture()
         f.jdbc.userFailure = DataIntegrityViolationException("synthetic unique")
         f.jdbc.userFailuresRemaining = 1
@@ -160,8 +170,11 @@ class JdbcSocialLoginTest {
             f.jdbc.googleAfterFailure = EXISTING
         }
 
+
+        // when
         val result = f.login.load("google", ATTRIBUTES)
 
+        // then
         assertEquals(
             if (racedAccount) EXISTING else SocialUser(19, "social@example.test", "Social", "ROLE_USER", null, "GOOGLE"),
             result,
@@ -176,69 +189,85 @@ class JdbcSocialLoginTest {
         assertEquals(expected, f.events)
         assertEquals(if (racedAccount) 1 else 2, f.nicknames)
         assertEquals(if (racedAccount) 1 else 2, f.jdbc.writes)
-        verifyNoInteractions(f.sessions)
+        verify { f.sessions wasNot Called }
     }
 
     @Test
-    fun given__existing_social_user__when__completing_login__then__create_one_session_inside_a_separate_transaction() {
+    fun `이미 있는 소셜 회원일 때__로그인을 마무리하면__별도 트랜잭션에서 세션을 하나 만든다`() {
+        // given
         val f = Fixture()
         val issued = IssuedRefreshToken("synthetic-session-token", 1_209_600)
-        `when`(f.sessions.create(7L)).thenAnswer {
+
+        every { f.sessions.create(any()) } answers {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
             f.events.add("create-session")
             issued
         }
 
-        assertSame(issued, f.login.complete(EXISTING))
+        // when
+        val result = f.login.complete(EXISTING)
 
+        // then
+        assertSame(issued, result)
         assertEquals(listOf("begin", "create-session", "commit", "cleanup"), f.events)
-        verify(f.sessions).create(7L)
-        verifyNoMoreInteractions(f.sessions)
+        verify(exactly = 1) { f.sessions.create(7L) }
+        confirmVerified(f.sessions)
         assertEquals(0, f.jdbc.writes)
         assertEquals(0, f.nicknames)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__session_write_or_commit_failure__when__completing_login__then__propagate_without_retry_or_success_result(
+    fun `세션 쓰기나 커밋이 실패했을 때__로그인을 마무리하면__재시도나 성공 결과 없이 전파한다`(
         commit: Boolean,
     ) {
+        // given
         val f = Fixture()
         val failure: RuntimeException = if (commit) {
             TransactionSystemException("synthetic commit")
         } else {
             DataAccessResourceFailureException("synthetic session")
         }
+
         if (commit) {
             f.manager.failure = failure
-            `when`(f.sessions.create(7L)).thenReturn(IssuedRefreshToken("synthetic-session-token", 1))
+            every { f.sessions.create(any()) } returns IssuedRefreshToken("synthetic-session-token", 1)
         } else {
-            `when`(f.sessions.create(7L)).thenThrow(failure)
+            every { f.sessions.create(any()) } throws failure
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { f.login.complete(EXISTING) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { f.login.complete(EXISTING) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(listOf("begin", if (commit) "commit" else "rollback", "cleanup"), f.events)
-        verify(f.sessions).create(7L)
+        verify(exactly = 1) { f.sessions.create(7L) }
     }
 
     @Test
-    fun given__multiple_rows_where_source_requires_optional_one__when__loading__then__do_not_choose_an_arbitrary_row() {
+    fun `원본이 옵셔널 하나를 요구하는데 행이 여러 개일 때__불러오면__임의의 행을 고르지 않는다`() {
+        // given
         val f = Fixture()
         f.jdbc.google = listOf(EXISTING, EXISTING)
 
+        // when
         assertThrows(IncorrectResultSizeDataAccessException::class.java) { f.login.load("google", ATTRIBUTES) }
 
+        // then
         assertEquals(0, f.jdbc.writes)
         assertEquals(0, f.nicknames)
     }
 
     @Test
-    fun given__new_naver_account__when__loading__then__look_up_by_provider_id_and_insert_naver_provider_and_id() {
+    fun `새 네이버 계정일 때__불러오면__제공자 id로 조회하고 네이버 제공자와 id를 삽입한다`() {
+        // given
         val f = Fixture()
 
+        // when
         val user = f.login.load("naver", NAVER_ATTRIBUTES)
 
+        // then
         assertEquals(SocialUser(19, "social@example.test", "Naver", "ROLE_USER", null, "NAVER"), user)
         assertEquals(
             listOf("begin", "user-id:NAVER", "user:LOCAL", "user:NAVER", "nickname", "insert-user", "commit", "cleanup"),
@@ -249,40 +278,50 @@ class JdbcSocialLoginTest {
         assertEquals("Naver", values[2])
         assertEquals("NAVER", values[7])
         assertEquals("naver-user-id", values[8])
-        verifyNoInteractions(f.sessions)
+        verify { f.sessions wasNot Called }
     }
 
     @Test
-    fun given__existing_naver_provider_id__when__loading__then__return_stored_account_without_email_checks_or_insert() {
+    fun `이미 있는 네이버 제공자 id일 때__불러오면__이메일 확인이나 삽입 없이 저장된 계정을 돌려준다`() {
+        // given
         val f = Fixture()
         f.jdbc.naverById = listOf(NAVER_EXISTING)
 
-        assertEquals(NAVER_EXISTING, f.login.load("naver", NAVER_ATTRIBUTES))
+        // when
+        val user = f.login.load("naver", NAVER_ATTRIBUTES)
 
+        // then
+        assertEquals(NAVER_EXISTING, user)
         assertEquals(listOf("begin", "user-id:NAVER", "commit", "cleanup"), f.events)
         assertEquals(0, f.nicknames)
         assertEquals(0, f.jdbc.writes)
     }
 
     @Test
-    fun given__local_account_with_same_email__when__loading_naver__then__reject_without_linking() {
+    fun `같은 이메일의 로컬 계정이 있을 때__네이버로 불러오면__연결 없이 거부한다`() {
+        // given
         val f = Fixture()
         f.jdbc.local = listOf(EXISTING)
 
+        // when
         val rejected = assertThrows(SocialLoginRejectedException::class.java) { f.login.load("naver", NAVER_ATTRIBUTES) }
 
+        // then
         assertEquals("이미 해당 이메일로 가입된 계정이 있습니다. 일반 로그인을 이용해주세요.", rejected.message)
         assertEquals(listOf("begin", "user-id:NAVER", "user:LOCAL", "rollback", "cleanup"), f.events)
         assertEquals(0, f.jdbc.writes)
     }
 
     @Test
-    fun given__naver_account_with_same_email_but_other_provider_id__when__loading__then__reject_instead_of_relinking_by_email() {
+    fun `같은 이메일이지만 다른 제공자 id의 네이버 계정일 때__불러오면__이메일로 다시 연결하지 않고 거부한다`() {
+        // given
         val f = Fixture()
         f.jdbc.naverByEmail = listOf(NAVER_EXISTING)
 
+        // when
         val rejected = assertThrows(SocialLoginRejectedException::class.java) { f.login.load("naver", NAVER_ATTRIBUTES) }
 
+        // then
         assertEquals("이미 다른 소셜 계정에 연결된 이메일입니다. 관리자에게 문의해주세요.", rejected.message)
         assertEquals(listOf("begin", "user-id:NAVER", "user:LOCAL", "user:NAVER", "rollback", "cleanup"), f.events)
         assertEquals(0, f.jdbc.writes)
@@ -291,7 +330,8 @@ class JdbcSocialLoginTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["missing-response", "missing-id", "missing-email"])
-    fun given__incomplete_naver_profile__when__loading__then__reject_before_any_account_transaction(example: String) {
+    fun `불완전한 네이버 프로필일 때__불러오면__계정 트랜잭션 전에 거부한다`(example: String) {
+        // given
         val f = Fixture()
         val response = HashMap<String, Any?>(
             java.util.Map.of<String, Any?>("id", "naver-user-id", "email", "social@example.test", "name", "Naver"),
@@ -308,8 +348,10 @@ class JdbcSocialLoginTest {
             java.util.Map.of<String, Any?>("response", response)
         }
 
+        // when
         assertThrows(SocialLoginRejectedException::class.java) { f.login.load("naver", attributes) }
 
+        // then
         assertTrue(f.events.isEmpty())
         assertEquals(0, f.nicknames)
     }
@@ -318,7 +360,7 @@ class JdbcSocialLoginTest {
         val events = ArrayList<String>()
         val jdbc = RecordingJdbc(events)
         val manager = Manager(events)
-        val sessions: JdbcAuthSessionStore = mock(JdbcAuthSessionStore::class.java)
+        val sessions = mockk<JdbcAuthSessionStore>()
         val login: JdbcSocialLogin
         var nicknames = 0
 
@@ -344,13 +386,13 @@ class JdbcSocialLoginTest {
         var googleAfterFailure: SocialUser? = null
 
         private fun row(user: SocialUser): ResultSet {
-            val row = mock(ResultSet::class.java)
-            `when`(row.getLong("user_id")).thenReturn(user.userId)
-            `when`(row.getString("email")).thenReturn(user.email)
-            `when`(row.getString("name")).thenReturn(user.name)
-            `when`(row.getString("role")).thenReturn(user.role)
-            `when`(row.getString("care_reg_no")).thenReturn(user.careRegNo)
-            `when`(row.getString("provider")).thenReturn(user.provider)
+            val row = mockk<ResultSet>()
+            every { row.getLong("user_id") } returns user.userId
+            every { row.getString("email") } returns user.email
+            every { row.getString("name") } returns user.name
+            every { row.getString("role") } returns user.role
+            every { row.getString("care_reg_no") } returns user.careRegNo
+            every { row.getString("provider") } returns user.provider
             return row
         }
 
@@ -400,27 +442,24 @@ class JdbcSocialLoginTest {
         private fun bind(creator: PreparedStatementCreator) {
             val values = HashMap<Int, Any?>()
             bindings.add(values)
-            val connection = mock(Connection::class.java)
-            val statement = mock(PreparedStatement::class.java)
+            val connection = mockk<Connection>()
+            val statement = mockk<PreparedStatement>()
             try {
-                `when`(connection.prepareStatement(anyString(), any(Array<String>::class.java))).thenAnswer { call ->
-                    assertTrue((call.getArgument<Any>(0) as String).contains("INSERT INTO pawbridge_user.users"))
-                    assertArrayEquals(arrayOf("user_id"), call.getArgument<Any>(1) as Array<String>)
+                every { connection.prepareStatement(any<String>(), any<Array<String>>()) } answers {
+                    assertTrue(firstArg<String>().contains("INSERT INTO pawbridge_user.users"))
+                    assertArrayEquals(arrayOf("user_id"), secondArg<Array<String>>())
                     statement
                 }
-                doAnswer { call ->
-                    values[call.getArgument<Int>(0)] = call.getArgument<Any?>(1)
-                    null
-                }.`when`(statement).setString(anyInt(), nullable(String::class.java))
-                doAnswer { call ->
-                    values[call.getArgument<Int>(0)] = call.getArgument<Any?>(1)
-                    null
-                }.`when`(statement).setLong(anyInt(), anyLong())
-                doAnswer { call ->
-                    values[call.getArgument<Int>(0)] = call.getArgument<Any?>(1)
-                    calendarZones.add((call.getArgument<Any>(2) as Calendar).timeZone.id)
-                    null
-                }.`when`(statement).setTimestamp(anyInt(), any(Timestamp::class.java), any(Calendar::class.java))
+                every { statement.setString(any(), any()) } answers {
+                    values[firstArg<Int>()] = secondArg<String?>()
+                }
+                every { statement.setLong(any(), any()) } answers {
+                    values[firstArg<Int>()] = secondArg<Long>()
+                }
+                every { statement.setTimestamp(any(), any(), any<Calendar>()) } answers {
+                    values[firstArg<Int>()] = secondArg<Timestamp>()
+                    calendarZones += thirdArg<Calendar>().timeZone.id
+                }
                 assertSame(statement, creator.createPreparedStatement(connection))
             } catch (failure: SQLException) {
                 throw IllegalStateException(failure)
