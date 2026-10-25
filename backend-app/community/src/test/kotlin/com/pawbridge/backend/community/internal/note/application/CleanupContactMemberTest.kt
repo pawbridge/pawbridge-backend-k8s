@@ -15,7 +15,8 @@ import org.junit.jupiter.params.provider.ValueSource
 class CleanupContactMemberTest {
     @ParameterizedTest
     @ValueSource(longs = [0, -1])
-    fun givenNonPositiveMember__whenRemoving__thenRejectLoginBeforeStoreOrUser(memberId: Long) {
+    fun `0 이하의 회원 ID가 주어졌을 때__삭제하면__저장소와 회원 조회 전에 로그인 거절로 끝난다`(memberId: Long) {
+        // given
         val calls = ArrayList<String>()
         val cleanup: ContactMemberCleanup = CleanupContactMember(
             contactMemberQuery { id ->
@@ -25,15 +26,18 @@ class CleanupContactMemberTest {
             contactMemberCleanupStore { _, _ -> calls.add("store") },
         )
 
+        // when
         val failure = assertThrows(ContactMemberCleanupRejectedException::class.java) { cleanup.remove(memberId) }
 
+        // then
         assertEquals(ContactMemberCleanupRejectedException.Reason.LOGIN, failure.reason())
         assertEquals(listOf<String>(), calls)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [true, false])
-    fun givenActiveOrMissingMember__whenLockedPendingPolicyRuns__thenRejectNotPending(active: Boolean) {
+    fun `활성이거나 이미 없는 회원이 주어졌을 때__잠금 안에서 탈퇴 대기 정책이 실행되면__탈퇴 대기 아님으로 거절한다`(active: Boolean) {
+        // given
         val calls = ArrayList<String>()
         val members = contactMemberQuery { id ->
             calls.add("user:$id")
@@ -48,14 +52,17 @@ class CleanupContactMemberTest {
             },
         )
 
+        // when
         val failure = assertThrows(ContactMemberCleanupRejectedException::class.java) { cleanup.remove(7) }
 
+        // then
         assertEquals(ContactMemberCleanupRejectedException.Reason.NOT_PENDING, failure.reason())
         assertEquals(listOf("locked:7", "user:7"), calls)
     }
 
     @Test
-    fun givenDeletionPendingMember__whenRemoving__thenCheckOriginalProjectionInsideStoreGuardOnce() {
+    fun `탈퇴 대기 회원이 주어졌을 때__삭제하면__저장소 가드 안에서 원본 회원 정보를 한 번 확인하고 정리한다`() {
+        // given
         val calls = ArrayList<String>()
         val cleanup: ContactMemberCleanup = CleanupContactMember(
             contactMemberQuery { id ->
@@ -69,13 +76,16 @@ class CleanupContactMemberTest {
             },
         )
 
+        // when
         cleanup.remove(7)
 
+        // then
         assertEquals(listOf("locked:7", "user:7", "cleanup"), calls)
     }
 
     @Test
-    fun givenUserUnavailable__whenPendingPolicyRuns__thenPropagateTypedFailureAndStopCleanup() {
+    fun `회원 조회를 쓸 수 없을 때__탈퇴 대기 정책이 실행되면__타입 있는 실패를 그대로 전파하고 정리를 멈춘다`() {
+        // given
         val failure = ContactMemberUnavailableException(IllegalStateException("private User failure"))
         val calls = ArrayList<String>()
         val cleanup = CleanupContactMember(
@@ -90,7 +100,11 @@ class CleanupContactMemberTest {
             },
         )
 
-        assertSame(failure, assertThrows(ContactMemberUnavailableException::class.java) { cleanup.remove(7) })
+        // when
+        val thrown = assertThrows(ContactMemberUnavailableException::class.java) { cleanup.remove(7) }
+
+        // then
+        assertSame(failure, thrown)
         assertEquals(listOf("locked", "user"), calls)
     }
 }

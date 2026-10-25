@@ -1,8 +1,13 @@
 package com.pawbridge.backend.community.internal.note.application
 
+import com.pawbridge.backend.community.support.TestFaker
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -10,12 +15,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataIntegrityViolationException
 import java.time.Clock
 import java.time.Instant
@@ -23,47 +22,52 @@ import java.util.UUID
 
 class DeletePrivateNoteTest {
     @Test
-    fun given__active_current__when__deleting__then__lookup_only_current_in_callback_with_two_uncached_instants() {
-        val members = mock(ContactMemberQuery::class.java)
-        val clock = mock(Clock::class.java)
+    fun `활성 현재 회원이 주어졌을 때__삭제하면__콜백 안에서 현재 회원만 조회하고 캐시 없이 시각을 두 번 읽는다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val clock = mockk<Clock>()
         val events = ArrayList<String>()
-        whenever(members.get(7L)).thenAnswer {
-            events.add("current")
-            ContactMember(7L, " raw ", true, false)
-        }
         var samples = 0
-        whenever(clock.instant()).thenAnswer {
-            samples++
-            events.add("clock:$samples")
-            FIRST.plusSeconds((samples - 1).toLong())
-        }
         // This port models callback placement; it is not transaction or SQL evidence.
         val mutation = NoteDeletion { current, note, guard, now ->
             assertEquals(7L, current)
             assertEquals(NOTE, note)
             events.add("port")
-            verifyNoInteractions(members, clock)
+            confirmVerified(members, clock)
             guard.run()
             for (index in 0 until 2) {
                 assertEquals(FIRST.plusSeconds(index.toLong()), now.get())
             }
         }
 
+        every { members.get(any()) } answers {
+            events.add("current")
+            ContactMember(7L, " raw ", true, false)
+        }
+        every { clock.instant() } answers {
+            samples++
+            events.add("clock:$samples")
+            FIRST.plusSeconds((samples - 1).toLong())
+        }
+
+        // when
         DeletePrivateNote(members, mutation, clock).delete(7L, NOTE)
 
+        // then
         assertEquals(listOf("port", "current", "clock:1", "clock:2"), events)
-        verify(members).get(7L)
-        verify(clock, times(2)).instant()
-        verifyNoMoreInteractions(members, clock)
+        verify(exactly = 1) { members.get(7L) }
+        verify(exactly = 2) { clock.instant() }
+        confirmVerified(members, clock)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0L, -1L])
-    fun given__nonpositive_direct_caller_and_a_port_failure_before_guard__when__deleting__then__preserve_the_earlier_member_sql_failure(
+    fun `0 이하의 직접 호출자와 가드 이전의 포트 실패가 주어졌을 때__삭제하면__앞선 회원 SQL 실패를 그대로 보존한다`(
         current: Long,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val clock = mock(Clock::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val clock = mockk<Clock>()
         val failure = DataIntegrityViolationException("synthetic member CHECK")
         val mutation = NoteDeletion { actual, note, _, _ ->
             assertEquals(current, actual)
@@ -71,39 +75,43 @@ class DeletePrivateNoteTest {
             throw failure
         }
 
-        assertSame(
-            failure,
-            assertThrows(DataIntegrityViolationException::class.java) {
-                DeletePrivateNote(members, mutation, clock).delete(current, NOTE)
-            },
-        )
-        verifyNoInteractions(members, clock)
+        // when
+        val thrown = assertThrows(DataIntegrityViolationException::class.java) {
+            DeletePrivateNote(members, mutation, clock).delete(current, NOTE)
+        }
+
+        // then
+        assertSame(failure, thrown)
+        confirmVerified(members, clock)
     }
 
     @Test
-    fun given__nonpositive_caller_whose_port_reaches_guard__when__checking_current__then__reject_login_inside_callback_before_user_or_clock() {
-        val members = mock(ContactMemberQuery::class.java)
-        val clock = mock(Clock::class.java)
+    fun `포트가 가드까지 가는 0 이하의 호출자가 주어졌을 때__현재 회원을 확인하면__회원 조회와 시각 읽기 전에 콜백 안에서 로그인 거절한다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val clock = mockk<Clock>()
         var entered = 0
         val mutation = NoteDeletion { _, _, guard, _ ->
             entered++
             guard.run()
         }
 
+        // when
         val failure = assertThrows(NoteDeletionRejectedException::class.java) {
             DeletePrivateNote(members, mutation, clock).delete(0L, NOTE)
         }
 
+        // then
         assertEquals(NoteDeletionRejectedException.Reason.LOGIN, failure.reason())
         assertEquals(1, entered)
-        verifyNoInteractions(members, clock)
+        confirmVerified(members, clock)
     }
 
     @Test
-    fun given__inactive_current__when__the_port_invokes_guard__then__reject_inactive_without_sampling_time_or_continuing() {
-        val members = mock(ContactMemberQuery::class.java)
-        val clock = mock(Clock::class.java)
-        whenever(members.get(7L)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, true))
+    fun `비활성 현재 회원이 주어졌을 때__포트가 가드를 호출하면__시각을 읽거나 이어가지 않고 비활성으로 거절한다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val clock = mockk<Clock>()
         val events = ArrayList<String>()
         val mutation = NoteDeletion { _, _, guard, now ->
             events.add("port")
@@ -112,82 +120,90 @@ class DeletePrivateNoteTest {
             now.get()
         }
 
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, true)
+
+        // when
         val failure = assertThrows(NoteDeletionRejectedException::class.java) {
             DeletePrivateNote(members, mutation, clock).delete(7L, NOTE)
         }
 
+        // then
         assertEquals(NoteDeletionRejectedException.Reason.INACTIVE, failure.reason())
         assertEquals(listOf("port"), events)
-        verify(members).get(7L)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(clock)
+        verify(exactly = 1) { members.get(7L) }
+        confirmVerified(members, clock)
     }
 
     @Test
-    fun given__the_port_reports_only_a_missing_owned_note__when__deleting__then__map_that_fact_to_not_found_policy() {
-        val members = mock(ContactMemberQuery::class.java)
-        val clock = mock(Clock::class.java)
-        whenever(members.get(7L)).thenReturn(ContactMember(7L, "member", true, false))
-        whenever(clock.instant()).thenReturn(FIRST)
+    fun `포트가 소유한 쪽지 없음만 보고할 때__삭제하면__그 사실을 찾을 수 없음 정책으로 옮긴다`() {
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val clock = mockk<Clock>()
         val mutation = NoteDeletion { _, _, guard, now ->
             guard.run()
             now.get()
             throw NoteDeletion.MissingOwnedNote()
         }
 
+        every { members.get(any()) } returns ContactMember(7L, "member", true, false)
+        every { clock.instant() } returns FIRST
+
+        // when
         val failure = assertThrows(NoteDeletionRejectedException::class.java) {
             DeletePrivateNote(members, mutation, clock).delete(7L, NOTE)
         }
 
+        // then
         assertEquals(NoteDeletionRejectedException.Reason.NOT_FOUND, failure.reason())
-        verify(members).get(7L)
-        verify(clock).instant()
-        verifyNoMoreInteractions(members, clock)
+        verify(exactly = 1) { members.get(7L) }
+        verify(exactly = 1) { clock.instant() }
+        confirmVerified(members, clock)
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__user_or_clock_failure__when__the_port_calls_application_dependencies__then__propagate_the_same_failure_without_not_found_translation(
+    fun `회원 조회 또는 시각 읽기가 실패할 때__포트가 애플리케이션 의존성을 호출하면__찾을 수 없음으로 바꾸지 않고 같은 실패를 전파한다`(
         phase: FailurePhase,
     ) {
-        val members = mock(ContactMemberQuery::class.java)
-        val clock = mock(Clock::class.java)
+        // given
+        val members = mockk<ContactMemberQuery>()
+        val clock = mockk<Clock>()
         val failure: RuntimeException =
             if (phase == FailurePhase.USER) {
                 ContactMemberUnavailableException(IllegalStateException("synthetic user"))
             } else {
                 IllegalStateException("synthetic clock")
             }
-        if (phase == FailurePhase.USER) {
-            whenever(members.get(7L)).thenThrow(failure)
-        } else {
-            whenever(members.get(7L)).thenReturn(ContactMember(7L, "member", true, false))
-            whenever(clock.instant()).thenThrow(failure)
-        }
         val mutation = NoteDeletion { _, _, guard, now ->
             guard.run()
             now.get()
         }
 
-        assertSame(
-            failure,
-            assertThrows(RuntimeException::class.java) {
-                DeletePrivateNote(members, mutation, clock).delete(7L, NOTE)
-            },
-        )
-        verify(members).get(7L)
         if (phase == FailurePhase.USER) {
-            verifyNoInteractions(clock)
+            every { members.get(any()) } throws failure
         } else {
-            verify(clock).instant()
+            every { members.get(any()) } returns ContactMember(7L, "member", true, false)
+            every { clock.instant() } throws failure
         }
-        verifyNoMoreInteractions(members, clock)
+
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) {
+            DeletePrivateNote(members, mutation, clock).delete(7L, NOTE)
+        }
+
+        // then
+        assertSame(failure, thrown)
+        verify(exactly = 1) { members.get(7L) }
+        if (phase == FailurePhase.CLOCK) {
+            verify(exactly = 1) { clock.instant() }
+        }
+        confirmVerified(members, clock)
     }
 
     enum class FailurePhase { USER, CLOCK }
 
     private companion object {
-        val NOTE: UUID = UUID.fromString("f2800000-0000-0000-0000-000000000001")
+        val NOTE: UUID = TestFaker.uuid()
         val FIRST: Instant = Instant.parse("2031-01-01T00:00:00.123456Z")
     }
 }

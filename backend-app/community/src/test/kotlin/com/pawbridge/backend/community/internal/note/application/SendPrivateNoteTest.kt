@@ -18,6 +18,10 @@ import com.pawbridge.backend.community.internal.note.application.SendPrivateNote
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -29,13 +33,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.times
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import java.time.Clock
 import java.time.Instant
 import java.util.Optional
@@ -47,35 +44,41 @@ class SendPrivateNoteTest {
 
     @ParameterizedTest
     @MethodSource("invalidInputs")
-    fun given__invalid_id_request_body_or_context__when__sending__then__reject_before_transaction_user_clock_or_uuid(
+    fun `잘못된 ID와 요청과 본문 또는 맥락이 주어졌을 때__보내면__트랜잭션과 회원 조회와 시각 읽기와 UUID 생성 전에 거절한다`(
         current: Long,
         request: SendNote?,
         reason: NoteSendRejectedException.Reason,
     ) {
+        // given
         val f = Fixture()
 
-        assertEquals(
-            reason,
-            assertThrows(NoteSendRejectedException::class.java) { f.app.send(current, request) }.reason(),
-        )
+        // when
+        val failure = assertThrows(NoteSendRejectedException::class.java) { f.app.send(current, request) }
+
+        // then
+        assertEquals(reason, failure.reason())
         assertTrue(f.events.isEmpty())
         assertEquals(0, f.generated)
-        verifyNoInteractions(f.members, f.clock)
+        confirmVerified(f.members, f.clock)
     }
 
     @ParameterizedTest
     @MethodSource("validBodies")
-    fun given__valid_body_and_active_members__when__sending__then__preserve_raw_text_hash_policy_order_seoul_day_and_utc_year(
+    fun `유효한 본문과 활성 회원이 주어졌을 때__보내면__원문 텍스트와 해시와 정책 순서와 서울 기준 하루와 UTC 기준 1년을 보존한다`(
         raw: String,
         stripped: String,
         hash: String,
     ) {
+        // given
         val f = Fixture()
         f.minuteCount = 9
         f.dayCount = 99
 
-        assertEquals(Receipt(NOTE), f.app.send(7L, request(raw)))
+        // when
+        val receipt = f.app.send(7L, request(raw))
 
+        // then
+        assertEquals(Receipt(NOTE), receipt)
         assertEquals(
             listOf(
                 "begin", "lock:7:8", "member:7", "member:8", "previous", "blocked", "clock:1",
@@ -97,68 +100,75 @@ class SendPrivateNoteTest {
         assertEquals(Instant.parse("2029-02-28T15:00:00.123456789Z"), f.inserted!!.expiresAt)
         assertEquals(Notification(NOTE, "PRIVATE_NOTE", 7L, " raw \n", NOW, false, "/notes/$NOTE"), f.notification)
         assertEquals(1, f.generated)
-        verify(f.clock).instant()
-        verify(f.members).get(7L)
-        verify(f.members).get(8L)
-        verifyNoMoreInteractions(f.members, f.clock)
+        verify(exactly = 1) { f.clock.instant() }
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        confirmVerified(f.members, f.clock)
         assertFalse(f.active)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["hello\n😀", " \thello\n😀\n "])
-    fun given__the_same_stripped_request_was_already_stored__when__replaying__then__check_members_and_return_original_id_before_block_time_or_new_work(
+    fun `같은 공백 제거 요청이 이미 저장되어 있을 때__다시 보내면__회원을 확인하고 차단과 시각과 새 작업 전에 원래 ID를 돌려준다`(
         body: String,
     ) {
+        // given
         val f = Fixture()
         f.previous = Optional.of(NoteSendStore.PreviousRequest(PARENT, HASH))
         f.blocked = true
 
-        assertEquals(Receipt(PARENT), f.app.send(7L, request(body)))
+        // when
+        val receipt = f.app.send(7L, request(body))
 
+        // then
+        assertEquals(Receipt(PARENT), receipt)
         assertEquals(listOf("begin", "lock:7:8", "member:7", "member:8", "previous", "commit"), f.events)
         assertEquals(listOf<Any?>(7L, REQUEST), f.previousArguments)
         assertNull(f.inserted)
         assertEquals(0, f.generated)
-        verifyNoInteractions(f.clock)
-        verify(f.members).get(7L)
-        verify(f.members).get(8L)
-        verifyNoMoreInteractions(f.members)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        confirmVerified(f.members, f.clock)
     }
 
     @ParameterizedTest
     @MethodSource("previousRequests")
-    fun given__gone_or_conflicting_request__when__sending__then__prefer_gone_before_hash_conflict_and_stop_before_time(
+    fun `사라졌거나 충돌하는 요청이 주어졌을 때__보내면__해시 충돌보다 사라짐을 먼저 판단하고 시각 읽기 전에 멈춘다`(
         previous: NoteSendStore.PreviousRequest,
         reason: NoteSendRejectedException.Reason,
     ) {
+        // given
         val f = Fixture()
         f.previous = Optional.of(previous)
 
-        assertEquals(
-            reason,
-            assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request("hello\n😀")) }.reason(),
-        )
+        // when
+        val failure = assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request("hello\n😀")) }
 
+        // then
+        assertEquals(reason, failure.reason())
         assertEquals(listOf("begin", "lock:7:8", "member:7", "member:8", "previous", "rollback"), f.events)
         assertNull(f.inserted)
         assertEquals(0, f.generated)
-        verifyNoInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        confirmVerified(f.members, f.clock)
     }
 
     @ParameterizedTest
     @ValueSource(longs = [7L, 8L])
-    fun given__current_or_recipient_is_inactive__when__sending__then__reject_in_user_order_before_looking_up_a_previous_request(
+    fun `현재 회원 또는 수신자가 비활성일 때__보내면__이전 요청 조회 전에 회원 조회 순서대로 거절한다`(
         inactive: Long,
     ) {
+        // given
         val f = Fixture()
         f.inactive.add(inactive)
         f.previous = Optional.of(NoteSendStore.PreviousRequest(null, null))
 
-        assertEquals(
-            INACTIVE,
-            assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request("body")) }.reason(),
-        )
+        // when
+        val failure = assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request("body")) }
 
+        // then
+        assertEquals(INACTIVE, failure.reason())
         val expected = ArrayList(listOf("begin", "lock:7:8", "member:7"))
         if (inactive == 8L) {
             expected.add("member:8")
@@ -166,58 +176,69 @@ class SendPrivateNoteTest {
         expected.add("rollback")
         assertEquals(expected, f.events)
         assertEquals(0, f.generated)
-        verifyNoInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        if (inactive == 8L) {
+            verify(exactly = 1) { f.members.get(8L) }
+        }
+        confirmVerified(f.members, f.clock)
     }
 
     @Test
-    fun given__recipient_user_lookup_is_unavailable__when__sending__then__propagate_the_same_typed_failure_before_request_or_clock() {
+    fun `수신자 회원 조회를 쓸 수 없을 때__보내면__요청 조회나 시각 읽기 전에 같은 타입 있는 실패를 전파한다`() {
+        // given
         val f = Fixture()
         val failure = ContactMemberUnavailableException(IllegalStateException("private-user-detail"))
         f.unavailable = failure
 
-        assertSame(
-            failure,
-            assertThrows(ContactMemberUnavailableException::class.java) { f.app.send(7L, request("body")) },
-        )
+        // when
+        val thrown = assertThrows(ContactMemberUnavailableException::class.java) { f.app.send(7L, request("body")) }
 
+        // then
+        assertSame(failure, thrown)
         assertEquals(listOf("begin", "lock:7:8", "member:7", "member:8", "rollback"), f.events)
         assertEquals(0, f.generated)
-        verifyNoInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        confirmVerified(f.members, f.clock)
     }
 
     @Test
-    fun given__new_request_is_blocked__when__sending__then__stop_before_sampling_time_or_querying_limits() {
+    fun `새 요청이 차단되었을 때__보내면__시각을 읽거나 한도를 조회하기 전에 멈춘다`() {
+        // given
         val f = Fixture()
         f.blocked = true
 
-        assertEquals(
-            BLOCKED,
-            assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request("body")) }.reason(),
-        )
+        // when
+        val failure = assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request("body")) }
 
+        // then
+        assertEquals(BLOCKED, failure.reason())
         assertEquals(
             listOf("begin", "lock:7:8", "member:7", "member:8", "previous", "blocked", "rollback"),
             f.events,
         )
         assertEquals(0, f.generated)
-        verifyNoInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        confirmVerified(f.members, f.clock)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["minute", "day"])
-    fun given__minute_or_day_limit_is_reached__when__sending__then__short_circuit_inclusive_queries_before_reply_context_or_uuid(
+    fun `분 또는 일 한도에 도달했을 때__보내면__답장 맥락과 UUID 전에 경계 포함 조회를 단락시켜 거절한다`(
         limit: String,
     ) {
+        // given
         val f = Fixture()
         f.minuteCount = if (limit == "minute") 10 else 9
         f.dayCount = 100
         val request = SendNote(8L, "body", REQUEST, PARENT, "POST", 3L)
 
-        assertEquals(
-            RATE_LIMIT,
-            assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request) }.reason(),
-        )
+        // when
+        val failure = assertThrows(NoteSendRejectedException::class.java) { f.app.send(7L, request) }
 
+        // then
+        assertEquals(RATE_LIMIT, failure.reason())
         assertEquals(
             if (limit == "minute") {
                 listOf(NOW.minusSeconds(60))
@@ -230,65 +251,77 @@ class SendPrivateNoteTest {
         assertFalse(f.events.contains("context:POST"))
         assertNull(f.inserted)
         assertEquals(0, f.generated)
-        verify(f.clock).instant()
-        verifyNoMoreInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        verify(exactly = 1) { f.clock.instant() }
+        confirmVerified(f.members, f.clock)
     }
 
     @ParameterizedTest
     @MethodSource("rejectedReplies")
-    fun given__missing_or_mismatching_reply__when__sending__then__sample_reply_time_and_reject_before_context_or_uuid(
+    fun `답장 쪽지가 없거나 맞지 않을 때__보내면__답장 시각을 잡고 맥락과 UUID 전에 거절한다`(
         parent: Optional<NoteSendStore.Reply>,
         reason: NoteSendRejectedException.Reason,
     ) {
+        // given
         val f = Fixture()
         f.parent = parent
 
-        assertEquals(
-            reason,
-            assertThrows(NoteSendRejectedException::class.java) {
-                f.app.send(7L, SendNote(8L, "body", REQUEST, PARENT, "POST", 3L))
-            }.reason(),
-        )
+        // when
+        val failure = assertThrows(NoteSendRejectedException::class.java) {
+            f.app.send(7L, SendNote(8L, "body", REQUEST, PARENT, "POST", 3L))
+        }
 
+        // then
+        assertEquals(reason, failure.reason())
         assertEquals(listOf<Any?>(7L, PARENT, NOW.plusSeconds(9)), f.replyArguments)
         assertFalse(f.events.contains("context:POST"))
         assertEquals(0, f.generated)
         assertNull(f.inserted)
-        verify(f.clock, times(2)).instant()
-        verifyNoMoreInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        verify(exactly = 2) { f.clock.instant() }
+        confirmVerified(f.members, f.clock)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["POST", "REPORT"])
-    fun given__context_does_not_belong_to_recipient__when__sending__then__reject_after_rate_before_uuid_or_insert(
+    fun `맥락이 수신자의 것이 아닐 때__보내면__한도 확인 뒤 UUID와 삽입 전에 거절한다`(
         context: String,
     ) {
+        // given
         val f = Fixture()
         f.contextAllowed = false
 
-        assertEquals(
-            CONTEXT_AUTHOR,
-            assertThrows(NoteSendRejectedException::class.java) {
-                f.app.send(7L, SendNote(8L, "body", REQUEST, null, context, 3L))
-            }.reason(),
-        )
+        // when
+        val failure = assertThrows(NoteSendRejectedException::class.java) {
+            f.app.send(7L, SendNote(8L, "body", REQUEST, null, context, 3L))
+        }
 
+        // then
+        assertEquals(CONTEXT_AUTHOR, failure.reason())
         assertEquals(listOf<Any?>(context, 3L, 8L), f.contextArguments)
         assertEquals(0, f.generated)
         assertNull(f.inserted)
-        verify(f.clock).instant()
-        verifyNoMoreInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        verify(exactly = 1) { f.clock.instant() }
+        confirmVerified(f.members, f.clock)
     }
 
     @ParameterizedTest
     @ValueSource(strings = ["POST", "REPORT"])
-    fun given__valid_reply_and_context__when__sending__then__check_reply_before_context_and_keep_the_first_instant_for_all_new_rows(
+    fun `유효한 답장과 맥락이 주어졌을 때__보내면__맥락보다 답장을 먼저 확인하고 새 행 모두에 첫 시각을 쓴다`(
         context: String,
     ) {
+        // given
         val f = Fixture()
 
-        assertEquals(Receipt(NOTE), f.app.send(7L, SendNote(8L, "body", REQUEST, PARENT, context, 3L)))
+        // when
+        val receipt = f.app.send(7L, SendNote(8L, "body", REQUEST, PARENT, context, 3L))
 
+        // then
+        assertEquals(Receipt(NOTE), receipt)
         assertEquals(
             listOf(
                 "begin", "lock:7:8", "member:7", "member:8", "previous", "blocked", "clock:1", "rate:1", "rate:2",
@@ -312,15 +345,17 @@ class SendPrivateNoteTest {
             },
             f.inserted!!.requestHash,
         )
-        verify(f.clock, times(2)).instant()
-        verifyNoMoreInteractions(f.clock)
+        verify(exactly = 1) { f.members.get(7L) }
+        verify(exactly = 1) { f.members.get(8L) }
+        verify(exactly = 2) { f.clock.instant() }
+        confirmVerified(f.members, f.clock)
     }
 
     /** Policy callback fake, not database or transaction manager evidence. */
     private class Fixture {
         val events = ArrayList<String>()
-        val members = mock(ContactMemberQuery::class.java)
-        val clock = mock(Clock::class.java)
+        val members = mockk<ContactMemberQuery>()
+        val clock = mockk<Clock>()
         val inactive = HashSet<Long>()
         val rateTimes = ArrayList<Instant>()
         var previous: Optional<NoteSendStore.PreviousRequest> = Optional.empty()
@@ -341,16 +376,16 @@ class SendPrivateNoteTest {
         val app: SendPrivateNote
 
         init {
-            whenever(members.get(anyLong())).thenAnswer { call ->
+            every { members.get(any()) } answers {
                 assertTrue(active)
-                val id: Long = call.getArgument(0)
+                val id: Long = firstArg()
                 events.add("member:$id")
                 if (id == 8L && unavailable != null) {
                     throw unavailable!!
                 }
                 ContactMember(id, if (id == 7L) " raw \n" else "target", !inactive.contains(id), inactive.contains(id))
             }
-            whenever(clock.instant()).thenAnswer {
+            every { clock.instant() } answers {
                 assertTrue(active)
                 samples++
                 events.add("clock:$samples")

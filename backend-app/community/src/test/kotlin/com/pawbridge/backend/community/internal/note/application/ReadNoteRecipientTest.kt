@@ -3,6 +3,11 @@ package com.pawbridge.backend.community.internal.note.application
 import com.pawbridge.backend.user.api.ContactMember
 import com.pawbridge.backend.user.api.ContactMemberQuery
 import com.pawbridge.backend.user.api.ContactMemberUnavailableException
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -10,133 +15,137 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.params.provider.ValueSource
-import org.mockito.Mockito.inOrder
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.verifyNoInteractions
-import org.mockito.Mockito.verifyNoMoreInteractions
-import org.mockito.Mockito.`when` as whenever
 import org.springframework.dao.DataAccessResourceFailureException
 
 class ReadNoteRecipientTest {
-    private val members = mock(ContactMemberQuery::class.java)
-    private val blocks = mock(NoteBlockReader::class.java)
+    private val members = mockk<ContactMemberQuery>()
+    private val blocks = mockk<NoteBlockReader>()
     private val query = ReadNoteRecipient(members, blocks)
 
     @Test
-    fun given__active_unblocked_members__when__reading__then__return_user_projection_after_current_block_and_target_in_order() {
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(members.get(99L)).thenReturn(RECIPIENT)
+    fun `활성이고 서로 차단하지 않은 회원이 주어졌을 때__읽으면__현재 회원 차단 대상 순서로 확인한 뒤 회원 정보를 돌려준다`() {
+        // given
+        every { members.get(7L) } returns CURRENT
+        every { members.get(99L) } returns RECIPIENT
+        every { blocks.blocked(any(), any()) } returns false
 
-        assertSame(RECIPIENT, query.read(7L, 99L))
+        // when
+        val result = query.read(7L, 99L)
 
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        order.verify(blocks).blocked(7L, 99L)
-        order.verify(members).get(99L)
-        verifyNoMoreInteractions(members, blocks)
+        // then
+        assertSame(RECIPIENT, result)
+        verifySequence {
+            members.get(7L)
+            blocks.blocked(7L, 99L)
+            members.get(99L)
+        }
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0L, -1L])
-    fun given__invalid_current_id__when__reading__then__reject_login_before_user_or_block_lookup(currentId: Long) {
-        assertEquals(
-            RecipientRejectedException.Reason.LOGIN,
-            assertThrows(RecipientRejectedException::class.java) { query.read(currentId, 99L) }.reason(),
-        )
+    fun `0 이하의 현재 회원 ID가 주어졌을 때__읽으면__회원 조회와 차단 조회 전에 로그인 거절로 끝난다`(currentId: Long) {
+        // when
+        val failure = assertThrows(RecipientRejectedException::class.java) { query.read(currentId, 99L) }
 
-        verifyNoInteractions(members, blocks)
+        // then
+        assertEquals(RecipientRejectedException.Reason.LOGIN, failure.reason())
+        confirmVerified(members, blocks)
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__missing_or_pending_current_member__when__reading_self__then__inactive_precedes_self_and_storage(
+    fun `현재 회원이 없거나 탈퇴 대기일 때__자기 자신을 읽으면__본인 확인과 저장소 조회보다 비활성 거절이 먼저다`(
         pending: Boolean,
     ) {
-        whenever(members.get(7L)).thenReturn(ContactMember(7L, "탈퇴한 회원", false, pending))
+        // given
+        every { members.get(any()) } returns ContactMember(7L, "탈퇴한 회원", false, pending)
 
-        assertEquals(
-            RecipientRejectedException.Reason.INACTIVE,
-            assertThrows(RecipientRejectedException::class.java) { query.read(7L, 7L) }.reason(),
-        )
+        // when
+        val failure = assertThrows(RecipientRejectedException::class.java) { query.read(7L, 7L) }
 
-        verify(members).get(7L)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(blocks)
+        // then
+        assertEquals(RecipientRejectedException.Reason.INACTIVE, failure.reason())
+        verify(exactly = 1) { members.get(7L) }
+        confirmVerified(members, blocks)
     }
 
     @Test
-    fun given__active_current_member_addressing_self__when__reading__then__reject_without_block_or_second_user_lookup() {
-        whenever(members.get(7L)).thenReturn(CURRENT)
+    fun `활성 현재 회원이 자기 자신을 대상으로 할 때__읽으면__차단 조회나 두 번째 회원 조회 없이 거절한다`() {
+        // given
+        every { members.get(any()) } returns CURRENT
 
-        assertEquals(
-            RecipientRejectedException.Reason.BLOCKED,
-            assertThrows(RecipientRejectedException::class.java) { query.read(7L, 7L) }.reason(),
-        )
+        // when
+        val failure = assertThrows(RecipientRejectedException::class.java) { query.read(7L, 7L) }
 
-        verify(members).get(7L)
-        verifyNoMoreInteractions(members)
-        verifyNoInteractions(blocks)
+        // then
+        assertEquals(RecipientRejectedException.Reason.BLOCKED, failure.reason())
+        verify(exactly = 1) { members.get(7L) }
+        confirmVerified(members, blocks)
     }
 
     @Test
-    fun given__block_between_members__when__reading__then__reject_before_target_lookup() {
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(blocks.blocked(7L, 99L)).thenReturn(true)
+    fun `두 회원 사이에 차단이 있을 때__읽으면__대상 회원 조회 전에 거절한다`() {
+        // given
+        every { members.get(any()) } returns CURRENT
+        every { blocks.blocked(any(), any()) } returns true
 
-        assertEquals(
-            RecipientRejectedException.Reason.BLOCKED,
-            assertThrows(RecipientRejectedException::class.java) { query.read(7L, 99L) }.reason(),
-        )
+        // when
+        val failure = assertThrows(RecipientRejectedException::class.java) { query.read(7L, 99L) }
 
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        order.verify(blocks).blocked(7L, 99L)
-        verifyNoMoreInteractions(members, blocks)
+        // then
+        assertEquals(RecipientRejectedException.Reason.BLOCKED, failure.reason())
+        verifySequence {
+            members.get(7L)
+            blocks.blocked(7L, 99L)
+        }
     }
 
     @ParameterizedTest
     @ValueSource(longs = [0L, -1L])
-    fun given__invalid_target_id__when__reading__then__login_rejection_follows_current_and_block_lookup(targetId: Long) {
-        whenever(members.get(7L)).thenReturn(CURRENT)
+    fun `0 이하의 대상 ID가 주어졌을 때__읽으면__현재 회원 조회와 차단 조회 뒤에 로그인 거절한다`(targetId: Long) {
+        // given
+        every { members.get(any()) } returns CURRENT
+        every { blocks.blocked(any(), any()) } returns false
 
-        assertEquals(
-            RecipientRejectedException.Reason.LOGIN,
-            assertThrows(RecipientRejectedException::class.java) { query.read(7L, targetId) }.reason(),
-        )
+        // when
+        val failure = assertThrows(RecipientRejectedException::class.java) { query.read(7L, targetId) }
 
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        order.verify(blocks).blocked(7L, targetId)
-        verifyNoMoreInteractions(members, blocks)
+        // then
+        assertEquals(RecipientRejectedException.Reason.LOGIN, failure.reason())
+        verifySequence {
+            members.get(7L)
+            blocks.blocked(7L, targetId)
+        }
     }
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun given__missing_or_pending_target__when__reading__then__reject_only_after_current_and_block_lookup(
+    fun `대상 회원이 없거나 탈퇴 대기일 때__읽으면__현재 회원 조회와 차단 조회 뒤에만 거절한다`(
         pending: Boolean,
     ) {
-        whenever(members.get(7L)).thenReturn(CURRENT)
-        whenever(members.get(99L)).thenReturn(ContactMember(99L, "탈퇴한 회원", false, pending))
+        // given
+        every { members.get(7L) } returns CURRENT
+        every { members.get(99L) } returns ContactMember(99L, "탈퇴한 회원", false, pending)
+        every { blocks.blocked(any(), any()) } returns false
 
-        assertEquals(
-            RecipientRejectedException.Reason.INACTIVE,
-            assertThrows(RecipientRejectedException::class.java) { query.read(7L, 99L) }.reason(),
-        )
+        // when
+        val failure = assertThrows(RecipientRejectedException::class.java) { query.read(7L, 99L) }
 
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        order.verify(blocks).blocked(7L, 99L)
-        order.verify(members).get(99L)
-        verifyNoMoreInteractions(members, blocks)
+        // then
+        assertEquals(RecipientRejectedException.Reason.INACTIVE, failure.reason())
+        verifySequence {
+            members.get(7L)
+            blocks.blocked(7L, 99L)
+            members.get(99L)
+        }
     }
 
     @ParameterizedTest
     @EnumSource(FailurePhase::class)
-    fun given__lookup_failure__when__reading__then__preserve_origin_and_stop_before_later_validation_or_lookup(
+    fun `조회가 실패할 때__읽으면__원래 실패를 보존하고 이후 검증이나 조회 전에 멈춘다`(
         phase: FailurePhase,
     ) {
-        whenever(members.get(7L)).thenReturn(CURRENT)
+        // given
         val targetId = if (phase == FailurePhase.BLOCK_DAO || phase == FailurePhase.BLOCK_RUNTIME) 0L else 99L
         val failure: RuntimeException = when (phase) {
             FailurePhase.CURRENT, FailurePhase.TARGET ->
@@ -144,24 +153,34 @@ class ReadNoteRecipientTest {
             FailurePhase.BLOCK_DAO -> DataAccessResourceFailureException("private block SQL failure")
             FailurePhase.BLOCK_RUNTIME -> IllegalStateException("private block runtime")
         }
+
         when (phase) {
-            FailurePhase.CURRENT -> whenever(members.get(7L)).thenThrow(failure)
-            FailurePhase.TARGET -> whenever(members.get(99L)).thenThrow(failure)
-            FailurePhase.BLOCK_DAO, FailurePhase.BLOCK_RUNTIME ->
-                whenever(blocks.blocked(7L, targetId)).thenThrow(failure)
+            FailurePhase.CURRENT -> every { members.get(any()) } throws failure
+            FailurePhase.TARGET -> {
+                every { members.get(7L) } returns CURRENT
+                every { members.get(99L) } throws failure
+                every { blocks.blocked(any(), any()) } returns false
+            }
+            FailurePhase.BLOCK_DAO, FailurePhase.BLOCK_RUNTIME -> {
+                every { members.get(any()) } returns CURRENT
+                every { blocks.blocked(any(), any()) } throws failure
+            }
         }
 
-        assertSame(failure, assertThrows(RuntimeException::class.java) { query.read(7L, targetId) })
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { query.read(7L, targetId) }
 
-        val order = inOrder(members, blocks)
-        order.verify(members).get(7L)
-        if (phase != FailurePhase.CURRENT) {
-            order.verify(blocks).blocked(7L, targetId)
+        // then
+        assertSame(failure, thrown)
+        verifySequence {
+            members.get(7L)
+            if (phase != FailurePhase.CURRENT) {
+                blocks.blocked(7L, targetId)
+            }
+            if (phase == FailurePhase.TARGET) {
+                members.get(99L)
+            }
         }
-        if (phase == FailurePhase.TARGET) {
-            order.verify(members).get(99L)
-        }
-        verifyNoMoreInteractions(members, blocks)
     }
 
     enum class FailurePhase { CURRENT, BLOCK_DAO, BLOCK_RUNTIME, TARGET }
