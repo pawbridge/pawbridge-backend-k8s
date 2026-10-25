@@ -1,3 +1,5 @@
+@file:Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+
 package com.pawbridge.backend.store.internal.catalogwrite.web
 
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogCategories
@@ -10,6 +12,10 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
+// Path ids use java.lang.Long deliberately: kotlin.Long? makes the variable optional (a blank segment reaches the
+// service as null) and kotlin.Long is a primitive (a blank segment becomes a type mismatch). A non-null
+// java.lang.Long keeps the Java behaviour: required and boxed, so a blank segment fails before this method runs.
+
 /** GET remains owned by StoreCatalogController; only original category write handlers are added. */
 @RestController
 @RequestMapping("/api/v1/categories")
@@ -21,13 +27,13 @@ class CategoryManagementController(private val categories: JpaCatalogCategories)
 
     @PutMapping("/{categoryId}")
     fun updateCategory(
-        @PathVariable("categoryId") id: Long?,
+        @PathVariable("categoryId") id: java.lang.Long,
         @RequestBody request: CategoryUpdateRequest,
-    ): ResponseEntity<CategoryResponse> = ResponseEntity.ok(categories.updateCategory(id, request))
+    ): ResponseEntity<CategoryResponse> = ResponseEntity.ok(categories.updateCategory(id.toLong(), request))
 
     @DeleteMapping("/{categoryId}")
-    fun deleteCategory(@PathVariable("categoryId") id: Long?): ResponseEntity<Void> {
-        categories.deleteCategory(id)
+    fun deleteCategory(@PathVariable("categoryId") id: java.lang.Long): ResponseEntity<Void> {
+        categories.deleteCategory(id.toLong())
         return ResponseEntity.noContent().build()
     }
 }
