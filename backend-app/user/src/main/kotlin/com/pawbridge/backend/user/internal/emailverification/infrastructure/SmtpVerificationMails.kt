@@ -31,8 +31,8 @@ class SmtpVerificationMails(
             val message = mailSender.createMimeMessage()
             val helper = MimeMessageHelper(message, true, "UTF-8")
             helper.setFrom(InternetAddress(fromEmail, "PawBridge"))
-            // MimeMessageHelper rejects a null recipient (IllegalArgumentException in Java, NullPointerException here).
-            helper.setTo(to!!)
+            // MimeMessageHelper (Spring Assert) rejects a null recipient with this IllegalArgumentException.
+            helper.setTo(requireNotNull(to) { "To address must not be null" })
             helper.setSubject(subject)
             helper.setText(loadTemplate(templatePath, code), true)
             // Other mail failures (MailException) propagate unchanged, exactly like the original.

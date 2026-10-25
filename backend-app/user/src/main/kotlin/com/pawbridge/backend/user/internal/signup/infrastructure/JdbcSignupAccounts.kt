@@ -19,11 +19,11 @@ import java.util.function.Supplier
 
 class JdbcSignupAccounts(
     private val jdbc: JdbcOperations,
-    private val nicknames: Supplier<String>,
-    private val now: Supplier<LocalDateTime>,
+    private val nicknames: Supplier<String?>,
+    private val now: Supplier<LocalDateTime?>,
 ) : SignupAccounts {
 
-    constructor(jdbc: JdbcOperations, nicknames: Supplier<String>) :
+    constructor(jdbc: JdbcOperations, nicknames: Supplier<String?>) :
         this(jdbc, nicknames, Supplier { LocalDateTime.now() })
 
     override fun existsLocalEmail(email: String?): Boolean {
@@ -38,7 +38,8 @@ class JdbcSignupAccounts(
         role: SignupRole,
         careRegNo: String?,
     ): SignedUp {
-        val nickname = nicknames.get()
+        // Nullable locals: a null from a Java supplier flows on exactly like the original (no early NPE).
+        val nickname: String? = nicknames.get()
         try {
             return insert(email, name, encodedPassword, nickname, role, careRegNo)
         } catch (duplicate: DataIntegrityViolationException) {
@@ -59,7 +60,7 @@ class JdbcSignupAccounts(
         role: SignupRole,
         careRegNo: String?,
     ): SignedUp {
-        val timestamp = now.get()
+        val timestamp: LocalDateTime? = now.get()
         val generated = GeneratedKeyHolder()
         jdbc.update(
             PreparedStatementCreator { connection ->
@@ -80,7 +81,7 @@ class JdbcSignupAccounts(
         nickname: String?,
         role: SignupRole,
         careRegNo: String?,
-        timestamp: LocalDateTime,
+        timestamp: LocalDateTime?,
     ): PreparedStatement {
         val statement = connection.prepareStatement(INSERT_USER, arrayOf("user_id"))
         try {
