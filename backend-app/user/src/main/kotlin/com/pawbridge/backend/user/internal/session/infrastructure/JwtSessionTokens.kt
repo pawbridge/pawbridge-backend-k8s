@@ -18,7 +18,9 @@ open class JwtSessionTokens(
             .claim("userId", user.userId)
             .claim("name", user.name)
             .claim("role", user.role)
-        if (user.careRegNo != null && !user.careRegNo.isBlank()) {
+        // Java String.isBlank semantics (Character.isWhitespace): Kotlin's isBlank would also treat NBSP,
+        // U+2007 and U+202F as blank and drop a claim that the Java code kept.
+        if (user.careRegNo != null && !user.careRegNo.all { Character.isWhitespace(it) }) {
             builder.claim("careRegNo", user.careRegNo)
         }
         return builder.issuedAt(now)
