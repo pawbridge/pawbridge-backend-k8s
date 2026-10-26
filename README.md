@@ -2,9 +2,9 @@
 
 ## 현재 운영과 개발
 
-2026-10-19 기준 운영 환경은 Mac의 Docker Compose이며, PostgreSQL 17과 pgvector를 사용합니다. 기존 Java 17 마이크로서비스를 운영하고, 동물 사진 검색·추천용 Python AI는 별도 Mac 네이티브 프로세스로 실행합니다. 현재 Mac 운영에서도 Kafka·Debezium CDC·Redis를 계속 사용합니다.
+2026-10-27 기준 운영은 Mac mini의 Docker Compose이며, 백엔드는 Java 21 [모듈형 모놀리스 backend-app](https://github.com/pawbridge/pawbridge-backend-services/tree/dev/backend-app) 하나로 실행합니다(main 커밋으로 만든 이미지). 데이터는 PostgreSQL 17과 pgvector에 두고, Redis는 회원 채팅·이메일 인증·상품 랭킹·챗봇 요청 제한에 씁니다. 동물 추천 AI와 사진 압축은 Python 컨테이너로, 실종동물 사진 검색은 Mac 네이티브 프로세스로 실행합니다. 외부 접속은 Cloudflare Tunnel로 받습니다. 이전 환경의 Java 17 마이크로서비스, Kafka·Debezium CDC, Elasticsearch, MySQL은 운영에서 쓰지 않습니다.
 
-`dev`에서는 Java 21 기반 [모듈형 모놀리스 backend-app](https://github.com/pawbridge/pawbridge-backend-services/tree/dev/backend-app)을 개발·통합합니다.
+`dev`에서 backend-app을 개발·통합하고, 운영 배포는 dev를 main에 올린 뒤 main 커밋으로 합니다([운영 배포 절차](backend-app/README.md#운영-배포)).
 
 `python/`에는 동물 사진 검색·추천 AI와 사진 압축 서비스가 있습니다. 2026-10-26 기존 `pawbridge/pawbridge-python` 저장소의 dev(`844facb6`)를 Git 이력째 가져왔고, 원본 저장소는 보관용으로 남깁니다. 저장소 이름은 같은 날 `pawbridge-backend-k8s`에서 `pawbridge-backend-services`로 바뀌었으며 옛 주소는 GitHub이 새 주소로 넘겨줍니다.
 
