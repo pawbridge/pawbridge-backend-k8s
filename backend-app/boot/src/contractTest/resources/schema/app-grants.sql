@@ -101,3 +101,45 @@ GRANT SELECT (room_id, first_member_id, second_member_id), UPDATE (first_member_
 GRANT SELECT (room_id, member_id), DELETE ON pawbridge_community.member_chat_room_members TO pawbridge_app;
 GRANT SELECT (sender_id), UPDATE (sender_id) ON pawbridge_community.member_chat_messages TO pawbridge_app;
 GRANT SELECT (sender_id), DELETE ON pawbridge_community.member_chat_requests TO pawbridge_app;
+
+-- Animal reports: public list and detail, author create, update and soft delete.
+GRANT SELECT (report_id, author_id, report_kind, description, image_urls, occurred_on, approximate_time, region, landmark,
+              species, animal_name, coat_color, animal_size, distinguishing_features, direction, created_at, updated_at,
+              deleted_at, province, district, animal_type) ON pawbridge_community.animal_reports TO pawbridge_app;
+GRANT INSERT (author_id, report_kind, description, image_urls, occurred_on, approximate_time, region, landmark, species,
+              animal_name, coat_color, animal_size, distinguishing_features, direction, province, district, animal_type,
+              created_at, updated_at) ON pawbridge_community.animal_reports TO pawbridge_app;
+GRANT UPDATE (description, occurred_on, approximate_time, region, landmark, species, animal_name, coat_color, animal_size,
+              distinguishing_features, direction, province, district, animal_type, updated_at, deleted_at)
+    ON pawbridge_community.animal_reports TO pawbridge_app;
+
+-- Home video management (board revision lock, selection, publication, order and metadata) and the daily refresh.
+GRANT SELECT (id, revision), UPDATE (revision) ON pawbridge_community.home_video_board TO pawbridge_app;
+GRANT INSERT (id, video_id, published, position, created_at) ON pawbridge_community.home_videos TO pawbridge_app;
+GRANT UPDATE (video_id, published, position, title, channel_title, thumbnail_url, duration_seconds, available, checked_at)
+    ON pawbridge_community.home_videos TO pawbridge_app;
+
+-- Visit collection: one deduplicated row per visitor and day, the day total, the collection start and the daily cleanup.
+GRANT INSERT (visit_date, unique_visitors), UPDATE (unique_visitors) ON pawbridge_community.daily_visit_count TO pawbridge_app;
+GRANT SELECT (visit_date, visitor_hash), INSERT (visit_date, visitor_hash), DELETE ON pawbridge_community.daily_visitor TO pawbridge_app;
+GRANT SELECT (singleton, started_at), INSERT (singleton, started_at) ON pawbridge_community.visit_collection TO pawbridge_app;
+
+-- Member chat: rooms, memberships, messages and idempotent send requests.
+GRANT SELECT (room_id, first_member_id, second_member_id, latest_sequence),
+      INSERT (room_id, first_member_id, second_member_id), UPDATE (latest_sequence)
+    ON pawbridge_community.member_chat_rooms TO pawbridge_app;
+GRANT SELECT (room_id, member_id, read_through, hidden_through), INSERT (room_id, member_id),
+      UPDATE (read_through, hidden_through) ON pawbridge_community.member_chat_room_members TO pawbridge_app;
+GRANT SELECT (room_id, sequence, sender_id, body, context_type, context_id, created_at, expires_at),
+      INSERT (room_id, sequence, sender_id, body, context_type, context_id, created_at, expires_at), DELETE
+    ON pawbridge_community.member_chat_messages TO pawbridge_app;
+GRANT SELECT (sender_id, request_id, request_hash, room_id, sequence, created_at),
+      INSERT (sender_id, request_id, request_hash, room_id, sequence, created_at)
+    ON pawbridge_community.member_chat_requests TO pawbridge_app;
+
+-- Private note expiry removes old requests that never got a note.
+GRANT DELETE ON pawbridge_community.private_note_requests TO pawbridge_app;
+
+-- Chat expiry locks the rows it deletes with FOR UPDATE SKIP LOCKED, which PostgreSQL allows only with an UPDATE privilege.
+GRANT DELETE ON pawbridge_community.member_chat_requests TO pawbridge_app;
+GRANT UPDATE (request_hash) ON pawbridge_community.member_chat_requests TO pawbridge_app;
