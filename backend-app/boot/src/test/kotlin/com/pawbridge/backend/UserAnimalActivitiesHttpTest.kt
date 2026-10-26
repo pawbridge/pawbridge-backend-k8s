@@ -7,6 +7,7 @@ import com.pawbridge.backend.community.internal.post.application.PostPageReader
 import com.pawbridge.backend.community.internal.post.application.ReadAdminPosts
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.user.internal.animalactivity.application.FavoriteActivityRejectedException
+import com.pawbridge.backend.user.internal.animalactivity.application.ShelterMembershipRequiredException
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities
 import com.pawbridge.backend.user.internal.animalactivity.web.UserAnimalActivitiesController
 import com.pawbridge.backend.user.internal.animalactivity.web.UserAnimalActivitiesExceptionHandler
@@ -198,7 +199,7 @@ class UserAnimalActivitiesHttpTest {
     }
 
     @Test
-    fun `원본의 비보호소 DB 거절이 주어졌을 때__등록 동물을 요청하면__403을 만들지 않고 일반 500을 유지한다`() {
+    fun `예상치 못한 실패가 주어졌을 때__등록 동물을 요청하면__일반 500을 유지한다`() {
         // given
         every { activities.registered(any(), any()) } throws IllegalStateException("synthetic-private")
 
@@ -209,6 +210,23 @@ class UserAnimalActivitiesHttpTest {
         result
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 에러!"))
+        verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(0, 20, "createdAt,desc")) }
+        cleared()
+    }
+
+    @Test
+    fun `보호소 회원이 아닐 때__등록 동물을 요청하면__403을 응답한다`() {
+        // given
+        every { activities.registered(any(), any()) } throws ShelterMembershipRequiredException()
+
+        // when
+        val result = mvc.perform(get("/api/v1/users/me/registered-animals").header("Authorization", token()))
+
+        // then
+        result
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value(403))
+            .andExpect(jsonPath("$.message").value("보호소 회원만 등록한 동물을 조회할 수 있습니다."))
         verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(0, 20, "createdAt,desc")) }
         cleared()
     }
