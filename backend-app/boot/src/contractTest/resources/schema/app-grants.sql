@@ -143,3 +143,10 @@ GRANT DELETE ON pawbridge_community.private_note_requests TO pawbridge_app;
 -- Chat expiry locks the rows it deletes with FOR UPDATE SKIP LOCKED, which PostgreSQL allows only with an UPDATE privilege.
 GRANT DELETE ON pawbridge_community.member_chat_requests TO pawbridge_app;
 GRANT UPDATE (request_hash) ON pawbridge_community.member_chat_requests TO pawbridge_app;
+
+-- animal
+-- The animal repositories read and write whole rows of their own tables (search projection, photo archive, travel
+-- catalog, batch metadata, observations, favorite counts). The animal schema holds no private user data, so table-wide
+-- privileges on every table of the schema are enough; no animal contract revokes single columns.
+GRANT USAGE ON SCHEMA pawbridge_animal TO pawbridge_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pawbridge_animal TO pawbridge_app;

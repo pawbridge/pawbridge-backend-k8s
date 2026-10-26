@@ -32,6 +32,14 @@ class SchemaSourcePinTest {
         assertCopiesMatch("community-service")
     }
 
+    @Test
+    fun `동물 서비스 마이그레이션이 있을 때__복사본을 비교하면__해시가 원본과 같다`() {
+        // given
+        // when
+        // then
+        assertCopiesMatch("animal-service")
+    }
+
     private fun assertCopiesMatch(service: String) {
         val copies = ContractPostgres.migrationFiles("schema/$service")
         assertThat(copies).isNotEmpty()
