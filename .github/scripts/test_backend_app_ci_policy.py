@@ -240,7 +240,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         check = self.job('check')
         self.assertIn('bash ./gradlew projects check :boot:bootJar', self.job('package'))
         for command in ('python3 scripts/f2_ci.py prepare', 'python3 scripts/f3_ci.py prepare',
-                        'python3 scripts/f3_ci.py smoke', 'python3 scripts/f3_ci.py cleanup'):
+                        'python3 scripts/f3_ci.py cleanup'):
             with self.subTest(command=command):
                 self.assertIn(command, check)
         self.assertIn('name: Verify production JAR isolation', check)
@@ -425,7 +425,6 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         last = str(max(shards))
         selected = {(mode, shard): [] for mode in modes for shard in shards}
         smoke_conditions, token_conditions = {}, {}
-        reproduced = []
         full_only = "matrix.profile == 'full'"
 
         def shard_of(key):
@@ -451,8 +450,6 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             smoke = re.findall(r'^\s*(?:run: )?python3 scripts/(f[0-9]+)_ci.py smoke\s*$', part, re.MULTILINE)
             member = re.findall(r'^\s*(?:run: )?python3 scripts/f29_ci.py member-cleanup-smoke\s*$', part, re.MULTILINE)
             prepare = re.search(r'^        id: fixture_post_unrelated_f([0-9]+)$', part, re.MULTILINE)
-            state = re.search(r'^        id: (' + '|'.join(backend_contract_profile.STATE_STEPS.values()) + ')$',
-                              part, re.MULTILINE)
             token = re.fullmatch(r'Issue synthetic JWTs for (F[0-9]+|member cleanup)', name)
             if smoke or member:
                 self.assertEqual(1, len(smoke) + len(member))
@@ -476,25 +473,21 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 token_conditions[key] = conditions
             elif prepare:
                 key = 'jar_f' + prepare.group(1)
-                self.assertEqual(runs_from(shard_of(key)), conditions, name)
-            elif state:
-                # A smoke that leaves state for later steps is followed directly by the step that
-                # reproduces that state in every shard after the one that runs the smoke.
-                key = next(smoke for smoke, step in backend_contract_profile.STATE_STEPS.items()
-                           if step == state.group(1))
-                self.assertEqual(key, found[-1], name)
-                self.assertEqual(['${{ matrix.shard >= ' + str(shard_of(key) + 1) + ' }}'], conditions, name)
-                reproduced.append(key)
+                # The smoke of a stage that moved to the Spring contract tests is gone; its fixture preparation
+                # stays until the harness is removed and then runs in every shard.
+                expected_conditions = (runs_from(shard_of(key)) if key in backend_contract_profile.ALL_SMOKES else [])
+                self.assertEqual(expected_conditions, conditions, name)
             elif conditions:
                 self.assertEqual([allowed_conditions.get(name)], conditions, name)
         self.assertEqual(list(backend_contract_profile.ALL_SMOKES), found)
         self.assertEqual(list(backend_contract_profile.PILOT_SKIPS), conditional)
-        self.assertEqual(sorted(backend_contract_profile.STATE_STEPS), sorted(reproduced))
-        shape = next(part for part in parts if '        id: shape_f4\n' in part)
-        self.assertIn('run: python3 scripts/f4_ci.py prepare-shape\n', shape)
+        self.assertEqual({}, backend_contract_profile.STATE_STEPS)
+        shape = next(part for part in parts if 'run: python3 scripts/f4_ci.py prepare-shape\n' in part)
+        self.assertEqual([], re.findall(r'^        if: (.+)$', shape, re.MULTILINE),
+                         'No F4 smoke is left, so the support tables are created in every shard.')
         for (mode, shard), actual in selected.items():
             self.assertEqual(list(backend_contract_profile.expected_smokes(mode, shard)), actual)
-        self.assertEqual(['jar_f' + str(n) for n in (12, 13, 14) + tuple(range(17, 30))] + ['jar_f31'],
+        self.assertEqual(['jar_f' + str(n) for n in tuple(range(17, 30))] + ['jar_f31'],
                          sorted(token_conditions, key=backend_contract_profile.ALL_SMOKES.index))
         for key, conditions in token_conditions.items():
             self.assertEqual(smoke_conditions[key], conditions, key)

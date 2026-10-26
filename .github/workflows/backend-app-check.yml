@@ -708,110 +708,17 @@ jobs:
             --shard "$CONTRACT_SHARD" \
             --jar boot/build/libs/pawbridge-backend-app.jar --plan build/ci/contract-plan.txt
 
-      - name: Verify packaged POST/GET, synthetic SDK uploads, failures and normal termination
-        id: jar_f3
-        if: ${{ matrix.shard == 1 }}
-        run: python3 scripts/f3_ci.py smoke
-
       - name: Verify F4 listener startup with socket and process mocks only
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f4_ci_startup.py
 
-      - name: Verify packaged owner deletion, best-effort storage and rollback recovery
-        id: jar_f4
-        if: ${{ matrix.shard == 1 }}
-        run: python3 scripts/f4_ci.py smoke
-
-      - name: Reproduce the F4 smoke support tables where a later shard skips that smoke
-        id: shape_f4
-        if: ${{ matrix.shard >= 2 }}
+      - name: Create the F4 support tables that the later business snapshots select from
         run: python3 scripts/f4_ci.py prepare-shape
-
-      - name: Verify packaged owner PUT, SDK replacement and failure recovery
-        id: jar_f5
-        if: ${{ matrix.shard == 1 }}
-        run: python3 scripts/f5_ci.py smoke
 
       - name: Verify F6 ownership guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f6_ci_guards.py
 
-      - name: Verify packaged public list journey, per-GET zero writes and recovery
-        id: jar_f6
-        if: ${{ matrix.shard == 1 }}
-        run: |
-          set -euo pipefail
-          python3 scripts/f6_ci.py smoke
-          test -s build/ci/f6-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f6-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['list_get_checks'] >= 10
-          assert result['list_get_database_changes'] == result['list_get_s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
-
       - name: Verify F7 grants guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f7_ci_guards.py
-
-      - name: Verify packaged public search journey, per-GET zero writes and recovery
-        id: jar_f7
-        if: ${{ matrix.shard == 1 }}
-        run: |
-          set -euo pipefail
-          python3 scripts/f7_ci.py smoke
-          test -s build/ci/f7-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f7-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['search_get_checks'] >= 14
-          assert result['search_get_database_changes'] == result['search_get_s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
-
-      - name: Verify packaged public comment reads, denied writes, zero side effects and recovery
-        id: jar_f8
-        if: ${{ matrix.shard == 1 }}
-        run: |
-          set -euo pipefail
-          python3 scripts/f8_ci.py smoke
-          test -s build/ci/f8-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f8-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['comment_get_checks'] >= 9
-          assert result['denied_route_checks'] == 10
-          assert result['comment_get_database_changes'] == result['comment_get_s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
-
-      - name: Verify packaged authenticated comment POST, F8 GET and isolated rollback recovery
-        id: jar_f9
-        if: ${{ matrix.shard == 1 }}
-        run: |
-          set -euo pipefail
-          python3 scripts/f9_ci.py smoke
-          test -s build/ci/f9-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f9-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['comments_created'] >= 15
-          assert result['rejected_post_checks'] >= 28
-          assert result['comment_post_checks'] == result['comments_created'] + result['rejected_post_checks']
-          assert result['comment_get_checks'] >= result['comments_created']
-          assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
 
       - name: Verify F10 staged ownership, ACL, report and workflow guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f10_ci_guards.py
@@ -820,58 +727,12 @@ jobs:
         id: fixture_post_unrelated_f10
         run: python3 scripts/f10_ci.py prepare
 
-      - name: Verify packaged authenticated comment deletion, preserved rows and rollback recovery
-        id: jar_f10
-        if: ${{ matrix.shard == 1 }}
-        run: |
-          set -euo pipefail
-          python3 scripts/f10_ci.py smoke
-          test -s build/ci/f10-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f10-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['comment_post_checks'] >= 10
-          assert result['comment_get_checks'] >= 20
-          assert result['comments_deleted'] >= 10
-          assert result['rejected_delete_checks'] >= 25
-          assert result['comment_delete_checks'] == result['comments_deleted'] + result['rejected_delete_checks']
-          assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
-
       - name: Verify F11 staged ownership, ACL, report guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f11_ci_guards.py
 
       - name: Extend the owned fixture with exact F11 comment content update permission
         id: fixture_post_unrelated_f11
         run: python3 scripts/f11_ci.py prepare
-
-      - name: Verify packaged comment PUT, old response timestamps, no-op writes and rollback recovery
-        id: jar_f11
-        if: ${{ matrix.shard == 1 }}
-        run: |
-          set -euo pipefail
-          python3 scripts/f11_ci.py smoke
-          test -s build/ci/f11-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f11-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['comment_post_checks'] >= 3
-          assert result['comment_get_checks'] >= 40
-          assert result['comment_delete_checks'] >= 1
-          assert result['changed_put_checks'] >= 10
-          assert result['same_put_checks'] >= 6
-          assert result['rejected_put_checks'] >= 28
-          assert result['comment_put_checks'] == result['changed_put_checks'] + result['same_put_checks'] + result['rejected_put_checks']
-          assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
 
       - name: Verify F12 staged fixture, identity, projection and workflow guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f12_ci_guards.py
@@ -880,161 +741,45 @@ jobs:
         id: fixture_post_unrelated_f12
         run: python3 scripts/f12_ci.py prepare
 
-      - name: Issue synthetic JWTs for F12
-        if: ${{ matrix.shard == 1 }}
-        run: python3 scripts/ci_tokens.py issue --stage f12
-
-      - name: Verify packaged authenticated profile reads, private-column exclusion and recovery
-        id: jar_f12
-        if: ${{ matrix.shard == 1 }}
-        run: |
-          set -euo pipefail
-          python3 scripts/f12_ci.py smoke
-          test -s build/ci/f12-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f12-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['successful_profile_checks'] >= 17
-          assert result['rejected_profile_checks'] >= 15
-          assert result['profile_get_checks'] == result['successful_profile_checks'] + result['rejected_profile_checks']
-          assert result['denied_route_checks'] == 8
-          assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
-
       - name: Verify F13 staged target, column ACL, pinned migration, reports and token guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f13_ci_guards.py
 
       - name: Extend the owned fixture with pinned User constraints and exact F13 nickname permissions
         id: fixture_post_unrelated_f13
-        run: python3 scripts/f13_ci.py prepare
-
-      - name: Issue synthetic JWTs for F13
-        if: ${{ matrix.shard == 1 }}
-        run: python3 scripts/ci_tokens.py issue --stage f13
-
-      - name: Verify packaged nickname PUT, profile and Community visibility, no-op and recovery
-        id: jar_f13
-        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
-          python3 scripts/f13_ci.py smoke
+          python3 scripts/f13_ci.py prepare
           test -s build/ci/f13-ddl-sha256.txt
-          test -s build/ci/f13-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f13-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['changed_put_checks'] >= 3
-          assert result['same_put_checks'] >= 3
-          assert result['rejected_put_checks'] >= 20
-          assert result['nickname_put_checks'] == result['changed_put_checks'] + result['same_put_checks'] + result['rejected_put_checks']
-          assert result['profile_get_checks'] >= 6
-          assert result['community_get_checks'] == result['profile_get_checks']
-          assert result['unrelated_database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
 
       - name: Verify F14 target, pinned schema, two-column ACL, reports and token guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f14_ci_guards.py
 
       - name: Extend the owned fixture with exact F14 favorites schema and reader-only columns
         id: fixture_post_unrelated_f14
-        run: python3 scripts/f14_ci.py prepare
-
-      - name: Issue synthetic JWTs for F14
-        if: ${{ matrix.shard == 1 }}
-        run: python3 scripts/ci_tokens.py issue --stage f14
-
-      - name: Verify packaged favorite Boolean GET, missing-user false, no side effects and permission recovery
-        id: jar_f14
-        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
-          python3 scripts/f14_ci.py smoke
+          python3 scripts/f14_ci.py prepare
           test -s build/ci/f14-ddl-sha256.txt
-          test -s build/ci/f14-helper-refusal.txt
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f14-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['true_checks'] >= 3
-          assert result['false_checks'] >= 3
-          assert result['rejected_get_checks'] >= 5
-          assert result['favorite_get_checks'] == result['true_checks'] + result['false_checks'] + result['rejected_get_checks']
-          assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PY
 
       - name: Verify F15 owner, full V9, exact ACL and report guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f15_ci_guards.py
 
       - name: Extend the owned fixture with pinned F15 board and videos and reader-only columns
         id: fixture_post_unrelated_f15
-        run: python3 scripts/f15_ci.py prepare
-
-      - name: Verify packaged public home videos, expiry, permission recovery and no side effects
-        id: jar_f15
-        if: ${{ matrix.shard == 1 }}
         run: |
           set -euo pipefail
-          python3 scripts/f15_ci.py smoke
+          python3 scripts/f15_ci.py prepare
           test -s build/ci/f15-ddl-sha256.txt
-          test -s build/ci/f15-helper-refusal.txt
-          python3 - <<'PYTHON'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f15-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          assert result['nonempty_checks'] == 3
-          assert result['empty_checks'] == 1
-          assert result['unavailable_checks'] == 1
-          assert result['malformed_bearer_checks'] == 1
-          assert result['home_get_checks'] == result['nonempty_checks'] + result['empty_checks'] + result['unavailable_checks']
-          assert result['database_changes'] == result['s3_requests'] == 0
-          assert result['shutdown_pools'] == 1
-          assert result['remaining_application_connections'] == 0
-          PYTHON
 
       - name: Verify F16 fixture, date window, reports and cleanup guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f16_ci_guards.py
 
       - name: Extend the owned fixture with only pinned F16 daily totals and reader columns
         id: fixture_post_unrelated_f16
-        run: python3 scripts/f16_ci.py prepare
-
-      - name: Verify packaged enabled totals and one disabled404 phase without JWT refresh
-        id: jar_f16
-        if: ${{ matrix.profile == 'full' && matrix.shard == 1 }}
         run: |
           set -euo pipefail
-          python3 scripts/f16_ci.py smoke
+          python3 scripts/f16_ci.py prepare
           test -s build/ci/f16-ddl-sha256.txt
-          test -s build/ci/f16-helper-refusal.txt
-          python3 - <<'PYTHON'
-          import json
-          from pathlib import Path
-          result = json.loads(Path('build/ci/f16-packaged-result.txt').read_text())
-          assert result['status'] == 'passed'
-          enabled, disabled = result['enabled'], result['disabled']
-          assert enabled['visit_get_checks'] == 5
-          assert enabled['positive_checks'] == 3
-          assert enabled['zero_checks'] == enabled['unavailable_checks'] == enabled['malformed_bearer_checks'] == 1
-          assert disabled['visit_get_checks'] == disabled['disabled_404_checks'] == 1
-          assert 'Boot tests only' in result['disabled_evidence']
-          for phase in (enabled, disabled):
-              assert phase['status'] == 'passed'
-              assert phase['shutdown_pools'] == 1
-              assert phase['remaining_application_connections'] == 0
-          assert result['database_changes'] == result['s3_requests'] == 0
-          PYTHON
 
       - name: Verify F17 staged ownership, minimal ACL, pinned source, token and report guards without starting resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f17_ci_guards.py

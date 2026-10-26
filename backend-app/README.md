@@ -310,7 +310,7 @@ JAR는 현재 단계에서 기존 실제 발급기로 갱신한 합성 토큰과
 
 1. PR과 dev push 모두 package job에서 `projects check :boot:bootJar`(모듈 unit/MVC/Security·구조 fixture·실행 JAR)와 `:boot:compileContractTestKotlin`(DB 계약 시험 컴파일만)을 실행하고, 실행 JAR에 시험·compatibility·계약 시험 코드와 Testcontainers가 들어가지 않았는지 확인한다.
 2. dev push에서만 check job이 digest로 고정한 공식 PostgreSQL 17.11 linux/amd64 컨테이너를 고유 run label로 만든다. loopback bind·CPU 2·RAM 512MiB·tmpfs 제한과 합성 schema/SELECT-only reader 계정에서 시작해 F3~F29 단계별 최소 fixture·권한을 차례로 확장한다. 운영 migration/owner/ACL을 변경하는 절차가 아니다.
-3. 각 단계는 `scripts/test_fN_ci_guards.py`의 자원 없는 가드 시험 → `fN_ci.py prepare` → 같은 실행 JAR의 packaged 시험(`jar_f3`~`jar_f29`, 관리자 회원 삭제 `jar_f31`) 순서다. packaged 시험은 run 전용 S3 HTTP stub과 실제 발급기 JWT로 HTTP 계약·무부작용·실패 후 복구·단일 pool 정상 종료를 확인한다.
+3. 각 단계는 `scripts/test_fN_ci_guards.py`의 자원 없는 가드 시험 → `fN_ci.py prepare` → 같은 실행 JAR의 packaged 시험(`jar_f17`~`jar_f29`, 관리자 회원 삭제 `jar_f31`) 순서다. F3~F16(게시글·댓글·본인 정보·닉네임·찜 여부·홈 영상·방문 합계)의 packaged 시험은 Spring 계약 시험(`boot/src/contractTest`, 실제 Tomcat·Testcontainers PostgreSQL·in-JVM S3 fake)으로 옮겼고, 이 단계들의 `prepare` 스텝은 하네스 제거(PR6) 전까지 남아 있다. packaged 시험은 run 전용 S3 HTTP stub과 실제 발급기 JWT로 HTTP 계약·무부작용·실패 후 복구·단일 pool 정상 종료를 확인한다.
 4. 같은 dev push에서 package job과 병렬인 `contract` job이 Testcontainers PostgreSQL 위에서 `:boot:contractTest`(아래)를 실행한다. 이 job은 packaged 시험과 fixture를 공유하지 않는다.
 5. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 

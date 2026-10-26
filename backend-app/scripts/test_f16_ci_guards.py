@@ -264,11 +264,11 @@ class F16GuardTest(unittest.TestCase):
     def test_given_workflow__when_extending_f16__then_preserve_f15_order_and_always_cleanup(self):
         text = (f16.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = text.index('- name: Extend the owned fixture with only pinned F16 daily totals and reader columns')
-        self.assertLess(text.index('python3 scripts/f15_ci.py smoke'), boundary)
-        self.assertLess(text.index('python3 scripts/f16_ci.py prepare', boundary), text.index('python3 scripts/f16_ci.py smoke'))
+        self.assertNotIn('python3 scripts/f15_ci.py smoke', text, 'The packaged F15 smoke moved to the Spring contract tests.')
         self.assertNotIn('python3 scripts/f16_ci.py results', text)
+        self.assertNotIn('python3 scripts/f16_ci.py smoke', text, 'The packaged F16 smoke moved to the Spring contract tests.')
         cleanup = text.index('- name: Remove only the owned disposable fixture')
-        self.assertLess(text.index('python3 scripts/f16_ci.py smoke'), cleanup); self.assertIn('if: always()', text[cleanup:])
+        self.assertLess(text.index('python3 scripts/f16_ci.py prepare', boundary), cleanup); self.assertIn('if: always()', text[cleanup:])
         for value in ('f16-helper-refusal.txt', 'f16-ddl-sha256.txt', 'test_f16_ci_guards.py', 'f[0-9]+_fixture'):
             self.assertIn(value, text)
         self.assertNotIn(':boot:compatibilityTest ', text[boundary:cleanup]); self.assertNotIn('F3_TEST_TOKENS_PATH', text[boundary:cleanup])
