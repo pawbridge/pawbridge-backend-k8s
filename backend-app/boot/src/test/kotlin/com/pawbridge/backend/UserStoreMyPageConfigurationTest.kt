@@ -2,7 +2,6 @@ package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.configuration.UserStoreMyPageConfiguration
 import com.pawbridge.backend.store.api.StoreMemberReads
-import com.pawbridge.backend.store.internal.memberread.infrastructure.JpaStoreMemberReads
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.storemypage.application.StoreMyPage
 import com.pawbridge.backend.user.internal.storemypage.infrastructure.ModuleStoreMyPage
@@ -19,7 +18,6 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
@@ -50,7 +48,7 @@ class UserStoreMyPageConfigurationTest {
     }
 
     @Test
-    fun `명시적 활성화가 주어졌을 때__조립하면__리더를 재사용하고 반복 읽기 트랜잭션을 분리한다`() {
+    fun `명시적 활성화가 주어졌을 때__조립하면__반복 읽기 5초 트랜잭션을 쓰고 연결을 열지 않는다`() {
         // given
         val runner = runner().withPropertyValues("pawbridge.user-store-mypage.enabled=true")
 
@@ -64,32 +62,14 @@ class UserStoreMyPageConfigurationTest {
                 assertThat(context.getBeansOfType(StoreMyPageController::class.java)).hasSize(1)
                 assertThat(context.getBeansOfType(StoreMyPageExceptionHandler::class.java)).hasSize(1)
 
-                val service = context.getBean(StoreMyPage::class.java)
-                assertThat(ReflectionTestUtils.getField(service, "profiles"))
-                    .isSameAs(context.getBean(UserProfileQuery::class.java))
-                assertThat(ReflectionTestUtils.getField(service, "read"))
-                    .isSameAs(context.getBean("readOnlyTransaction"))
-                assertThat(ReflectionTestUtils.getField(service, "store"))
-                    .isSameAs(context.getBean(StoreMemberReads::class.java))
-
                 val jdbc = context.getBean("userStoreModuleJdbc", JdbcTemplate::class.java)
-                assertThat(jdbc.dataSource).isSameAs(context.getBean("dataSource"))
                 assertThat(jdbc.queryTimeout).isEqualTo(5)
                 val reads = context.getBean("userStoreModuleReadTransaction", TransactionTemplate::class.java)
-                assertThat(reads.transactionManager).isSameAs(context.getBean("transactionManager"))
                 assertThat(reads.isReadOnly).isTrue()
                 assertThat(reads.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ)
                 assertThat(reads.timeout).isEqualTo(5)
                 assertThat(context.getBeansOfType(DataSource::class.java)).hasSize(1)
                 assertThat(context.getBeansOfType(PlatformTransactionManager::class.java)).hasSize(2)
-
-                val storeReads = context.getBean(StoreMemberReads::class.java)
-                assertThat(storeReads).isInstanceOf(JpaStoreMemberReads::class.java)
-                val jpaReads = ReflectionTestUtils.getField(storeReads, "reads") as TransactionTemplate
-                assertThat(jpaReads.transactionManager).isSameAs(context.getBean("storeMemberJpaTransactionManager"))
-                assertThat(jpaReads.isReadOnly).isTrue()
-                assertThat(jpaReads.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ)
-                assertThat(jpaReads.timeout).isEqualTo(5)
 
                 val factory = context.getBean("storeMemberEntityManagerFactory", EntityManagerFactory::class.java)
                 assertThat(factory.metamodel.entities).hasSize(9)

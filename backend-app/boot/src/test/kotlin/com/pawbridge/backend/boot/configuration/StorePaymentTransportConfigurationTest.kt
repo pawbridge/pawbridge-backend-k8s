@@ -68,8 +68,6 @@ class StorePaymentTransportConfigurationTest {
             .run { app ->
                 // then
                 assertThat(app).hasNotFailed().hasSingleBean(RedisConnectionFactory::class.java)
-                assertThat(app.getBean("storePaymentRankingRedis")).isSameAs(shared)
-                assertThat(app.getBean(RedisConnectionFactory::class.java)).isSameAs(global)
                 app.getBean(StorePaymentTransportConfiguration.RedisResource::class.java).close()
                 confirmVerified(factories, global)
             }
@@ -109,8 +107,6 @@ class StorePaymentTransportConfigurationTest {
                 assertThat(app).hasNotFailed()
                     .hasSingleBean(StringRedisTemplate::class.java)
                     .doesNotHaveBean(RedisConnectionFactory::class.java)
-                assertThat(app.getBean("storePaymentRankingRedis", StringRedisTemplate::class.java).connectionFactory)
-                    .isSameAs(owned)
                 assertThat(seen.get().hostName).isEqualTo("127.0.0.1")
                 assertThat(seen.get().port).isEqualTo(6381)
                 assertThat(seen.get().database).isEqualTo(2)

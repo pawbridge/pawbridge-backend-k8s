@@ -13,9 +13,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
-import org.springframework.test.util.ReflectionTestUtils
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
@@ -135,8 +133,7 @@ class PhotoArchiveScheduleTest {
 
             // then
             assertThat(schedule.isRunning).isFalse()
-            val executor = ReflectionTestUtils.getField(schedule, "executor") as ScheduledThreadPoolExecutor
-            assertThat(executor.isTerminated).isFalse()
+            assertThat(workerThread.get().isAlive).isTrue()
             assertThat(workerThread.get().isDaemon).isTrue()
             assertThat(appender.list).anySatisfy { event ->
                 assertThat(event.formattedMessage)
@@ -144,12 +141,12 @@ class PhotoArchiveScheduleTest {
             }
             verify(exactly = 1) { worker.scheduled() }
             release.countDown()
-            assertThat(executor.awaitTermination(3, TimeUnit.SECONDS)).isTrue()
+            workerThread.get().join(3000)
+            assertThat(workerThread.get().isAlive).isFalse()
         } finally {
             release.countDown()
             schedule.stop()
-            val executor = ReflectionTestUtils.getField(schedule, "executor") as ScheduledThreadPoolExecutor?
-            executor?.awaitTermination(3, TimeUnit.SECONDS)
+            workerThread.get()?.join(3000)
             logger.detachAppender(appender)
             appender.stop()
         }

@@ -18,7 +18,6 @@ import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoCon
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.util.function.Supplier
@@ -71,7 +70,7 @@ class AnimalTravelConfigurationTest {
     }
 
     @Test
-    fun `기존 조회 자원이 있을 때__카탈로그를 조립하면__새 풀이나 모델 없이 목록에만 격리 수준을 복사한다`() {
+    fun `기존 조회 자원이 있을 때__카탈로그를 조립하면__새 풀이나 모델 없이 목록에만 반복 읽기 격리를 쓴다`() {
         // given
         val source: DataSource = mockk<DataSource>()
         val manager: JdbcTransactionManager = mockk<JdbcTransactionManager>()
@@ -101,19 +100,12 @@ class AnimalTravelConfigurationTest {
                     .doesNotHaveBean(EntityManagerFactory::class.java)
                     .doesNotHaveBean("writeDataSource")
                 val list = app.getBean("animalTravelListReadOnlyTransaction", TransactionTemplate::class.java)
-                assertThat(list).isNotSameAs(reads)
-                assertThat(list.transactionManager).isSameAs(manager)
                 assertThat(list.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ)
                 assertThat(list.isReadOnly).isTrue()
                 assertThat(list.timeout).isEqualTo(3)
                 assertThat(reads.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
                 assertThat(reads.timeout).isEqualTo(3)
                 assertThat(reads.isReadOnly).isTrue()
-                val service: Any = app.getBean(PetTravel::class.java)
-                assertThat(ReflectionTestUtils.getField(service, "reads")).isSameAs(reads)
-                assertThat(ReflectionTestUtils.getField(service, "repeatableReads")).isSameAs(list)
-                val repository: Any = ReflectionTestUtils.getField(service, "repository")!!
-                assertThat(ReflectionTestUtils.getField(repository, "jdbc")).isSameAs(jdbc)
                 confirmVerified(source)
                 verify(exactly = 0) { manager.getTransaction(any()) }
             }

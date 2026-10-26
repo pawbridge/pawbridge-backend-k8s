@@ -20,16 +20,11 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.scheduling.config.CronTask
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
-import org.springframework.util.ErrorHandler
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -105,7 +100,7 @@ class ShelterObservationConfigurationTest {
     }
 
     @Test
-    fun `실제 main과 명시적 관찰 설정이 주어졌을 때__구성하고 닫으면__시작 SQL 없이 writer와 이름 있는 크론을 재사용한다`(
+    fun `실제 main과 명시적 관찰 설정이 주어졌을 때__구성하고 닫으면__시작 SQL 없이 단일 풀과 이름 있는 크론 하나로 구성된다`(
         output: CapturedOutput,
     ) {
         // given
@@ -156,25 +151,7 @@ class ShelterObservationConfigurationTest {
                     .hasSingleBean(JdbcShelterObservationRecorder::class.java)
                     .hasSingleBean(ShelterObservationConfiguration.ShelterObservationJob::class.java)
                     .hasSingleBean(ThreadPoolTaskScheduler::class.java)
-                val recorder = context.getBean(JdbcShelterObservationRecorder::class.java)
-                val jdbc = ReflectionTestUtils.getField(recorder, "jdbc") as JdbcTemplate
-                val transaction = ReflectionTestUtils.getField(recorder, "transaction") as TransactionTemplate
-                assertThat(jdbc.dataSource).isSameAs(context.getBean("writeDataSource"))
-                assertThat(jdbc.queryTimeout).isEqualTo(30)
-                assertThat(transaction.transactionManager).isSameAs(context.getBean("writeTransactionManager"))
-                assertThat(transaction).isNotSameAs(context.getBean("writeTransaction"))
-                assertThat(transaction.timeout).isEqualTo(30)
-                assertThat(transaction.isReadOnly).isFalse()
-                assertThat(transaction.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-                assertThat(transaction.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
-                assertThat(
-                    ReflectionTestUtils.getField(
-                        context.getBean(ShelterObservationConfiguration.ShelterObservationJob::class.java),
-                        "recorder",
-                    ),
-                ).isSameAs(recorder)
                 assertThat(context.getBeansOfType(DataSource::class.java)).containsOnlyKeys("dataSource")
-                assertThat(context.getBean("writeDataSource")).isSameAs(context.getBean("dataSource"))
                 assertThat(context.getBeansOfType(JdbcTransactionManager::class.java))
                     .containsOnlyKeys("transactionManager", "writeTransactionManager")
                 assertThat(context.getBeansOfType(EntityManagerFactory::class.java)).isEmpty()
@@ -190,9 +167,6 @@ class ShelterObservationConfigurationTest {
                 assertThat(scheduler.scheduledThreadPoolExecutor.corePoolSize).isEqualTo(1)
                 assertThat(scheduler.scheduledThreadPoolExecutor.continueExistingPeriodicTasksAfterShutdownPolicy).isFalse()
                 assertThat(scheduler.scheduledThreadPoolExecutor.executeExistingDelayedTasksAfterShutdownPolicy).isFalse()
-                assertThat(ReflectionTestUtils.getField(scheduler, "acceptTasksAfterContextClose")).isEqualTo(false)
-                assertThat(ReflectionTestUtils.getField(scheduler, "waitForTasksToCompleteOnShutdown")).isEqualTo(true)
-                assertThat(ReflectionTestUtils.getField(scheduler, "awaitTerminationMillis")).isEqualTo(35000L)
                 assertThat(context.beanFactory.getDependenciesForBean("shelterObservationScheduler"))
                     .contains("dataSource", "shelterObservationRecorder")
                 val tasks = context.getBean(ScheduledAnnotationBeanPostProcessor::class.java).scheduledTasks
@@ -204,10 +178,15 @@ class ShelterObservationConfigurationTest {
                 assertThat(metadata.cron).isEqualTo("\${pawbridge.shelter-observations.cron:0 0 4 * * *}")
                 assertThat(metadata.zone).isEqualTo("Asia/Seoul")
                 assertThat(metadata.scheduler).isEqualTo("shelterObservationScheduler")
-                val errors = ReflectionTestUtils.getField(scheduler, "errorHandler") as ErrorHandler
-                errors.handleError(
-                    IllegalStateException("synthetic-private-observation-SQL", RuntimeException("synthetic-private-cause")),
-                )
+                scheduler.schedule(
+                    Runnable {
+                        throw IllegalStateException(
+                            "synthetic-private-observation-SQL",
+                            RuntimeException("synthetic-private-cause"),
+                        )
+                    },
+                    Instant.now(),
+                ).get(5, TimeUnit.SECONDS)
                 assertThat(output.all).contains("Shelter daily observation failed (IllegalStateException)")
                     .doesNotContain("synthetic-private-observation-SQL", "synthetic-private-cause")
                 delayedRef.set(

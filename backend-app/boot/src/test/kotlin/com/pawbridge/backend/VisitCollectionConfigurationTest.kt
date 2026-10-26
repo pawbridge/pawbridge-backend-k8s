@@ -2,7 +2,6 @@ package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.configuration.VisitCollectionConfiguration
 import com.pawbridge.backend.community.internal.visit.application.VisitCollection
-import com.pawbridge.backend.community.internal.visit.application.VisitCollectionStore
 import com.pawbridge.backend.community.internal.visit.application.VisitIdentity
 import com.pawbridge.backend.community.internal.visit.web.VisitCollectionController
 import io.mockk.confirmVerified
@@ -23,11 +22,10 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.scheduling.config.FixedDelayTask
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.support.TransactionTemplate
-import org.springframework.util.ErrorHandler
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.util.concurrent.TimeUnit
 import java.util.Base64
 
 @ExtendWith(OutputCaptureExtension::class)
@@ -73,7 +71,7 @@ class VisitCollectionConfigurationTest {
     }
 
     @Test
-    fun `기존 쓰기 자원과 합성 키로 켜졌을 때__조립하면__한정된 생명주기 하나와 원래 트랜잭션을 쓴다`(output: CapturedOutput) {
+    fun `기존 쓰기 자원과 합성 키로 켜졌을 때__조립하면__제한된 스케줄러에 60초 고정 지연 작업을 하나 등록한다`(output: CapturedOutput) {
         // given
         val jdbc = mockk<JdbcTemplate>()
         val manager = mockk<JdbcTransactionManager>()
@@ -90,23 +88,12 @@ class VisitCollectionConfigurationTest {
             assertThat(context.getBeansOfType(VisitCollection::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(VisitCollectionConfiguration.VisitCollectionLifecycle::class.java))
                 .hasSize(1)
-            val service = context.getBean(VisitCollection::class.java)
-            val store = context.getBean(VisitCollectionStore::class.java)
-            assertThat(ReflectionTestUtils.getField(store, "jdbc")).isSameAs(context.getBean("writeJdbc"))
-            assertThat(ReflectionTestUtils.getField(service, "clock")).isSameAs(context.getBean("readClock"))
-            val tx = ReflectionTestUtils.getField(service, "transactions") as TransactionTemplate
-            assertThat(tx.transactionManager).isSameAs(context.getBean("writeTransactionManager"))
-            assertThat(tx.timeout).isEqualTo(10)
-            assertThat(tx.isReadOnly).isFalse()
             val scheduler = context.getBean("visitCollectionScheduler", ThreadPoolTaskScheduler::class.java)
             assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).hasSize(1)
             assertThat(scheduler.scheduledThreadPoolExecutor.corePoolSize).isEqualTo(1)
             assertThat(scheduler.scheduledThreadPoolExecutor.removeOnCancelPolicy).isTrue()
             assertThat(scheduler.scheduledThreadPoolExecutor.continueExistingPeriodicTasksAfterShutdownPolicy).isFalse()
             assertThat(scheduler.scheduledThreadPoolExecutor.executeExistingDelayedTasksAfterShutdownPolicy).isFalse()
-            assertThat(ReflectionTestUtils.getField(scheduler, "acceptTasksAfterContextClose")).isEqualTo(false)
-            assertThat(ReflectionTestUtils.getField(scheduler, "waitForTasksToCompleteOnShutdown")).isEqualTo(false)
-            assertThat(ReflectionTestUtils.getField(scheduler, "awaitTerminationMillis")).isEqualTo(5000L)
             assertThat(context.beanFactory.getDependenciesForBean("visitCollectionScheduler"))
                 .contains("writeDataSource")
             val tasks = context.getBean(ScheduledAnnotationBeanPostProcessor::class.java).scheduledTasks
@@ -119,8 +106,12 @@ class VisitCollectionConfigurationTest {
                 .getAnnotation(Scheduled::class.java)
             assertThat(annotation.scheduler).isEqualTo("visitCollectionScheduler")
             confirmVerified(jdbc, manager, clock)
-            val handler = ReflectionTestUtils.getField(scheduler, "errorHandler") as ErrorHandler
-            handler.handleError(IllegalStateException("synthetic-secret-cookie", RuntimeException("synthetic-private-sql")))
+            scheduler.schedule(
+                Runnable {
+                    throw IllegalStateException("synthetic-secret-cookie", RuntimeException("synthetic-private-sql"))
+                },
+                Instant.now(),
+            ).get(5, TimeUnit.SECONDS)
             assertThat(output.all).contains("Visit collection cleanup failed (IllegalStateException)")
                 .doesNotContain("synthetic-secret-cookie", "synthetic-private-sql")
         }

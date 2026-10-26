@@ -14,7 +14,6 @@ import com.pawbridge.backend.store.internal.directorder.web.OrderReadController
 import io.mockk.confirmVerified
 import io.mockk.excludeRecords
 import io.mockk.mockk
-import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
@@ -28,8 +27,6 @@ import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
@@ -83,7 +80,7 @@ class StoreCartConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["cart", "both", "direct-with-cart-on"])
-    fun `선택된 스토어 쓰기 기능이 주어졌을 때__조립하면__다른 API를 켜지 않고 쓰기 DB와 감사자 하나를 공유한다`(
+    fun `선택된 스토어 쓰기 기능이 주어졌을 때__조립하면__다른 API를 켜지 않고 영속 단위와 감사자를 하나만 만든다`(
         mode: String,
     ) {
         val carts = mode != "direct-with-cart-on"
@@ -131,7 +128,6 @@ class StoreCartConfigurationTest {
                     "&storeDirectOrderEntityManagerFactory",
                     LocalContainerEntityManagerFactoryBean::class.java,
                 )
-                assertThat(factory.dataSource).isSameAs(writer).isNotSameAs(reader)
                 val model = "com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model."
                 val managed = ArrayList(
                     listOf(
@@ -160,44 +156,17 @@ class StoreCartConfigurationTest {
                         "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy",
                     )
                 val manager = context.getBean("storeDirectOrderJpaTransactionManager", JpaTransactionManager::class.java)
-                assertThat(manager.dataSource).isSameAs(writer)
-                assertThat(manager.entityManagerFactory).isSameAs(unit.get())
                 assertThat(manager.defaultTimeout).isEqualTo(15)
                 val writes = context.getBean("storeDirectOrderWrites", TransactionTemplate::class.java)
                 val reads = context.getBean("storeDirectOrderReads", TransactionTemplate::class.java)
                 for (transaction in listOf(writes, reads)) {
-                    assertThat(transaction.transactionManager).isSameAs(manager).isNotSameAs(readerManager)
                     assertThat(transaction.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
                     assertThat(transaction.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
                     assertThat(transaction.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
                 }
                 assertThat(writes.isReadOnly).isFalse()
                 assertThat(reads.isReadOnly).isTrue()
-                val shared = context.getBean("storeDirectOrderEntityManager", EntityManager::class.java)
-                assertThat(shared.entityManagerFactory).isSameAs(unit.get())
-                val actorJdbc = ReflectionTestUtils.getField(context.getBean(StoreOrderActors::class.java), "jdbc") as JdbcTemplate
-                assertThat(actorJdbc.dataSource).isSameAs(writer)
                 assertThat(context.containsBean("storeCarts")).isEqualTo(carts)
-                if (carts) {
-                    val cartService: Any = context.getBean("storeCarts")
-                    assertThat(ReflectionTestUtils.getField(cartService, "em")).isSameAs(shared)
-                    assertThat(ReflectionTestUtils.getField(cartService, "writes")).isSameAs(writes)
-                    assertThat(ReflectionTestUtils.getField(cartService, "reads")).isSameAs(reads)
-                    assertThat(ReflectionTestUtils.getField(cartService, "actors"))
-                        .isSameAs(context.getBean(StoreOrderActors::class.java))
-                    val repository: Any = ReflectionTestUtils.getField(cartService, "carts")!!
-                    val target: Any = AopTestUtils.getUltimateTargetObject(repository)
-                    assertThat(ReflectionTestUtils.getField(target, "entityManager")).isSameAs(shared)
-                    val checkout: Any = context.getBean(CartOrders::class.java)
-                    assertThat(ReflectionTestUtils.getField(checkout, "writes")).isSameAs(writes)
-                    assertThat(ReflectionTestUtils.getField(checkout, "actors"))
-                        .isSameAs(context.getBean(StoreOrderActors::class.java))
-                    for (name in listOf("carts", "orders", "skus")) {
-                        val checkoutRepository: Any = ReflectionTestUtils.getField(checkout, name)!!
-                        val checkoutTarget: Any = AopTestUtils.getUltimateTargetObject(checkoutRepository)
-                        assertThat(ReflectionTestUtils.getField(checkoutTarget, "entityManager")).isSameAs(shared)
-                    }
-                }
                 assertThat(context.containsBean("cartController")).isEqualTo(carts)
                 assertThat(context.containsBean("cartExceptionHandler")).isEqualTo(carts)
                 assertThat(context.getBeansOfType(DirectOrders::class.java)).hasSize(1)

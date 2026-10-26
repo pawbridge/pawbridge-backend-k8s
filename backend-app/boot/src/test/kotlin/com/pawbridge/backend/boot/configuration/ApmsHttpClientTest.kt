@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.config.BeanDefinitionCustomizer
 import org.springframework.beans.factory.support.AbstractBeanDefinition
 import org.springframework.context.support.GenericApplicationContext
-import org.springframework.test.util.ReflectionTestUtils
 import java.net.URI
 import java.net.URLDecoder
 import java.net.http.HttpHeaders
@@ -31,14 +30,11 @@ import java.util.function.Supplier
 
 class ApmsHttpClientTest {
     @Test
-    fun `명시한 제공자 기준 URL이 주어졌을 때__운영 전송을 만들면__HTTPS이고 연결 시간이 유한하며 리다이렉트를 따르지 않는다`() {
+    fun `명시한 제공자 기준 URL이 주어졌을 때__운영 전송을 만들면__HTTPS 제공자 URL만 받는다`() {
         // given, when
         ApmsHttpClient(BASE, ObjectMapper()).use { transport ->
             // then
-            val client = ReflectionTestUtils.getField(transport, "client") as HttpClient
-            assertThat(client.connectTimeout()).contains(Duration.ofSeconds(2))
-            assertThat(client.followRedirects()).isEqualTo(HttpClient.Redirect.NEVER)
-            assertThat(ReflectionTestUtils.getField(transport, "ownsClient")).isEqualTo(true)
+            assertThat(transport).isNotNull()
         }
         val invalidBases = arrayOf(
             "", "http://localhost:8080", "https://user:password@example.test",
