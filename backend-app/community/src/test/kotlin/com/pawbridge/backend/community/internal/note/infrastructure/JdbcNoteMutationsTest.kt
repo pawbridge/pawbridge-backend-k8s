@@ -5,7 +5,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.pawbridge.backend.community.internal.note.application.NoteChangeHints
 import com.pawbridge.backend.community.internal.note.application.NoteDeletion
-import com.pawbridge.backend.community.support.TestFaker
+import com.pawbridge.backend.community.internal.note.application.NoteFavoriteMutation
+import com.pawbridge.backend.community.internal.note.application.NoteReadMutation
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
@@ -15,11 +16,10 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.function.Executable
 import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.CsvSource
-import org.junit.jupiter.params.provider.EnumSource
+import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataAccessResourceFailureException
@@ -40,8 +40,77 @@ import java.time.Instant
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.function.Supplier
+import java.util.stream.Stream
 
-class JdbcNoteDeletionTest {
+/**
+ * Mark-as-read, set-favorite and delete run the same transaction script: member row insert and lock, active guard,
+ * two ownership checks around the note lock, then their own write(s), and a push hint only after the commit.
+ * The first three tests pin each script's exact SQL, arguments and clock samples. The remaining tests run the
+ * shared failure, missing-note and hint-failure contract against all three.
+ */
+class JdbcNoteMutationsTest {
+
+    @ParameterizedTest
+    @ValueSource(ints = [0, 1])
+    fun `갱신된 사서함이 0건이거나 1건일 때__읽음 처리를 하면__서로 다른 시각 세 개를 바인딩하고 매니저 커밋 뒤에만 힌트를 보낸다`(
+        affected: Int,
+    ) {
+        // given
+        val fixture = Fixture(READ)
+        fixture.jdbc.rows["update"] = affected
+
+        // when
+        fixture.run()
+
+        // then
+        assertEquals(
+            listOf(
+                "begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock",
+                "clock:2", "find:2", "clock:3", "update", "commit", "hint:7", "cleanup",
+            ),
+            fixture.events,
+        )
+        assertEquals(
+            listOf(INSERT, MEMBER_LOCK, FIND, NOTE_LOCK, FIND, READ_UPDATE),
+            fixture.jdbc.calls.map { it.sql },
+        )
+        assertCommonArguments(fixture)
+        assertArrayEquals(
+            arrayOf<Any?>(Timestamp.from(FIRST.plusSeconds(2)), 7L, NOTE),
+            fixture.jdbc.calls[5].arguments,
+        )
+        assertCommitted(fixture, samples = 3)
+    }
+
+    @ParameterizedTest
+    @CsvSource("false, 0", "true, 1")
+    fun `즐겨찾기 값과 갱신된 사서함이 0건이거나 1건일 때__즐겨찾기를 설정하면__서로 다른 시각 두 개를 바인딩하고 매니저 커밋 뒤에만 힌트를 보낸다`(
+        favorite: Boolean,
+        affected: Int,
+    ) {
+        // given
+        val fixture = Fixture(favoriteSubject(favorite))
+        fixture.jdbc.rows["update"] = affected
+
+        // when
+        fixture.run()
+
+        // then
+        assertEquals(
+            listOf(
+                "begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock",
+                "clock:2", "find:2", "update", "commit", "hint:7", "cleanup",
+            ),
+            fixture.events,
+        )
+        assertEquals(
+            listOf(INSERT, MEMBER_LOCK, FIND, NOTE_LOCK, FIND, FAVORITE_UPDATE),
+            fixture.jdbc.calls.map { it.sql },
+        )
+        assertCommonArguments(fixture)
+        assertArrayEquals(arrayOf<Any?>(favorite, 7L, NOTE), fixture.jdbc.calls[5].arguments)
+        assertCommitted(fixture, samples = 2)
+    }
 
     @ParameterizedTest
     @CsvSource("0, 0", "1, 1")
@@ -50,12 +119,12 @@ class JdbcNoteDeletionTest {
         noteRows: Int,
     ) {
         // given
-        val fixture = Fixture()
-        fixture.jdbc.mailboxRows = mailboxRows
-        fixture.jdbc.noteRows = noteRows
+        val fixture = Fixture(DELETE)
+        fixture.jdbc.rows["delete-mailbox"] = mailboxRows
+        fixture.jdbc.rows["delete-orphan"] = noteRows
 
         // when
-        fixture.delete()
+        fixture.run()
 
         // then
         assertEquals(
@@ -69,28 +138,20 @@ class JdbcNoteDeletionTest {
             listOf(INSERT, MEMBER_LOCK, FIND, NOTE_LOCK, FIND, DELETE_MAILBOX, DELETE_ORPHAN),
             fixture.jdbc.calls.map { it.sql },
         )
-        assertArrayEquals(arrayOf<Any?>(7L), fixture.jdbc.calls[0].arguments)
-        assertArrayEquals(arrayOf<Any?>(7L), fixture.jdbc.calls[1].arguments)
-        assertArrayEquals(arrayOf<Any?>(7L, NOTE, Timestamp.from(FIRST)), fixture.jdbc.calls[2].arguments)
-        assertArrayEquals(arrayOf<Any?>(NOTE), fixture.jdbc.calls[3].arguments)
-        assertArrayEquals(arrayOf<Any?>(7L, NOTE, Timestamp.from(FIRST.plusSeconds(1))), fixture.jdbc.calls[4].arguments)
+        assertCommonArguments(fixture)
         assertArrayEquals(arrayOf<Any?>(7L, NOTE), fixture.jdbc.calls[5].arguments)
         assertArrayEquals(arrayOf<Any?>(NOTE), fixture.jdbc.calls[6].arguments)
-        assertEquals(1, fixture.guards)
-        assertEquals(2, fixture.samples)
-        assertEquals(listOf(7L), fixture.hinted)
-        assertEquals(1, fixture.manager.commits)
-        assertEquals(0, fixture.manager.rollbacks)
-        fixture.assertReturned()
+        assertCommitted(fixture, samples = 2)
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = [1, 2])
-    fun `0행 쪽지 잠금 전이나 후에 소유가 없을 때__쪽지를 삭제하면__어떤 삭제도 힌트도 없이 롤백한다`(
+    @ParameterizedTest(name = "{0} 확인 {1}")
+    @MethodSource("subjectsWithMissingAt")
+    fun `소유 쪽지가 0행 쪽지 잠금 앞이나 뒤에서 사라졌을 때__변경하면__쓰기나 힌트 없이 롤백한다`(
+        subject: Subject,
         missingAt: Int,
     ) {
         // given
-        val fixture = Fixture()
+        val fixture = Fixture(subject)
         fixture.jdbc.found.clear()
         if (missingAt == 2) {
             fixture.jdbc.found.add(true)
@@ -99,7 +160,7 @@ class JdbcNoteDeletionTest {
         fixture.jdbc.noteLockRows = 0
 
         // when
-        assertThrows(NoteDeletion.MissingOwnedNote::class.java) { fixture.delete() }
+        assertThrows(subject.missingOwnedNote) { fixture.run() }
 
         // then
         val expected = ArrayList(listOf("begin", "insert", "member-lock", "guard", "clock:1", "find:1"))
@@ -117,84 +178,66 @@ class JdbcNoteDeletionTest {
         fixture.assertReturned()
     }
 
-    @ParameterizedTest
-    @EnumSource(FailurePhase::class)
-    fun `시작 회원 가드 잠금 삭제 또는 커밋이 실패할 때__쪽지를 삭제하면__재시도나 힌트 없이 예외를 전파한다`(
-        phase: FailurePhase,
+    @ParameterizedTest(name = "{0} {1} 실패")
+    @MethodSource("subjectsWithPhase")
+    fun `시작 회원 삽입 가드 잠금 쓰기 또는 커밋이 실패할 때__변경하면__재시도나 힌트 없이 예외를 전파한다`(
+        subject: Subject,
+        phase: String,
     ) {
         // given
-        val fixture = Fixture()
+        val fixture = Fixture(subject)
         val failure: RuntimeException = when (phase) {
-            FailurePhase.BEGIN -> CannotCreateTransactionException("synthetic begin")
-            FailurePhase.MEMBER_INSERT -> DataIntegrityViolationException("synthetic member CHECK")
-            FailurePhase.NOTE_LOCK, FailurePhase.MAILBOX_DELETE, FailurePhase.NOTE_DELETE ->
-                DataAccessResourceFailureException("synthetic SQL")
-            FailurePhase.GUARD -> IllegalStateException("synthetic guard")
-            FailurePhase.COMMIT -> TransactionSystemException("synthetic commit")
+            "begin" -> CannotCreateTransactionException("synthetic begin")
+            "insert" -> DataIntegrityViolationException("synthetic member CHECK")
+            "guard" -> IllegalStateException("synthetic guard")
+            "commit" -> TransactionSystemException("synthetic commit")
+            else -> DataAccessResourceFailureException("synthetic SQL")
         }
         when (phase) {
-            FailurePhase.BEGIN -> fixture.manager.beginFailure = failure
-            FailurePhase.COMMIT -> fixture.manager.commitFailure = failure
-            FailurePhase.GUARD -> fixture.guardFailure = failure
+            "begin" -> fixture.manager.beginFailure = failure
+            "commit" -> fixture.manager.commitFailure = failure
+            "guard" -> fixture.guardFailure = failure
             else -> {
-                fixture.jdbc.failEvent =
-                    if (phase == FailurePhase.MEMBER_INSERT) {
-                        "insert"
-                    } else if (phase == FailurePhase.NOTE_LOCK) {
-                        "note-lock"
-                    } else if (phase == FailurePhase.MAILBOX_DELETE) {
-                        "delete-mailbox"
-                    } else {
-                        "delete-orphan"
-                    }
+                fixture.jdbc.failEvent = phase
                 fixture.jdbc.failure = failure
             }
         }
 
         // when
-        val thrown = assertThrows(RuntimeException::class.java) { fixture.delete() }
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.run() }
 
         // then
         assertSame(failure, thrown)
-        val stages = listOf(
-            "begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock",
-            "clock:2", "find:2", "delete-mailbox", "delete-orphan", "commit",
-        )
-        val last = when (phase) {
-            FailurePhase.BEGIN -> 0
-            FailurePhase.MEMBER_INSERT -> 1
-            FailurePhase.GUARD -> 3
-            FailurePhase.NOTE_LOCK -> 6
-            FailurePhase.MAILBOX_DELETE -> 9
-            FailurePhase.NOTE_DELETE -> 10
-            FailurePhase.COMMIT -> 11
-        }
-        val expected = ArrayList(stages.subList(0, last + 1))
-        if (phase != FailurePhase.BEGIN && phase != FailurePhase.COMMIT) {
+        val last = subject.stages.indexOf(phase)
+        val expected = ArrayList(subject.stages.subList(0, last + 1))
+        if (phase != "begin" && phase != "commit") {
             expected.add("rollback")
         }
-        if (phase != FailurePhase.BEGIN) {
+        if (phase != "begin") {
             expected.add("cleanup")
         }
         assertEquals(expected, fixture.events)
         assertTrue(fixture.hinted.isEmpty())
-        assertEquals(if (phase == FailurePhase.COMMIT) 1 else 0, fixture.manager.commits)
-        assertEquals(if (phase == FailurePhase.BEGIN || phase == FailurePhase.COMMIT) 0 else 1, fixture.manager.rollbacks)
+        assertEquals(if (phase == "commit") 1 else 0, fixture.manager.commits)
+        assertEquals(if (phase == "begin" || phase == "commit") 0 else 1, fixture.manager.rollbacks)
         fixture.assertReturned()
     }
 
-    @Test
-    fun `커밋 뒤 비공개 힌트가 런타임 예외를 던질 때__알리면__성공을 유지하고 비공개 메시지 없이 예외 종류만 기록한다`() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("subjects")
+    fun `커밋 뒤 비공개 힌트가 런타임 예외를 낼 때__알림을 보내면__성공을 유지하고 비공개 메시지 없이 타입만 기록한다`(
+        subject: Subject,
+    ) {
         // given
-        val fixture = Fixture()
+        val fixture = Fixture(subject)
         fixture.hintFailure = IllegalStateException("Bearer synthetic-private-token", SQLException("synthetic-private-SQL"))
-        val logger = LoggerFactory.getLogger(JdbcNoteDeletion::class.java) as Logger
+        val logger = LoggerFactory.getLogger(subject.mutationType) as Logger
         val appender = ListAppender<ILoggingEvent>()
         appender.start()
         logger.addAppender(appender)
         try {
             // when
-            assertDoesNotThrow(Executable { fixture.delete() })
+            assertDoesNotThrow { fixture.run() }
 
             // then
             assertEquals(
@@ -219,16 +262,43 @@ class JdbcNoteDeletionTest {
         }
     }
 
-    enum class FailurePhase { BEGIN, MEMBER_INSERT, GUARD, NOTE_LOCK, MAILBOX_DELETE, NOTE_DELETE, COMMIT }
+    private fun assertCommonArguments(fixture: Fixture) {
+        assertArrayEquals(arrayOf<Any?>(7L), fixture.jdbc.calls[0].arguments)
+        assertArrayEquals(arrayOf<Any?>(7L), fixture.jdbc.calls[1].arguments)
+        assertArrayEquals(arrayOf<Any?>(7L, NOTE, Timestamp.from(FIRST)), fixture.jdbc.calls[2].arguments)
+        assertArrayEquals(arrayOf<Any?>(NOTE), fixture.jdbc.calls[3].arguments)
+        assertArrayEquals(arrayOf<Any?>(7L, NOTE, Timestamp.from(FIRST.plusSeconds(1))), fixture.jdbc.calls[4].arguments)
+    }
+
+    private fun assertCommitted(fixture: Fixture, samples: Int) {
+        assertEquals(1, fixture.guards)
+        assertEquals(samples, fixture.samples)
+        assertEquals(listOf(7L), fixture.hinted)
+        assertEquals(1, fixture.manager.commits)
+        assertEquals(0, fixture.manager.rollbacks)
+        fixture.assertReturned()
+    }
+
+    /** One of the three mutations, reduced to what the shared tests need. */
+    class Subject(
+        private val name: String,
+        val mutationType: Class<*>,
+        val missingOwnedNote: Class<out RuntimeException>,
+        /** Events from begin to commit; the failure test fails each of them in turn. */
+        val stages: List<String>,
+        val create: (JdbcTemplate, TransactionTemplate, NoteChangeHints) -> (Runnable, Supplier<Instant>) -> Unit,
+    ) {
+        override fun toString(): String = name
+    }
 
     private class Call(val sql: String, val arguments: Array<out Any?>)
 
-    private class Fixture {
+    private class Fixture(subject: Subject) {
         val events = ArrayList<String>()
         val hinted = ArrayList<Long>()
         val manager = SynchronizingManager(events)
         val jdbc = RecordingJdbc(manager, events)
-        val mutation: JdbcNoteDeletion
+        private val invoke: (Runnable, Supplier<Instant>) -> Unit
         var guards = 0
         var samples = 0
         var guardFailure: RuntimeException? = null
@@ -237,7 +307,7 @@ class JdbcNoteDeletionTest {
         init {
             val transaction = TransactionTemplate(manager)
             transaction.timeout = 15
-            mutation = JdbcNoteDeletion(
+            invoke = subject.create(
                 jdbc,
                 transaction,
                 NoteChangeHints { current ->
@@ -253,15 +323,13 @@ class JdbcNoteDeletionTest {
             )
         }
 
-        fun delete() {
+        fun run() {
             val now = Supplier<Instant> {
                 samples++
                 events.add("clock:$samples")
                 FIRST.plusSeconds((samples - 1).toLong())
             }
-            mutation.delete(
-                7L,
-                NOTE,
+            invoke(
                 Runnable {
                     assertTrue(manager.active)
                     events.add("guard")
@@ -287,23 +355,24 @@ class JdbcNoteDeletionTest {
     ) : JdbcTemplate() {
         val calls = ArrayList<Call>()
         val found = ArrayDeque<Boolean>(listOf(true, true))
+
+        /** Affected rows per write event; every write affects one row unless a test says otherwise. */
+        val rows = HashMap<String, Int>()
         var finds = 0
         var noteLockRows = 1
-        var mailboxRows = 1
-        var noteRows = 1
         var failEvent: String? = null
         var failure: RuntimeException? = null
 
         override fun update(sql: String, vararg arguments: Any?): Int {
-            val event = if (normalize(sql).startsWith("INSERT")) {
-                "insert"
-            } else if (normalize(sql).startsWith("DELETE FROM pawbridge_community.private_note_mailboxes")) {
-                "delete-mailbox"
-            } else {
-                "delete-orphan"
+            val statement = normalize(sql)
+            val event = when {
+                statement.startsWith("INSERT") -> "insert"
+                statement.startsWith("UPDATE") -> "update"
+                statement.startsWith("DELETE FROM pawbridge_community.private_note_mailboxes") -> "delete-mailbox"
+                else -> "delete-orphan"
             }
             record(sql, arguments, event)
-            return if (event == "insert") 0 else if (event == "delete-mailbox") mailboxRows else noteRows
+            return if (event == "insert") 0 else rows.getOrDefault(event, 1)
         }
 
         override fun <T : Any?> queryForObject(sql: String, type: Class<T>, vararg arguments: Any?): T? {
@@ -387,19 +456,77 @@ class JdbcNoteDeletionTest {
         }
     }
 
-    private companion object {
-        val NOTE: UUID = TestFaker.uuid()
-        val FIRST: Instant = Instant.parse("2031-01-01T00:00:00.123456Z")
-        const val INSERT =
+    companion object {
+        private val NOTE: UUID = UUID.fromString("f2600000-0000-0000-0000-000000000001")
+        private val FIRST: Instant = Instant.parse("2031-01-01T00:00:00.123456Z")
+        private const val INSERT =
             "INSERT INTO pawbridge_community.private_note_members(member_id) VALUES (?) ON CONFLICT DO NOTHING"
-        const val MEMBER_LOCK =
+        private const val MEMBER_LOCK =
             "SELECT member_id FROM pawbridge_community.private_note_members WHERE member_id = ? FOR UPDATE"
-        const val FIND =
+        private const val FIND =
             "SELECT 1 FROM pawbridge_community.private_note_mailboxes m JOIN pawbridge_community.private_notes n ON n.note_id = m.note_id WHERE m.member_id = ? AND n.note_id = ? AND n.expires_at > ?"
-        const val NOTE_LOCK = "SELECT note_id FROM pawbridge_community.private_notes WHERE note_id = ? FOR UPDATE"
-        const val DELETE_MAILBOX =
+        private const val NOTE_LOCK = "SELECT note_id FROM pawbridge_community.private_notes WHERE note_id = ? FOR UPDATE"
+        private const val READ_UPDATE =
+            "UPDATE pawbridge_community.private_note_mailboxes SET read_at = COALESCE(read_at, ?) WHERE member_id = ? AND note_id = ? AND direction = 'INBOX'"
+        private const val FAVORITE_UPDATE =
+            "UPDATE pawbridge_community.private_note_mailboxes SET favorite = ? WHERE member_id = ? AND note_id = ?"
+        private const val DELETE_MAILBOX =
             "DELETE FROM pawbridge_community.private_note_mailboxes WHERE member_id = ? AND note_id = ?"
-        const val DELETE_ORPHAN =
+        private const val DELETE_ORPHAN =
             "DELETE FROM pawbridge_community.private_notes n WHERE note_id = ? AND NOT EXISTS( SELECT 1 FROM pawbridge_community.private_note_mailboxes m WHERE m.note_id = n.note_id )"
+
+        private val CHECKS = listOf("begin", "insert", "member-lock", "guard", "clock:1", "find:1", "note-lock", "clock:2", "find:2")
+
+        private val READ = Subject(
+            name = "읽음",
+            mutationType = JdbcNoteReadMutation::class.java,
+            missingOwnedNote = NoteReadMutation.MissingOwnedNote::class.java,
+            stages = CHECKS + listOf("clock:3", "update", "commit"),
+            create = { jdbc, transaction, hints ->
+                val mutation = JdbcNoteReadMutation(jdbc, transaction, hints)
+                ({ guard, now -> mutation.read(7L, NOTE, guard, now) })
+            },
+        )
+
+        private fun favoriteSubject(favorite: Boolean) = Subject(
+            name = "즐겨찾기",
+            mutationType = JdbcNoteFavoriteMutation::class.java,
+            missingOwnedNote = NoteFavoriteMutation.MissingOwnedNote::class.java,
+            stages = CHECKS + listOf("update", "commit"),
+            create = { jdbc, transaction, hints ->
+                val mutation = JdbcNoteFavoriteMutation(jdbc, transaction, hints)
+                ({ guard, now -> mutation.set(7L, NOTE, favorite, guard, now) })
+            },
+        )
+
+        private val DELETE = Subject(
+            name = "삭제",
+            mutationType = JdbcNoteDeletion::class.java,
+            missingOwnedNote = NoteDeletion.MissingOwnedNote::class.java,
+            stages = CHECKS + listOf("delete-mailbox", "delete-orphan", "commit"),
+            create = { jdbc, transaction, hints ->
+                val mutation = JdbcNoteDeletion(jdbc, transaction, hints)
+                ({ guard, now -> mutation.delete(7L, NOTE, guard, now) })
+            },
+        )
+
+        private val SUBJECTS = listOf(READ, favoriteSubject(false), DELETE)
+
+        @JvmStatic
+        fun subjects(): Stream<Arguments> = SUBJECTS.stream().map { Arguments.of(it) }
+
+        @JvmStatic
+        fun subjectsWithMissingAt(): Stream<Arguments> =
+            SUBJECTS.stream().flatMap { subject -> Stream.of(1, 2).map { Arguments.of(subject, it) } }
+
+        /** Every stage that can fail, except the read-only ones (member lock, clocks, existence checks). */
+        @JvmStatic
+        fun subjectsWithPhase(): Stream<Arguments> = SUBJECTS.stream().flatMap { subject ->
+            subject.stages
+                .filter { it == "begin" || it == "insert" || it == "guard" || it == "note-lock" || it == "commit" ||
+                    it == "update" || it.startsWith("delete-") }
+                .stream()
+                .map { Arguments.of(subject, it) }
+        }
     }
 }

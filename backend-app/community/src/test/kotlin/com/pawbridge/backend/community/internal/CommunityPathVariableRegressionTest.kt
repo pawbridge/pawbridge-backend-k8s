@@ -31,15 +31,18 @@ import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
 import com.pawbridge.backend.community.internal.post.web.PostUpdateController
 import com.pawbridge.backend.community.internal.post.web.PostUpdateExceptionHandler
+import io.mockk.confirmVerified
 import io.mockk.mockk
-import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
+import org.springframework.test.web.servlet.RequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
@@ -47,6 +50,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.nio.charset.StandardCharsets
+import java.util.stream.Stream
 
 /**
  * Locks in the 400 response for a blank (`%20`) or non-numeric path variable in the community post, comment and
@@ -122,156 +126,37 @@ class CommunityPathVariableRegressionTest {
             .build()
     }
 
-    // PostReadController
-
-    @Test
-    fun `공백 ID일 때__게시글을 조회하면__400을 응답한다`() {
+    @ParameterizedTest(name = "{0} {1}")
+    @MethodSource("routes")
+    fun `공백이나 숫자가 아닌 ID일 때__경로를 바인딩하면__유스케이스를 호출하지 않고 400을 응답한다`(
+        route: Route,
+        segment: String,
+    ) {
         // when
-        val result = postReadMvc.perform(get("/api/v1/posts/read/{postId}", BLANK_SEGMENT)).andReturn()
+        val result = mvc(route).perform(route.request(segment)).andReturn()
 
         // then
         assertBadRequest(result)
-        verify(exactly = 0) { readPost.read(any()) }
+        confirmVerified(
+            readPost, listPosts, readAdminPosts, deletePost, updatePost,
+            createComment, updateComment, commentDeletion, listComments, chats, tickets,
+        )
     }
 
-    @Test
-    fun `숫자가 아닌 ID일 때__게시글을 조회하면__400을 응답한다`() {
-        // when
-        val result = postReadMvc.perform(get("/api/v1/posts/read/{postId}", NON_NUMERIC)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { readPost.read(any()) }
+    private fun mvc(route: Route): MockMvc = when (route.controller) {
+        "postRead" -> postReadMvc
+        "adminPostRead" -> adminPostReadMvc
+        "postDelete" -> postDeleteMvc
+        "postUpdate" -> postUpdateMvc
+        "commentCreate" -> commentCreateMvc
+        "commentUpdate" -> commentUpdateMvc
+        "commentDelete" -> commentDeleteMvc
+        "commentRead" -> commentReadMvc
+        else -> chatMvc
     }
 
-    // AdminPostReadController
-
-    @Test
-    fun `공백 ID일 때__관리자가 게시글을 조회하면__400을 응답한다`() {
-        // when
-        val result = adminPostReadMvc.perform(get("/api/v1/admin/posts/{postId}", BLANK_SEGMENT)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { readPost.read(any()) }
-    }
-
-    // PostDeleteController, AdminPostDeleteController
-
-    @Test
-    fun `공백 ID일 때__게시글을 삭제하면__400을 응답한다`() {
-        // when
-        val result = postDeleteMvc.perform(delete("/api/v1/posts/{postId}", BLANK_SEGMENT)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { deletePost.delete(any(), any()) }
-    }
-
-    @Test
-    fun `공백 ID일 때__관리자가 게시글을 삭제하면__400을 응답한다`() {
-        // when
-        val result = postDeleteMvc.perform(delete("/api/v1/admin/posts/{postId}", BLANK_SEGMENT)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { deletePost.deleteAsAdmin(any()) }
-    }
-
-    // PostUpdateController, AdminPostUpdateController
-
-    @Test
-    fun `공백 ID일 때__게시글을 수정하면__400을 응답한다`() {
-        // when
-        val result = postUpdateMvc.perform(multipart(HttpMethod.PUT, "/api/v1/posts/{postId}", BLANK_SEGMENT))
-            .andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { updatePost.update(any(), any(), any(), any(), any()) }
-    }
-
-    @Test
-    fun `공백 ID일 때__관리자가 게시글을 수정하면__400을 응답한다`() {
-        // when
-        val result = postUpdateMvc.perform(multipart(HttpMethod.PUT, "/api/v1/admin/posts/{postId}", BLANK_SEGMENT))
-            .andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { updatePost.updateAsAdmin(any(), any(), any(), any()) }
-    }
-
-    // Comment controllers
-
-    @Test
-    fun `공백 ID일 때__댓글을 조회하면__400을 응답한다`() {
-        // when
-        val result = commentReadMvc.perform(get("/api/v1/comments/posts/read/{postId}", BLANK_SEGMENT)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { listComments.read(any()) }
-    }
-
-    @Test
-    fun `공백 ID일 때__댓글을 작성하면__400을 응답한다`() {
-        // when
-        val result = commentCreateMvc.perform(
-            post("/api/v1/comments/posts/{postId}", BLANK_SEGMENT)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(COMMENT_BODY),
-        ).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { createComment.create(any(), any(), any()) }
-    }
-
-    @Test
-    fun `공백 ID일 때__댓글을 수정하면__400을 응답한다`() {
-        // when
-        val result = commentUpdateMvc.perform(
-            put("/api/v1/comments/{commentId}", BLANK_SEGMENT)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(COMMENT_BODY),
-        ).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { updateComment.update(any(), any(), any()) }
-    }
-
-    @Test
-    fun `공백 ID일 때__댓글을 삭제하면__400을 응답한다`() {
-        // when
-        val result = commentDeleteMvc.perform(delete("/api/v1/comments/{commentId}", BLANK_SEGMENT)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { commentDeletion.delete(any(), any()) }
-    }
-
-    // MemberChatController
-
-    @Test
-    fun `공백 회원 ID일 때__기존 채팅방을 조회하면__400을 응답한다`() {
-        // when
-        val result = chatMvc.perform(get("/api/v1/chats/with/{member}", BLANK_SEGMENT)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { chats.existingRoom(any(), any()) }
-    }
-
-    @Test
-    fun `숫자가 아닌 회원 ID일 때__기존 채팅방을 조회하면__400을 응답한다`() {
-        // when
-        val result = chatMvc.perform(get("/api/v1/chats/with/{member}", NON_NUMERIC)).andReturn()
-
-        // then
-        assertBadRequest(result)
-        verify(exactly = 0) { chats.existingRoom(any(), any()) }
+    class Route(val controller: String, val name: String, val request: (String) -> RequestBuilder) {
+        override fun toString(): String = name
     }
 
     companion object {
@@ -282,6 +167,29 @@ class CommunityPathVariableRegressionTest {
 
         private const val BAD_REQUEST_BODY =
             "{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}"
+
+        private val ROUTES = listOf(
+            Route("postRead", "게시글 조회") { get("/api/v1/posts/read/{postId}", it) },
+            Route("adminPostRead", "관리자 게시글 조회") { get("/api/v1/admin/posts/{postId}", it) },
+            Route("postDelete", "게시글 삭제") { delete("/api/v1/posts/{postId}", it) },
+            Route("postDelete", "관리자 게시글 삭제") { delete("/api/v1/admin/posts/{postId}", it) },
+            Route("postUpdate", "게시글 수정") { multipart(HttpMethod.PUT, "/api/v1/posts/{postId}", it) },
+            Route("postUpdate", "관리자 게시글 수정") { multipart(HttpMethod.PUT, "/api/v1/admin/posts/{postId}", it) },
+            Route("commentRead", "댓글 조회") { get("/api/v1/comments/posts/read/{postId}", it) },
+            Route("commentCreate", "댓글 작성") {
+                post("/api/v1/comments/posts/{postId}", it).contentType(MediaType.APPLICATION_JSON).content(COMMENT_BODY)
+            },
+            Route("commentUpdate", "댓글 수정") {
+                put("/api/v1/comments/{commentId}", it).contentType(MediaType.APPLICATION_JSON).content(COMMENT_BODY)
+            },
+            Route("commentDelete", "댓글 삭제") { delete("/api/v1/comments/{commentId}", it) },
+            Route("chat", "기존 채팅방 조회") { get("/api/v1/chats/with/{member}", it) },
+        )
+
+        @JvmStatic
+        fun routes(): Stream<Arguments> = ROUTES.stream().flatMap { route ->
+            Stream.of(BLANK_SEGMENT, NON_NUMERIC).map { Arguments.of(route, it) }
+        }
 
         /** 400 in the feature's `{code, message, data}` envelope, with no use case call. */
         private fun assertBadRequest(result: MvcResult) {

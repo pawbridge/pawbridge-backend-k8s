@@ -11,7 +11,6 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -60,10 +59,9 @@ class CreateCommentTest {
         every { posts.findById(any()) } returns Optional.empty()
 
         // when
-        val thrown = assertThrows(PostNotFoundException::class.java) { create.create(42L, 7L, CONTENT) }
+        assertThrows(PostNotFoundException::class.java) { create.create(42L, 7L, CONTENT) }
 
         // then
-        assertNotNull(thrown)
         verify(exactly = 1) { posts.findById(42L) }
         confirmVerified(posts, nicknames, writer)
     }
