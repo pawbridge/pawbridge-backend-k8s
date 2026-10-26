@@ -12,6 +12,7 @@ import org.springframework.http.CacheControl
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.server.ResponseStatusException
 
@@ -54,6 +55,12 @@ class NoteStreamExceptionHandler {
     @ExceptionHandler(DataAccessException::class)
     fun storageUnavailable(response: HttpServletResponse): ResponseEntity<Map<String, String>>? =
         error(503, "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.", response)
+
+    // An open stream ends with this when its emitter times out and the client reconnects, so it is not a failure
+    // and is not logged. The response stays the same as before for a stream that has not started writing.
+    @ExceptionHandler(AsyncRequestTimeoutException::class)
+    fun streamTimedOut(response: HttpServletResponse): ResponseEntity<Map<String, String>>? =
+        error(503, "쪽지를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.", response)
 
     @ExceptionHandler(RuntimeException::class)
     fun unexpectedFailure(
