@@ -156,7 +156,11 @@ jobs:
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           validate-wrappers: true
-          cache-disabled: true
+          # Only downloaded dependencies and the Gradle distribution are cached, under the isolated
+          # GRADLE_USER_HOME above. The Gradle build cache stays off (org.gradle.caching is unset),
+          # so every test, architecture and bootJar task still executes against this checkout.
+          # Pull requests only read the cache; pushes to dev are the only writers.
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
           dependency-graph: disabled
           build-scan-publish: false
           add-job-summary-as-pr-comment: never
@@ -179,14 +183,16 @@ jobs:
             printf 'jdk_version=%s\n' "$JDK_VERSION"
             java -version 2>&1
           } | tee build/ci/runtime-metadata.txt
-          bash ./gradlew --version --no-daemon --max-workers=1 -Dorg.gradle.parallel=false | tee build/ci/gradle-version.txt
+          bash ./gradlew --version | tee build/ci/gradle-version.txt
           grep -Fx 'Gradle 8.14.3' build/ci/gradle-version.txt
 
+      # The hosted runner has 4 vCPUs; the daemon heap and the Kotlin daemon heap are set in
+      # backend-app/gradle.properties so that four workers fit in 16 GB.
       - name: Check modules, boundaries, unit tests and executable JAR
-        run: bash ./gradlew projects check :boot:bootJar --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+        run: bash ./gradlew projects check :boot:bootJar --max-workers=4 -Dorg.gradle.parallel=true
 
       - name: Compile the PostgreSQL compatibility test without running it
-        run: bash ./gradlew :boot:compileCompatibilityTestJava --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
+        run: bash ./gradlew :boot:compileCompatibilityTestJava --max-workers=4 -Dorg.gradle.parallel=true
 
       - name: Bind the candidate JAR to this checked source
         id: package
@@ -216,7 +222,7 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-      - name: Preserve shared unit and architecture evidence even on failure
+      - name: Preserve shared unit evidence even on failure
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -236,6 +242,95 @@ jobs:
         with:
           name: backend-app-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: backend-app/*/build/reports/jacoco/test/
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
+  architecture:
+    needs: [selection, proof]
+    if: ${{ needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}
+    name: Gradle build-logic architecture tests
+    # Runs on its own runner at the same time as the package job. Each of these tests starts a
+    # complete Gradle build in a TestKit fixture, so it is moved off the critical path of `check`.
+    # Pushes to dev always run it; a pull request runs it only when build logic changed.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend-app
+    steps:
+      - name: Check out the candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          sparse-checkout: |
+            backend-app
+            .github/workflows/backend-app-check.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Decide whether build logic changed
+        id: scope
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            printf 'run=true\n' >> "$GITHUB_OUTPUT"
+            printf 'Push to dev: architecture tests always run\n'
+            exit 0
+          fi
+          git diff --name-only "$PULL_REQUEST_BASE_SHA"...HEAD > "$RUNNER_TEMP/changed-paths.txt"
+          build_logic_paths='^backend-app/(.*/)?[^/]*\.gradle$'
+          build_logic_paths="$build_logic_paths|^backend-app/gradle/"
+          build_logic_paths="$build_logic_paths|^backend-app/gradle\.properties$"
+          build_logic_paths="$build_logic_paths|^backend-app/gradlew"
+          build_logic_paths="$build_logic_paths|^backend-app/boot/src/architectureTest/"
+          build_logic_paths="$build_logic_paths|^\.github/workflows/backend-app-check\.yml$"
+          if grep -Eq "$build_logic_paths" "$RUNNER_TEMP/changed-paths.txt"; then
+            printf 'run=true\n' >> "$GITHUB_OUTPUT"
+            printf 'Build logic changed: architecture tests run\n'
+          else
+            printf 'run=false\n' >> "$GITHUB_OUTPUT"
+            printf 'No build logic change against the pull request base: architecture tests skipped\n'
+          fi
+
+      - name: Isolate Gradle state on the hosted runner
+        if: ${{ steps.scope.outputs.run == 'true' }}
+        run: |
+          set -euo pipefail
+          printf 'GRADLE_USER_HOME=%s\n' "$RUNNER_TEMP/pawbridge-backend-app-gradle" >> "$GITHUB_ENV"
+
+      - name: Set up Java 21
+        if: ${{ steps.scope.outputs.run == 'true' }}
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: x64
+          check-latest: true
+
+      - name: Set up Gradle Wrapper validation
+        if: ${{ steps.scope.outputs.run == 'true' }}
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          validate-wrappers: true
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+          dependency-graph: disabled
+          build-scan-publish: false
+          add-job-summary-as-pr-comment: never
+
+      - name: Run the Gradle build-logic architecture tests
+        if: ${{ steps.scope.outputs.run == 'true' }}
+        run: bash ./gradlew :boot:architectureTest --max-workers=4 -Dorg.gradle.parallel=true
+
+      - name: Preserve architecture test evidence even on failure
+        if: ${{ always() && steps.scope.outputs.run == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-app-architecture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: backend-app/boot/build/test-results/architectureTest/TEST-*.xml
           if-no-files-found: warn
           include-hidden-files: false
           retention-days: 7
@@ -1587,7 +1682,7 @@ jobs:
 
   ci-result:
     name: Backend app CI result
-    needs: [selection, proof, package, check]
+    needs: [selection, proof, package, architecture, check]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -1598,6 +1693,7 @@ jobs:
           MODULE_SELECTED: ${{ needs.selection.outputs.selected }}
           MODULE_RESULT: ${{ needs.check.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           PROOF_RESULT: ${{ needs.proof.result }}
           PROOF_MODE: ${{ needs.proof.outputs.mode }}
           EVENT_NAME: ${{ github.event_name }}
@@ -1609,7 +1705,8 @@ jobs:
           if [ "$EVENT_NAME" = pull_request ]; then
             executed=skipped
           fi
-          case "$MODULE_SELECTED:$PROOF_RESULT:$PROOF_MODE:$PACKAGE_RESULT:$MODULE_RESULT" in
-            "true:success:execute:success:$executed"|true:success:reused-full:skipped:skipped|false:skipped::skipped:skipped) ;;
+          # The architecture job succeeds even when a pull request skips its steps for unchanged build logic.
+          case "$MODULE_SELECTED:$PROOF_RESULT:$PROOF_MODE:$PACKAGE_RESULT:$ARCHITECTURE_RESULT:$MODULE_RESULT" in
+            "true:success:execute:success:success:$executed"|true:success:reused-full:skipped:skipped:skipped|false:skipped::skipped:skipped:skipped) ;;
             *) printf 'Backend app checks failed or were unexpectedly skipped\n' >&2; exit 1 ;;
           esac

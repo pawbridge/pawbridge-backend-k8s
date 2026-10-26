@@ -76,7 +76,7 @@ tasks.register('architectureTest', Test) {
     systemProperty 'architecture.gradle.user.home', gradle.gradleUserHomeDir.absolutePath
 }
 
-tasks.named('check') { dependsOn tasks.named('architectureTest') }
+// architectureTest is not part of check: it runs in the separate architecture CI job.
 
 // The only remaining compatibility contract: cookie refresh sessions on the owned PostgreSQL fixture.
 tasks.register('authSessionCompatibilityTest', Test) {
