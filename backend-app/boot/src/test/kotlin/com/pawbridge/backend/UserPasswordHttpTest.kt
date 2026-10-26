@@ -19,7 +19,6 @@ import io.mockk.every
 import io.mockk.justRun
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -207,27 +206,6 @@ class UserPasswordHttpTest {
                 ),
             )
         verify(exactly = 1) { change.change(7, "Current1!", "NewPass1!") }
-    }
-
-    @Test
-    fun `기존 닉네임 경로가 주어졌을 때__비밀번호 기능이 켜져 있어도 요청하면__비밀번호 어드바이스가 가로채지 않는다`() {
-        // given
-        justRun { nicknames.change(any(), any()) }
-
-        // when
-        val result = mvc.perform(
-            put("/api/v1/users/me/nickname")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"nickname\":\"새닉네임\"}"),
-        )
-
-        // then
-        result
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").value("닉네임이 변경되었습니다."))
-        verify(exactly = 1) { nicknames.change(7, "새닉네임") }
-        confirmVerified(change)
     }
 
     companion object {

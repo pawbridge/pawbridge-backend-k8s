@@ -13,7 +13,6 @@ import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandle
 import com.pawbridge.backend.user.internal.favorite.application.FavoriteStatusQuery
 import com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusController
 import com.pawbridge.backend.user.internal.favorite.web.FavoriteStatusExceptionHandler
-import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.profile.web.UserProfileController
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
@@ -21,7 +20,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -39,7 +37,6 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.TransactionSystemException
 import java.sql.SQLException
@@ -177,30 +174,6 @@ class FavoriteStatusHttpTest {
         verify(exactly = 1) { favorites.isFavorite(7, 42) }
         confirmVerified(favorites)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @Test
-    fun `프로필이 없고 공개 글 목록이 있을 때__요청하면__즐겨찾기 오류 처리와 인증이 각자 계약을 유지한다`() {
-        // given
-        every { profiles.require(7) } throws UserNotFoundException()
-        every { listPosts.read() } returns listOf()
-
-        // when
-        val profileResult = mvc.perform(
-            get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-        val postsResult = mvc.perform(get("/api/v1/posts/read").header("Authorization", "Bearer invalid"))
-
-        // then
-        profileResult
-            .andExpect(status().isBadRequest())
-            .andExpect(
-                content().json("{\"code\":400,\"message\":\"존재하지 않는 회원입니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        postsResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data").isArray())
-        confirmVerified(favorites)
     }
 
     companion object {

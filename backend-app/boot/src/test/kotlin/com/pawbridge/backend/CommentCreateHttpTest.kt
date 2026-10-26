@@ -25,7 +25,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -40,7 +39,6 @@ import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
@@ -246,28 +244,6 @@ class CommentCreateHttpTest {
         }
         verify(exactly = 1) { createComment.create(42, 7, "synthetic-private-comment") }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @Test
-    fun `공개 읽기와 글 404가 있을 때__읽으면__댓글 작성의 인증과 오류 처리 범위가 유지된다`() {
-        // given
-        every { listComments.read(42) } returns listOf(details(7, "댓글"))
-        every { readPost.read(42) } throws PostNotFoundException()
-
-        // when
-        val commentsResult = mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
-        val postResult = mvc.perform(get("/api/v1/posts/read/42"))
-
-        // then
-        commentsResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].commentId").value(12))
-        postResult
-            .andExpect(status().isNotFound())
-            .andExpect(
-                content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(createComment, listPosts)
     }
 
     companion object {

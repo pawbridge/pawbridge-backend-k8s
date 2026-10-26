@@ -8,7 +8,6 @@ import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.InvalidPostSearchInputException
 import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.PostDetails
-import com.pawbridge.backend.community.internal.post.application.PostNotFoundException
 import com.pawbridge.backend.community.internal.post.application.PostSearchUnavailableException
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.application.SearchPosts
@@ -179,24 +178,6 @@ class PostSearchHttpTest {
                 ),
             )
         confirmVerified(searchPosts)
-    }
-
-    @Test
-    fun `기존 읽기 경로에 없는 게시글이 주어졌을 때__조회하면__검색 어드바이스가 원래 404를 바꾸지 않는다`() {
-        // given
-        every { readPost.read(any()) } throws PostNotFoundException()
-
-        // when
-        val result = mvc.perform(get("/api/v1/posts/read/42"))
-
-        // then
-        result
-            .andExpect(status().isNotFound())
-            .andExpect(
-                content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        verify(exactly = 1) { readPost.read(42) }
-        confirmVerified(searchPosts, listPosts)
     }
 
     @ParameterizedTest

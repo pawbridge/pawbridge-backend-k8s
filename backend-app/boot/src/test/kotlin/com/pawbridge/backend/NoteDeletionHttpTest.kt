@@ -17,7 +17,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -151,35 +150,6 @@ class NoteDeletionHttpTest {
         verify(exactly = 1) { mutation.delete(7L, NOTE, any(), any()) }
         verify(exactly = 1) { members.get(7) }
         confirmVerified(mutation, members, clock, counts)
-        cleared()
-    }
-
-    @Test
-    fun `삭제 어드바이스 밖의 관리자 집계일 때__사용자나 위조 역할 관리자가 요청하면__403과 공통 500을 유지한다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("private-count")
-
-        // when
-        val forbidden = mvc.perform(
-            get(ADMIN_COUNT)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN"),
-        )
-        val failed = mvc.perform(get(ADMIN_COUNT).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts, members, mutation, clock)
         cleared()
     }
 

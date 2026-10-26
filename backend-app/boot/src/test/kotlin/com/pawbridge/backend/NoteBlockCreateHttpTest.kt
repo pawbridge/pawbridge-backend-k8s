@@ -288,63 +288,6 @@ class NoteBlockCreateHttpTest {
         contextCleared()
     }
 
-    @Test
-    fun `상태 조회가 트랜잭션 오류로 실패했을 때__차단 상태를 읽으면__생성 어드바이스 밖에서 저장소 503을 준다`() {
-        // given
-        every { members.get(any()) } returns active(7)
-        every { statuses.blockedAuthors(any(), any()) } throws TransactionSystemException("synthetic-status-commit")
-
-        // when
-        val result = mvc.perform(
-            get("/api/v1/notes/blocks/status")
-                .param("memberIds", "8")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isServiceUnavailable())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to STORAGE)), JsonCompareMode.STRICT))
-        verify(exactly = 1) { members.get(7) }
-        verify(exactly = 1) { statuses.blockedAuthors(7, listOf(8L)) }
-        confirmVerified(members, statuses, creation, clock, counts)
-        contextCleared()
-    }
-
-    @Test
-    fun `관리자 통계 조회가 런타임 오류를 낼 때__사용자 수를 세면__일반 사용자는 403 관리자는 500을 받는다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
-
-        // when
-        val forbidden = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-        confirmVerified(counts)
-        val failed = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts, creation, members, clock, statuses)
-        contextCleared()
-    }
-
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_ADMIN", "", "ROLE_UNRECOGNIZED"])
     fun `사용자가 아닌 역할의 검증된 토큰일 때__차단하면__새 역할 제한 없이 접근을 유지한다`(

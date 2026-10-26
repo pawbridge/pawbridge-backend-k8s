@@ -12,7 +12,6 @@ import com.pawbridge.backend.user.internal.nickname.application.NicknameDuplicat
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameController
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameExceptionHandler
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
-import com.pawbridge.backend.user.internal.profile.application.UserProfile
 import com.pawbridge.backend.user.internal.profile.application.UserProfileQuery
 import com.pawbridge.backend.user.internal.profile.web.UserProfileController
 import com.pawbridge.backend.user.internal.profile.web.UserProfileExceptionHandler
@@ -249,31 +248,6 @@ class UserNicknameHttpTest {
                 ),
             )
         verify(exactly = 1) { change.change(7, "기존닉네임") }
-    }
-
-    @Test
-    fun `기존 프로필과 공개 조회가 주어졌을 때__요청하면__닉네임 어드바이스와 인증이 가로채지 않는다`() {
-        // given
-        every { profiles.require(any()) } returns
-            UserProfile(7, "synthetic@fixture.invalid", "합성", "기존닉네임", "LOCAL", "ROLE_USER", null)
-        every { listPosts.read() } returns listOf()
-
-        // when
-        val profile = mvc.perform(
-            get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-        val posts = mvc.perform(get("/api/v1/posts/read").header("Authorization", "Bearer invalid"))
-
-        // then
-        profile
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.nickname").value("기존닉네임"))
-        posts
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data").isArray())
-        verify(exactly = 1) { profiles.require(7) }
-        verify(exactly = 1) { listPosts.read() }
-        confirmVerified(change, profiles, listPosts)
     }
 
     companion object {

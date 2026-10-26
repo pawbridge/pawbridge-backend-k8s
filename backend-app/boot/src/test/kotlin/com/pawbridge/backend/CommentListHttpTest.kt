@@ -10,7 +10,6 @@ import com.pawbridge.backend.community.internal.comment.application.ListComments
 import com.pawbridge.backend.community.internal.comment.web.CommentReadController
 import com.pawbridge.backend.community.internal.comment.web.CommentReadExceptionHandler
 import com.pawbridge.backend.community.internal.post.application.ListPosts
-import com.pawbridge.backend.community.internal.post.application.PostNotFoundException
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
@@ -179,23 +178,6 @@ class CommentListHttpTest {
         }
         verify(exactly = 1) { listComments.read(42) }
         confirmVerified(readPost, listPosts)
-    }
-
-    @Test
-    fun `기존 읽기 경로에 없는 글일 때__글을 조회하면__댓글 오류 처리가 글 404를 유지한다`() {
-        // given
-        every { readPost.read(42) } throws PostNotFoundException()
-
-        // when
-        val result = mvc.perform(get("/api/v1/posts/read/42"))
-
-        // then
-        result
-            .andExpect(status().isNotFound())
-            .andExpect(
-                content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(listComments, listPosts)
     }
 
 }

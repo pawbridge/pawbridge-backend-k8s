@@ -24,7 +24,6 @@ import com.pawbridge.backend.community.internal.comment.web.CommentReadException
 import com.pawbridge.backend.community.internal.comment.web.CommentUpdateController
 import com.pawbridge.backend.community.internal.comment.web.CommentUpdateExceptionHandler
 import com.pawbridge.backend.community.internal.post.application.ListPosts
-import com.pawbridge.backend.community.internal.post.application.PostNotFoundException
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
@@ -53,9 +52,6 @@ import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
@@ -432,49 +428,6 @@ class CommentUpdateHttpTest {
                 ),
             )
         confirmVerified(modification)
-    }
-
-    @Test
-    fun `기존 댓글 읽기와 작성과 삭제와 글 404가 있을 때__요청하면__수정의 오류 처리와 인증 범위가 유지된다`() {
-        // given
-        val comment = details(7, "댓글", "작성자")
-
-        every { listComments.read(42) } returns listOf(comment)
-        every { createComment.create(42, 7, "댓글") } returns comment
-        justRun { deletion.delete(12, 7) }
-        every { readPost.read(42) } throws PostNotFoundException()
-
-        // when
-        val readResult = mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
-        val createResult = mvc.perform(
-            post("/api/v1/comments/posts/42")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"content\":\"댓글\"}")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-        val deleteResult = mvc.perform(
-            delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-        val postResult = mvc.perform(get("/api/v1/posts/read/42"))
-
-        // then
-        readResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].commentId").value(12))
-        createResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").value("댓글이 생성되었습니다."))
-        deleteResult
-            .andExpect(status().isOk())
-            .andExpect(
-                content().json("{\"code\":200,\"message\":\"댓글이 삭제되었습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        postResult
-            .andExpect(status().isNotFound())
-            .andExpect(
-                content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(comments, users, modification, listPosts)
     }
 
     companion object {

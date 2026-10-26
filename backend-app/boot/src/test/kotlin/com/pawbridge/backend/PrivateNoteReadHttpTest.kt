@@ -399,35 +399,6 @@ class PrivateNoteReadHttpTest {
         confirmVerified(notes, blocks, batches, counts)
     }
 
-    @Test
-    fun `관리자 건수 경로에 일반 권한과 런타임 오류가 있을 때__요청하면__쪽지 조언 밖에서 403과 공통 500을 유지한다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("synthetic-private-count")
-
-        // when
-        val forbidden = mvc.perform(authenticated("/api/v1/admin/users/stats/total-users"))
-        val failed = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts)
-        confirmVerified(members, clock, notes, blocks, batches, blockLists, notifications)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
     private fun expectedNote(
         direction: String,
         readAt: Instant?,

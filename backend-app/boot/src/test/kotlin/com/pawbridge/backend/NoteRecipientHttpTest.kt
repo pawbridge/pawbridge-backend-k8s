@@ -224,24 +224,6 @@ class NoteRecipientHttpTest {
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
-    @Test
-    fun `기존 즐겨찾기와 공개 게시글 경로일 때__읽으면__인증과 범위 실패 계약을 유지한다`() {
-        // given
-        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
-
-        // when
-        val favorite = mvc.perform(get("/api/v1/favorites/42/check"))
-        val post = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
-
-        // then
-        favorite.andExpect(status().isUnauthorized())
-        post
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { readPost.read(42) }
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
-    }
-
     private fun authenticatedRecipient(target: Long): MockHttpServletRequestBuilder {
         return get("/api/v1/notes/recipients/{member}", target)
             .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))

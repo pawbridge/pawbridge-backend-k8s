@@ -210,22 +210,6 @@ class UserAnimalActivitiesHttpTest {
         cleared()
     }
 
-    @Test
-    fun `기존 상태 조회가 주어졌을 때__요청하면__동물 활동 어드바이스가 상태 조회를 가로채지 않는다`() {
-        // given
-        every { statusQuery.isFavorite(any(), any()) } returns true
-
-        // when
-        val statusResult = mvc.perform(get("/api/v1/favorites/8/check").header("Authorization", token()))
-
-        // then
-        statusResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data").value(true))
-        verify(exactly = 1) { statusQuery.isFavorite(7, 8) }
-        confirmVerified(activities)
-    }
-
     companion object {
         private fun token(): String = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
 

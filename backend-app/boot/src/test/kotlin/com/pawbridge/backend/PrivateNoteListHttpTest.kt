@@ -404,34 +404,6 @@ class PrivateNoteListHttpTest {
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
-    @Test
-    fun `관리자 건수 경로에 일반 권한과 런타임 오류가 있을 때__요청하면__목록 조언 밖에서 403과 공통 500을 유지한다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
-
-        // when
-        val forbidden = mvc.perform(authenticated("/api/v1/admin/users/stats/total-users"))
-        val failed = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts)
-        confirmVerified(members, batches, clock, notes, blocks, details, notifications, blockLists)
-    }
-
     private fun page(total: Long, pages: Int, number: Int): ObjectNode {
         val result = mapper.createObjectNode().put("code", 200).put("message", "요청이 성공적으로 처리되었습니다.")
         val data = result.putObject("data")

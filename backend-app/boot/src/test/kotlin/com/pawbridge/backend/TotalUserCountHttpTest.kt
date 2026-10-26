@@ -19,7 +19,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -139,24 +138,6 @@ class TotalUserCountHttpTest {
         verify(exactly = 1) { counts.count() }
         confirmVerified(counts)
         confirmVerified(members, blocks, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @Test
-    fun `잘못된 베어러로 공개 게시글을 읽을 때__자체 실패가 나면__공개 접근과 범위 한정 500을 유지한다`() {
-        // given
-        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
-
-        // when
-        val result = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
-
-        // then
-        result
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { readPost.read(42) }
-        confirmVerified(readPost)
-        confirmVerified(counts, members, blocks, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 

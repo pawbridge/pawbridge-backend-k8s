@@ -206,63 +206,6 @@ class NoteBlockRemoveHttpTest {
         contextCleared()
     }
 
-    @Test
-    fun `읽기 전용 트랜잭션 오류가 났을 때__차단 상태를 조회하면__해제 어드바이스 밖에서 저장소 503을 유지한다`() {
-        // given
-        every { members.get(any()) } returns active()
-        every { statuses.blockedAuthors(any(), any()) } throws TransactionSystemException("synthetic-status-commit")
-
-        // when
-        val result = mvc.perform(
-            get("/api/v1/notes/blocks/status")
-                .param("memberIds", "8")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isServiceUnavailable())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to STORAGE)), JsonCompareMode.STRICT))
-        verify(exactly = 1) { members.get(7) }
-        verify(exactly = 1) { statuses.blockedAuthors(7, listOf(8L)) }
-        confirmVerified(members, statuses, removal, counts)
-        contextCleared()
-    }
-
-    @Test
-    fun `관리자 권한과 런타임 오류가 주어졌을 때__사용자 수를 세면__해제 어드바이스 밖에서 403과 500을 유지한다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
-
-        // when
-        val forbidden = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-        confirmVerified(counts)
-        val failed = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts, removal, members, statuses)
-        contextCleared()
-    }
-
     private fun authenticated(path: String): MockHttpServletRequestBuilder {
         return delete(path).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
     }

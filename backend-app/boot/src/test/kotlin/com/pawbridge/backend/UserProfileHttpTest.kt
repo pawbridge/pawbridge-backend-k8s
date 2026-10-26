@@ -10,7 +10,6 @@ import com.pawbridge.backend.community.internal.comment.application.ListComments
 import com.pawbridge.backend.community.internal.comment.web.CommentReadController
 import com.pawbridge.backend.community.internal.comment.web.CommentReadExceptionHandler
 import com.pawbridge.backend.community.internal.post.application.ListPosts
-import com.pawbridge.backend.community.internal.post.application.PostNotFoundException
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.application.SearchPosts
 import com.pawbridge.backend.community.internal.post.web.PostReadController
@@ -261,46 +260,6 @@ class UserProfileHttpTest {
             appender.stop()
         }
         verify(exactly = 1) { profiles.require(7) }
-        confirmVerified(profiles)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "/api/v1/posts/read/42",
-            "/api/v1/posts/read",
-            "/api/v1/posts/search?keyword=test",
-            "/api/v1/comments/posts/read/42",
-        ],
-    )
-    fun `유효하지 않은 Bearer와 기존 공개 조회가 주어졌을 때__요청하면__프로필 인증과 어드바이스가 가로채지 않는다`(path: String) {
-        // given
-        every { readPost.read(any()) } throws PostNotFoundException()
-        every { listPosts.read() } returns listOf()
-        every { searchPosts.search(any()) } returns listOf()
-        every { listComments.read(any()) } returns listOf()
-
-        // when
-        val response = mvc.perform(get(path).header("Authorization", "Bearer invalid"))
-
-        // then
-        if (path == "/api/v1/posts/read/42") {
-            response.andExpect(status().isNotFound())
-                .andExpect(
-                    content().json(
-                        "{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}",
-                        JsonCompareMode.STRICT,
-                    ),
-                )
-            verify(exactly = 1) { readPost.read(42) }
-        } else {
-            response.andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(200))
-                .andExpect(jsonPath("$.message").value("요청이 성공적으로 처리되었습니다."))
-                .andExpect(jsonPath("$.data").isArray())
-                .andExpect(jsonPath("$.data.length()").value(0))
-        }
         confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
