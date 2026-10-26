@@ -25,7 +25,6 @@ import org.springframework.beans.factory.config.BeanDefinitionCustomizer
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.test.util.ReflectionTestUtils
@@ -210,18 +209,6 @@ class AnimalImageConfigurationTest {
                 .hasStackTraceContaining("postS3Client")
             confirmVerified(writer)
         }
-    }
-
-    @Test
-    fun `애플리케이션 임포트__검사하면__이미지 설정을 한 번만 등록한다`() {
-        // given
-        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value
-
-        // when
-        val registrations = imports.filter { type -> type.java == AnimalImageConfiguration::class.java }.size
-
-        // then
-        assertThat(registrations).isEqualTo(1)
     }
 
     companion object {

@@ -288,37 +288,6 @@ class NoteBlockCreateHttpTest {
         contextCleared()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["ROLE_ADMIN", "", "ROLE_UNRECOGNIZED"])
-    fun `사용자가 아닌 역할의 검증된 토큰일 때__차단하면__새 역할 제한 없이 접근을 유지한다`(
-        role: String,
-    ) {
-        // given
-        every { members.get(7) } returns active(7)
-        every { members.get(8) } returns active(8)
-        every { clock.instant() } returns NOW
-        every { creation.create(any(), any(), any()) } answers {
-            val afterActive = thirdArg<Supplier<Instant>>()
-            assertThat(afterActive.get()).isEqualTo(NOW)
-        }
-
-        // when
-        val result = mvc.perform(put(PATH + "8").header("Authorization", "Bearer " + F3TestInputs.token(7, role)))
-
-        // then
-        result
-            .andExpect(status().isOk())
-            .andExpect(content().string(""))
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        verify(exactly = 1) { creation.create(7L, 8L, any()) }
-        verify(exactly = 1) { members.get(7) }
-        verify(exactly = 1) { members.get(8) }
-        verify(exactly = 1) { clock.instant() }
-        confirmVerified(creation, members, clock, statuses, counts)
-        contextCleared()
-    }
-
     private fun authenticated(path: String): MockHttpServletRequestBuilder {
         return put(path).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
     }

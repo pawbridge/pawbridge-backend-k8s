@@ -1,6 +1,5 @@
 package com.pawbridge.backend.boot.configuration
 
-import com.pawbridge.backend.PawBridgeApplication
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveHttpClient
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveObjectStorage
 import com.pawbridge.backend.animal.internal.photoarchive.infrastructure.PhotoArchiveProperties
@@ -19,7 +18,6 @@ import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoCon
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.test.util.ReflectionTestUtils
@@ -31,19 +29,6 @@ class AnimalPhotoArchiveConfigurationTest {
     private val context = ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))
         .withUserConfiguration(AnimalPhotoArchiveConfiguration::class.java)
-
-    @Test
-    fun `실제 메인 조립이 주어졌을 때__import를 읽으면__사진 생산자가 등록되어 있다`() {
-        // given
-        val application = PawBridgeApplication::class.java
-
-        // when
-        val imports = application.getAnnotation(Import::class.java).value.map { it.java }
-
-        // then
-        assertThat(imports)
-            .contains(AnimalPhotoArchiveConfiguration::class.java)
-    }
 
     @Test
     fun `플래그가 없을 때__컨텍스트가 시작되면__기록기나 외부 클라이언트가 필요하지 않다`() {

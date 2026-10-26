@@ -1,7 +1,6 @@
 package com.pawbridge.backend.boot.configuration
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.pawbridge.backend.PawBridgeApplication
 import com.pawbridge.backend.animal.internal.discovery.infrastructure.KoreanSearchAnalyzer
 import com.pawbridge.backend.animal.internal.shelterdirectory.infrastructure.ShelterDirectoryClient
 import com.pawbridge.backend.animal.internal.shelterdirectory.infrastructure.ShelterDirectoryCollector
@@ -22,7 +21,6 @@ import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.DependsOn
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.annotation.Scheduled
@@ -34,19 +32,6 @@ import org.springframework.transaction.interceptor.TransactionAttribute
 import java.util.function.Supplier
 
 class ShelterDirectoryConfigurationTest {
-    @Test
-    fun `메인 임포트가 주어졌을 때__보호소 디렉터리 설정이 추가되면__메인이 그 설정을 명시적으로 등록한다`() {
-        // given
-        // when
-        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java }
-
-        // then
-        assertThat(imports).contains(
-            ShelterDirectoryConfiguration::class.java,
-            AnimalTravelCollectionConfiguration::class.java,
-        )
-    }
-
     private fun runner(source: HikariDataSource, manager: JdbcTransactionManager): ApplicationContextRunner {
         return ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))

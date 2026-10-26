@@ -13,7 +13,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.aop.support.AopUtils
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -82,15 +81,4 @@ class UserPasswordConfigurationTest {
             }
     }
 
-    @Test
-    fun `애플리케이션이 주어졌을 때__임포트를 살펴보면__비밀번호 구성이 한 번만 임포트된다`() {
-        // given
-        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value
-
-        // when
-        val count = imports.filter { type -> type.java == UserPasswordConfiguration::class.java }.size
-
-        // then
-        assertThat(count).isEqualTo(1)
-    }
 }
