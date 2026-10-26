@@ -120,6 +120,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
 
     def test_given_module_or_its_policy_change__when_selecting__then_require_the_application_check(self):
         for path in ('backend-app/boot/src/main/java/Example.java',
+                     'user-service/src/migration/resources/db/postgresql/V6__next.sql',
+                     'community-service/src/migration/resources/db/postgresql/V12__next.sql',
                      '.github/workflows/backend-app-check.yml',
                      '.github/scripts/test_backend_app_ci_policy.py',
                      '.github/scripts/ci_branch_policy.py',
@@ -249,7 +251,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('        if: always()', cleanup)
         self.assertNotRegex(check, r'--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)')
         # The auth session contract moved to the contract job; nothing of its fixture harness stays in a shard.
-        for removed in ('authSessionCompatibility', 'auth-sessions', 'auth_sessions', 'verify_auth_sessions_report'):
+        for removed in ('authSessionCompatibility', 'auth-sessions', 'auth_sessions', 'admin-update', 'fixture_admin_update'):
             with self.subTest(removed=removed):
                 self.assertNotIn(removed, check)
 
@@ -294,15 +296,11 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn("PAWBRIDGE_CONTRACT_REQUIRE_LEGACY_SOURCES: 'true'", contract)
         sparse = re.search(r'sparse-checkout: \|\n(.*?)\n\s+sparse-checkout-cone-mode:', contract, re.DOTALL).group(1)
         self.assertEqual({'backend-app', '.github/workflows/backend-app-check.yml',
-                          '.github/scripts/backend_contract_profile.py',
                           'user-service/src/migration/resources/db/postgresql',
                           'community-service/src/migration/resources/db/postgresql'},
                          {line.strip() for line in sparse.splitlines() if line.strip()})
         self.assertIn('validate-wrappers: true', contract)
         self.assertIn('$RUNNER_TEMP/pawbridge-backend-app-gradle', contract)
-        self.assertIn('verify_contract_reports(', contract)
-        self.assertIn('boot/build/test-results/contractTestUtc', contract)
-        self.assertIn('boot/build/test-results/contractTestSeoul', contract)
         evidence = contract.split('name: Preserve the contract test reports even on failure', 1)[1]
         self.assertIn('if: always()', evidence)
         self.assertIn('boot/build/test-results/contractTestUtc/TEST-*.xml', evidence)
@@ -439,8 +437,6 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         allowed_conditions = {
             'Add pinned User and installed chat tables only after fixed source preparation':
                 '${{ matrix.shard >= ' + last + ' }}',
-            'Add only administrator role and care registration column rights after member fixture preparation':
-                '${{ matrix.shard >= ' + last + ' }}',
             'Remove only the owned disposable fixture': 'always()',
             'Reject missing, failed or falsely skipped runtime contracts': 'always()',
             'Preserve tests and bounded runtime evidence': 'always()',
@@ -545,14 +541,13 @@ class BackendAppCiPolicyTest(unittest.TestCase):
 
     def test_given_late_member_and_administrator_fixtures__when_wiring__then_keep_order_and_the_final_cleanup(self):
         check = self.job('check')
-        keys = ('jar_f29', 'fixture_member_cleanup', 'jar_f31', 'fixture_admin_update', 'owned_cleanup')
+        keys = ('jar_f29', 'fixture_member_cleanup', 'jar_f31', 'owned_cleanup')
         for first, second in zip(keys, keys[1:]):
             self.assertLess(check.index('id: ' + first + '\n'), check.index('id: ' + second + '\n'))
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)[1:]
         for key, command in (
                 ('fixture_member_cleanup', 'python3 scripts/f29_ci.py member-cleanup-prepare'),
-                ('jar_f31', 'python3 scripts/f29_ci.py member-cleanup-smoke'),
-                ('fixture_admin_update', 'python3 scripts/f29_ci.py admin-update-prepare')):
+                ('jar_f31', 'python3 scripts/f29_ci.py member-cleanup-smoke')):
             step = next(part for part in parts if 'id: ' + key + '\n' in part)
             self.assertIn(command, step)
         self.assertIn("result['request_checks'] == result['delete_checks'] + result['get_checks'] == 9", check)

@@ -9,7 +9,6 @@ import tempfile
 import types
 import unittest
 from unittest.mock import Mock, patch
-import xml.etree.ElementTree as ET
 
 import backend_contract_profile as profile
 
@@ -364,112 +363,6 @@ class ContractProfileTest(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertEqual('Contract profile verification failed.\n', stderr.getvalue())
         self.assertEqual('failed', write.call_args.args[2]['status'])
-
-
-class ContractReportTest(unittest.TestCase):
-    """The JUnit XML of the contract job: every pinned case in UTC, only the time-zone cases in Seoul."""
-
-    def reports(self, root):
-        for sub, groups in (('utc', profile.CONTRACT_CASES), ('seoul', profile.CONTRACT_SEOUL_CASES)):
-            folder = root / sub
-            folder.mkdir()
-            for name, cases in groups:
-                class_name = profile.CONTRACT_PACKAGE + '.' + name
-                names = [case for label, count in cases for case in profile._case_names(label, count)]
-                suite = ET.Element('testsuite', name=class_name, tests=str(len(names)),
-                                   failures='0', errors='0', skipped='0')
-                for case in names:
-                    ET.SubElement(suite, 'testcase', name=case, classname=class_name)
-                ET.ElementTree(suite).write(folder / ('TEST-' + class_name + '.xml'))
-
-    def auth_report(self, root, sub='utc'):
-        return root / sub / ('TEST-' + profile.CONTRACT_PACKAGE + '.AuthSessionContractTest.xml')
-
-    def test_given_all_cases_and_only_the_seoul_case__when_verifying__then_require_the_exact_invocations(self):
-        auth = dict(profile.CONTRACT_CASES)['AuthSessionContractTest']
-        self.assertEqual((1, 4, 1, 1, 1, 1, 3, 4, 1, 1), tuple(count for _, count in auth))
-        self.assertEqual(((profile.AUTH_ROTATION, 1),), dict(profile.CONTRACT_SEOUL_CASES)['AuthSessionContractTest'])
-        self.assertEqual(auth[0][0], profile.AUTH_ROTATION)
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp).resolve()
-            self.reports(root)
-            profile.verify_contract_reports(root / 'utc', root / 'seoul')
-
-    def test_given_missing_extra_wrong_or_unsuccessful_reports__when_verifying__then_refuse_before_claiming_success(self):
-        defects = ('missing', 'extra-file', 'file-name', 'wrong-root', 'wrong-class', 'wrong-count',
-                   'wrong-label', 'duplicate-label', 'nested-case', 'failure-attr', 'missing-failure-attr',
-                   'error-child', 'skipped-child', 'disabled-attr', 'disabled-child', 'bad-status',
-                   'bad-result', 'malformed', 'file-link', 'directory-link', 'seoul-extra', 'seoul-missing',
-                   'class-missing')
-        rewritten_elsewhere = ('missing', 'file-name', 'malformed', 'file-link', 'directory-link',
-                               'seoul-extra', 'seoul-missing', 'class-missing')
-        for defect in defects:
-            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp).resolve()
-                self.reports(root)
-                path = self.auth_report(root)
-                seoul = self.auth_report(root, 'seoul')
-                tree = ET.parse(path)
-                suite = tree.getroot()
-                if defect == 'missing':
-                    path.unlink()
-                elif defect == 'class-missing':
-                    (root / 'utc' / ('TEST-' + profile.CONTRACT_PACKAGE + '.SchemaSourcePinTest.xml')).unlink()
-                elif defect == 'extra-file':
-                    path.with_name('TEST-extra.xml').write_bytes(path.read_bytes())
-                elif defect == 'file-name':
-                    path.rename(path.with_name('TEST-wrong.xml'))
-                elif defect == 'wrong-root':
-                    suite.tag = 'testsuites'
-                elif defect == 'wrong-class':
-                    suite[0].set('classname', 'Other')
-                elif defect == 'wrong-count':
-                    suite.set('tests', '7')
-                elif defect == 'wrong-label':
-                    suite[0].set('name', 'unknown()')
-                elif defect == 'duplicate-label':
-                    suite[1].set('name', suite[0].get('name'))
-                elif defect == 'nested-case':
-                    case = suite[0]
-                    suite.remove(case)
-                    ET.SubElement(suite, 'wrapper').append(case)
-                elif defect == 'failure-attr':
-                    suite.set('failures', '1')
-                elif defect == 'missing-failure-attr':
-                    del suite.attrib['failures']
-                elif defect == 'error-child':
-                    ET.SubElement(suite[0], 'error')
-                elif defect == 'skipped-child':
-                    ET.SubElement(suite[0], 'skipped')
-                elif defect == 'disabled-attr':
-                    suite[0].set('disabled', '1')
-                elif defect == 'disabled-child':
-                    ET.SubElement(suite[0], 'disabled')
-                elif defect == 'bad-status':
-                    suite[0].set('status', 'notrun')
-                elif defect == 'bad-result':
-                    suite[0].set('result', 'ignored')
-                elif defect == 'malformed':
-                    path.write_text('<bad')
-                elif defect == 'file-link':
-                    path.rename(path.with_name('actual.xml'))
-                    path.symlink_to(path.with_name('actual.xml'))
-                elif defect == 'directory-link':
-                    (root / 'utc').rename(root / 'actual')
-                    (root / 'utc').symlink_to(root / 'actual', target_is_directory=True)
-                elif defect == 'seoul-extra':
-                    seoul_tree = ET.parse(seoul)
-                    seoul_tree.getroot().set('tests', '2')
-                    ET.SubElement(seoul_tree.getroot(), 'testcase',
-                                  name=profile._case_names(profile.CONTRACT_CASES[0][1][1][0], 4)[0],
-                                  classname=profile.CONTRACT_PACKAGE + '.AuthSessionContractTest')
-                    seoul_tree.write(seoul)
-                elif defect == 'seoul-missing':
-                    seoul.unlink()
-                if defect not in rewritten_elsewhere:
-                    tree.write(path)
-                with self.assertRaises(profile.ProfileBlocked):
-                    profile.verify_contract_reports(root / 'utc', root / 'seoul')
 
 
 if __name__ == '__main__':
