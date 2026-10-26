@@ -1,0 +1,200 @@
+--- a/sam3/model/position_encoding.py
++++ b/sam3/model/position_encoding.py
+@@ -52,10 +52,15 @@
+                 (precompute_resolution // 32, precompute_resolution // 32),
+             ]
+             for size in precompute_sizes:
+-                tensors = torch.zeros((1, 1) + size, device="cuda")
++                tensors = torch.zeros((1, 1) + size, device="cpu")
+                 self.forward(tensors)
+                 # further clone and detach it in the cache (just to be safe)
+                 self.cache[size] = self.cache[size].clone().detach()
++
++    def _apply(self, fn, recurse=True):
++        super()._apply(fn, recurse=recurse)
++        self.cache = {key: fn(value) for key, value in self.cache.items()}
++        return self
+ 
+     def _encode_xy(self, x, y):
+         # The positions are expected to be normalized
+--- a/sam3/model/decoder.py
++++ b/sam3/model/decoder.py
+@@ -73,7 +73,7 @@
+         return tensor if pos is None else tensor + pos
+ 
+     def forward_ffn(self, tgt):
+-        with torch.amp.autocast(device_type="cuda", enabled=False):
++        with torch.amp.autocast(device_type=tgt.device.type, enabled=False):
+             tgt2 = self.linear2(self.dropout3(self.activation(self.linear1(tgt))))
+         tgt = tgt + self.dropout4(tgt2)
+         tgt = self.norm3(tgt)
+@@ -298,7 +298,7 @@
+             if resolution is not None and stride is not None:
+                 feat_size = resolution // stride
+                 coords_h, coords_w = self._get_coords(
+-                    feat_size, feat_size, device="cuda"
++                    feat_size, feat_size, device="cpu"
+                 )
+                 self.compilable_cord_cache = (coords_h, coords_w)
+                 self.compilable_stored_size = (feat_size, feat_size)
+@@ -341,6 +341,15 @@
+         # in selected layers)
+         for layer_idx, layer in enumerate(self.layers):
+             layer.layer_idx = layer_idx
++
++    def _apply(self, fn, recurse=True):
++        super()._apply(fn, recurse=recurse)
++        if getattr(self, "compilable_cord_cache", None) is not None:
++            self.compilable_cord_cache = tuple(fn(v) for v in self.compilable_cord_cache)
++        if hasattr(self, "coord_cache"):
++            self.coord_cache = {key: tuple(fn(v) for v in values)
++                                for key, values in self.coord_cache.items()}
++        return self
+ 
+     @staticmethod
+     def _get_coords(H, W, device):
+--- a/sam3/model/sam3_tracker_utils.py
++++ b/sam3/model/sam3_tracker_utils.py
+@@ -6,7 +6,6 @@
+ import torch
+ import torch.nn.functional as F
+ from numpy.typing import NDArray
+-from sam3.model.edt import edt_triton
+ 
+ 
+ def sample_box_points(
+@@ -177,6 +176,9 @@
+     else:
+         padded_fp_masks = fp_masks
+         padded_fn_masks = fn_masks
++
++    # Tracking-only CUDA kernel; image grounding must not import Triton.
++    from sam3.model.edt import edt_triton
+ 
+     fn_mask_dt = edt_triton(padded_fn_masks)
+     fp_mask_dt = edt_triton(padded_fp_masks)
+--- a/sam3/perflib/fused.py
++++ b/sam3/perflib/fused.py
+@@ -16,6 +16,15 @@
+     mat1 = mat1.to(torch.bfloat16)
+     mat2 = mat2.to(torch.bfloat16)
+     mat1_flat = mat1.view(-1, mat1.shape[-1])
++    if mat1.device.type == "mps":
++        y = torch.nn.functional.linear(mat1_flat, mat2, self)
++        if activation in [torch.nn.functional.relu, torch.nn.ReLU]:
++            y = torch.nn.functional.relu(y)
++        elif activation in [torch.nn.functional.gelu, torch.nn.GELU]:
++            y = torch.nn.functional.gelu(y)
++        else:
++            raise ValueError(f"Unexpected activation {activation}")
++        return y.view(mat1.shape[:-1] + (y.shape[-1],))
+     if activation in [torch.nn.functional.relu, torch.nn.ReLU]:
+         y = addmm_act_op(self, mat1_flat, mat2.t(), beta=1, alpha=1, use_gelu=False)
+         return y.view(mat1.shape[:-1] + (y.shape[-1],))
+--- a/sam3/model/geometry_encoders.py
++++ b/sam3/model/geometry_encoders.py
+@@ -12,6 +12,15 @@
+ from .act_ckpt_utils import activation_ckpt_wrapper
+ from .box_ops import box_cxcywh_to_xyxy
+ from .model_misc import get_clones
++
++
++def _assert_device(condition):
++    # MPS lacks _assert_async; only the GPU-computed scalar is read by Python.
++    if condition.device.type == "mps":
++        if not condition.item():
++            raise AssertionError("Invalid padded sequence")
++    else:
++        torch._assert_async(condition)
+ 
+ 
+ def is_right_padded(mask):
+@@ -45,8 +54,8 @@
+     assert seq1_length == mask1.size(1)
+     assert seq2_length == mask2.size(1)
+ 
+-    torch._assert_async(is_right_padded(mask1))
+-    torch._assert_async(is_right_padded(mask2))
++    _assert_device(is_right_padded(mask1))
++    _assert_device(is_right_padded(mask2))
+ 
+     actual_seq1_lengths = (~mask1).sum(dim=-1)
+     actual_seq2_lengths = (~mask2).sum(dim=-1)
+@@ -592,6 +601,9 @@
+     def _encode_points(self, points, points_mask, points_labels, img_feats):
+         points_embed = None
+         n_points, bs = points.shape[:2]
++        # Text-only prompts have no geometry. MPS grid_sample rejects an empty grid.
++        if points.device.type == "mps" and n_points == 0:
++            return self.label_embed.weight.new_empty((0, bs, self.d_model)), points_mask
+ 
+         if self.points_direct_project is not None:
+             proj = self.points_direct_project(points)
+@@ -635,6 +647,8 @@
+     def _encode_boxes(self, boxes, boxes_mask, boxes_labels, img_feats):
+         boxes_embed = None
+         n_boxes, bs = boxes.shape[:2]
++        if boxes.device.type == "mps" and n_boxes == 0:
++            return self.label_embed.weight.new_empty((0, bs, self.d_model)), boxes_mask
+ 
+         if self.boxes_direct_project is not None:
+             proj = self.boxes_direct_project(boxes)
+--- a/sam3/model/vitdet.py
++++ b/sam3/model/vitdet.py
+@@ -19,6 +19,7 @@
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
++from sam3.perflib.mps_attention import scaled_dot_product_attention as mps_scaled_dot_product_attention
+ import torch.utils.checkpoint as checkpoint
+ 
+ try:
+@@ -626,7 +627,7 @@
+                     q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+                 ).transpose(1, 2)
+             else:
+-                x = F.scaled_dot_product_attention(q, k, v)
++                x = mps_scaled_dot_product_attention(q, k, v)
+         else:
+             raise NotImplementedError
+ 
+--- a/sam3/model/model_misc.py
++++ b/sam3/model/model_misc.py
+@@ -16,6 +16,7 @@
+ import numpy as np
+ import torch
+ import torch.nn.functional as F
++from sam3.perflib.mps_attention import scaled_dot_product_attention as mps_scaled_dot_product_attention
+ from torch import nn, Tensor
+ from torch.overrides import handle_torch_function, has_torch_function
+ from typing_extensions import override
+@@ -406,7 +407,7 @@
+             torch.backends.cuda.enable_math_sdp(True)
+             torch.backends.cuda.enable_mem_efficient_sdp(True)
+ 
+-            attn_output = F.scaled_dot_product_attention(
++            attn_output = mps_scaled_dot_product_attention(
+                 q, k, v, attn_mask, dropout_p, is_causal
+             )
+ 
+--- /dev/null
++++ b/sam3/perflib/mps_attention.py
+@@ -0,0 +1,18 @@
++# PawBridge Mac image-inference adapter. Models and preprocessing stay unchanged.
++import torch
++import torch.nn.functional as F
++
++
++def scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False):
++    """Bound large, unmasked MPS attention without splitting the softmax key axis.
++
++    CUDA, training, masks, causal attention, and short sequences keep PyTorch's
++    original path. This narrow adapter is for the pinned SAM3 image model only.
++    """
++    if (q.device.type != "mps" or torch.is_grad_enabled() or q.shape[-2] <= 1024
++            or k.shape[-2] <= 1024 or attn_mask is not None or dropout_p != 0.0 or is_causal):
++        return F.scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal)
++    # Each query still attends to every key; only independent query rows split.
++    parts = [F.scaled_dot_product_attention(part, k, v)
++             for part in q.split(512, dim=-2)]
++    return torch.cat(parts, dim=-2)

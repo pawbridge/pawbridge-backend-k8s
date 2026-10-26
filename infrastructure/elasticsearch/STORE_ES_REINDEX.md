@@ -34,7 +34,7 @@ MySQL이 전체 재생성의 유일한 원본이다. 상품 topic은 `compact,de
 수정 Store 이미지는 `latest`나 재사용 가능한 tag가 아니라 registry에 push된 immutable digest로 지정한다. 아래 경로와 digest는 실제 값으로 바꾸며, `CUTOVER_DIR`에는 connector credential이 포함되므로 공유·커밋하지 않는다.
 
 ```bash
-BACKEND_ROOT=/path/to/pawbridge-backend-k8s
+BACKEND_ROOT=/path/to/pawbridge-backend-services
 INFRA_ROOT=/path/to/pawbridge-infra-k8s
 ENVIRONMENT=dev
 CUTOVER_DIR=/secure/path/store-es-v001
