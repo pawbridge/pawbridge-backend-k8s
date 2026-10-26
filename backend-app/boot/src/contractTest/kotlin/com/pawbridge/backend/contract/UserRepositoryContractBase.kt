@@ -87,19 +87,22 @@ abstract class UserRepositoryContractBase : ApiContractTestBase() {
     protected fun hash(character: Char): String = character.toString().repeat(64)
 
     /**
-     * Holds `FOR UPDATE` on the user row from another connection, runs [action] on its own thread, and proves that
-     * the action does not finish until the lock is released.
+     * Holds `FOR KEY SHARE` on the user row from another connection, runs [action] on its own thread, and proves that
+     * the action does not finish until the lock is released. Only an explicit `FOR UPDATE` in the action conflicts with
+     * that lock: a plain `UPDATE` of other columns or an insert that references the user does not, so the wait cannot
+     * come from the writes that follow the lock. [whileBlocked] runs while the action is still waiting.
      */
-    protected fun <T> assertWaitsForUserRowLock(userId: Long, action: Callable<T>): T {
+    protected fun <T> assertWaitsForUserRowLock(userId: Long, whileBlocked: () -> Unit = {}, action: Callable<T>): T {
         val executor = Executors.newSingleThreadExecutor()
         try {
             return ContractPostgres.adminConnection { connection ->
                 connection.autoCommit = false
                 connection.createStatement().use {
-                    it.execute("SELECT user_id FROM pawbridge_user.users WHERE user_id = $userId FOR UPDATE")
+                    it.execute("SELECT user_id FROM pawbridge_user.users WHERE user_id = $userId FOR KEY SHARE")
                 }
                 val pending = executor.submit(action)
                 assertThatThrownBy { pending.get(700, TimeUnit.MILLISECONDS) }.isInstanceOf(TimeoutException::class.java)
+                whileBlocked()
                 connection.commit()
                 pending.get(10, TimeUnit.SECONDS)
             }

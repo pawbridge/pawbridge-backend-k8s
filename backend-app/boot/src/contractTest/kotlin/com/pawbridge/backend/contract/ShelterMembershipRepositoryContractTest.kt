@@ -240,7 +240,7 @@ class ShelterMembershipRepositoryContractTest : UserRepositoryContractBase() {
         val id = insertApplication(APPLICANT)
 
         // when
-        val approved = assertWaitsForUserRowLock(APPLICANT, Callable { memberships.approve(ADMIN, id, "CARE-LOCK", "대기 후 승인") })
+        val approved = assertWaitsForUserRowLock(APPLICANT, action = Callable { memberships.approve(ADMIN, id, "CARE-LOCK", "대기 후 승인") })
 
         // then
         assertThat(approved.application!!.status).isEqualTo(Status.APPROVED)

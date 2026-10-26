@@ -61,7 +61,7 @@ class UserActorsRepositoryContractTest : UserRepositoryContractBase() {
     fun `회원 행이 다른 연결에 잠겨 있을 때__동물 명령 주체를 찾으면__잠금이 풀릴 때까지 기다린다`() {
         // given
         // when
-        val found = assertWaitsForUserRowLock(ACTIVE, Callable { writeTransaction().execute { animalActors.find(ACTIVE) } })
+        val found = assertWaitsForUserRowLock(ACTIVE, action = Callable { writeTransaction().execute { animalActors.find(ACTIVE) } })
 
         // then
         assertThat(found!!.role).isEqualTo("ROLE_SHELTER")
@@ -104,7 +104,7 @@ class UserActorsRepositoryContractTest : UserRepositoryContractBase() {
         // given
         // when
         val read = assertIgnoresUserRowLock(ACTIVE, Callable { readOnlyTransaction().execute { orderActors.currentForRead(ACTIVE) } })
-        val written = assertWaitsForUserRowLock(ACTIVE, Callable { writeTransaction().execute { orderActors.currentForWrite(ACTIVE) } })
+        val written = assertWaitsForUserRowLock(ACTIVE, action = Callable { writeTransaction().execute { orderActors.currentForWrite(ACTIVE) } })
 
         // then
         assertThat(read!!.active).isTrue()
@@ -154,7 +154,7 @@ class UserActorsRepositoryContractTest : UserRepositoryContractBase() {
         // given
         // when
         val read = assertIgnoresUserRowLock(ACTIVE, Callable { readOnlyTransaction().execute { administrators.currentForRead(ACTIVE) } })
-        val written = assertWaitsForUserRowLock(ACTIVE, Callable { writeTransaction().execute { administrators.currentForWrite(ACTIVE) } })
+        val written = assertWaitsForUserRowLock(ACTIVE, action = Callable { writeTransaction().execute { administrators.currentForWrite(ACTIVE) } })
 
         // then
         assertThat(read!!.role).isEqualTo("ROLE_SHELTER")

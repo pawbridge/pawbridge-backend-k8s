@@ -12,6 +12,7 @@ import com.pawbridge.backend.user.internal.session.application.UserSessionRevoke
 import com.pawbridge.backend.user.internal.session.infrastructure.JdbcAuthSessionStore
 import java.time.LocalDateTime
 import java.util.concurrent.Callable
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.LongConsumer
 import java.util.function.Supplier
 import org.assertj.core.api.Assertions.assertThat
@@ -140,6 +141,21 @@ class UserDeletionAndUpdateRepositoryContractTest : UserRepositoryContractBase()
         assertThat(count("SELECT count(*) FROM pawbridge_user.contact_deletions WHERE user_id = ?", MEMBER)).`as`("The marker stays for a retry").isOne()
     }
 
+    @Test
+    fun `회원 행이 다른 연결에 잠겨 있을 때__삭제하면__대기 표식과 정리도 잠금이 풀릴 때까지 시작하지 않는다`() {
+        // given
+        insertUser(MEMBER)
+        val cleanups = AtomicInteger()
+        val deletion = JdbcUserDeletion(write, writeTransaction(), LongConsumer { cleanups.incrementAndGet() }, sessions)
+
+        // when
+        assertWaitsForUserRowLock(MEMBER, whileBlocked = { assertThat(cleanups.get()).isZero() }, action = Callable { deletion.delete(MEMBER) })
+
+        // then
+        assertThat(cleanups.get()).isOne()
+        assertThat(count("SELECT count(*) FROM pawbridge_user.users WHERE user_id = ?", MEMBER)).isZero()
+    }
+
     // ---- Administrator update ---------------------------------------------------------------------------------
 
     @Test
@@ -265,13 +281,14 @@ class UserDeletionAndUpdateRepositoryContractTest : UserRepositoryContractBase()
     @Test
     fun `회원 행이 다른 연결에 잠겨 있을 때__수정하면__잠금이 풀릴 때까지 기다린 뒤 적용한다`() {
         // given
-        insertUser(MEMBER, nickname = "Waiting")
+        // The role column is in no unique index, so the write itself would not conflict with the lock held below.
+        insertUser(MEMBER, nickname = "Waiting", role = "ROLE_USER")
 
         // when
-        assertWaitsForUserRowLock(MEMBER, Callable { updater().update(MEMBER, Changes("Waited", null, null)) })
+        assertWaitsForUserRowLock(MEMBER, action = Callable { updater().update(MEMBER, Changes(null, Role.ROLE_ADMIN, null)) })
 
         // then
-        assertThat(userRow(MEMBER).get("nickname").asText()).isEqualTo("Waited")
+        assertThat(userRow(MEMBER).get("role").asText()).isEqualTo("ROLE_ADMIN")
     }
 
     private fun updater() = JdbcAdminUserUpdate(write, writeTransaction(), Supplier { modified }, sessions)
