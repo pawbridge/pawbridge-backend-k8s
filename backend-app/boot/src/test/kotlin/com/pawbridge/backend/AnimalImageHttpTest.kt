@@ -87,9 +87,9 @@ class AnimalImageHttpTest {
     }
 
     @Test
-    fun `서명된 사용자__이미지 여러 장을 올리면__원래의 범위 지정 없는 경로에 도달한다`() {
+    fun `서명된 회원과 위조 헤더__이미지 여러 장을 올리면__검증된 ID만 넘기고 원래 맵을 돌려준다`() {
         // given
-        every { images.uploadImages(any()) } returns listOf("u1", "u2")
+        every { images.uploadImages(any(), any()) } returns listOf("u1", "u2")
 
         // when
         val result = mvc.perform(call("multiple").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
@@ -103,6 +103,7 @@ class AnimalImageHttpTest {
             .andExpect(jsonPath("$.length()").value(2))
         verify(exactly = 1) {
             images.uploadImages(
+                7L,
                 match { files ->
                     files != null &&
                         files.size == 2 &&
@@ -141,7 +142,7 @@ class AnimalImageHttpTest {
             AnimalImageTooLargeException(),
             RuntimeException("이미지 업로드에 실패했습니다."),
         )
-        every { images.uploadImages(any()) } throws IllegalArgumentException("최대 5개의 이미지만 업로드할 수 있습니다.")
+        every { images.uploadImages(any(), any()) } throws IllegalArgumentException("최대 5개의 이미지만 업로드할 수 있습니다.")
         every { images.deleteImage(any(), any()) } throws DataAccessResourceFailureException("synthetic")
 
         // when

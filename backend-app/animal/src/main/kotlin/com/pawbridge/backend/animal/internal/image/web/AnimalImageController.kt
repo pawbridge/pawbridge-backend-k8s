@@ -31,8 +31,11 @@ class AnimalImageController(
     }
 
     @PostMapping("/multiple")
-    fun uploadMultipleImages(@RequestParam("files") files: Array<MultipartFile?>): ResponseEntity<Map<String, Any>> {
-        val imageUrls = images.uploadImages(files)
+    fun uploadMultipleImages(
+        @AuthenticationPrincipal verifiedUserId: Long?,
+        @RequestParam("files") files: Array<MultipartFile?>,
+    ): ResponseEntity<Map<String, Any>> {
+        val imageUrls = images.uploadImages(verifiedUserId, files)
 
         val response = HashMap<String, Any>()
         response["imageUrls"] = imageUrls
