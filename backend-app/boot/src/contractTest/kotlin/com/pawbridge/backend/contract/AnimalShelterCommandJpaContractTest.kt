@@ -135,7 +135,7 @@ class AnimalShelterCommandJpaContractTest : JpaContractBase() {
     }
 
     @Test
-    fun `회원 승인이 보호소 행에 키 공유 잠금을 쥐고 소속을 쓰는 중일 때__다른 관리자가 삭제하면__잠금이 풀릴 때까지 기다린 뒤 커밋된 소속을 보고 충돌로 끝난다`() {
+    fun `승인이 보호소 행을 쥔 채 소속을 쓰는 중일 때__삭제하면__기다린 뒤 커밋된 소속을 보고 충돌로 끝난다`() {
         // given
         seedShelter(EMPTY, "CR-EMPTY")
         val executor = Executors.newSingleThreadExecutor()
@@ -162,7 +162,7 @@ class AnimalShelterCommandJpaContractTest : JpaContractBase() {
     }
 
     @Test
-    fun `다른 연결이 담당자 회원 행에 키 공유 잠금을 쥐고 있을 때__그 담당자가 보호소를 수정하면__회원 행 잠금이 풀릴 때까지 기다린다`() {
+    fun `담당자 회원 행에 키 공유 잠금이 걸렸을 때__그 담당자가 수정하면__잠금이 풀릴 때까지 기다린다`() {
         // given
         val executor = Executors.newSingleThreadExecutor()
         try {
