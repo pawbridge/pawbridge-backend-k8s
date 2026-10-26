@@ -85,3 +85,19 @@ GRANT SELECT (sender_id, request_id, request_hash, note_id, created_at),
 
 -- The context check of a note that answers an animal report reads the author of that report.
 GRANT SELECT (report_id, author_id, deleted_at) ON pawbridge_community.animal_reports TO pawbridge_app;
+
+-- Admin member deletion (pending marker, note and chat withdrawal, then the account and its favorites and shelter
+-- applications). Same narrow lists as the writer of the packaged-JAR fixtures had; users keep no wider column grants.
+GRANT INSERT (user_id) ON pawbridge_user.contact_deletions TO pawbridge_app;
+GRANT DELETE ON pawbridge_user.favorites TO pawbridge_app;
+GRANT SELECT (user_id), DELETE ON pawbridge_user.shelter_applications TO pawbridge_app;
+
+GRANT DELETE ON pawbridge_community.private_note_members TO pawbridge_app;
+GRANT UPDATE (context_type, context_id) ON pawbridge_community.private_notes TO pawbridge_app;
+GRANT UPDATE (request_hash) ON pawbridge_community.private_note_requests TO pawbridge_app;
+
+GRANT SELECT (room_id, first_member_id, second_member_id), UPDATE (first_member_id, second_member_id), DELETE
+    ON pawbridge_community.member_chat_rooms TO pawbridge_app;
+GRANT SELECT (room_id, member_id), DELETE ON pawbridge_community.member_chat_room_members TO pawbridge_app;
+GRANT SELECT (sender_id), UPDATE (sender_id) ON pawbridge_community.member_chat_messages TO pawbridge_app;
+GRANT SELECT (sender_id), DELETE ON pawbridge_community.member_chat_requests TO pawbridge_app;
