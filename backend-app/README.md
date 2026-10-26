@@ -332,6 +332,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
 - `:boot:architectureTest`: 빌드 규칙(`gradle/architecture.gradle`)을 TestKit fixture로 검증한다. 빌드 규칙을 바꿀 때 반드시 실행한다.
 - `:boot:contractTest`: Testcontainers PostgreSQL 위의 DB 계약 시험(아래 "DB 계약 시험").
 - `:boot:jarSmokeTest`: 실제 `bootJar` 산출물을 자식 프로세스로 띄우는 기동·종료 시험(아래 "패키지 JAR 기동·종료 시험"). `:boot:bootJar`에 의존하므로 항상 새 JAR로 돈다.
+- `python/`을 바꾼 PR은 위 대신(또는 함께) `python/README.md`의 "로컬 시험" 명령을 저장소 루트에서 실행한다.
 
 ## F22 본인 쪽지 단건 조회
 
