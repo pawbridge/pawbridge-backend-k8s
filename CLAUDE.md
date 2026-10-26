@@ -2,7 +2,7 @@
 
 ## 적용 범위
 
-이 파일은 `pawbridge-backend-k8s` 저장소 전체에 적용한다.
+이 파일은 `pawbridge-backend-services` 저장소 전체(구 `pawbridge-backend-k8s`)에 적용한다.
 파일을 수정하기 전에 해당 경로에서 가장 가까운 `CLAUDE.md`를 읽는다.
 하위 디렉터리의 더 구체적인 `CLAUDE.md`는 해당 디렉터리의 규칙을 추가하거나 재정의할 수 있다.
 
