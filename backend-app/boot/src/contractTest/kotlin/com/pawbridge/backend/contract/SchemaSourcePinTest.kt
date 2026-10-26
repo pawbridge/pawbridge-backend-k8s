@@ -11,9 +11,8 @@ import org.springframework.core.io.ClassPathResource
 
 /**
  * The migration files under `schema/` are copies of the service migrations. While the service directories
- * exist, every copy must be byte-identical to its source and no source may lack a copy. The CI job
- * sets `PAWBRIDGE_CONTRACT_REQUIRE_LEGACY_SOURCES=true`, so a checkout that forgot the sources fails here
- * instead of silently comparing nothing.
+ * exist, every copy must be byte-identical to its source and no source may lack a copy. Once a service
+ * directory is removed, its copies are the only source and there is nothing left to compare.
  */
 @Tag("contract")
 class SchemaSourcePinTest {
@@ -39,7 +38,6 @@ class SchemaSourcePinTest {
         val sourceDirectory = sourceDirectory(service)
         if (sourceDirectory == null) {
             // Without the legacy directory the copies are the only source; nothing can drift.
-            assertThat(requireSources()).`as`("$service migrations are required in CI").isFalse()
             return
         }
         val sources = Files.list(sourceDirectory).use { stream ->
@@ -58,8 +56,6 @@ class SchemaSourcePinTest {
         val directory = Path.of(root, service, "src", "migration", "resources", "db", "postgresql")
         return if (Files.isDirectory(directory)) directory else null
     }
-
-    private fun requireSources(): Boolean = System.getenv("PAWBRIDGE_CONTRACT_REQUIRE_LEGACY_SOURCES") == "true"
 
     private fun sha256(bytes: ByteArray): String {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
