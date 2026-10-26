@@ -8,8 +8,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from app.services.lost_gallery import read_manifest, reusable_document, build_gallery, gallery_mapping
-from app.services.sam3_focus import FOCUS_VERSION
+from app.services.gallery.builder import read_manifest, reusable_document, build_gallery, gallery_mapping
+from app.services.vision.sam3_focus import FOCUS_VERSION
 from tests.fake_gallery_store import FakeGalleryStore
 
 OLD_BUILD = 'animals-lost-dinov3-sam3-build-' + 'a' * 24
@@ -107,7 +107,7 @@ class LostGalleryTest(unittest.TestCase):
                 self.assertTrue(paths and all(not path.exists() for path in paths))
 
     def test_color_backfill_reuses_vectors_and_completed_colors_but_never_publishes_failure(self):
-        from app.services.coat_color import VERSION
+        from app.services.vision.coat_color import VERSION
         from tests.test_coat_color import descriptor
         color = descriptor("black")
         buffer = io.BytesIO()
@@ -164,21 +164,21 @@ class LostGalleryTest(unittest.TestCase):
                 encoder.describe_coat_color.assert_called_once()
 
     def test_color_contract_creates_a_new_target_even_for_identical_source_snapshot(self):
-        from app.services.lost_gallery import gallery_target
+        from app.services.gallery.builder import gallery_target
         digest = "a" * 64
         legacy = "animals-lost-dinov3-sam3-build-" + hashlib.sha256((FOCUS_VERSION + digest).encode()).hexdigest()[:24]
         self.assertNotEqual(gallery_target(digest), legacy)
 
     def test_corrected_color_version_does_not_overwrite_previous_gallery_target(self):
-        from app.services.lost_gallery import gallery_target, METADATA_VERSION
+        from app.services.gallery.builder import gallery_target, METADATA_VERSION
         digest = "c" * 64
         previous = "animals-lost-dinov3-sam3-build-" + hashlib.sha256(
             (FOCUS_VERSION + "foreground-lab32-joint8-v2" + METADATA_VERSION + digest).encode()).hexdigest()[:24]
         self.assertNotEqual(gallery_target(digest), previous)
 
     def test_status_is_indexed_and_metadata_contract_changes_the_target(self):
-        from app.services.coat_color import VERSION as COLOR_VERSION
-        from app.services.lost_gallery import METADATA_VERSION, gallery_target
+        from app.services.vision.coat_color import VERSION as COLOR_VERSION
+        from app.services.gallery.builder import METADATA_VERSION, gallery_target
         digest = "b" * 64
         mapping = gallery_mapping(digest)
         self.assertEqual(mapping["properties"]["status"], {"type": "keyword"})

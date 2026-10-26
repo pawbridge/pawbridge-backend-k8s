@@ -101,7 +101,7 @@ def prepare_focus(image, box, mask, *, color_source="single_mask"):
             or (xs.max()-xs.min()+1)/region.shape[1] < .75
             or (ys.max()-ys.min()+1)/region.shape[0] < .75):
         return FocusResult(square_image(image), "original_suspect_mask")
-    from app.services.coat_color import describe
+    from app.services.vision.coat_color import describe
     color_mask = np.zeros_like(foreground)
     color_mask[bounds[1]:bounds[3], bounds[0]:bounds[2]] = probabilities[bounds[1]:bounds[3], bounds[0]:bounds[2]] >= .9
     color = describe(image, color_mask, source=color_source)

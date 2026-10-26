@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-from app.services.lost_gallery import read_manifest, GalleryBuildCancelled
+from app.services.gallery.builder import read_manifest, GalleryBuildCancelled
 
 MAX_FEED_BYTES = 128 * 1024 * 1024
 MAX_PHOTO_BYTES = 10 * 1024 * 1024

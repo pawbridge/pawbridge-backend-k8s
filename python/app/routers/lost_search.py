@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.services.lost_search import MAX_IMAGE_BYTES, InvalidPhoto, search_photo
+from app.services.search.lost_search import MAX_IMAGE_BYTES, InvalidPhoto, search_photo
 
 router = APIRouter()
 _gate = asyncio.Lock()

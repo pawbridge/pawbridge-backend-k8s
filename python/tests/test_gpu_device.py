@@ -9,9 +9,9 @@ except ModuleNotFoundError as error:
         raise
     torch = None
 
-from app.services.dinov3 import DinoV3Encoder
-from app.services.gpu_device import inference_device
-from app.services.inference_gate import InferenceGate
+from app.services.vision.dinov3 import DinoV3Encoder
+from app.services.vision.gpu_device import inference_device
+from app.services.vision.inference_gate import InferenceGate
 
 
 @unittest.skipIf(torch is None, "Requires the dedicated PyTorch runtime")
@@ -44,7 +44,7 @@ class GpuDeviceTest(unittest.TestCase):
                     inference_device()
 
     def test_legacy_focus_cannot_accidentally_construct_a_cuda_model_on_mps(self):
-        with patch.dict(os.environ, {"LOST_SEARCH_VISUAL_PROFILE": "animal-focus"}), patch("app.services.gpu_device.inference_device", return_value="mps"):
+        with patch.dict(os.environ, {"LOST_SEARCH_VISUAL_PROFILE": "animal-focus"}), patch("app.services.vision.gpu_device.inference_device", return_value="mps"):
             with self.assertRaisesRegex(RuntimeError, "legacy animal-focus"):
                 DinoV3Encoder()
 
@@ -56,7 +56,7 @@ class GpuDeviceTest(unittest.TestCase):
                 encoder.gate = InferenceGate()
                 oom = RuntimeError("MPS backend out of memory (test)")
                 if color_only:
-                    from app.services.animal_focus import FocusResult
+                    from app.services.vision.animal_focus import FocusResult
                     from PIL import Image
                     encoder.focus = Mock()
                     encoder.focus.prepare.side_effect = [oom, FocusResult(Image.new("RGB", (8, 8)), "animal_mask", {"ok": True})]

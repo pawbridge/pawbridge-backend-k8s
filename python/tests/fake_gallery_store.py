@@ -4,8 +4,8 @@ app/services/pg_gallery_store.py; SQL transactions are replaced by dictionaries.
 """
 from copy import deepcopy
 
-from app.services.lost_gallery import CONTRACT, PREFIX, gallery_mapping
-from app.services.sam3_focus import FOCUS_VERSION
+from app.services.gallery.builder import CONTRACT, PREFIX, gallery_mapping
+from app.services.vision.sam3_focus import FOCUS_VERSION
 import re
 
 

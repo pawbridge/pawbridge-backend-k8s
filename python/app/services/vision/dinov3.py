@@ -54,7 +54,7 @@ def validate_vector(vector):
 
 class DinoV3Encoder:
     def __init__(self):
-        from app.services.gpu_device import inference_device
+        from app.services.vision.gpu_device import inference_device
         self.device = inference_device()
         if self.device == "mps" and visual_profile() == "animal-focus":
             raise RuntimeError("The legacy animal-focus profile requires CUDA; select sam3-animal-focus for MPS")
@@ -80,7 +80,7 @@ class DinoV3Encoder:
         self.model_version = MODEL_VERSION
         # SAM first avoids retaining DINO's CPU allocation during SAM construction.
         if visual_profile() == "sam3-animal-focus":
-            from app.services.sam3_focus import Sam3Focus, FOCUS_VERSION
+            from app.services.vision.sam3_focus import Sam3Focus, FOCUS_VERSION
             self.focus = Sam3Focus()
             self.model_version = FOCUS_VERSION
         self.model = timm.create_model(MODEL_NAME, pretrained=False, num_classes=0,
@@ -93,10 +93,10 @@ class DinoV3Encoder:
             raise RuntimeError("DINOv3 preprocessing or pooling changed")
         self.transform = timm.data.create_transform(**config, is_training=False)
         if visual_profile() == "animal-focus":
-            from app.services.animal_focus import AnimalFocus, FOCUS_VERSION
+            from app.services.vision.animal_focus import AnimalFocus, FOCUS_VERSION
             self.focus = AnimalFocus()
             self.model_version = FOCUS_VERSION
-        from app.services.inference_gate import InferenceGate
+        from app.services.vision.inference_gate import InferenceGate
         self.gate = InferenceGate()
 
     def encode(self, image, species=None):
@@ -113,7 +113,7 @@ class DinoV3Encoder:
     def encode_with_metadata(self, image, species=None, *, background=False, prepared_focus_image=None):
         # Hold one lock across detection and both embeddings; no concurrent GPU jobs.
         import torch
-        from app.services.gpu_device import is_gpu_oom
+        from app.services.vision.gpu_device import is_gpu_oom
         with self.gate.acquire(background=background):
             try:
                 if prepared_focus_image is None:
@@ -129,7 +129,7 @@ class DinoV3Encoder:
     def describe_coat_color(self, image, species, *, background=False, prepared_focus_image=None):
         # Reuse the loaded segmenter without recomputing either DINO vector.
         import torch
-        from app.services.gpu_device import is_gpu_oom
+        from app.services.vision.gpu_device import is_gpu_oom
         with self.gate.acquire(background=background):
             try:
                 if self.focus is None:
@@ -149,7 +149,7 @@ class DinoV3Encoder:
     def _encode_image(self, image, species, *, prepared_focus_image=None):
         if self.focus is None:
             return AnimalEmbedding(self._vector_for(image), self.model_version, "original_profile")
-        from app.services.animal_focus import square_image
+        from app.services.vision.animal_focus import square_image
         # Always preserve the same full-photo channel, even if segmentation changes
         # after JPEG recompression or is ambiguous on only one side of the search.
         with square_image(image) as original:

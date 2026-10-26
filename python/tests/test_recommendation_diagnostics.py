@@ -54,7 +54,7 @@ class RecommendationDiagnosticsTest(unittest.TestCase):
         self.assertEqual(response.json(), [9, 4])
 
     def test_source_features_and_gallery_contract_failures_have_distinct_safe_reasons(self):
-        from app.services.pg_gallery_store import RecommendationGalleryUnavailable, RecommendationSourceUnavailable
+        from app.services.gallery.pg_store import RecommendationGalleryUnavailable, RecommendationSourceUnavailable
         for exception_type, reason in [(RecommendationSourceUnavailable, 'SOURCE_FEATURES_NOT_READY'),
                                        (RecommendationGalleryUnavailable, 'GALLERY_CONTRACT_UNAVAILABLE')]:
             with self.subTest(reason=reason):
@@ -69,8 +69,8 @@ class RecommendationDiagnosticsTest(unittest.TestCase):
 
     def test_storage_guards_classify_missing_gallery_and_missing_source(self):
         from unittest.mock import Mock
-        from app.services.lost_gallery import CONTRACT
-        from app.services.pg_gallery_store import (PostgresqlGalleryStore,
+        from app.services.gallery.builder import CONTRACT
+        from app.services.gallery.pg_store import (PostgresqlGalleryStore,
             RecommendationGalleryUnavailable, RecommendationSourceUnavailable)
         store = PostgresqlGalleryStore(Mock())
         with patch.object(store, 'connection') as connection:

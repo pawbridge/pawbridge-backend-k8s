@@ -6,12 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.routers.lost_search import router
 from app.routers.recommendation import router as recommendation_router
-from app.services.dinov3 import get_encoder, gallery_index, visual_profile
+from app.services.vision.dinov3 import get_encoder, gallery_index, visual_profile
 
 
 def validate_focus_gallery(encoder):
-    from app.services.lost_storage import get_postgresql_store
-    from app.services.coat_color import VERSION as COLOR_VERSION, ranking_weight
+    from app.services.gallery.storage import get_postgresql_store
+    from app.services.vision.coat_color import VERSION as COLOR_VERSION, ranking_weight
     get_postgresql_store().validate(gallery_index(), encoder.model_version,
                                     COLOR_VERSION if ranking_weight() else None)
 
@@ -21,22 +21,22 @@ async def lifespan(app):
     if not os.getenv("INTERNAL_API_KEY"):
         raise RuntimeError("Internal authentication must be configured")
     gallery_index()
-    from app.services.coat_color import ranking_weight
+    from app.services.vision.coat_color import ranking_weight
     if ranking_weight() and visual_profile() != "sam3-animal-focus":
         raise RuntimeError("Coat-color ranking requires the SAM 3 gallery")
     enabled = os.getenv("LOST_GALLERY_SYNC_ENABLED", "false").lower() == "true"
     state_dir = os.getenv("LOST_GALLERY_STATE_DIR")
     if enabled and (visual_profile() != "sam3-animal-focus" or not state_dir):
         raise RuntimeError("Automatic gallery refresh requires SAM 3 and a persistent state directory")
-    from app.services.gallery_runtime import runtime_owner, GalleryRefresh
-    from app.services.gallery_source import GallerySource
-    from app.services.gallery_pages import PagedGallerySource
+    from app.services.gallery.runtime import runtime_owner, GalleryRefresh
+    from app.services.gallery.source import GallerySource
+    from app.services.gallery.pages import PagedGallerySource
     protocol = os.getenv('LOST_GALLERY_PROTOCOL', 'v1')
     if protocol not in {'v1', 'v2'}:
         raise RuntimeError('Gallery protocol must be v1 or v2')
     source_class = PagedGallerySource if protocol == 'v2' else GallerySource
-    from app.services.lost_storage import storage_session
-    from app.services.pg_gallery_store import ColorGalleryRefreshRequired, GalleryUnavailable
+    from app.services.gallery.storage import storage_session
+    from app.services.gallery.pg_store import ColorGalleryRefreshRequired, GalleryUnavailable
     if visual_profile() != 'sam3-animal-focus':
         raise RuntimeError('PostgreSQL gallery requires the SAM 3 profile')
     # Acquire ownership before loading weights; CLI and API must use the same state directory.

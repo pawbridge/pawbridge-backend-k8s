@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from PIL import Image
-from app.services.animal_focus import choose_detection, prepare_focus, square_image, BACKGROUND
+from app.services.vision.animal_focus import choose_detection, prepare_focus, square_image, BACKGROUND
 
 
 class AnimalFocusTest(unittest.TestCase):

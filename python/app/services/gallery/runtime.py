@@ -6,9 +6,9 @@ import fcntl
 import logging
 import threading
 
-from app.services.gallery_source import atomic_json
-from app.services.lost_gallery import build_gallery, GalleryBuildCancelled
-from app.services.gallery_retention import GalleryRetention
+from app.services.gallery.source import atomic_json
+from app.services.gallery.builder import build_gallery, GalleryBuildCancelled
+from app.services.gallery.retention import GalleryRetention
 
 
 @contextmanager

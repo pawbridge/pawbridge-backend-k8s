@@ -19,12 +19,13 @@ PawBridge 백엔드(`backend-app`)가 내부 API로 부르는 Python 서비스 �
 app/
 ├── main.py, lost_main.py, photo_main.py, gallery_main.py   # 실행 진입점
 ├── photo_optimizer.py  # 사진 압축 (사진 서비스 전용, Torch 없음)
-├── routers/            # chatbot, lost_search, recommendation
-└── services/
+├── routers/            # HTTP 경로: chatbot, lost_search, recommendation
+└── services/           # 업무 로직
     ├── chatbot/        # Gemini·stub 제공자, 프롬프트
-    ├── dinov3.py, sam3_focus.py, animal_focus.py, coat_color.py, gpu_device.py, inference_gate.py
-    ├── lost_search.py, recommendation.py, lost_storage.py
-    └── lost_gallery.py, gallery_*.py, pg_gallery_store.py, pg_gallery_incremental.py
+    ├── vision/         # 모델 추론: dinov3, sam3_focus, animal_focus, coat_color, gpu_device, inference_gate
+    ├── search/         # 실종 검색 순위(lost_search), 유사 동물 추천(recommendation)
+    └── gallery/        # 갤러리 빌드(builder)·자동 갱신(runtime, source, pages, inputs, prefetch)·보관(retention)
+                        # PostgreSQL 저장소(storage, pg_store, pg_incremental)
 deploy/macos/           # 네이티브 실행본 설치 런북, SAM 3 패치·고정 목록
 scripts/                # SAM 3 MPS 준비 스크립트
 tests/                  # unittest. tests/integration은 PostgreSQL이 필요한 선택 시험
@@ -132,7 +133,7 @@ Mac 네이티브 실행본은 앱 소스만 바꿔서는 교체되지 않는다.
 - `min_score=1.6`: 코사인 유사도 0.6 미만 결과 제외 → 관련 없는 동물을 억지로 채우지 않음
 - `species` 필터: min_score만으로는 외형이 비슷한 이종 동물 혼재 방지 불충분 (고양이 검색 시 강아지 포함 문제 해결)
 
-두 규칙(같은 종만, 시각 점수 0.6 이상)은 현재 추천(`services/recommendation.py`)에도 이어집니다.
+두 규칙(같은 종만, 시각 점수 0.6 이상)은 현재 추천(`services/search/recommendation.py`)에도 이어집니다.
 
 ### L2 정규화
 
