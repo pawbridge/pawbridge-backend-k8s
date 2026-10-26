@@ -77,7 +77,10 @@ class SecurityChainFlagHttpTest {
     private data class RouteOutcome(val route: Route, val open: Boolean, val outcomes: List<SecurityChainFixture.Outcome>)
 
     private fun outcomesIn(properties: Map<String, String>): List<RouteOutcome> {
-        val chain = SecurityChainFixture.with(properties)
+        return SecurityChainFixture.open(properties).use { chain -> requestEveryRoute(chain, properties) }
+    }
+
+    private fun requestEveryRoute(chain: SecurityChainFixture, properties: Map<String, String>): List<RouteOutcome> {
         return SecurityRoutes.routes.map { route ->
             val serving = SecurityRoutes.routes.filter { it.isOpenIn(properties) && it.matches(route.method, route.example) }
             val outcomes = if (serving.isEmpty()) {

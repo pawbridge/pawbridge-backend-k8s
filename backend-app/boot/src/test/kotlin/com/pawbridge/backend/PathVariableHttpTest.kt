@@ -5,6 +5,7 @@ import io.mockk.clearAllMocks
 import io.mockk.confirmVerified
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -25,7 +26,13 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PathVariableHttpTest {
-    private val mvc: MockMvc = SecurityChainFixture.mvcWith(AllControllers::class.java)
+    private val assembly = SecurityChainFixture.assemble(AllControllers::class.java)
+    private val mvc: MockMvc = assembly.mvc
+
+    @AfterAll
+    fun closeAssembly() {
+        assembly.close()
+    }
 
     @BeforeEach
     fun forgetEarlierCalls() {

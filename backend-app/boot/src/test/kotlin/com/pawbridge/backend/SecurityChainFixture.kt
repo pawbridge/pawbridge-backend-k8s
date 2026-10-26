@@ -29,7 +29,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * The real ReadSecurityConfiguration chain in front of a single catch-all handler.
  * A request that gets past the chain is counted, so "rejected before any handler" is a plain count of zero.
  */
-class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: Recorder, private val context: AnnotationConfigWebApplicationContext) {
+class SecurityChainFixture private constructor(
+    val mvc: MockMvc,
+    val recorder: Recorder,
+    private val context: AnnotationConfigWebApplicationContext,
+) : AutoCloseable {
     @RestController
     class Recorder {
         val reached = AtomicInteger()
@@ -63,6 +67,11 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
         fun recorder(): Recorder = Recorder()
     }
 
+    /** Closes the Spring context; a test heap is small, so contexts are never kept longer than the test needs. */
+    override fun close() {
+        context.close()
+    }
+
     fun call(request: MockHttpServletRequestBuilder): Outcome {
         val before = recorder.reached.get()
         val result = mvc.perform(request).andReturn()
@@ -92,28 +101,34 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
     }
 
     companion object {
-        private val cache = HashMap<Map<String, String>, SecurityChainFixture>()
-
-        @Synchronized
-        fun with(properties: Map<String, String>): SecurityChainFixture {
-            return cache.getOrPut(properties) {
-                val context = AnnotationConfigWebApplicationContext()
-                context.servletContext = MockServletContext()
-                context.environment.propertySources.addFirst(MapPropertySource("flags", properties))
-                context.register(ChainConfiguration::class.java, RecorderConfiguration::class.java)
-                context.refresh()
-                SecurityChainFixture(mvcOf(context), context.getBean(Recorder::class.java), context)
-            }
+        /** A new chain with the given properties; the caller closes it. */
+        fun open(properties: Map<String, String>): SecurityChainFixture {
+            val context = newContext(properties, RecorderConfiguration::class.java)
+            return SecurityChainFixture(mvcOf(context), context.getBean(Recorder::class.java), context)
         }
 
         /** The production chain in front of whatever [configuration] registers, with every route flag on. */
-        fun mvcWith(configuration: Class<*>): MockMvc {
+        fun assemble(configuration: Class<*>): Assembly {
+            val context = newContext(SecurityRoutes.everythingOn, configuration)
+            return Assembly(mvcOf(context), context)
+        }
+
+        class Assembly(val mvc: MockMvc, private val context: AnnotationConfigWebApplicationContext) : AutoCloseable {
+            override fun close() {
+                context.close()
+            }
+        }
+
+        private fun newContext(
+            properties: Map<String, String>,
+            configuration: Class<*>,
+        ): AnnotationConfigWebApplicationContext {
             val context = AnnotationConfigWebApplicationContext()
             context.servletContext = MockServletContext()
-            context.environment.propertySources.addFirst(MapPropertySource("flags", SecurityRoutes.everythingOn))
+            context.environment.propertySources.addFirst(MapPropertySource("flags", properties))
             context.register(ChainConfiguration::class.java, configuration)
             context.refresh()
-            return mvcOf(context)
+            return context
         }
 
         private fun mvcOf(context: AnnotationConfigWebApplicationContext): MockMvc {
@@ -121,9 +136,6 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
                 .apply<DefaultMockMvcBuilder>(springSecurity())
                 .build()
         }
-
-        val everythingOn: SecurityChainFixture
-            get() = with(SecurityRoutes.everythingOn)
 
         const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
         const val ADMIN_MESSAGE = "관리자 권한이 필요합니다."

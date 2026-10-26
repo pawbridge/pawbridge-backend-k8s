@@ -9,6 +9,7 @@ import com.pawbridge.backend.user.internal.statistics.application.TotalUserCount
 import io.mockk.clearAllMocks
 import io.mockk.every
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.params.ParameterizedTest
@@ -25,7 +26,13 @@ import org.springframework.transaction.TransactionSystemException
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AdviceScopeHttpTest {
-    private val mvc: MockMvc = SecurityChainFixture.mvcWith(AllControllers::class.java)
+    private val assembly = SecurityChainFixture.assemble(AllControllers::class.java)
+    private val mvc: MockMvc = assembly.mvc
+
+    @AfterAll
+    fun closeAssembly() {
+        assembly.close()
+    }
 
     @BeforeEach
     fun forgetEarlierStubs() {

@@ -7,8 +7,10 @@ import com.pawbridge.backend.SecurityChainFixture.Companion.bearer
 import com.pawbridge.backend.SecurityChainFixture.Companion.rejectedTokens
 import com.pawbridge.backend.SecurityChainFixture.Companion.send
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import org.springframework.security.core.context.SecurityContextHolder
@@ -18,8 +20,14 @@ import org.springframework.security.core.context.SecurityContextHolder
  * instead of once per endpoint test: who is let in, which token is refused, and that nothing behind the
  * chain runs for a refused request. Feature specific behavior stays in each endpoint's own test.
  */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SecurityChainHttpTest {
-    private val chain = SecurityChainFixture.everythingOn
+    private val chain = SecurityChainFixture.open(SecurityRoutes.everythingOn)
+
+    @AfterAll
+    fun closeChain() {
+        chain.close()
+    }
 
     @AfterEach
     fun clearContext() {
