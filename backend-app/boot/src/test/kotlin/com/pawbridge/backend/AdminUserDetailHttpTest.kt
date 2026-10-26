@@ -207,7 +207,7 @@ class AdminUserDetailHttpTest {
     }
 
     @Test
-    fun `관리자와 잘못된 Long__조회 전에 바인딩하면__원래 런타임 오류 봉투를 유지한다`() {
+    fun `관리자와 잘못된 Long__조회 전에 바인딩하면__서비스 호출 없이 400을 응답한다`() {
         // given
         val request = get(PATH + "not-a-number")
             .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
@@ -217,11 +217,11 @@ class AdminUserDetailHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
+            .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
-                content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
+                content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
