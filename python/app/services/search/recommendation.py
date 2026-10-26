@@ -1,9 +1,9 @@
 """Image recommendations reuse published SAM3/DINOv3 features without inference."""
-from app.services.coat_color import VERSION as COLOR_VERSION, ranking_weight
-from app.services.dinov3 import gallery_index
-from app.services.lost_search import rank_candidates
-from app.services.lost_storage import get_postgresql_store
-from app.services.sam3_focus import FOCUS_VERSION
+from app.services.vision.coat_color import VERSION as COLOR_VERSION, ranking_weight
+from app.services.vision.dinov3 import gallery_index
+from app.services.search.lost_search import rank_candidates
+from app.services.gallery.storage import get_postgresql_store
+from app.services.vision.sam3_focus import FOCUS_VERSION
 
 MAX_RECOMMENDATIONS = 6
 # Compatibility floor; not an identity probability or a calibrated DINOv3 threshold.

@@ -5,10 +5,10 @@ import json
 import re
 from pathlib import Path
 
-from app.services.dinov3 import DIMENSIONS, validate_vector
-from app.services.sam3_focus import FOCUS_VERSION
-from app.services.coat_color import VERSION as COLOR_VERSION, valid as valid_color
-from app.services.gallery_inputs import GalleryInputPrefetch
+from app.services.vision.dinov3 import DIMENSIONS, validate_vector
+from app.services.vision.sam3_focus import FOCUS_VERSION
+from app.services.vision.coat_color import VERSION as COLOR_VERSION, valid as valid_color
+from app.services.gallery.inputs import GalleryInputPrefetch
 
 CONTRACT = "pawbridge-lost-gallery-v1"
 PREFIX = "animals-lost-dinov3-sam3-"

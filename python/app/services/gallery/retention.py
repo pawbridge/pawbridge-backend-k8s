@@ -3,8 +3,8 @@ import json
 import re
 from pathlib import Path
 
-from app.services.gallery_source import atomic_json
-from app.services.lost_gallery import PREFIX, gallery_target, GalleryBuildCancelled
+from app.services.gallery.source import atomic_json
+from app.services.gallery.builder import PREFIX, gallery_target, GalleryBuildCancelled
 
 
 class GalleryRetention:

@@ -7,7 +7,7 @@ from queue import Empty, Queue
 import threading
 
 from PIL import Image, ImageOps
-from app.services.gallery_prefetch import PhotoPrefetch
+from app.services.gallery.prefetch import PhotoPrefetch
 
 MAX_PREPARED_IMAGES = 3  # Current image plus at most two upcoming images.
 MAX_PREPARED_BYTES = 128 * 1024 * 1024

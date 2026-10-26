@@ -5,9 +5,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from PIL import Image
-from app.services import lost_storage
-from app.services.lost_search import search_photo
-from app.services.pg_gallery_store import PostgresqlGalleryStore
+from app.services.gallery import storage as lost_storage
+from app.services.search.lost_search import search_photo
+from app.services.gallery.pg_store import PostgresqlGalleryStore
 
 
 class LostStorageTest(unittest.TestCase):
@@ -62,8 +62,8 @@ class LostStorageTest(unittest.TestCase):
                     {'_score':1.795,'_source':{'id':2,'happen_place':'서울'}}]
         store=Mock();store.search.side_effect=retrieve
         with patch.dict(os.environ,{'LOST_STORAGE_BACKEND':'postgresql','LOST_SEARCH_COAT_COLOR_WEIGHT':'0'}), \
-                patch('app.services.dinov3.get_encoder',return_value=SimpleNamespace(encode_with_metadata=encode)), \
-                patch('app.services.dinov3.gallery_index',return_value='test'), \
+                patch('app.services.vision.dinov3.get_encoder',return_value=SimpleNamespace(encode_with_metadata=encode)), \
+                patch('app.services.vision.dinov3.gallery_index',return_value='test'), \
                 patch.object(lost_storage,'get_postgresql_store',return_value=store):
             result=search_photo(image.getvalue(),'DOG',region='서울',include_adopted_or_returned=True)
         self.assertEqual([row['animalId'] for row in result['candidates']],[2,1])

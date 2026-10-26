@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import numpy as np
 from PIL import Image, ImageEnhance
-from app.services.coat_color import describe, mismatch, ranking_weight, valid, VERSION
-from app.services.lost_search import rank_candidates
+from app.services.vision.coat_color import describe, mismatch, ranking_weight, valid, VERSION
+from app.services.search.lost_search import rank_candidates
 
 
 def swatch(color, background="blue"):
@@ -24,7 +24,7 @@ def descriptor(color):
 
 
 def synthetic_descriptor(points):
-    from app.services.coat_color import JOINT_BINS, MARGINAL_BINS
+    from app.services.vision.coat_color import JOINT_BINS, MARGINAL_BINS
     joint = np.zeros((JOINT_BINS, JOINT_BINS, JOINT_BINS))
     for point in points:
         joint[point] += 1 / len(points)

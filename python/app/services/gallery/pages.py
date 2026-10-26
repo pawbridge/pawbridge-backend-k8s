@@ -8,8 +8,8 @@ import uuid
 from urllib.parse import urlsplit
 
 import httpx
-from app.services.gallery_source import GallerySource, atomic_json, read_bounded, MAX_PHOTO_BYTES
-from app.services.lost_gallery import GalleryBuildCancelled, METADATA, STATUSES
+from app.services.gallery.source import GallerySource, atomic_json, read_bounded, MAX_PHOTO_BYTES
+from app.services.gallery.builder import GalleryBuildCancelled, METADATA, STATUSES
 
 PROTOCOL = 'pawbridge-gallery-pages-v2'
 PAGE_BYTES = 2 * 1024 * 1024

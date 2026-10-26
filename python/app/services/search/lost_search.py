@@ -6,7 +6,7 @@ import re
 import warnings
 from datetime import date
 from PIL import Image, ImageOps, UnidentifiedImageError
-from app.services.coat_color import mismatch, ranking_weight
+from app.services.vision.coat_color import mismatch, ranking_weight
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_PIXELS = 16_000_000
@@ -92,12 +92,12 @@ def rank_candidates(hits, lost_date=None, region=None, description=None, *, coat
 
 
 def search_photo(data, species, lost_date=None, region=None, description=None, include_adopted_or_returned=False):
-    from app.services.dinov3 import get_encoder, gallery_index
+    from app.services.vision.dinov3 import get_encoder, gallery_index
     color_weight = ranking_weight()
     with decode_photo(data) as image:
         embedding = get_encoder().encode_with_metadata(image, species)
     logging.getLogger(__name__).info("Lost-search image processing: %s", embedding.focus_status)
-    from app.services.lost_storage import get_postgresql_store
+    from app.services.gallery.storage import get_postgresql_store
     statuses = ACTIVE_STATUSES + (RESOLVED_STATUSES if include_adopted_or_returned else ())
     hits = get_postgresql_store().search(gallery_index(), embedding, species, statuses, CANDIDATE_POOL)
     return {"candidates": rank_candidates(hits, lost_date, region, description,

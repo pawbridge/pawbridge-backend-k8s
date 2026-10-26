@@ -3,8 +3,8 @@ import json
 import hashlib
 import re
 from contextlib import contextmanager
-from app.services.dinov3 import validate_vector
-from app.services.lost_gallery import PREFIX, CONTRACT, gallery_mapping
+from app.services.vision.dinov3 import validate_vector
+from app.services.gallery.builder import PREFIX, CONTRACT, gallery_mapping
 
 
 class GalleryUnavailable(RuntimeError):
@@ -74,7 +74,7 @@ class PostgresqlGalleryStore:
         if (row and row[3] and row[4] == 1
                 and {k:v for k,v in row[1].items() if k != 'snapshot_sha256'}
                 == {k:v for k,v in expected.items() if k != 'snapshot_sha256'}):
-            from app.services.pg_gallery_incremental import IncrementalGallerySession
+            from app.services.gallery.pg_incremental import IncrementalGallerySession
             session = IncrementalGallerySession(self, alias, row[0], row[1], row[2], snapshot_hash, total)
             return session, session.delta_target
         return self, self.build_target(target, snapshot_hash, total)
@@ -125,8 +125,8 @@ class PostgresqlGalleryStore:
     def write_page(self, target, documents):
         if not 1 <= len(documents) <= 100:
             raise ValueError('Gallery writes must be bounded to 100 animals')
-        from app.services.coat_color import valid as valid_color
-        from app.services.lost_gallery import STATUSES
+        from app.services.vision.coat_color import valid as valid_color
+        from app.services.gallery.builder import STATUSES
         rows = []
         ids = set()
         for document in documents:
@@ -209,7 +209,7 @@ class PostgresqlGalleryStore:
             validate_vector(embedding.animal_vector)
         if limit != 200 or species not in {'DOG', 'CAT'}:
             raise ValueError('Invalid candidate contract')
-        from app.services.lost_search import ANIMAL_REGION_WEIGHT
+        from app.services.search.lost_search import ANIMAL_REGION_WEIGHT
         # Exact cosine on the eligible snapshot. No ANN truncation or score/feature change.
         with self.connection(read_only=True) as conn:
             head = conn.execute('SELECT b.metadata,b.completed FROM lost_gallery_heads h '
@@ -232,7 +232,7 @@ class PostgresqlGalleryStore:
         """Reuse one published 1024-dim snapshot; filter live availability before top-200."""
         if type(animal_id) is not int or animal_id <= 0 or species not in {'DOG', 'CAT'}:
             raise ValueError('Invalid recommendation source')
-        from app.services.lost_search import ANIMAL_REGION_WEIGHT
+        from app.services.search.lost_search import ANIMAL_REGION_WEIGHT
         with self.connection(read_only=True) as conn:
             head = conn.execute('SELECT h.build_key,b.metadata,b.completed FROM lost_gallery_heads h '
                 'JOIN lost_gallery_builds b ON b.build_key=h.build_key WHERE h.alias=%s', (alias,)).fetchone()
@@ -272,7 +272,7 @@ class PostgresqlGalleryStore:
                 row = conn.execute('SELECT metadata FROM lost_gallery_builds WHERE build_key=%s FOR UPDATE', (target,)).fetchone()
                 if not row:
                     return True
-                from app.services.sam3_focus import FOCUS_VERSION
+                from app.services.vision.sam3_focus import FOCUS_VERSION
                 if row[0].get('contract') != CONTRACT or row[0].get('model_version') != FOCUS_VERSION:
                     raise RuntimeError('Refusing to delete an unowned gallery')
                 # Recheck all aliases while publication is excluded for this page.

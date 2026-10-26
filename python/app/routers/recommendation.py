@@ -2,8 +2,8 @@ import logging
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from app.routers.lost_search import authenticate
-from app.services.recommendation import recommend_animals
-from app.services.pg_gallery_store import RecommendationGalleryUnavailable, RecommendationSourceUnavailable
+from app.services.search.recommendation import recommend_animals
+from app.services.gallery.pg_store import RecommendationGalleryUnavailable, RecommendationSourceUnavailable
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

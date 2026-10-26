@@ -4,7 +4,7 @@ import tempfile
 from threading import Event, Lock
 import unittest
 
-from app.services.gallery_prefetch import PhotoPrefetch
+from app.services.gallery.prefetch import PhotoPrefetch
 
 
 class PhotoPrefetchTest(unittest.TestCase):

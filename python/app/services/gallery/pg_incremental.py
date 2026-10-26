@@ -4,7 +4,7 @@ import json
 import re
 from copy import deepcopy
 
-from app.services.lost_gallery import PREFIX, gallery_mapping
+from app.services.gallery.builder import PREFIX, gallery_mapping
 
 
 class IncrementalGallerySession:

@@ -10,10 +10,10 @@ from unittest.mock import Mock, create_autospec, patch
 
 import httpx
 from PIL import Image
-from app.services.inference_gate import InferenceGate
-from app.services.gallery_source import GallerySource
-from app.services.gallery_runtime import GalleryRefresh, runtime_owner
-from app.services.pg_gallery_store import PostgresqlGalleryStore
+from app.services.vision.inference_gate import InferenceGate
+from app.services.gallery.source import GallerySource
+from app.services.gallery.runtime import GalleryRefresh, runtime_owner
+from app.services.gallery.pg_store import PostgresqlGalleryStore
 from tests.fake_gallery_store import FakeGalleryStore
 
 HOST = 'test.r2.cloudflarestorage.com'
@@ -42,7 +42,7 @@ class GalleryRuntimeTest(unittest.TestCase):
             source.fetch.return_value = {'manifest_path': 'manifest', 'etag': 'new',
                                          'snapshot_sha256': 'a'*64}
             result = {'index': 'stable-active', 'records': 1, 'snapshot_sha256': 'a'*64}
-            with patch('app.services.gallery_runtime.build_gallery', return_value=result) as build:
+            with patch('app.services.gallery.runtime.build_gallery', return_value=result) as build:
                 refresh.cycle()
             self.assertIs(build.call_args.args[0], store)
             self.assertIs(build.call_args.kwargs['incremental'], True)
@@ -126,7 +126,7 @@ class GalleryRuntimeTest(unittest.TestCase):
             refresh.etag = 'old'; refresh.status['lastSuccess'] = 'previous-success'
             snapshot = {'manifest_path':'manifest','etag':'new','downloaded':1,'reused_photos':0,'snapshot_sha256':'a'*64}
             source.fetch.return_value = snapshot
-            with patch('app.services.gallery_runtime.build_gallery', side_effect=RuntimeError('bulk failed')):
+            with patch('app.services.gallery.runtime.build_gallery', side_effect=RuntimeError('bulk failed')):
                 with self.assertRaises(RuntimeError): refresh.cycle()
             self.assertEqual(refresh.etag,'old')
             self.assertEqual(refresh.status['lastSuccess'],'previous-success')
@@ -134,7 +134,7 @@ class GalleryRuntimeTest(unittest.TestCase):
             source.fetch.side_effect = [None, snapshot]
             store.published.side_effect = RuntimeError('gallery head unavailable')
             result = {'index':'new-index','records':1,'snapshot_sha256':'a'*64}
-            with patch('app.services.gallery_runtime.build_gallery',return_value=result): refresh.cycle()
+            with patch('app.services.gallery.runtime.build_gallery',return_value=result): refresh.cycle()
             self.assertEqual(source.fetch.call_args_list[-2].args[0],'old')
             self.assertIsNone(source.fetch.call_args_list[-1].args[0])
             self.assertEqual(refresh.etag,'new'); self.assertTrue(refresh.ready)
@@ -143,8 +143,8 @@ class GalleryRuntimeTest(unittest.TestCase):
                 with self.assertRaises(BlockingIOError), runtime_owner(directory): pass
 
     def test_retention_only_deletes_recorded_unpublished_owned_builds_and_survives_restart(self):
-        from app.services.gallery_retention import GalleryRetention
-        from app.services.lost_gallery import gallery_target, gallery_mapping
+        from app.services.gallery.retention import GalleryRetention
+        from app.services.gallery.builder import gallery_target, gallery_mapping
         with tempfile.TemporaryDirectory() as directory:
             store = FakeGalleryStore()
             alias = 'animals-lost-dinov3-sam3-retention-test'
@@ -170,8 +170,8 @@ class GalleryRuntimeTest(unittest.TestCase):
             self.assertEqual(resumed.journal['known'], targets[1:])
 
     def test_retention_stop_preserves_pending_journal_until_retry_completes(self):
-        from app.services.gallery_retention import GalleryRetention
-        from app.services.lost_gallery import gallery_target, GalleryBuildCancelled
+        from app.services.gallery.retention import GalleryRetention
+        from app.services.gallery.builder import gallery_target, GalleryBuildCancelled
         with tempfile.TemporaryDirectory() as directory:
             store=create_autospec(PostgresqlGalleryStore,instance=True); source=Mock(photo_root=Path(directory),downloaded=0)
             refresh=GalleryRefresh(store,SimpleNamespace(model_version='test'),source,
@@ -244,7 +244,7 @@ class GalleryRuntimeTest(unittest.TestCase):
             source.close()
 
     def test_unchanged_feed_rebuilds_when_published_color_contract_is_stale(self):
-        from app.services.lost_gallery import gallery_mapping
+        from app.services.gallery.builder import gallery_mapping
         with tempfile.TemporaryDirectory() as directory:
             source = Mock(photo_root=Path(directory), downloaded=0)
             store = FakeGalleryStore()
@@ -262,7 +262,7 @@ class GalleryRuntimeTest(unittest.TestCase):
             self.assertFalse(refresh.published())
             snapshot = {"manifest_path": "manifest", "etag": "unchanged", "snapshot_sha256": "a"*64}
             source.fetch.side_effect = [None, snapshot]
-            with patch("app.services.gallery_runtime.build_gallery", return_value=dict(result, index="new")) as build:
+            with patch("app.services.gallery.runtime.build_gallery", return_value=dict(result, index="new")) as build:
                 refresh.cycle()
             self.assertEqual([call.args[0] for call in source.fetch.call_args_list], ["unchanged", None])
             build.assert_called_once()

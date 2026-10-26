@@ -21,7 +21,7 @@ def get_postgresql_store():
     with _lock:
         if _store is None:
             from psycopg_pool import ConnectionPool
-            from app.services.pg_gallery_store import PostgresqlGalleryStore
+            from app.services.gallery.pg_store import PostgresqlGalleryStore
             dsn = os.getenv('LOST_PG_DSN')
             size = int(os.getenv('LOST_PG_POOL_MAX_SIZE', '2'))
             if not dsn or not 1 <= size <= 4:

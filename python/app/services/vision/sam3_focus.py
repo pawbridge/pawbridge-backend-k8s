@@ -4,7 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 
-from app.services.animal_focus import FocusResult, prepare_focus, square_image
+from app.services.vision.animal_focus import FocusResult, prepare_focus, square_image
 
 CHECKPOINT_SHA256 = "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e"
 FOCUS_VERSION = "dinov3-large-sam39999e234-dual-pad256-v1"
@@ -65,7 +65,7 @@ def prepare_prediction(image, boxes, masks, scores):
 
 class Sam3Focus:
     def __init__(self):
-        from app.services.gpu_device import inference_device
+        from app.services.vision.gpu_device import inference_device
         self.device = inference_device()
         import torch
         from sam3.model_builder import build_sam3_image_model
