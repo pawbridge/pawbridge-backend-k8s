@@ -58,6 +58,14 @@ jobs:
     steps:
       - name: Select execution or reuse
         run: source-proof
+  contract:
+    name: Java 21 PostgreSQL contract tests with Testcontainers
+    steps:
+      - name: Run the PostgreSQL contract tests
+        run: existing-contract-tests
+      - name: Preserve the contract test reports
+        if: always()
+        uses: existing-upload
 '''
 
 
@@ -119,7 +127,7 @@ class Inputs:
             run_id=str(RUN), run_attempt=str(ATTEMPT))
         self.plan = proof.profile.make_plan(context, PATHS, proof.profile.FULL, JAR)
         steps = {name: {'outcome': 'success', 'conclusion': 'success'}
-                 for name in proof.profile.ALL_SMOKES + proof.profile.FULL_CONTRACTS + ('owned_cleanup',)}
+                 for name in proof.profile.ALL_SMOKES + ('owned_cleanup',)}
         self.execution = proof.profile.audit_execution(self.plan, context, PATHS, proof.profile.FULL, JAR, steps)
         metadata = ''.join(k + '=' + self.source_identity[k] + '\n' for k in
                            ('source_sha', 'workflow_sha', 'workflow_ref')).encode()
@@ -298,6 +306,19 @@ class PostmergeProofTest(unittest.TestCase):
             if defect == 'missing': del steps[1]
             else: steps[1]['conclusion'] = 'skipped'
             self.execute(data, 'missing-or-skipped-validation-step')
+
+    def test_given_contract_job_missing_or_failed_or_with_a_skipped_step__when_deciding__then_fallback(self):
+        contract = 4  # jobs follow the order package, check, ci-result, proof, contract
+        for defect in ('job-missing', 'job-skipped', 'job-failed', 'step-missing', 'step-skipped'):
+            data = self.fixture()
+            self.assertEqual('Java 21 PostgreSQL contract tests with Testcontainers', data.jobs[contract]['name'])
+            if defect == 'job-missing': del data.jobs[contract]
+            elif defect == 'job-skipped': data.jobs[contract]['conclusion'] = 'skipped'
+            elif defect == 'job-failed': data.jobs[contract]['conclusion'] = 'failure'
+            elif defect == 'step-missing': del data.jobs[contract]['steps'][0]
+            else: data.jobs[contract]['steps'][0]['conclusion'] = 'skipped'
+            with self.subTest(defect=defect):
+                self.execute(data)
 
     def test_given_unknown_step_condition_or_continue_on_error__when_interpreting_current_recipe__then_fallback(self):
         for old, new in ((b'if: always()', b'if: secrets.unknown'),

@@ -59,12 +59,16 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         return value if raw else value.splitlines()[0] + '\n'
 
     def gate(self, selection='success', selected='true', check='success', package=None,
-             proof=None, mode=None, event='push', architecture=None):
+             proof=None, mode=None, event='push', architecture=None, contract=None):
         package_result = package if package is not None else ('skipped' if selected == 'false' else 'success')
+        # Like the packaged contracts, the contract job runs on a dev push and is skipped on a pull request,
+        # for an unselected change and when a verified reuse stands in for the whole run.
+        contract_result = contract if contract is not None else (
+            'skipped' if selected == 'false' or event == 'pull_request' or mode == 'reused-full' else 'success')
         return subprocess.run(
             ['bash', '-euc', self.script('ci-result')],
             env={'PATH': os.environ.get('PATH', ''), 'EVENT_NAME': event, 'SELECTION_RESULT': selection,
-                 'MODULE_SELECTED': selected, 'MODULE_RESULT': check,
+                 'MODULE_SELECTED': selected, 'MODULE_RESULT': check, 'CONTRACT_RESULT': contract_result,
                  'PACKAGE_RESULT': package_result,
                  'ARCHITECTURE_RESULT': architecture if architecture is not None else package_result,
                  'PROOF_RESULT': proof if proof is not None else ('skipped' if selected == 'false' else 'success'),
@@ -116,6 +120,8 @@ class BackendAppCiPolicyTest(unittest.TestCase):
 
     def test_given_module_or_its_policy_change__when_selecting__then_require_the_application_check(self):
         for path in ('backend-app/boot/src/main/java/Example.java',
+                     'user-service/src/migration/resources/db/postgresql/V6__next.sql',
+                     'community-service/src/migration/resources/db/postgresql/V12__next.sql',
                      '.github/workflows/backend-app-check.yml',
                      '.github/scripts/test_backend_app_ci_policy.py',
                      '.github/scripts/ci_branch_policy.py',
@@ -171,6 +177,18 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             with self.subTest(check=check):
                 self.assertNotEqual(0, self.gate(event='push', check=check).returncode)
 
+    def test_given_contract_job_result__when_gating__then_require_success_on_push_and_a_skip_on_pull_request(self):
+        self.assertEqual(0, self.gate(event='push', contract='success').returncode)
+        self.assertEqual(0, self.gate(event='pull_request', check='skipped', contract='skipped').returncode)
+        for contract in ('skipped', 'failure', 'cancelled', ''):
+            with self.subTest(event='push', contract=contract):
+                self.assertNotEqual(0, self.gate(event='push', contract=contract).returncode)
+        for contract in ('success', 'failure', 'cancelled', ''):
+            with self.subTest(event='pull_request', contract=contract):
+                self.assertNotEqual(0, self.gate(event='pull_request', check='skipped', contract=contract).returncode)
+        self.assertNotEqual(0, self.gate(selected='false', package='skipped', check='skipped', contract='success').returncode)
+        self.assertNotEqual(0, self.gate(selected='false', package='skipped', check='skipped', contract='').returncode)
+
     def test_given_pull_request_without_contracts__when_packaging__then_keep_the_same_jar_isolation_guard(self):
         def isolation(job, name):
             step = job.split('      - name: ' + name + '\n', 1)[1].split('\n      - name:', 1)[0]
@@ -206,9 +224,10 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('needs: [selection, proof, package]', check)
         self.assertIn("if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}", check)
         gate = self.job('ci-result')
-        self.assertIn('needs: [selection, proof, package, architecture, check]', gate)
+        self.assertIn('needs: [selection, proof, package, architecture, check, contract]', gate)
+        self.assertIn('CONTRACT_RESULT: ${{ needs.contract.result }}', gate)
         self.assertIn('ARCHITECTURE_RESULT: ${{ needs.architecture.result }}', gate)
-        self.assertIn('$PACKAGE_RESULT:$ARCHITECTURE_RESULT:$MODULE_RESULT', gate)
+        self.assertIn('$PACKAGE_RESULT:$ARCHITECTURE_RESULT:$MODULE_RESULT:$CONTRACT_RESULT', gate)
         self.assertIn('EVENT_NAME: ${{ github.event_name }}', gate)
         self.assertIn('SELECTION_RESULT: ${{ needs.selection.result }}', gate)
         self.assertIn('MODULE_SELECTED: ${{ needs.selection.outputs.selected }}', gate)
@@ -220,8 +239,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
     def test_given_application_checks_are_selected__when_running__then_preserve_the_full_runtime_contract(self):
         check = self.job('check')
         self.assertIn('bash ./gradlew projects check :boot:bootJar', self.job('package'))
-        for command in ('bash ./gradlew :boot:authSessionCompatibilityTest :boot:authSessionCompatibilitySeoulTest',
-                        'python3 scripts/f2_ci.py prepare', 'python3 scripts/f3_ci.py prepare',
+        for command in ('python3 scripts/f2_ci.py prepare', 'python3 scripts/f3_ci.py prepare',
                         'python3 scripts/f3_ci.py smoke', 'python3 scripts/f3_ci.py cleanup'):
             with self.subTest(command=command):
                 self.assertIn(command, check)
@@ -232,11 +250,16 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         cleanup = cleanup.split('      - name:', 1)[0]
         self.assertIn('        if: always()', cleanup)
         self.assertNotRegex(check, r'--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)')
+        # The auth session contract moved to the contract job; nothing of its fixture harness stays in a shard.
+        for removed in ('authSessionCompatibility', 'auth-sessions', 'auth_sessions', 'admin-update', 'fixture_admin_update'):
+            with self.subTest(removed=removed):
+                self.assertNotIn(removed, check)
 
     def test_given_candidate_build__when_running__then_use_the_runner_cpus_without_skipping_any_task(self):
         package = self.job('package')
         self.assertIn('bash ./gradlew projects check :boot:bootJar --max-workers=4 -Dorg.gradle.parallel=true\n', package)
-        self.assertIn('bash ./gradlew :boot:compileCompatibilityTestJava --max-workers=4 -Dorg.gradle.parallel=true\n', package)
+        self.assertIn('bash ./gradlew :boot:compileContractTestKotlin --max-workers=4 -Dorg.gradle.parallel=true\n', package)
+        self.assertNotIn('compileCompatibilityTestJava', package)
         self.assertNotIn('--max-workers=1', package)
         self.assertNotIn('-Dorg.gradle.parallel=false', package)
         self.assertNotRegex(package, r'--build-cache|--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)')
@@ -245,11 +268,45 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('org.gradle.jvmargs=-Xmx3g', gradle_properties)
         self.assertIn('kotlin.daemon.jvmargs=-Xmx2g', gradle_properties)
 
-    def test_given_database_contracts__when_running__then_keep_their_gradle_tasks_serial(self):
-        check = self.job('check')
-        self.assertIn('--no-daemon --max-workers=1 -Dorg.gradle.parallel=false', check)
+    def test_given_database_contracts__when_running__then_keep_their_gradle_tasks_serial_and_out_of_check(self):
+        contract = self.job('contract')
         boot = (ROOT / 'backend-app/boot/build.gradle').read_text()
-        self.assertGreaterEqual(boot.count("systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'"), 3)
+        self.assertIn('bash ./gradlew :boot:contractTest --continue', contract)
+        helper = boot.split('def registerContractTest', 1)[1].split("registerContractTest('contractTestUtc'", 1)[0]
+        self.assertIn("systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'", helper)
+        self.assertIn('result.testCount == 0 || result.skippedTestCount > 0', helper)
+        self.assertIn('filter { failOnNoMatchingTests = true }', helper)
+        self.assertIn('outputs.upToDateWhen { false }', helper)
+        self.assertIn("tasks.named('contractTestSeoul') { mustRunAfter tasks.named('contractTestUtc') }", boot)
+        self.assertIn("dependsOn tasks.named('contractTestUtc'), tasks.named('contractTestSeoul')", boot)
+        self.assertIn("includeTags 'timezone-sensitive'", boot)
+        self.assertGreaterEqual(boot.count("systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'"), 2)
+        # They need Docker, so they are not a dependency of the ordinary check.
+        self.assertNotRegex(boot, r"tasks\.named\('check'\)[^\n]*contractTest")
+        self.assertNotRegex(self.job('package'), r'gradlew[^\n]*:boot:contractTest(?:Utc|Seoul)?\b')
+        self.assertNotRegex(contract, r'--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)|continue-on-error')
+
+    def test_given_contract_job__when_running__then_only_dev_pushes_in_parallel_with_the_package_job(self):
+        contract, package = self.job('contract'), self.job('package')
+        self.assertIn('needs: [selection, proof]', contract)
+        self.assertNotIn('needs.package', contract)
+        self.assertNotIn('package,', contract.split('    if:', 1)[0])
+        self.assertIn("if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' "
+                      "&& needs.proof.outputs.mode == 'execute' }}", contract)
+        self.assertIn("PAWBRIDGE_CONTRACT_REQUIRE_LEGACY_SOURCES: 'true'", contract)
+        sparse = re.search(r'sparse-checkout: \|\n(.*?)\n\s+sparse-checkout-cone-mode:', contract, re.DOTALL).group(1)
+        self.assertEqual({'backend-app', '.github/workflows/backend-app-check.yml',
+                          'user-service/src/migration/resources/db/postgresql',
+                          'community-service/src/migration/resources/db/postgresql'},
+                         {line.strip() for line in sparse.splitlines() if line.strip()})
+        self.assertIn('validate-wrappers: true', contract)
+        self.assertIn('$RUNNER_TEMP/pawbridge-backend-app-gradle', contract)
+        evidence = contract.split('name: Preserve the contract test reports even on failure', 1)[1]
+        self.assertIn('if: always()', evidence)
+        self.assertIn('boot/build/test-results/contractTestUtc/TEST-*.xml', evidence)
+        self.assertIn('boot/build/test-results/contractTestSeoul/TEST-*.xml', evidence)
+        self.assertNotIn('GH_TOKEN:', contract)
+        self.assertNotIn('docker login', contract)
 
     def test_given_gradle_dependency_cache__when_running__then_only_dev_pushes_write_and_build_outputs_are_not_cached(self):
         package = self.job('package')
@@ -304,7 +361,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertEqual({'backend-app', '.github/workflows/backend-app-check.yml',
                           '.github/scripts/backend_contract_profile.py'}, checked_out)
         self.assertIn('bash ./gradlew projects check :boot:bootJar', package)
-        self.assertIn('bash ./gradlew :boot:compileCompatibilityTestJava', package)
+        self.assertIn('bash ./gradlew :boot:compileContractTestKotlin', package)
         self.assertNotIn('-x :boot:architectureTest', package)
         self.assertNotIn('verify_architecture_selftest_inputs', package)
         self.assertNotRegex(self.job('check'), r'./gradlew[^\n]*(?:\bcheck\b|:boot:test\b|:boot:ownedPostgresqlTest\b|:boot:compileTestJava\b)')
@@ -363,7 +420,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         found, conditional = [], []
         modes = (backend_contract_profile.FULL, backend_contract_profile.PILOT)
         shards = backend_contract_profile.SHARDS
-        last = str(backend_contract_profile.CONTRACT_SHARD)
+        last = str(max(shards))
         selected = {(mode, shard): [] for mode in modes for shard in shards}
         smoke_conditions, token_conditions = {}, {}
         reproduced = []
@@ -380,15 +437,6 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         allowed_conditions = {
             'Add pinned User and installed chat tables only after fixed source preparation':
                 '${{ matrix.shard >= ' + last + ' }}',
-            'Add only administrator role and care registration column rights after member fixture preparation':
-                '${{ matrix.shard >= ' + last + ' }}',
-            'Add only refresh logout column rights on the exact administrator fixture':
-                '${{ ' + full_only + ' && matrix.shard >= ' + last + ' }}',
-            'Compare refresh logout transactions and one Seoul expiry storage boundary':
-                '${{ ' + full_only + ' && matrix.shard >= ' + last + ' }}',
-            'Always restore only auth column rights and verify the prior administrator fixture':
-                "${{ always() && matrix.profile == 'full' && (steps.fixture_auth_sessions.outcome == 'success' "
-                "|| steps.fixture_auth_sessions.outcome == 'failure') }}",
             'Remove only the owned disposable fixture': 'always()',
             'Reject missing, failed or falsely skipped runtime contracts': 'always()',
             'Preserve tests and bounded runtime evidence': 'always()',
@@ -469,7 +517,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
 
     def test_given_verified_reuse__when_gating__then_accept_only_two_expected_skips(self):
         valid = dict(selected='true', proof='success', mode='reused-full',
-                     package='skipped', check='skipped')
+                     package='skipped', check='skipped', contract='skipped')
         actual = self.gate(**valid)
         self.assertEqual(0, actual.returncode, actual.stderr)
         for key, values in {
@@ -477,6 +525,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
             'mode': ('', 'reuse', 'full', 'reused-scoped'),
             'package': ('success', 'failure', 'cancelled', ''),
             'check': ('success', 'failure', 'cancelled', ''),
+            'contract': ('success', 'failure', 'cancelled', ''),
         }.items():
             for value in values:
                 with self.subTest(key=key, value=value):
@@ -490,29 +539,19 @@ class BackendAppCiPolicyTest(unittest.TestCase):
                 with self.subTest(event=event, architecture=value):
                     self.assertNotEqual(0, self.gate(event=event, check=check, architecture=value).returncode)
 
-    def test_given_late_member_and_auth_fixtures__when_wiring__then_keep_order_contracts_and_always_restore(self):
+    def test_given_late_member_and_administrator_fixtures__when_wiring__then_keep_order_and_the_final_cleanup(self):
         check = self.job('check')
-        keys = ('jar_f29', 'fixture_member_cleanup', 'jar_f31', 'fixture_admin_update',
-                'fixture_auth_sessions', 'pg_auth_sessions', 'restore_auth_sessions', 'owned_cleanup')
+        keys = ('jar_f29', 'fixture_member_cleanup', 'jar_f31', 'owned_cleanup')
         for first, second in zip(keys, keys[1:]):
             self.assertLess(check.index('id: ' + first + '\n'), check.index('id: ' + second + '\n'))
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)[1:]
         for key, command in (
                 ('fixture_member_cleanup', 'python3 scripts/f29_ci.py member-cleanup-prepare'),
-                ('jar_f31', 'python3 scripts/f29_ci.py member-cleanup-smoke'),
-                ('fixture_admin_update', 'python3 scripts/f29_ci.py admin-update-prepare'),
-                ('fixture_auth_sessions', 'python3 scripts/f29_ci.py auth-sessions-prepare'),
-                ('pg_auth_sessions', ':boot:authSessionCompatibilityTest :boot:authSessionCompatibilitySeoulTest'),
-                ('restore_auth_sessions', 'python3 scripts/f29_ci.py auth-sessions-restore')):
+                ('jar_f31', 'python3 scripts/f29_ci.py member-cleanup-smoke')):
             step = next(part for part in parts if 'id: ' + key + '\n' in part)
             self.assertIn(command, step)
-        pg = next(part for part in parts if 'id: pg_auth_sessions\n' in part)
-        self.assertIn('verify_auth_sessions_report(', pg)
-        self.assertIn('test -s build/ci/auth-sessions-fixture-write.txt', pg)
         self.assertIn("result['request_checks'] == result['delete_checks'] + result['get_checks'] == 9", check)
         self.assertIn("result['child_log_evidence'] == 'safe-copied'", check)
-        self.assertEqual(list(backend_contract_profile.FULL_CONTRACTS),
-                         ['fixture_auth_sessions', 'pg_auth_sessions', 'restore_auth_sessions'])
         self.assertNotRegex(check, r'oracle-sha256|LegacyOracle|results\n')
 
     def test_given_unknown_or_failed_proof__when_gating__then_do_not_accept_full_success(self):

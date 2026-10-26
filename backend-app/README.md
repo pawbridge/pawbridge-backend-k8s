@@ -308,10 +308,10 @@ JAR는 현재 단계에서 기존 실제 발급기로 갱신한 합성 토큰과
 
 로컬 단위·컴파일 검사는 운영 서비스·DB에 연결하지 않는다. 실제 PostgreSQL/S3 HTTP 통합 검증은 아래 GitHub-hosted 전용 가드 안에서만 실행한다. `Backend app check`는 dev PR·push마다 경로 선택과 고정 최종 결과를 보고하고, backend-app·관련 CI 변경이 선택됐을 때 GitHub-hosted Linux에서 앱 검증을 실행한다. contents:read와 credential 미보존을 유지한다. 이미지 발행·infra PR·배포는 없다.
 
-1. PR과 dev push 모두 package job에서 `projects check :boot:bootJar`(모듈 unit/MVC/Security·구조 fixture·실행 JAR)와 `:boot:compileCompatibilityTestJava`를 실행하고, 실행 JAR에 시험·compatibility 코드가 들어가지 않았는지 확인한다.
+1. PR과 dev push 모두 package job에서 `projects check :boot:bootJar`(모듈 unit/MVC/Security·구조 fixture·실행 JAR)와 `:boot:compileContractTestKotlin`(DB 계약 시험 컴파일만)을 실행하고, 실행 JAR에 시험·compatibility·계약 시험 코드와 Testcontainers가 들어가지 않았는지 확인한다.
 2. dev push에서만 check job이 digest로 고정한 공식 PostgreSQL 17.11 linux/amd64 컨테이너를 고유 run label로 만든다. loopback bind·CPU 2·RAM 512MiB·tmpfs 제한과 합성 schema/SELECT-only reader 계정에서 시작해 F3~F29 단계별 최소 fixture·권한을 차례로 확장한다. 운영 migration/owner/ACL을 변경하는 절차가 아니다.
 3. 각 단계는 `scripts/test_fN_ci_guards.py`의 자원 없는 가드 시험 → `fN_ci.py prepare` → 같은 실행 JAR의 packaged 시험(`jar_f3`~`jar_f29`, 관리자 회원 삭제 `jar_f31`) 순서다. packaged 시험은 run 전용 S3 HTTP stub과 실제 발급기 JWT로 HTTP 계약·무부작용·실패 후 복구·단일 pool 정상 종료를 확인한다.
-4. 마지막으로 관리자 fixture 위에 refresh logout 권한만 더해 `authSessionCompatibilityTest`(UTC)·`authSessionCompatibilitySeoulTest`(Seoul 한 메서드)를 실행하고, 권한을 항상 원래대로 되돌린다.
+4. 같은 dev push에서 package job과 병렬인 `contract` job이 Testcontainers PostgreSQL 위에서 `:boot:contractTest`(아래)를 실행한다. 이 job은 packaged 시험과 fixture를 공유하지 않는다.
 5. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
 구 MSA 원본 코드와 결과를 비교하던 oracle 시험(`prepare_*_legacy_oracle.py`, 원본 비교 compatibility 시험, 범위별 CI 프로파일)은 MSA가 운영에서 종료되어 더 비교할 대상이 없으므로 삭제했다. fixture DDL은 여전히 고정 commit의 Git 객체에서 읽는다.
@@ -536,7 +536,13 @@ refresh는 쿠키만 읽는다(본문 무시). 한 UPDATE로 `token_hash=:old`�
 
 로그인(LOCAL·소셜)마다 회원 행을 `FOR UPDATE`로 잠근 같은 트랜잭션에서 세션을 새로 만들고, 활성 세션이 5개를 넘으면 `last_used_at`이 오래된 순으로 폐기한다. 관리자가 역할을 낮추면(ADMIN→SHELTER/USER, SHELTER→USER), 비밀번호를 변경·재설정하면, 회원 삭제를 시작하면(`contact_deletions` 표시) 각각 같은 트랜잭션에서 그 회원의 세션을 모두 폐기한다. 올리는 변경은 폐기하지 않는다. 회원 행 삭제는 FK `ON DELETE CASCADE`로 세션과 이력을 지운다. `pawbridge.jobs.cleanup-enabled=true`이면 1시간마다 만료됐거나 폐기 후 하루가 지난 세션을 1000행씩 지운다. 토큰 값과 해시는 로그에 남기지 않는다. 코드는 `refresh_tokens`를 더 이상 참조하지 않으며(회원 삭제의 마지막 `DELETE`도 제거), 테이블은 `V5__drop_refresh_tokens.sql`이 지운다. 운영에는 이 참조가 없는 코드를 먼저 배포한 뒤 V5를 적용한다.
 
-refresh 세션 PostgreSQL 시험(`PostgresqlAuthSessionCompatibilityTest`, `authSessionCompatibilityTest`·`authSessionCompatibilitySeoulTest`)은 원문과 비교하지 않는다. `f29_ci.py auth-sessions-prepare`가 기존 admin24 fixture에 검토된 V4 DDL(해시 고정)과 두 테이블의 writer 정확 열 권한을 추가하고, 시험은 회전·이력 기록·유실 응답 복구·동시 grace 요청·두 세대 전 토큰 재사용·만료·5개 제한·logout·전체 폐기·정리·권한 회수·회원 삭제 연쇄를 실제 DB에서 확인한다. 복구 단계는 추가 권한을 회수하고 두 테이블을 지운다. 이 시험은 hosted CI 전용이다.
+### DB 계약 시험(`contractTest`)
+
+`boot/src/contractTest/kotlin`의 시험은 앱 전체를 `@SpringBootTest(webEnvironment = RANDOM_PORT)`(실제 Tomcat, `java.net.http.HttpClient`)로 띄우고 Testcontainers PostgreSQL에 비소유 역할 `pawbridge_app`으로 접속한다. JVM마다 컨테이너 하나(이미지는 `-PcontractPostgresImage=...`·`pawbridge.contract.postgres-image`·`PAWBRIDGE_CONTRACT_POSTGRES_IMAGE`로 바꾸고, 기본은 packaged smoke와 같은 digest 고정 `postgres:17.11-bookworm`)와 Spring 컨텍스트 하나를 `ContractTestBase`로 모든 시험이 공유한다. 스키마는 `src/contractTest/resources/schema/`의 서비스 마이그레이션 복사본(user V1~V5, community V1~V11)을 스키마별 `search_path`로 적용하고, 앱 역할의 열 단위 권한은 `app-grants.sql`이 정한다. 복사본은 `SchemaSourcePinTest`가 원본 SHA-256과 대조한다(CI는 원본이 없으면 실패). 권한 회수 시험은 `ContractPostgres.withRevoked`로 슈퍼유저 연결에서 REVOKE하고 `finally`에서 GRANT한다.
+
+`./gradlew :boot:contractTest`는 JVM 시간대 UTC로 전체(`contractTestUtc`)를, 이어서 `@Tag("timezone-sensitive")` 시험만 Asia/Seoul로(`contractTestSeoul`) 실행한다. `check`에 포함되지 않으며(Docker 필요) 시험이 없거나 건너뛴 시험이 있으면 실패한다. 로컬 Docker Desktop은 `DOCKER_HOST=unix://$HOME/.docker/run/docker.sock`과 `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`이 필요하다. Testcontainers 1.20은 Docker Engine 29가 거부하는 API 1.32를 요청하므로 시험 JVM에 `api.version=1.44`를 주며 `-PdockerApiVersion=...`으로 바꿀 수 있다.
+
+refresh 세션 계약(`AuthSessionContractTest`)은 원문과 비교하지 않는다. 회전·이력 기록·유실 응답 복구·동시 grace 요청·두 세대 전 토큰 재사용·만료·5개 제한·logout·전체 폐기·정리·권한 회수·회원 삭제 연쇄를 실제 DB에서 확인하고, 쿠키 refresh HTTP 요청 한 건으로 Tomcat 경로를 확인한다.
 
 ## 관리자 게시글 기간·오늘 통계
 
