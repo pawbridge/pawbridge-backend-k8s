@@ -67,11 +67,13 @@ class AnimalImageServiceTest {
 
         // when
         val upload = assertThatThrownBy { subject.uploadImage(7L, photo) }
+        val multiple = assertThatThrownBy { subject.uploadImages(7L, arrayOf<MultipartFile?>(photo)) }
         val delete = assertThatThrownBy { subject.deleteImage(7L, "https://assets.invalid/animals/x.png") }
 
         // then
         upload.isInstanceOf(AnimalImageForbiddenException::class.java)
             .hasMessage("권한이 부족합니다.")
+        multiple.isInstanceOf(AnimalImageForbiddenException::class.java)
         delete.isInstanceOf(AnimalImageForbiddenException::class.java)
         confirmVerified(images)
     }
@@ -82,10 +84,12 @@ class AnimalImageServiceTest {
 
         // when
         val upload = assertThatThrownBy { subject.uploadImage(null, photo) }
+        val multiple = assertThatThrownBy { subject.uploadImages(null, arrayOf<MultipartFile?>(photo)) }
         val delete = assertThatThrownBy { subject.deleteImage(null, "x") }
 
         // then
         upload.isInstanceOf(AnimalImageForbiddenException::class.java)
+        multiple.isInstanceOf(AnimalImageForbiddenException::class.java)
         delete.isInstanceOf(AnimalImageForbiddenException::class.java)
         confirmVerified(actors, images, manager)
     }
@@ -112,23 +116,27 @@ class AnimalImageServiceTest {
     }
 
     @Test
-    fun `검증된 회원이 여러 파일을 올릴 때__여러 파일 업로드를 하면__역할 조회 없이 요청 순서대로 URL을 돌려준다`() {
+    fun `보호소 계정이 여러 파일을 올릴 때__여러 파일 업로드를 하면__조회를 커밋한 뒤 요청 순서대로 저장한다`() {
         // given
         val second = MockMultipartFile("files", "b.png", "image/png", byteArrayOf(4))
 
+        givenActor(Actor(7L, "ROLE_SHELTER", "C1", true, false))
         every { images.uploadImage(photo) } returns "u1"
         every { images.uploadImage(second) } returns "u2"
 
         // when
-        val urls = subject.uploadImages(arrayOf<MultipartFile?>(photo, second))
+        val urls = subject.uploadImages(7L, arrayOf<MultipartFile?>(photo, second))
 
         // then
         assertThat(urls).containsExactly("u1", "u2")
         verifyOrder {
+            manager.getTransaction(any())
+            actors.find(7L)
+            manager.commit(any())
             images.uploadImage(photo)
             images.uploadImage(second)
         }
-        confirmVerified(actors, manager)
+        confirmVerified(images, actors)
     }
 
     @Test
@@ -139,10 +147,12 @@ class AnimalImageServiceTest {
             six[i] = photo
         }
 
+        givenActor(Actor(7L, "ROLE_SHELTER", "C1", true, false))
+
         // when
-        val none = assertThatThrownBy { subject.uploadImages(null) }
-        val empty = assertThatThrownBy { subject.uploadImages(arrayOfNulls<MultipartFile>(0)) }
-        val tooMany = assertThatThrownBy { subject.uploadImages(six) }
+        val none = assertThatThrownBy { subject.uploadImages(7L, null) }
+        val empty = assertThatThrownBy { subject.uploadImages(7L, arrayOfNulls<MultipartFile>(0)) }
+        val tooMany = assertThatThrownBy { subject.uploadImages(7L, six) }
 
         // then
         none.isInstanceOf(IllegalArgumentException::class.java)
@@ -151,17 +161,18 @@ class AnimalImageServiceTest {
             .hasMessage("업로드할 파일이 없습니다.")
         tooMany.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessage("최대 5개의 이미지만 업로드할 수 있습니다.")
-        confirmVerified(images, actors, manager)
+        confirmVerified(images)
     }
 
     @Test
     fun `장당 10MB 이하이고 합계가 10MB를 넘을 때__여러 파일 업로드를 하면__모두 저장한다`() {
         // given
+        givenActor(Actor(7L, "ROLE_ADMIN", null, true, false))
         every { images.uploadImage(any()) } returnsMany listOf("u1", "u2", "u3", "u4", "u5")
         val five = Array<MultipartFile?>(5) { sized(10L * 1024 * 1024) }
 
         // when
-        val urls = subject.uploadImages(five)
+        val urls = subject.uploadImages(7L, five)
 
         // then
         assertThat(urls).containsExactly("u1", "u2", "u3", "u4", "u5")
@@ -173,9 +184,11 @@ class AnimalImageServiceTest {
         val oneTooLarge = arrayOf<MultipartFile?>(sized(1024), sized(10L * 1024 * 1024 + 1))
         val sixFull = Array<MultipartFile?>(6) { sized(10L * 1024 * 1024) }
 
+        givenActor(Actor(7L, "ROLE_SHELTER", "C1", true, false))
+
         // when
-        val fileTooLarge = assertThatThrownBy { subject.uploadImages(oneTooLarge) }
-        val totalTooLarge = assertThatThrownBy { subject.uploadImages(sixFull) }
+        val fileTooLarge = assertThatThrownBy { subject.uploadImages(7L, oneTooLarge) }
+        val totalTooLarge = assertThatThrownBy { subject.uploadImages(7L, sixFull) }
 
         // then
         fileTooLarge.isInstanceOf(AnimalImageTooLargeException::class.java)
@@ -189,17 +202,24 @@ class AnimalImageServiceTest {
         val second = MockMultipartFile("files", "b.png", "image/png", byteArrayOf(4))
         val failure = IllegalStateException("synthetic storage failure")
 
+        givenActor(Actor(7L, "ROLE_SHELTER", "C1", true, false))
         every { images.uploadImage(photo) } returns "u1"
         every { images.uploadImage(second) } throws failure
 
         // when
-        val thrown = assertThatThrownBy { subject.uploadImages(arrayOf<MultipartFile?>(photo, second)) }
+        val thrown = assertThatThrownBy { subject.uploadImages(7L, arrayOf<MultipartFile?>(photo, second)) }
 
         // then
         thrown.isSameAs(failure)
         verify(exactly = 1) { images.uploadImage(photo) }
         verify(exactly = 1) { images.uploadImage(second) }
         confirmVerified(images)
+    }
+
+    private fun givenActor(actor: Actor) {
+        every { manager.getTransaction(any()) } returns SimpleTransactionStatus()
+        justRun { manager.commit(any()) }
+        every { actors.find(any()) } returns actor
     }
 
     /** A file whose only meaningful property is its size: a data fake, so no stub is needed to build it. */

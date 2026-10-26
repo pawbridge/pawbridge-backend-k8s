@@ -6,8 +6,9 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.multipart.MultipartFile
 
 /**
- * Original image routes behind the former Gateway checks. Single upload and delete matched its non-USER
- * path rule; the two-segment multiple upload matched no role rule and stays open to any signed member.
+ * Animal photo storage for the shelter registration screens. Every write needs a current admin or shelter
+ * account. The former Gateway left the two-segment multiple upload open to any signed member only because
+ * its role rule matched one path segment; that gap let ordinary members store unattached files.
  */
 class AnimalImageService(
     private val images: S3AnimalImages,
@@ -21,7 +22,8 @@ class AnimalImageService(
         return images.uploadImage(file)
     }
 
-    fun uploadImages(files: Array<MultipartFile?>?): List<String> {
+    fun uploadImages(verifiedUserId: Long?, files: Array<MultipartFile?>?): List<String> {
+        requireNonUser(verifiedUserId)
         var total = 0L
         if (files != null) {
             for (file in files) {
