@@ -150,3 +150,10 @@ GRANT UPDATE (request_hash) ON pawbridge_community.member_chat_requests TO pawbr
 -- privileges on every table of the schema are enough; no animal contract revokes single columns.
 GRANT USAGE ON SCHEMA pawbridge_animal TO pawbridge_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pawbridge_animal TO pawbridge_app;
+
+-- store
+-- The store repositories read and write whole rows of their own tables (catalog, cart, orders, wishlists, search
+-- documents). The store schema holds no private user data beyond numeric member ids, and no store contract revokes single
+-- columns, so table-wide privileges (and the search view) are enough.
+GRANT USAGE ON SCHEMA pawbridge_store TO pawbridge_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pawbridge_store TO pawbridge_app;
