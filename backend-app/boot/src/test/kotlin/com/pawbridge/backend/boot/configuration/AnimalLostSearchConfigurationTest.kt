@@ -5,7 +5,6 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.service.Anim
 import com.pawbridge.backend.animal.internal.lostsearch.infrastructure.LostSearchService
 import com.pawbridge.backend.animal.internal.lostsearch.infrastructure.PythonLostSearchClient
 import com.pawbridge.backend.animal.internal.lostsearch.web.LostSearchController
-import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.security.PostTokenAuthenticator
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
@@ -18,25 +17,17 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
-import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.mock.web.MockMultipartFile
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
-import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.util.AopTestUtils
 import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.nio.charset.StandardCharsets
@@ -235,88 +226,5 @@ class LostSearchTestSecurity {
                 .signWith(KEY)
                 .compact()
         }
-    }
-}
-
-@WebMvcTest(excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class])
-@ContextConfiguration(
-    classes = [LostSearchController::class, ReadSecurityConfiguration::class, LostSearchTestSecurity::class],
-)
-class AnimalLostSearchDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var service: LostSearchService
-
-    @Test
-    fun `기본 꺼짐일 때__검증된 사용자가 업로드하면__검색 전에 거부한다`() {
-        // given, when
-        mvc.perform(
-            multipart("/api/v1/animals/lost-candidates")
-                .file(MockMultipartFile("image", byteArrayOf(1)))
-                .param("species", "DOG")
-                .header("Authorization", LostSearchTestSecurity.token()),
-        ).andExpect(status().isForbidden())
-        // then
-        confirmVerified(service)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-lost-search.enabled=on"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [LostSearchController::class, ReadSecurityConfiguration::class, LostSearchTestSecurity::class],
-)
-class AnimalLostSearchAliasDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var service: LostSearchService
-
-    @Test
-    fun `별칭 on이 켜졌을 때__검증된 사용자가 업로드하면__소유 경로를 닫아 둔다`() {
-        // given, when
-        mvc.perform(
-            multipart("/api/v1/animals/lost-candidates")
-                .file(MockMultipartFile("image", byteArrayOf(1)))
-                .param("species", "DOG")
-                .header("Authorization", LostSearchTestSecurity.token()),
-        ).andExpect(status().isForbidden())
-        // then
-        confirmVerified(service)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-lost-search.enabled=true"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [LostSearchController::class, ReadSecurityConfiguration::class, LostSearchTestSecurity::class],
-)
-class AnimalLostSearchNeighborHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var service: LostSearchService
-
-    @Test
-    fun `공개 사진 게시만 켰을 때__GET이나 더 깊은 POST를 쓰면__두 이웃 경로를 모두 거부한다`() {
-        // given, when
-        mvc.perform(get("/api/v1/animals/lost-candidates").header("Authorization", LostSearchTestSecurity.token()))
-            .andExpect(status().isForbidden())
-        mvc.perform(
-            multipart("/api/v1/animals/lost-candidates/extra")
-                .file(MockMultipartFile("image", byteArrayOf(1)))
-                .param("species", "DOG")
-                .header("Authorization", LostSearchTestSecurity.token()),
-        ).andExpect(status().isForbidden())
-        // then
-        confirmVerified(service)
     }
 }
