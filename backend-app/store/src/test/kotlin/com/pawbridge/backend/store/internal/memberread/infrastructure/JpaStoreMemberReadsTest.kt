@@ -136,72 +136,12 @@ class JpaStoreMemberReadsTest {
         assertFalse(read.active)
     }
 
-    @ParameterizedTest(name = "blockedSort[{index}]")
-    @MethodSource("blockedSortRequests")
-    fun `지원하지 않거나 과도한 정렬일 때__페이지를 읽으면__트랜잭션과 저장소 전에 고정 메시지로 거부한다`(
+    @ParameterizedTest(name = "rejected[{index}]")
+    @MethodSource("rejectedRequests")
+    fun `지원하지 않는 정렬이나 한도를 넘는 페이지 크기일 때__페이지를 읽으면__트랜잭션과 저장소 전에 고정 메시지로 거부한다`(
         wishlist: Boolean,
-        sort: List<StoreMemberReads.Order>,
+        input: StoreMemberReads.Request,
     ) {
-        // given
-        val input = StoreMemberReads.Request(0, 2, sort)
-
-        // when
-        val failure = assertThrows(IllegalArgumentException::class.java) {
-            if (wishlist) {
-                store.wishlists(7, input)
-            } else {
-                store.orders(7, input)
-            }
-        }
-
-        // then
-        assertEquals("Store member sort is not supported", failure.message)
-        assertEquals(0, read.calls)
-        assertFalse(read.active)
-        verify {
-            wishlists wasNot Called
-            orders wasNot Called
-            carts wasNot Called
-        }
-    }
-
-    @ParameterizedTest
-    @MethodSource("collectionSortRequests")
-    fun `새 컬렉션 정렬 경로일 때__부모 페이지를 읽으면__트랜잭션과 저장소 전에 고정 메시지로 거부한다`(
-        wishlist: Boolean,
-        property: String,
-    ) {
-        // given
-        val input = StoreMemberReads.Request(0, 2, listOf(StoreMemberReads.Order(property, true, false)))
-
-        // when
-        val failure = assertThrows(IllegalArgumentException::class.java) {
-            if (wishlist) {
-                store.wishlists(7, input)
-            } else {
-                store.orders(7, input)
-            }
-        }
-
-        // then
-        assertEquals("Store member sort is not supported", failure.message)
-        assertEquals(0, read.calls)
-        assertFalse(read.active)
-        verify {
-            wishlists wasNot Called
-            orders wasNot Called
-            carts wasNot Called
-        }
-    }
-
-    @ParameterizedTest
-    @ValueSource(booleans = [true, false])
-    fun `페이지 크기가 한도를 넘을 때__페이지를 읽으면__트랜잭션과 저장소 전에 고정 메시지로 거부한다`(
-        wishlist: Boolean,
-    ) {
-        // given
-        val input = StoreMemberReads.Request(0, 2001, request.sort())
-
         // when
         val failure = assertThrows(IllegalArgumentException::class.java) {
             if (wishlist) {
@@ -817,25 +757,27 @@ class JpaStoreMemberReadsTest {
         )
 
         @JvmStatic
-        fun blockedSortRequests(): Stream<Arguments> {
-            return Stream.of(true, false).flatMap { wishlist ->
+        fun rejectedRequests(): Stream<Arguments> {
+            val defaultSort = listOf(StoreMemberReads.Order("createdAt", false, false))
+            val blocked = Stream.of(true, false).flatMap { wishlist ->
                 val deep = if (wishlist) "sku.product.category.parent.parent.name" else "orderItems.order.orderItems.price"
                 Stream.concat(
                     Stream.of(
                         "unknown", " ", "sum(price)", null, deep, deep.replace('.', '_'),
                         if (wishlist) "skuProductCategoryParentParentName" else "orderItemsOrderOrderItemsPrice",
                         if (wishlist) "orderItems.price" else "sku.price",
-                    ).map { property -> Arguments.of(wishlist, listOf(StoreMemberReads.Order(property, true, false))) },
+                    ).map { property ->
+                        Arguments.of(wishlist, StoreMemberReads.Request(0, 2, listOf(StoreMemberReads.Order(property, true, false))))
+                    },
                     Stream.of(
-                        Arguments.of(wishlist, Collections.nCopies(5, StoreMemberReads.Order("createdAt", true, false))),
+                        Arguments.of(
+                            wishlist,
+                            StoreMemberReads.Request(0, 2, Collections.nCopies(5, StoreMemberReads.Order("createdAt", true, false))),
+                        ),
                     ),
                 )
             }
-        }
-
-        @JvmStatic
-        fun collectionSortRequests(): Stream<Arguments> {
-            return Stream.concat(
+            val collection = Stream.concat(
                 Stream.of("sku.skuValues.optionValue.name", "sku_skuValues_optionValue_name")
                     .map { property -> Arguments.of(true, property) },
                 Stream.of(
@@ -844,7 +786,14 @@ class JpaStoreMemberReadsTest {
                     "orderItems.productSKU.price", "orderItems_price", "orderItems_productSKU_price",
                     "orderItemsProductSKUPrice",
                 ).map { property -> Arguments.of(false, property) },
-            )
+            ).map { args ->
+                val property = args.get()[1] as String
+                Arguments.of(args.get()[0], StoreMemberReads.Request(0, 2, listOf(StoreMemberReads.Order(property, true, false))))
+            }
+            val oversized = Stream.of(true, false).map { wishlist ->
+                Arguments.of(wishlist, StoreMemberReads.Request(0, 2001, defaultSort))
+            }
+            return Stream.concat(Stream.concat(blocked, collection), oversized)
         }
 
         @JvmStatic
