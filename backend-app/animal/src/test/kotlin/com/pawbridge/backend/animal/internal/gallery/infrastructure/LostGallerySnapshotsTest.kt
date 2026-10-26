@@ -9,7 +9,6 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -148,18 +147,16 @@ class LostGallerySnapshotsTest {
             now.set(now.get().plus(Duration.ofHours(7)))
 
             // when
-            val expired = assertThrows(LostGallerySnapshots.Gone::class.java) { store.page(id, snapshot.cursor, 100) }
+            assertThrows(LostGallerySnapshots.Gone::class.java) { store.page(id, snapshot.cursor, 100) }
 
             // then
-            assertNotNull(expired)
         }
         Files.writeString(directory.resolve("b".repeat(32) + ".partial"), "incomplete")
         LostGallerySnapshots(mapper, source, signer(), directory, clock).use { store ->
             // when
-            val restarted = assertThrows(LostGallerySnapshots.Gone::class.java) { store.describe(id) }
+            assertThrows(LostGallerySnapshots.Gone::class.java) { store.describe(id) }
 
             // then
-            assertNotNull(restarted)
             assertFalse(Files.exists(directory.resolve("b".repeat(32) + ".partial")))
         }
     }
@@ -220,10 +217,9 @@ class LostGallerySnapshotsTest {
         }
         LostGallerySnapshots(mapper, source, signer(), directory, Clock.systemUTC()).use { store ->
             // when
-            val failure = assertThrows(IllegalStateException::class.java) { store.create() }
+            assertThrows(IllegalStateException::class.java) { store.create() }
 
             // then
-            assertNotNull(failure)
             Files.list(directory).use { files ->
                 assertEquals(1L, files.count())
             }

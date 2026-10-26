@@ -26,7 +26,6 @@ import io.mockk.verify
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -358,12 +357,11 @@ class ChatbotServiceTest {
         }
 
         // when
-        val thrown = assertThrows(ChatbotRateLimitExceededException::class.java) {
+        assertThrows(ChatbotRateLimitExceededException::class.java) {
             service.createMessage(41L, ChatbotMessageRequest(null, "입양 문의"), request, response)
         }
 
         // then
-        assertNotNull(thrown)
         assertEquals(
             listOf("cookie", "ip", "hash", "begin:R", "animal", "commit:R", "begin:W", "session-save", "commit:W", "quota"),
             events,
@@ -408,12 +406,11 @@ class ChatbotServiceTest {
         }
 
         // when
-        val thrown = assertThrows(RuntimeException::class.java) {
+        assertThrows(RuntimeException::class.java) {
             service.createMessage(41L, ChatbotMessageRequest(null, "입양 문의"), request, response)
         }
 
         // then
-        assertNotNull(thrown)
         assertTrue(events.contains("commit:W"))
         assertEquals(if (stage == "ai") "ai" else "rollback:W", events.last())
         verify(exactly = 1) { sessions.save(any<ChatbotSession>()) }
@@ -436,12 +433,11 @@ class ChatbotServiceTest {
         }
 
         // when
-        val thrown = assertThrows(ChatbotAnimalNotFoundException::class.java) {
+        assertThrows(ChatbotAnimalNotFoundException::class.java) {
             service.createMessage(41L, ChatbotMessageRequest(null, "입양 문의"), request, response)
         }
 
         // then
-        assertNotNull(thrown)
         assertEquals(listOf("cookie", "ip", "hash", "begin:R", "animal", "rollback:R"), events)
         confirmVerified(sessions, quota, messages, blocks, ai)
     }
