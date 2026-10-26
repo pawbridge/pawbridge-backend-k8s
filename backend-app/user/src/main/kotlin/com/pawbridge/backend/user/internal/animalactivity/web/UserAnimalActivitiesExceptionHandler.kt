@@ -1,6 +1,7 @@
 package com.pawbridge.backend.user.internal.animalactivity.web
 
 import com.pawbridge.backend.user.internal.animalactivity.application.FavoriteActivityRejectedException
+import com.pawbridge.backend.user.internal.animalactivity.application.ShelterMembershipRequiredException
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameController.Response
 import com.pawbridge.backend.user.internal.nickname.web.UserNicknameExceptionHandler
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
@@ -19,6 +20,10 @@ class UserAnimalActivitiesExceptionHandler {
         val reason = failure.reason()
         return ResponseEntity.status(reason.status()).body(Response(reason.status(), reason.message(), null))
     }
+
+    @ExceptionHandler(ShelterMembershipRequiredException::class)
+    fun shelterOnly(failure: ShelterMembershipRequiredException): ResponseEntity<Response<Void>> =
+        ResponseEntity.status(403).body(Response(403, "보호소 회원만 등록한 동물을 조회할 수 있습니다.", null))
 
     @ExceptionHandler(UserNotFoundException::class)
     fun missing(failure: UserNotFoundException): ResponseEntity<Response<Void>> = existing.userNotFound(failure)

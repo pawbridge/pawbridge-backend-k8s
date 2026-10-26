@@ -9,6 +9,7 @@ import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimal
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.Favorites
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.PageRequest
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.Shelter
+import com.pawbridge.backend.user.internal.animalactivity.application.ShelterMembershipRequiredException
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -298,7 +299,7 @@ class JdbcUserAnimalActivitiesTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["missing", "ROLE_USER", "ROLE_ADMIN", "no-registration"])
-    fun `데이터베이스 회원이 없거나 보호소 회원이 아닐 때__등록 동물을 읽으면__동물 HTTP 전에 원래의 실패를 유지한다`(
+    fun `데이터베이스 회원이 없거나 보호소 회원이 아닐 때__등록 동물을 읽으면__동물 HTTP 전에 거부한다`(
         state: String,
     ) {
         // given
@@ -312,7 +313,7 @@ class JdbcUserAnimalActivitiesTest {
         }
 
         // when
-        val expected = if (state == "missing") UserNotFoundException::class.java else IllegalStateException::class.java
+        val expected = if (state == "missing") UserNotFoundException::class.java else ShelterMembershipRequiredException::class.java
         assertThrows(expected) { f.service.registered(7, request()) }
 
         // then

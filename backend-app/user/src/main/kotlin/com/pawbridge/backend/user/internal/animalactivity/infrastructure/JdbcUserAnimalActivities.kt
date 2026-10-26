@@ -11,6 +11,7 @@ import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimal
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.FavoriteAnimal
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.Favorites
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.PageRequest
+import com.pawbridge.backend.user.internal.animalactivity.application.ShelterMembershipRequiredException
 import com.pawbridge.backend.user.internal.animalactivity.application.UserAnimalActivities.Shelter
 import com.pawbridge.backend.user.internal.profile.application.UserNotFoundException
 import org.springframework.dao.DataIntegrityViolationException
@@ -126,12 +127,12 @@ class JdbcUserAnimalActivities(
                 throw UserNotFoundException()
             }
             val found = users.first()
-            // The source UnauthorizedException is a RuntimeException handled by its generic 500 advice.
+            // Only an approved shelter member has a shelter to list; anyone else is refused with 403.
             if ("ROLE_SHELTER" != found.role) {
-                throw IllegalStateException("Shelter membership is required")
+                throw ShelterMembershipRequiredException()
             }
             if (found.careRegNo == null || found.careRegNo.isEmpty()) {
-                throw IllegalStateException("Shelter registration is missing")
+                throw ShelterMembershipRequiredException()
             }
             found
         }!!
