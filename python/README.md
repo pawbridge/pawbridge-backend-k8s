@@ -1,5 +1,7 @@
 # Pawbridge Python AI Service
 
+> 이 폴더는 2026-10-26 `pawbridge/pawbridge-python` 저장소(dev `844facb6`)를 Git 이력째 옮겨 온 것입니다. 원본 저장소는 읽기 전용으로 보관했으며, 이후 Python 코드는 이 저장소의 `python/`에서만 고칩니다. 아래 기능 설명 중 Kubernetes·Java MSA 관련 내용은 이전 환경의 기록입니다. 현재 운영 방식은 [운영 빌드와 배포](#운영-빌드와-배포)를 따릅니다.
+
 유기동물 이미지 기반 **유사 동물 검색** 기능을 담당하는 AI 마이크로서비스입니다.
 Pawbridge MSA의 일부로, Java animal-service로부터 요청을 받아 이미지 벡터 유사도 검색 결과를 반환합니다.
 
@@ -113,8 +115,8 @@ app/
 
 ## 관련 레포지토리
 
-- [pawbridge-backend-k8s](https://github.com/pawbridge/pawbridge-backend-k8s) — Java MSA 백엔드 (animal-service 등)
-- [pawbridge-infra-k8s](https://github.com/pawbridge/pawbridge-infra-k8s) — Kubernetes 인프라 (Helm Charts, Vagrant)
+- 이 저장소 [`backend-app/`](../backend-app) — Spring 모듈형 모놀리스 백엔드(이 서비스를 호출하는 쪽)
+- [pawbridge-infra-k8s](https://github.com/pawbridge/pawbridge-infra-k8s) — 이전 Kubernetes 인프라(Helm Charts, Vagrant) 기록
 
 ## 실종동물 검색 GPU 프로필
 
@@ -189,3 +191,45 @@ SAM3 실종 후보 검색의 내부 스냅샷 공급, 단일 GPU 공유, 원자�
 ### Bounded gallery feed
 
 Set `LOST_GALLERY_PROTOCOL=v2` only after the animal-service snapshot/page API is deployed. `LOST_GALLERY_SOURCE_URL` remains the legacy base URL; the client appends `/snapshots`. The consumer requests at most 100 records and 2MiB per page, persists only the acknowledged cursor/hash state, and never falls back to the full v1 feed. Failed or expired snapshots preserve the published search alias. Photo prefetch remains current plus one next photo. A completed snapshot is released from the server; URLs never enter the checkpoint file.
+
+## 로컬 시험
+
+GitHub Actions는 `python/` 전체가 컴파일되는지만 확인합니다. 시험은 병합 전에 로컬에서 돌립니다. 의존성을 새로 설치하지 않도록 운영 중인 `python-ai-service` 이미지 안에서 네트워크 없이, 소스는 읽기 전용으로 붙여 실행합니다. 이 이미지에는 사진 서비스 시험에 필요한 의존성도 들어 있습니다.
+
+```bash
+docker run --rm --network none --read-only --tmpfs /tmp -e PYTHONDONTWRITEBYTECODE=1 \
+  -v "$PWD/python":/src:ro -w /src --entrypoint python \
+  "$(docker inspect pawbridge-prod-python-api --format '{{.Image}}')" \
+  -m unittest discover -s tests
+```
+
+저장소 루트에서 실행합니다. `requirements*.txt`를 바꿨다면 운영 이미지에 새 의존성이 없으므로, 아래 빌드 절차로 새 이미지를 먼저 만든 뒤 그 이미지로 시험합니다. 모델 가중치·GPU·DB가 필요한 시험은 건너뜀(skip)으로 표시되며, 실제 모델 품질 검증이 아닙니다.
+
+## 운영 빌드와 배포
+
+운영은 Mac mini의 Docker Compose 프로젝트 `pawbridge-prod`와 Mac 네이티브 프로세스로 나뉩니다. 이미지는 레지스트리에 올리지 않고 로컬에서 만듭니다. 원본 저장소의 이미지 발행 CI는 이 저장소로 옮기지 않았습니다.
+
+| 운영 구성요소 | 소스 | 이미지·실행본 |
+| --- | --- | --- |
+| `python-ai-service`(컨테이너 `pawbridge-prod-python-api`) | `python/Dockerfile` | `pawbridge-mac-python:<커밋 7자리>` |
+| `photo-service`(컨테이너 `pawbridge-prod-photo`) | `python/Dockerfile.photo` | `pawbridge-mac-photo:<커밋 7자리>` |
+| Mac 네이티브 실종동물 검색(launchd `kr.pawbridge.native`) | `app.lost_main`, `deploy/macos/` | 별도 실행본과 가상환경([macOS 런북](deploy/macos/README.md)) |
+
+컨테이너 서비스 교체 순서:
+
+1. **main 커밋에서만 빌드한다.** dev 병합과 로컬 시험을 거쳐 main에 들어간 커밋을 깨끗한 작업 폴더로 꺼낸다.
+2. **이미지를 만든다.** 저장소 루트에서:
+   ```bash
+   docker build -f python/Dockerfile -t pawbridge-mac-python:$(git rev-parse --short=7 HEAD) python
+   docker build -f python/Dockerfile.photo -t pawbridge-mac-photo:$(git rev-parse --short=7 HEAD) python
+   ```
+   바뀐 서비스만 빌드한다. 빌드는 기반 이미지와 Python 패키지를 내려받는다.
+3. **새 이미지로 시험한다.** 위 "로컬 시험" 명령의 이미지 자리에 새 `pawbridge-mac-python` 태그를 넣어 실행한다.
+4. **교체한다.** 운영 compose 폴더(비밀 저장소 아래, 저장소에 두지 않음)에서 `compose.json`을 날짜 붙은 이름으로 백업하고, 해당 서비스의 `image` 값만 새 이미지 ID(`docker image inspect <태그> --format '{{.Id}}'`)로 바꾼 뒤 그 서비스만 다시 만든다.
+   ```bash
+   docker compose -p pawbridge-prod -f compose.json --env-file compose.env up -d --no-deps python-ai-service
+   ```
+5. **확인한다.** 컨테이너가 재시작 없이 실행 중이고, 백엔드의 동물 추천·사진 기능이 정상 응답하며, 10분 동안 오류 로그와 운영 경고가 없는지 본다.
+6. **롤백한다.** 백업한 `compose.json`을 되돌리고 4의 명령을 다시 실행한다. 이전 이미지는 로컬에 남아 있다.
+
+Mac 네이티브 실행본은 앱 소스만 바꿔서는 교체되지 않는다. 새 실행본과 가상환경을 따로 준비하는 절차는 [macOS 런북](deploy/macos/README.md)을 따른다.
