@@ -304,29 +304,23 @@ JAR는 현재 단계에서 기존 실제 발급기로 갱신한 합성 토큰과
 - 모듈 `build.gradle`에는 Kotlin plugin을 쓰지 않는다. 구조 TestKit fixture가 실제 모듈 스크립트를 Kotlin plugin 없는 루트에 복사해 적용하기 때문이다.
 - `.kt`는 `src/main/kotlin` 또는 `src/main/java`에 둘 수 있다. Kotlin이 먼저 컴파일되고 Java가 그 class를 본다. 같은 모듈의 Java Lombok 생성 멤버는 Kotlin에서 보이지 않으므로 Lombok class는 함께 Kotlin으로 옮기거나 일반 Java 접근자로 바꾼다.
 
-## GitHub-hosted 검증
+## 검증
 
-로컬 단위·컴파일 검사는 운영 서비스·DB에 연결하지 않는다. 실제 PostgreSQL/S3 HTTP 통합 검증은 아래 GitHub-hosted 전용 가드 안에서만 실행한다. `Backend app check`는 dev PR·push마다 경로 선택과 고정 최종 결과를 보고하고, backend-app·관련 CI 변경이 선택됐을 때 GitHub-hosted Linux에서 앱 검증을 실행한다. contents:read와 credential 미보존을 유지한다. 이미지 발행·infra PR·배포는 없다.
+GitHub Actions(`Backend app check`)는 최소 검사만 한다. 모든 source set(main, test, architectureTest, contractTest)을 컴파일하고 실행 JAR을 만든다. 단위·구조·DB 계약 시험은 GitHub에서 돌리지 않고, 병합 전에 PR head에서 로컬로 실행한다.
 
-1. PR과 dev push 모두 package job에서 `projects check :boot:bootJar`(모듈 unit/MVC/Security·구조 fixture·실행 JAR)와 `:boot:compileContractTestKotlin`(DB 계약 시험 컴파일만)을 실행하고, 실행 JAR에 시험·compatibility·계약 시험 코드와 Testcontainers가 들어가지 않았는지 확인한다.
-2. dev push에서만 check job이 digest로 고정한 공식 PostgreSQL 17.11 linux/amd64 컨테이너를 고유 run label로 만든다. loopback bind·CPU 2·RAM 512MiB·tmpfs 제한과 합성 schema/SELECT-only reader 계정에서 시작해 F3~F29 단계별 최소 fixture·권한을 차례로 확장한다. 운영 migration/owner/ACL을 변경하는 절차가 아니다.
-3. 각 단계는 `scripts/test_fN_ci_guards.py`의 자원 없는 가드 시험 → `fN_ci.py prepare` → 같은 실행 JAR의 packaged 시험(`jar_f3`~`jar_f29`, 관리자 회원 삭제 `jar_f31`) 순서다. packaged 시험은 run 전용 S3 HTTP stub과 실제 발급기 JWT로 HTTP 계약·무부작용·실패 후 복구·단일 pool 정상 종료를 확인한다.
-4. 같은 dev push에서 package job과 병렬인 `contract` job이 Testcontainers PostgreSQL 위에서 `:boot:contractTest`(아래)를 실행한다. 이 job은 packaged 시험과 fixture를 공유하지 않는다.
-5. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
+```bash
+cd backend-app
+./gradlew projects check :boot:bootJar :boot:architectureTest
+DOCKER_HOST=unix://$HOME/.docker/run/docker.sock \
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+./gradlew :boot:contractTest
+```
 
-구 MSA 원본 코드와 결과를 비교하던 oracle 시험(`prepare_*_legacy_oracle.py`, 원본 비교 compatibility 시험, 범위별 CI 프로파일)은 MSA가 운영에서 종료되어 더 비교할 대상이 없으므로 삭제했다. fixture DDL은 여전히 고정 commit의 Git 객체에서 읽는다.
+- `check`: 모듈별 단위 시험과 `verifyArchitecture`·`verifyBusinessPackages`.
+- `:boot:architectureTest`: 빌드 규칙(`gradle/architecture.gradle`)을 TestKit fixture로 검증한다. 빌드 규칙을 바꿀 때 반드시 실행한다.
+- `:boot:contractTest`: Testcontainers PostgreSQL 위의 DB 계약 시험(아래 "DB 계약 시험").
 
-`scripts/f2_ci.py`·`f3_ci.py`·`f4_ci.py`·`f5_ci.py`·`f6_ci.py`·`f7_ci.py`·`f8_ci.py`·`f9_ci.py`·`f10_ci.py`·`f11_ci.py`·`f12_ci.py`·`f13_ci.py`·`f14_ci.py`·`f15_ci.py`·`f16_ci.py`·`f17_ci.py`·`f18_ci.py`·`f19_ci.py`·`f20_ci.py`·`f3_s3_stub.py`의 실행 가드는 이 저장소 GitHub-hosted Linux와 고유 run ID를 요구한다. DB mutation 전에는 loopback/정확한 시험 DB/marker/admin/reader를 대조한다. 미설정 테스트를 skip 성공으로 처리하지 않는다. `scripts/f2_fixture.sql`·`f3_fixture.sql`·`f4_fixture.sql`·`f5_fixture.sql`·`f7_fixture.sql`·`f8_fixture.sql`·`f9_fixture.sql`·`f10_fixture.sql`·`f11_fixture.sql`·`f12_fixture.sql`·`f13_fixture.sql`·`f14_fixture.sql`·`f15_fixture.sql`·`f16_fixture.sql`·`f17_fixture.sql`은 CI 전용이며 앱 resource/JAR에 포함되지 않는다.
-
-TestKit은 Gradle logging 충돌을 막기 위해 architectureTest 전용 classpath를 사용한다. 실제 업무 build와 guard를 fixture에 복사하고, 본 빌드가 해결한 BOM/의존 cache를 offline으로 사용한다. 허용/금지 fixture의 이유를 검사하며 일반 컴파일·다운로드 오류를 구조 차단 성공으로 취급하지 않는다.
-
-Wrapper checksum 고정과 기존 최소 메모리·worker 1 설정을 유지한다. CI는 테스트 XML·source/runtime·packaged JAR hash/기동/종료를 7일 보존한다. Mac ARM64 운영 기동·전체 서비스 통합·RAM 절감의 증거와 구분한다.
-
-F21은 F20 전체 stage 뒤 고정d436e3c의 V6 notes/mailboxes 두 표와 V7 새 두 표용3 index·V8 reply index만 격리 fixture에 추가한다. 전체 migration3개와 원문 fragment6개의 hash·기존 F17의 동일 hash key를 검증하고, source/owner/F20 receipt/출력 receipt 충돌·새 표 부재를 모두 확인한 뒤 한 TX로 추가한다. 기존 members/blocks/F20 exact3열 ACL과 소유 evidence를 재사용하며 requests·새 schema/marker/writer/sequence는 없다. 원본 notes9열/mailboxes6열·PK/FK/CHECK·각5 index·소유 postgres를 검사하고 reader는 notes4/mailboxes5열만 허용한다. candidate에게 body SELECT를 주지 않는다.
-
-F21 Seoul JAR는 소유6 member/5 User/26 note·26 mailbox/pending1만 seed하여 20+3/cursor·foreign cursor 빈 목록·nullable actor/탈퇴·원문 nickname/µs Instant·read/unread, expiry 권한503/복원·User nickname 회원503/복원·missing401·POST deny를 관찰한다. 실제9요청은 GET8(성공5/거부3)+POST1으로 확인했다. batch/unread의 정확한 실패 phase는 PG hook 근거이며 JAR 선행 caller/list 실패를 그 근거로 부르지 않는다. 매 인증 요청은 전체 snapshot 뒤 Authorization 설정 직전에 사용키 TTL60초만 재검사하며 요청마다 재발급하지 않고 무토큰 reload0이다. 회수 중에는 ACL 비의존 marker identity+exact F20/F21 receipt로 소유를 확인한 뒤에만 GRANT를 복원하고 full fixture는 복원 뒤 확인한다. 기존14+새2=정확16표/S3의 요청·기동 전후 불변, 자기 성공 INSERT 키만 mailbox→note→member/pending→User FK 순서 정리, private body/회원/인증값 비노출·단일 pool 정상 종료/연결0을 확인한다. 기존 stage와 always cleanup은 보존하고 원본 lifecycle/예약/SSE/전용 전역 filter는 등록하지 않는다. 실제 PG/JAR 및 운영 검증 성공은 이 설명만으로 선언하지 않는다.
-
-`scripts/f21_ci.py`도 기존 helper와 같은 GitHub-hosted Linux·정확한 target·run owner 제한을 사용한다. F21 DDL은 원본 Git 객체에서 최소 fragment를 조립하며 새 fixture SQL 파일/앱 resource를 만들지 않는다. 고정 catalog SELECT 실패만 F21 stage와 최대512자 첫 ERROR/FATAL을 기록하고 PASSWORD/SECRET/TOKEN 환경값을 지운다. SQL/DETAIL/command/stdout 전체를 기록하지 않으며 업무 SQL 실패는 원문 없이 중단한다. workflow는 고정d436e3c commit 객체를 명시적으로 확인하고 부재 시 일시적인 read token 환경으로 해당 객체만 fetch한다. 시험·compatibility 코드는 production JAR에서 거부한다. 기존 cleanup/artifact 보존은 그대로다.
+Python 패키지 JAR 스모크(`scripts/fN_ci.py`)와 병합 후 shard·증거 검증 스크립트, 옛 MSA 서비스 CI는 삭제했다. 아래 F 단계 절의 CI 스크립트·shard·fixture 언급은 당시 기록이며 현재 검증 방법이 아니다.
 
 ## F22 본인 쪽지 단건 조회
 
@@ -394,25 +388,6 @@ always owned cleanup·실패 증거 보존·발행/배포 차단·contents read�
 
 전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21·F22·F23·F24·F25·F26 계획과 모듈형 모놀리스 전환 노트를 따른다.
 
-## CI 전체 기준과 F25 축소 비교
-
-일반 실행은 `full`이며 기존 필수 검사 이름 `Backend app CI result`를 유지한다. 공통 `package` 작업에서 일반·구조 검사와 실행 JAR 빌드를 한 번 수행하고, 현재 workflow run의 같은 artifact와 SHA-256을 각 격리 검증 작업이 사용한다. ZIP 생성 시각이 다른 별도 빌드를 같은 바이너리로 간주하지 않는다. PG 단계를 진행한 뒤와 최종 정리 뒤에도 producer의 JAR 해시를 확인한다. 단위·구조 XML은 package 산출물에, 실제 PG XML은 각 모드 산출물에 있으므로 전체 집계 시 합치되 중복 계산하지 않는다.
-
-첫 실험의 `f25-six-smoke-pilot`은 같은 저장소의 `ci/backend-contract-regression-scope` PR, 기준 `0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3`, 명시된 CI/README 다섯 경로만 바뀐 경우에만 full과 함께 추가된다. F16·F17·F19·F21·F22·F23 JAR 단계만 생략 후보이며, F3~F15·F18·F20·F24·F25의 17개 JAR 단계와 모든 기존 준비·인가·TX·정리 검증은 유지한다. 준비 데이터를 남기는 smoke를 단순히 끄지 않는다. 두 모드는 별도 hosted runner와 임시 자원을 사용하며 `fail-fast: false`로 pilot 실패가 full을 취소하지 않는다. 비교를 위해 별도 full을 더 실행하지 않는다.
-
-`backend_contract_profile.py`는 profile·source/head/base/tree·run/attempt·JAR 해시에 묶인 계획과 실제 step outcome/conclusion을 판정한다. 필수 실행 누락, 예정 밖 skip, continue-on-error로 가린 실패, 잘못된 모드/후보, 미지 JAR 단계, 정리 실패는 통과하지 않는다. `contract-plan.txt`와 `contract-execution.txt`만 현재 evidence artifact에 남기며 전체 환경·step outputs·토큰은 저장하지 않는다. 새로운 JAR 계약을 추가할 때는 workflow step ID와 공통 목록/정책 시험을 함께 갱신해야 한다. 전체 결과 gate는 package와 선택한 모든 모드의 성공을 요구한다.
-
-이 첫 실험은 일반 PR의 자동 축소를 활성화하지 않는다. fork·다른 기준·일반 기능/공통 인증/빌드 변경 등은 full로 실행하고, 명시적으로 부적격 pilot을 요청하면 거부한다. 기존 CI 39분18초와 생략 후보 단계 합계 11분04초는 과거 측정이며 실제 절감 시간은 같은 후보의 full/pilot 결과를 읽은 뒤 판단한다. 비교 결과와 일반 적용 여부는 Obsidian의 CI 개선 계획에 기록하며, 앱·운영·비밀값·데이터·복구 자료를 바꾸지 않는다.
-
-F26은 CI 개선 병합 dev `ce5898071c5022c09634c5e68b0c12c9dc66123e`를 인수하며 full 실행 목록에 `jar_f26`을 추가해 총24단계를 감사한다. F25 고정 비교의23/17 기록은 당시 결과다. 새 기준과 기능 변경은 그 pilot 조건에 해당하지 않으므로 F26은 full만 실행한다. 공통 package/XML 분리와45분 check 상한, 기존 F26 검증을 유지한다.
-
-
-## F27·F28 본인 메일함 상태 관리의 CI 연결
-
-즐겨찾기 변경과 메일함 삭제는 한 사용자 결과로 함께 검토하되 각각의 명시적인 타입·SQL·실패 검증을 보존한다. F29 발송은 이 범위에 포함하지 않는다. 선행 F26의 공통 package/선택 정책/동일 JAR 해시·실행 감사·always 소유 정리를 그대로 두고 F27 → F28 순서만 추가한다. `jar_f3`부터 `jar_f28`까지26개가 full 필수이며 마지막 owned cleanup을 합쳐27개 결과를 감사한다. F25 고정 pilot의 ref/base/변경경로/6개 skip 조건은 넓히지 않으므로 이 기능 변경은 full만 실행한다. 일반적인 pilot 선택 가능성을 새 기능으로 확대하지 않는다. 기존 F26의24단계 기록은 해당 기준의 이력이다.
-
-첫 결합 check 상한은55분이다. F26 actual full39분58초와 이전42분20초에 새 두 단계의 비용·정리 여유를 고려한 제한이며, F27·F28 실제 시간이나55분 충분성을 보장하지 않는다. 단위별 검증·full 필수 목록·정리·발행 차단은 유지하고 첫 hosted 결과 뒤 상한을 재평가한다. 이 연결 사본은 고정 F26 `efe0309e4f340d364241138ab54ca3653be641e8` 입력 위의 준비일 뿐이며 실제 feature branch/base·hosted PG/JAR/CI 결과는 부모 통합 뒤 별도 확인한다.
-
 ## F27 본인 쪽지 즐겨찾기 값 변경 준비
 
 기존 `PUT /api/v1/notes/{id}/favorite`를 요청한 boolean 값으로 설정하고 commit 뒤 본인 SSE resync와 기존 단건/목록의 favorite·favorites 필터를 연결한다. INBOX/SENT 모두 허용하며 동일 값 반복도 UPDATE·commit·resync를 수행한다. TX15 → member INSERT/lock → current active → find(clock1) → note lock → find(clock2) → favorite UPDATE → hook 등록/commit 순서를 보존한다. 시각은2회로 읽음의 세 번째 Clock 호출을 복제하지 않는다. read_at·unread·상대 mailbox·created_at은 바꾸지 않으며 counterpart/block 조회0이다. 영향 행수0로 새404를 만들지 않고 두 ownership 조회의 엄격한 만료 경계가 부재를 판단한다.
@@ -465,20 +440,6 @@ CI는 기존 F29 원문/JpaTM·18표 소유 fixture를 재사용하여 UTC expir
 실제 활성 작업의 FK 잠금→context close→정상 잠금 해제→commit/연결 반환→pool 종료를 확인한다.
 이 증거는 실행 JAR의 강제 취소나 운영 예약 인수 완료를 뜻하지 않는다. 새 HTTP/JAR 여정은 복제하지 않는다.
 
-
-## 병합 후 동일 코드의 전체 검증 인수
-
-PR에서는 package를 실행한다. PostgreSQL 계약은 full로 dev push에서 실행한다. dev push의 `proof` job은 새 package보다 먼저, 방금 병합한 같은 저장소 PR의 **검사된 전체 Git tree**와 현재 dev가 같은지 판정한다. 첫 범위는 push 직전 base와 head를 두 부모로 가진 단일 merge commit이며 squash/rebase·여러 PR·다른 tree는 full을 새로 실행한다. 브랜치명이나 PR head SHA만 같다고 재사용하지 않는다.
-
-`backend_postmerge_proof.py`는 실제 완료된 원본 backend-app run/attempt의 package·full·최종 결과, 현재 workflow에 대응하는 실제 성공 단계, 원본 full plan/실행/cleanup 증거, producer와 consumer의 JAR SHA·source/tree·workflow 정체성을 연결한다. 27개 JAR receipt만으로 전체 PG 등 다른 단계의 성공을 대신하지 않는다. 원본 성공 후 24시간을 넘거나 자료가 없고 만료·모순·조회 실패가 있으면 현재 선택된 검증을 새로 실행한다. 원본 PR에서 실제 사용한 workflow와 현재 dev를 비교하므로 PR 자체의 CI 코드 변경을 금지하는 규칙은 아니다.
-
-통과한 dev 실행은 별도 `backend-app-postmerge-proof-<run>-<attempt>`의 `postmerge-proof.txt`에 `reused-full`과 원본 실행을 기록하고 새 package/full은 실행하지 않는다. 과거 XML·fixture·토큰·receipt를 새 시험 결과로 복제하거나 JAR을 다시 빌드해 과거 SHA와 비교하지 않는다. 새 merge SHA와 검사 당시 synthetic SHA는 다를 수 있으며 전체 tree로 결속한다. 다른 필수 CI와 이미지 발행 차단은 유지한다.
-
-최종 `Backend app CI result`는 선택·판정이 성공하고 **execute+package/check 성공**, 또는 **검증된 reused-full+package/check의 예상된 생략**만 허용한다. execute는 현재 선택한 검증을 새로 실행한다는 뜻이며 full coverage를 주장하지 않는다. 판정 실패·빈 mode·예상 밖 생략은 성공이 아니다. 읽기 권한과 현재 실행 토큰은 판정 job에 한정하며 새 secret이나 쓰기 권한을 요구하지 않는다.
-
-이 방식은 같은 코드에 대한 기존 검증을 인수한다. 새 runner/JDK·외부 의존성을 다시 시험했다는 의미가 아니며 원본 환경·검증 시각을 보존한다. 실제 제거한 중복 실행과 병합 후 소요를 측정하고 PR 자체의 full 소요 또는 전체 개발시간 단축과 구분한다. 재사용에 문제가 있으면 CI 수정/revert로 기존 full 경로로 돌아가며 앱·DB·배포를 되돌리지 않는다.
-
-판정과 최종 gate는 `.github/scripts/test_backend_postmerge_proof.py`와 `test_backend_app_ci_policy.py`에서 합성 Git/API 응답·임시 파일·실제 gate 실행으로 검증한다. 실제 hosted full·병합 후 재사용 성공은 해당 실행 증거가 있어야 선언한다.
 
 ## 관리자 회원 삭제와 Community 정리
 
