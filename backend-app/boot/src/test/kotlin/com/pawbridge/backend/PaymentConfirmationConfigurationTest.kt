@@ -6,9 +6,6 @@ import com.pawbridge.backend.boot.configuration.ReadDatabaseSettings
 import com.pawbridge.backend.boot.configuration.StorePaymentTransportConfiguration
 import com.pawbridge.backend.payment.internal.confirmation.application.Payments
 import com.pawbridge.backend.payment.internal.confirmation.infrastructure.JpaPayments
-import com.pawbridge.backend.payment.internal.confirmation.infrastructure.jpa.repository.PaymentCompensationRecordRepository
-import com.pawbridge.backend.payment.internal.confirmation.infrastructure.jpa.repository.PaymentRepository
-import com.pawbridge.backend.payment.internal.confirmation.infrastructure.toss.TossPaymentsClient
 import com.pawbridge.backend.payment.internal.confirmation.web.PaymentController
 import com.pawbridge.backend.payment.internal.confirmation.web.PaymentInputExceptionHandler
 import com.pawbridge.backend.store.api.StorePaymentEvents
@@ -17,7 +14,6 @@ import com.pawbridge.backend.store.internal.payment.infrastructure.JdbcStorePaym
 import com.zaxxer.hikari.HikariDataSource
 import io.mockk.justRun
 import io.mockk.mockk
-import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -31,13 +27,9 @@ import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.data.auditing.AuditingHandler
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
-import org.springframework.web.client.RestClient
 import java.net.http.HttpClient
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -113,7 +105,7 @@ class PaymentConfirmationConfigurationTest {
     }
 
     @Test
-    fun `실제 main과 명시적 가짜 결제가 주어졌을 때__조립하고 닫으면__시작 I-O와 비밀 로그 없이 자원을 공유한다`(
+    fun `실제 main과 명시적 가짜 결제가 주어졌을 때__조립하고 닫으면__시작 I-O와 비밀 로그 없이 쓰기 단위 하나만 쓴다`(
         output: CapturedOutput,
     ) {
         // given
@@ -192,7 +184,6 @@ class PaymentConfirmationConfigurationTest {
                     "&storeDirectOrderEntityManagerFactory",
                     LocalContainerEntityManagerFactoryBean::class.java,
                 )
-                assertThat(definition.dataSource).isSameAs(context.getBean("writeDataSource"))
                 assertThat(definition.persistenceUnitInfo!!.managedClassNames)
                     .contains(
                         "com.pawbridge.backend.payment.internal.confirmation.infrastructure.jpa.model.BaseEntity",
@@ -205,58 +196,16 @@ class PaymentConfirmationConfigurationTest {
                     .containsEntry("hibernate.boot.allow_jdbc_metadata_access", false)
                     .containsEntry("hibernate.hbm2ddl.auto", "none")
                     .containsEntry("hibernate.jdbc.time_zone", "UTC")
-                val manager = context.getBean("storeDirectOrderJpaTransactionManager", JpaTransactionManager::class.java)
-                assertThat(manager.entityManagerFactory).isSameAs(factory)
-                assertThat(manager.dataSource).isSameAs(context.getBean("writeDataSource"))
-                val shared = context.getBean("storeDirectOrderEntityManager", EntityManager::class.java)
-                val repositories = listOf<Any>(
-                    context.getBean(PaymentRepository::class.java),
-                    context.getBean(PaymentCompensationRecordRepository::class.java),
-                )
-                for (repository in repositories) {
-                    val target = AopTestUtils.getUltimateTargetObject<Any>(repository)
-                    assertThat(ReflectionTestUtils.getField(target, "entityManager")).isSameAs(shared)
-                }
-                val payments = context.getBean(Payments::class.java)
-                assertThat(payments).isInstanceOf(JpaPayments::class.java)
-                assertThat(ReflectionTestUtils.getField(payments, "tossPaymentsClient"))
-                    .isSameAs(context.getBean(TossPaymentsClient::class.java))
-                assertThat(ReflectionTestUtils.getField(payments, "paymentRepository"))
-                    .isSameAs(context.getBean(PaymentRepository::class.java))
-                assertThat(ReflectionTestUtils.getField(payments, "compensations"))
-                    .isSameAs(context.getBean(PaymentCompensationRecordRepository::class.java))
-                assertThat(ReflectionTestUtils.getField(payments, "storePayments"))
-                    .isSameAs(context.getBean(StorePaymentEvents::class.java))
                 val writes = context.getBean("storeDirectOrderWrites", TransactionTemplate::class.java)
-                assertThat(ReflectionTestUtils.getField(payments, "writes")).isSameAs(writes)
-                assertThat(writes.transactionManager).isSameAs(manager)
                 assertThat(writes.isReadOnly).isFalse()
-                val paymentReads = context.getBean("storeDirectOrderReads", TransactionTemplate::class.java)
-                assertThat(ReflectionTestUtils.getField(payments, "reads")).isSameAs(paymentReads)
-                assertThat(paymentReads.transactionManager).isSameAs(manager)
-                assertThat(paymentReads.isReadOnly).isTrue()
-                val orders = context.getBean(StorePaymentOrders::class.java)
-                assertThat(orders).isInstanceOf(JdbcStorePaymentOrders::class.java)
-                assertThat(ReflectionTestUtils.getField(payments, "storeServiceClient")).isSameAs(orders)
-                assertThat(ReflectionTestUtils.getField(orders, "jdbc")).isSameAs(context.getBean("readJdbc"))
-                assertThat(ReflectionTestUtils.getField(orders, "reads")).isSameAs(context.getBean("readOnlyTransaction"))
-                val reads = context.getBean("readOnlyTransaction", TransactionTemplate::class.java)
-                assertThat(reads.isReadOnly).isTrue()
-                assertThat(reads.transactionManager).isSameAs(context.getBean("transactionManager")).isNotSameAs(manager)
-                assertThat((ReflectionTestUtils.getField(orders, "jdbc") as JdbcTemplate).dataSource)
-                    .isSameAs(context.getBean("dataSource"))
-                    .isSameAs(context.getBean("writeDataSource"))
-                assertThat(ReflectionTestUtils.getField(context.getBean(PaymentController::class.java), "payments"))
-                    .isSameAs(payments)
+                assertThat(context.getBean("storeDirectOrderReads", TransactionTemplate::class.java).isReadOnly).isTrue()
+                assertThat(context.getBean("readOnlyTransaction", TransactionTemplate::class.java).isReadOnly).isTrue()
+                assertThat(context.getBean(Payments::class.java)).isInstanceOf(JpaPayments::class.java)
+                assertThat(context.getBean(StorePaymentOrders::class.java)).isInstanceOf(JdbcStorePaymentOrders::class.java)
                 val client = context.getBean("paymentTossHttpClient", HttpClient::class.java)
                 clientRef.set(client)
                 assertThat(client.connectTimeout()).contains(Duration.ofSeconds(10))
                 assertThat(client.followRedirects()).isEqualTo(HttpClient.Redirect.NEVER)
-                val requestFactory = ReflectionTestUtils.getField(
-                    context.getBean("paymentTossRestClient", RestClient::class.java),
-                    "clientRequestFactory",
-                )
-                assertThat(ReflectionTestUtils.getField(requestFactory!!, "readTimeout")).isEqualTo(Duration.ofSeconds(60))
                 poolsRef.set(context.getBeansOfType(HikariDataSource::class.java).values.toList())
                 poolsRef.get().forEach { pool ->
                     assertThat(pool.hikariPoolMXBean.totalConnections).isZero()

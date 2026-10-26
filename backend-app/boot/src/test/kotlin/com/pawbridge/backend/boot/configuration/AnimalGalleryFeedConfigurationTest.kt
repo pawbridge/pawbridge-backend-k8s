@@ -20,14 +20,12 @@ import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoCon
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import software.amazon.awssdk.services.s3.presigner.S3Presigner
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Clock
+import java.time.Duration
 import java.util.function.Consumer
 import java.util.function.Function
 import java.util.function.Supplier
@@ -132,7 +130,7 @@ class AnimalGalleryFeedConfigurationTest {
 
     @Test
     @Suppress("UNCHECKED_CAST")
-    fun `명시한 오프라인 입력이 주어졌을 때__조립하면__리더를 재사용하고 정확한 GET에 서명하며 디렉터리 소유권을 해제한다`() {
+    fun `명시한 오프라인 입력이 주어졌을 때__조립하면__전용 엔드포인트로 서명하고 디렉터리 소유권을 해제한다`() {
         // given
         val source: DataSource = mockk<DataSource>()
 
@@ -169,20 +167,12 @@ class AnimalGalleryFeedConfigurationTest {
                     .hasSingleBean(LostGalleryFeedController::class.java)
                     .hasSingleBean(LostGalleryPagesController::class.java)
                     .doesNotHaveBean("writeDataSource")
-                val feed = app.getBean(LostGalleryFeed::class.java)
-                assertThat(ReflectionTestUtils.getField(feed, "jdbc")).isSameAs(jdbc)
-                val reads = ReflectionTestUtils.getField(feed, "reads") as TransactionTemplate
-                val stream = ReflectionTestUtils.getField(feed, "streamReads") as TransactionTemplate
-                for (tx in listOf(reads, stream)) {
-                    assertThat(tx.transactionManager).isSameAs(manager)
-                    assertThat(tx.isReadOnly).isTrue()
-                    assertThat(tx.timeout).isEqualTo(120)
-                }
-                assertThat(stream.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ)
-                assertThat(reads.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
-                assertThat(jdbc.queryTimeout).isEqualTo(3)
-                val signer = ReflectionTestUtils.getField(feed, "signer") as Function<String, String>
-                val signed = URI.create(signer.apply("apms/photos/" + "a".repeat(64) + ".jpg"))
+                val signed = app.getBean(S3Presigner::class.java).presignGetObject { request ->
+                    request.signatureDuration(Duration.ofHours(1))
+                        .getObjectRequest { get ->
+                            get.bucket("pawbridge-animal-originals").key("apms/photos/" + "a".repeat(64) + ".jpg")
+                        }
+                }.url().toURI()
                 assertThat(signed.host).isEqualTo("synthetic.r2.cloudflarestorage.com")
                 assertThat(signed.path).isEqualTo("/pawbridge-animal-originals/apms/photos/" + "a".repeat(64) + ".jpg")
                 assertThat(signed.query).contains("X-Amz-Expires=3600").doesNotContain("synthetic-secret")

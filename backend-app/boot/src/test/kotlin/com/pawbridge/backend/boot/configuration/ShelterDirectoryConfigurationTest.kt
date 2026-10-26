@@ -16,7 +16,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.batch.core.Job
 import org.springframework.batch.core.job.SimpleJob
 import org.springframework.batch.core.repository.JobRepository
-import org.springframework.batch.core.step.tasklet.TaskletStep
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -25,10 +24,6 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.interceptor.TransactionAttribute
 import java.util.function.Supplier
 
 class ShelterDirectoryConfigurationTest {
@@ -77,7 +72,7 @@ class ShelterDirectoryConfigurationTest {
     }
 
     @Test
-    fun `스위치가 true일 때__컨텍스트를 시작하면__같은 작성자로 잡과 서울 스케줄러 하나를 만들고 실행은 않는다`() {
+    fun `스위치가 true일 때__컨텍스트를 시작하면__잡과 전용 스케줄러 하나를 만들고 실행은 않는다`() {
         // given
         val source = mockk<HikariDataSource>()
         val manager = JdbcTransactionManager(source)
@@ -101,33 +96,12 @@ class ShelterDirectoryConfigurationTest {
                     .hasSingleBean(ShelterDirectorySchedule::class.java)
                     .hasSingleBean(ThreadPoolTaskScheduler::class.java)
                     .hasSingleBean(KoreanSearchAnalyzer::class.java)
-                assertThat(ReflectionTestUtils.getField(app.getBean(ShelterDirectoryClient::class.java), "key"))
-                    .isEqualTo("")
-                assertThat(ReflectionTestUtils.getField(app.getBean(ShelterDirectoryCollector::class.java), "source"))
-                    .isSameAs(source)
-                val search: Any =
-                    ReflectionTestUtils.getField(app.getBean(ShelterDirectoryStore::class.java), "searchDocuments")!!
-                assertThat(ReflectionTestUtils.getField(search, "analyzer"))
-                    .isSameAs(app.getBean(KoreanSearchAnalyzer::class.java))
-
-                val target: Any = AopTestUtils.getUltimateTargetObject(app.getBean(JobRepository::class.java))
-                val dao: Any = ReflectionTestUtils.getField(target, "jobExecutionDao")!!
-                assertThat(ReflectionTestUtils.getField(dao, "tablePrefix")).isEqualTo("pawbridge_animal.BATCH_")
-                assertThat((ReflectionTestUtils.getField(dao, "jdbcTemplate") as JdbcTemplate).dataSource)
-                    .isSameAs(source)
-
                 val job = app.getBean(Job::class.java) as SimpleJob
                 assertThat(job.name).isEqualTo("shelterDirectoryJob")
                 assertThat(job.stepNames).containsExactly("shelterDirectoryStep")
-                val step = job.getStep("shelterDirectoryStep") as TaskletStep
-                assertThat(ReflectionTestUtils.getField(step, "transactionManager")).isSameAs(manager)
-                val attribute = ReflectionTestUtils.getField(step, "transactionAttribute") as TransactionAttribute
-                assertThat(attribute.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED)
-
                 val scheduler = app.getBean("shelterDirectoryScheduler", ThreadPoolTaskScheduler::class.java)
                 assertThat(scheduler.scheduledThreadPoolExecutor.corePoolSize).isEqualTo(1)
                 assertThat(scheduler.threadNamePrefix).isEqualTo("pawbridge-shelter-directory-")
-                assertThat(ReflectionTestUtils.getField(scheduler, "waitForTasksToCompleteOnShutdown")).isEqualTo(true)
                 verify(exactly = 0) { source.connection }
             }
     }

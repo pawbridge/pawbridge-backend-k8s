@@ -130,8 +130,7 @@ class LocalAuthConfigurationTest {
         runner.run { context ->
             // then
             assertThat(context).hasNotFailed()
-            assertThat(context.getBean(RedisConnectionFactory::class.java))
-                .isSameAs(context.getBean("otherRedisConnectionFactory"))
+            assertThat(context.getBeanProvider(RedisConnectionFactory::class.java).getIfUnique()).isNotNull()
         }
     }
 

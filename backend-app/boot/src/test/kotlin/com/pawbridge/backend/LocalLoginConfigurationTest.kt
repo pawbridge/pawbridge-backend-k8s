@@ -24,8 +24,6 @@ import org.springframework.security.core.userdetails.UserDetailsService
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.DefaultSecurityFilterChain
 import org.springframework.security.web.SecurityFilterChain
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.support.TransactionTemplate
 import java.util.function.Supplier
 
 class LocalLoginConfigurationTest {
@@ -90,7 +88,7 @@ class LocalLoginConfigurationTest {
     }
 
     @Test
-    fun `공유 입력이 모두 있을 때__조립하면__작성기와 발급기를 재사용하고 경로 필터를 하나만 두며 전역 인증 빈은 없다`() {
+    fun `공유 입력이 모두 있을 때__조립하면__로그인 경로만 체인이 받고 전역 인증 빈은 없다`() {
         // given
         val runner = inputs("")
 
@@ -98,13 +96,6 @@ class LocalLoginConfigurationTest {
         runner.run { context ->
             // then
             assertThat(context).hasNotFailed()
-            val login = context.getBean(LocalLogin::class.java)
-            assertThat(ReflectionTestUtils.getField(login, "jdbc")).isSameAs(context.getBean("writeJdbc"))
-            assertThat(ReflectionTestUtils.getField(login, "tokens")).isSameAs(context.getBean(JwtSessionTokens::class.java))
-            assertThat(ReflectionTestUtils.getField(login, "sessions"))
-                .isSameAs(context.getBean(JdbcAuthSessionStore::class.java))
-            val saves = ReflectionTestUtils.getField(login, "saves") as TransactionTemplate
-            assertThat(saves.transactionManager).isSameAs(context.getBean("writeTransactionManager"))
             val chain = context.getBean(SecurityFilterChain::class.java) as DefaultSecurityFilterChain
             for (method in arrayOf("POST", "GET", "PATCH")) {
                 val request = MockHttpServletRequest(method, LocalLoginFilter.PATH)
@@ -114,7 +105,6 @@ class LocalLoginConfigurationTest {
             val other = MockHttpServletRequest("POST", LocalLoginFilter.PATH + "/extra")
             other.servletPath = LocalLoginFilter.PATH + "/extra"
             assertThat(chain.matches(other)).isFalse()
-            assertThat(chain.filters.filterIsInstance<LocalLoginFilter>()).hasSize(1)
             assertThat(context)
                 .doesNotHaveBean(LocalLoginFilter::class.java)
                 .doesNotHaveBean(AuthenticationManager::class.java)

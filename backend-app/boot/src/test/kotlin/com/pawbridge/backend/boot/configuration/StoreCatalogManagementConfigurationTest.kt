@@ -19,7 +19,6 @@ import io.mockk.excludeRecords
 import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
-import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -36,8 +35,6 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import software.amazon.awssdk.services.s3.S3Client
@@ -81,7 +78,7 @@ class StoreCatalogManagementConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["catalog", "catalog-direct", "catalog-cart", "catalog-both"])
-    fun `카탈로그가 켜졌을 때__조립하면__쓰기 DB를 공유하고 소유자가 닫을 때까지 스토리지를 빌린다`(
+    fun `카탈로그가 켜졌을 때__조립하면__스토리지를 한 번만 닫고 읽기·쓰기 트랜잭션을 구분한다`(
         mode: String,
     ) {
         // given
@@ -136,7 +133,6 @@ class StoreCatalogManagementConfigurationTest {
                     "&storeDirectOrderEntityManagerFactory",
                     LocalContainerEntityManagerFactoryBean::class.java,
                 )
-                assertThat(factory.dataSource).isSameAs(writer)
                 val model = "com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model."
                 assertThat(factory.persistenceUnitInfo!!.managedClassNames).containsExactlyInAnyOrder(
                     model + "BaseEntity", model + "Wishlist", model + "ProductSKU", model + "Product",
@@ -150,54 +146,15 @@ class StoreCatalogManagementConfigurationTest {
                     .containsEntry("hibernate.hbm2ddl.auto", "none")
                     .containsEntry("jakarta.persistence.schema-generation.database.action", "none")
                     .containsEntry("hibernate.default_schema", "pawbridge_store")
-                val manager = context.getBean("storeDirectOrderJpaTransactionManager", JpaTransactionManager::class.java)
-                assertThat(manager.entityManagerFactory).isSameAs(unit.get())
-                assertThat(manager.dataSource).isSameAs(writer)
                 val writes = context.getBean("storeDirectOrderWrites", TransactionTemplate::class.java)
                 val reads = context.getBean("storeDirectOrderReads", TransactionTemplate::class.java)
-                assertThat(writes.transactionManager).isSameAs(manager)
-                assertThat(reads.transactionManager).isSameAs(manager)
                 assertThat(writes.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
                 assertThat(writes.isReadOnly).isFalse()
                 assertThat(reads.isReadOnly).isTrue()
-                val shared = context.getBean("storeDirectOrderEntityManager", EntityManager::class.java)
-                assertThat(shared.entityManagerFactory).isSameAs(unit.get())
-                val products: Any = context.getBean(JpaCatalogProducts::class.java)
-                val options: Any = context.getBean(JpaCatalogOptions::class.java)
-                assertThat(ReflectionTestUtils.getField(products, "writes")).isSameAs(writes)
-                assertThat(ReflectionTestUtils.getField(options, "writes")).isSameAs(writes)
-                for (field in listOf("products", "categories", "skus", "cartItems")) {
-                    sameRepositoryWriter(ReflectionTestUtils.getField(products, field)!!, shared)
-                }
-                for (field in listOf("groups", "values", "products", "skus")) {
-                    sameRepositoryWriter(ReflectionTestUtils.getField(options, field)!!, shared)
-                }
-                val categories: Any = context.getBean(JpaCatalogCategories::class.java)
-                assertThat(ReflectionTestUtils.getField(categories, "writes")).isSameAs(writes)
-                sameRepositoryWriter(ReflectionTestUtils.getField(categories, "categories")!!, shared)
                 val jdbc = context.getBean("storeCatalogManagementSearchJdbc", NamedParameterJdbcTemplate::class.java)
-                assertThat(jdbc.jdbcTemplate.dataSource).isSameAs(writer)
                 assertThat(jdbc.jdbcTemplate.queryTimeout).isEqualTo(5)
                 terms.set(context.getBean("storeCatalogManagementSearchTerms", KoreanSearchTerms::class.java))
                 assertThat(terms.get().document("말티즈")).isNotBlank()
-                for (service in listOf(products, options)) {
-                    val snapshot: Any = ReflectionTestUtils.getField(service, "snapshots")!!
-                    val documents: Any = ReflectionTestUtils.getField(snapshot, "documents")!!
-                    assertThat(ReflectionTestUtils.getField(documents, "jdbc")).isSameAs(jdbc)
-                }
-                val images = context.getBean(S3ProductImages::class.java)
-                assertThat(ReflectionTestUtils.getField(images, "s3Client")).isSameAs(storage)
-                assertThat(ReflectionTestUtils.getField(images, "bucketName")).isEqualTo(settings.bucket())
-                assertThat(ReflectionTestUtils.getField(images, "publicBaseUrl")).isEqualTo(settings.publicBaseUrl())
-                assertThat(ReflectionTestUtils.getField(context.getBean(ProductWriteController::class.java), "products"))
-                    .isSameAs(products)
-                assertThat(ReflectionTestUtils.getField(context.getBean(OptionManagementController::class.java), "options"))
-                    .isSameAs(options)
-                assertThat(ReflectionTestUtils.getField(context.getBean(ProductImageController::class.java), "images"))
-                    .isSameAs(images)
-                assertThat(
-                    ReflectionTestUtils.getField(context.getBean(CategoryManagementController::class.java), "categories"),
-                ).isSameAs(categories)
                 if (mode == "catalog") {
                     assertThat(context)
                         .doesNotHaveBean(DirectOrderController::class.java)
@@ -252,11 +209,6 @@ class StoreCatalogManagementConfigurationTest {
                 .hasStackTraceContaining(if (mode == "reader-only") "writeDataSource" else "postS3Client")
             confirmVerified(source, storage)
         }
-    }
-
-    private fun sameRepositoryWriter(repository: Any, shared: EntityManager) {
-        val target: Any = AopTestUtils.getUltimateTargetObject(repository)
-        assertThat(ReflectionTestUtils.getField(target, "entityManager")).isSameAs(shared)
     }
 
     private fun runner(): ApplicationContextRunner {

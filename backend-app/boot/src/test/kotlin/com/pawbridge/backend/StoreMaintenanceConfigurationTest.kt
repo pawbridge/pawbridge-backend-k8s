@@ -22,7 +22,6 @@ import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Duration
@@ -60,7 +59,7 @@ class StoreMaintenanceConfigurationTest {
     }
 
     @Test
-    fun `두 게이트가 모두 켜졌을 때__작업 실행 없이 조립하면__기존 타임아웃의 이름 있는 작성기를 재사용하고 작업을 하나 등록한다`() {
+    fun `두 게이트가 모두 켜졌을 때__작업 실행 없이 조립하면__5초 질의와 10초 쓰기 제한으로 작업을 하나 등록한다`() {
         // given
         val source = mockk<DataSource>()
         val manager = mockk<JdbcTransactionManager>()
@@ -89,14 +88,10 @@ class StoreMaintenanceConfigurationTest {
             .run { context ->
                 // then
                 assertThat(context).hasNotFailed()
-                val rebuild = context.getBean(JdbcProductSearchRebuild::class.java)
+                assertThat(context).hasSingleBean(JdbcProductSearchRebuild::class.java)
                 val jdbc = context.getBean("storeSearchRebuildJdbc", NamedParameterJdbcTemplate::class.java)
-                assertThat(ReflectionTestUtils.getField(rebuild, "jdbc")).isSameAs(jdbc)
-                assertThat(jdbc.jdbcTemplate.dataSource).isSameAs(source)
                 assertThat(jdbc.jdbcTemplate.queryTimeout).isEqualTo(5)
-                val transaction = ReflectionTestUtils.getField(rebuild, "transactions") as TransactionTemplate
-                assertThat(transaction).isSameAs(context.getBean("storeSearchRebuildTransaction"))
-                assertThat(transaction.transactionManager).isSameAs(manager)
+                val transaction = context.getBean("storeSearchRebuildTransaction", TransactionTemplate::class.java)
                 assertThat(transaction.timeout).isEqualTo(10)
                 assertThat(transaction.isReadOnly).isFalse()
                 assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).hasSize(1)

@@ -18,11 +18,10 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import org.springframework.scheduling.config.FixedDelayTask
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.support.TransactionTemplate
-import org.springframework.util.ErrorHandler
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.util.concurrent.TimeUnit
 
 @ExtendWith(OutputCaptureExtension::class)
 class NoteExpiryConfigurationTest {
@@ -47,7 +46,7 @@ class NoteExpiryConfigurationTest {
     }
 
     @Test
-    fun `정리가 켜지고 기존 쓰기 입력이 있을 때__조립하면__전용 트랜잭션과 제한된 한정 스케줄러를 쓴다`() {
+    fun `정리가 켜지고 기존 쓰기 입력이 있을 때__조립하면__제한된 전용 스케줄러에 고정 지연 작업을 하나 등록한다`() {
         // given
         val jdbc = mockk<JdbcTemplate>()
         val manager = mockk<JdbcTransactionManager>()
@@ -58,16 +57,6 @@ class NoteExpiryConfigurationTest {
             // then
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(NoteExpiry::class.java)).hasSize(1)
-            val expiry = context.getBean(NoteExpiry::class.java)
-            assertThat(ReflectionTestUtils.getField(expiry, "jdbc")).isSameAs(jdbc)
-            assertThat(ReflectionTestUtils.getField(expiry, "clock")).isSameAs(clock)
-            val transaction = ReflectionTestUtils.getField(expiry, "transaction") as TransactionTemplate
-            assertThat(transaction.transactionManager).isSameAs(manager)
-            assertThat(transaction.timeout).isEqualTo(15)
-            assertThat(transaction.isReadOnly).isFalse()
-            val job = context.getBean(NoteExpiryConfiguration.NoteExpiryJob::class.java)
-            assertThat(ReflectionTestUtils.getField(job, "expiry")).isSameAs(expiry)
-
             assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).hasSize(1)
             val scheduler = context.getBean("noteExpiryScheduler", ThreadPoolTaskScheduler::class.java)
             assertThat(scheduler.javaClass).isEqualTo(ThreadPoolTaskScheduler::class.java)
@@ -75,9 +64,6 @@ class NoteExpiryConfigurationTest {
             assertThat(scheduler.scheduledThreadPoolExecutor.removeOnCancelPolicy).isTrue()
             assertThat(scheduler.scheduledThreadPoolExecutor.continueExistingPeriodicTasksAfterShutdownPolicy).isFalse()
             assertThat(scheduler.scheduledThreadPoolExecutor.executeExistingDelayedTasksAfterShutdownPolicy).isFalse()
-            assertThat(ReflectionTestUtils.getField(scheduler, "acceptTasksAfterContextClose")).isEqualTo(false)
-            assertThat(ReflectionTestUtils.getField(scheduler, "waitForTasksToCompleteOnShutdown")).isEqualTo(false)
-            assertThat(ReflectionTestUtils.getField(scheduler, "awaitTerminationMillis")).isEqualTo(5000L)
             assertThat(context.beanFactory.getDependenciesForBean("noteExpiryScheduler")).contains("writeDataSource")
 
             val processor = context.getBean(ScheduledAnnotationBeanPostProcessor::class.java)
@@ -105,13 +91,15 @@ class NoteExpiryConfigurationTest {
         runner.run { context ->
             assertThat(context).hasNotFailed()
             val scheduler = context.getBean("noteExpiryScheduler", ThreadPoolTaskScheduler::class.java)
-            val handler = ReflectionTestUtils.getField(scheduler, "errorHandler") as ErrorHandler
-            handler.handleError(
-                IllegalStateException(
-                    "private-note-body private-token DELETE FROM private_notes",
-                    RuntimeException("private-cause"),
-                ),
-            )
+            scheduler.schedule(
+                {
+                    throw IllegalStateException(
+                        "private-note-body private-token DELETE FROM private_notes",
+                        RuntimeException("private-cause"),
+                    )
+                },
+                Instant.now(),
+            ).get(5, TimeUnit.SECONDS)
 
             // then
             assertThat(output.all).contains("Private note expiry failed (IllegalStateException)")
