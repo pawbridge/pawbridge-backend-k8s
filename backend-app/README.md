@@ -14,12 +14,12 @@ Java 21·Gradle 8.14.3·Spring Boot 3.4.11의 독립 멀티프로젝트다. F2�
 
 Gateway 없이도 운영할 수 있도록 Gateway가 하던 네 가지를 이 실행기로 옮겼다. 원본은 삭제된 구 api-gateway의 `application.yml`과 `LostSearchLimitsGatewayFilterFactory`였다.
 
-- **CORS**: `GatewayCors`가 Gateway `globalcors`와 같은 값(origin 패턴 `localhost/127.0.0.1:3000·5173`, `pawbridge.kr`, `www.pawbridge.kr`, `*.pawbridge.kr`, 메서드 GET/POST/PUT/DELETE/PATCH/OPTIONS, 허용 헤더 Authorization·Content-Type·Accept·x-user-id, 노출 헤더 Retry-After·Authorization, 자격 증명 허용)을 만든다. `ReadSecurityConfiguration`(주 체인), `LocalLoginConfiguration`(로컬 로그인 체인), `GoogleOAuthConfiguration`(Google OAuth 체인)이 모두 이 필터를 보안 체인의 CORS 위치에 넣어 preflight가 인증 전에 응답된다. 로그인·OAuth는 주 체인과 별도의 `SecurityFilterChain`이라 각 체인에 따로 넣어야 하며, 세 체인은 `GatewayCors.ORIGIN_PATTERNS_VALUE`로 같은 속성과 기본값을 읽는다. origin은 `pawbridge.cors.allowed-origin-patterns`(쉼표 구분)로 덮어쓴다. 차이: 허용되지 않은 origin의 preflight가 아닌 실제 요청은 403 대신 CORS 헤더 없이 정상 처리한다(Origin을 보내는 서버 간 호출과 F16 계약 검사의 응답이 바뀌지 않게 하며, 브라우저는 헤더가 없으면 응답을 막는다). preflight는 원본처럼 거절한다.
+- **CORS**: `GatewayCors`가 Gateway `globalcors`와 같은 값(origin 패턴 `localhost/127.0.0.1:3000·5173`, `pawbridge.kr`, `www.pawbridge.kr`, `*.pawbridge.kr`, 메서드 GET/POST/PUT/DELETE/PATCH/OPTIONS, 허용 헤더 Authorization·Content-Type·Accept·x-user-id, 노출 헤더 Retry-After·Authorization, 자격 증명 허용)을 만든다. `ReadSecurityConfiguration`(주 체인), `LocalLoginConfiguration`(로컬 로그인 체인), `GoogleOAuthConfiguration`(Google OAuth 체인)이 모두 이 필터를 보안 체인의 CORS 위치에 넣어 preflight가 인증 전에 응답된다. 로그인·OAuth는 주 체인과 별도의 `SecurityFilterChain`이라 각 체인에 따로 넣어야 하며, 세 체인은 `GatewayCors.ORIGIN_PATTERNS_VALUE`로 같은 속성과 기본값을 읽는다. origin은 `pawbridge.cors.allowed-origin-patterns`(쉼표 구분)로 덮어쓴다. 차이: 허용되지 않은 origin의 preflight가 아닌 실제 요청은 403 대신 CORS 헤더 없이 정상 처리한다(Origin을 보내는 서버 간 호출의 응답이 바뀌지 않게 하며, 브라우저는 헤더가 없으면 응답을 막는다). preflight는 원본처럼 거절한다.
 - **유실동물 검색 제한**: `pawbridge.animal-lost-search.enabled=true`일 때만 `POST /api/v1/animals/lost-candidates`에 `LostSearchLimitsFilter`(보안 체인 뒤)를 건다. 속성과 기본값은 원본 그대로 `lost-search.max-request-bytes=6291456`, `max-concurrent=2`, `requests-per-minute=30`, `timeout-seconds=50`. 응답은 413(크기), 415(multipart 아님), 503+`Retry-After: 3`(동시 초과), 429+`Retry-After: 60`(분당 초과), 400(빈 본문), 504이고 본문은 원본과 같은 `{"message":"..."}`다. 하위 호출(Python)은 `PythonLostSearchClient`가 서버 설정의 `X-Internal-Api-Key`만 보내므로 클라이언트의 `Authorization`·`X-User-Id`·`X-Internal-Api-Key`는 전달되지 않고, 필터도 핸들러에 보이는 요청에서 이 헤더와 `Transfer-Encoding`을 숨긴다. **원본과 다른 점**: (1) 서블릿 컨테이너가 multipart를 직접 파싱하므로 본문을 필터에서 버퍼링하지 않는다. 크기는 선언된 `Content-Length`로 판단하고, `Content-Length`가 없는 chunked 업로드는 411로 거절한다(리버스 프록시가 보통 길이를 채운다). 선언 길이는 컨테이너가 강제한다. 적용 여부는 디코딩된 경로(`UrlPathHelper`)로 판단해 `lost-%63andidates` 같은 인코딩 표기로 제한을 우회할 수 없고(실제 Tomcat 시험으로 확인), 동시성 permit은 본문(multipart)을 모두 받은 뒤에 잡아 느린 업로드가 permit을 오래 쥐지 못한다. 별도의 총 업로드 시간 제한은 없다. (2) 전체 50초는 요청을 중단시켜 강제하지 않는다. 하위 Python 호출의 연결 3초·읽기 45초 타임아웃(초과 시 서비스가 503)이 실제 상한이고, 타임아웃이 핸들러 밖으로 새면 504를 낸다. `timeout-seconds`는 값 검증만 한다. AI 큐 도입은 이 범위 밖이다.
-- **헬스체크**: `spring-boot-starter-actuator`를 추가하고 `management.endpoints.web.exposure.include=health,info,prometheus`와 프로브 활성(`/actuator/health/liveness`·`/readiness`)으로 노출을 제한한다(관리 포트를 분리한 뒤에는 관리 포트에서만 제공된다). 보안 설정은 `GET /actuator/health`와 `/actuator/health/**`만 permitAll이며 `info`를 포함한 나머지는 기존 `denyAll`에 걸린다. `show-details`는 원본의 `always` 대신 `never`다(인증 없이 DB 등 세부 상태가 보이지 않게). Prometheus 지표는 별도 관리 포트에서만 노출한다(아래 "내부 지표 엔드포인트"). 쿠버네티스 프로브는 세부 지표가 섞이지 않는 `/actuator/health/liveness`·`/readiness`를 쓰고, 전체 `/actuator/health`에서는 메일 지표를 끈다(`management.health.mail.enabled=false`). 빌드 파일(`boot/build.gradle`)이 바뀌어 구조 selftest 재사용 기준이 깨지므로 CI가 구조 검사를 직접 실행한다.
-- **구 경로 호환(임시)**: `LegacyApiPathFilter`는 Gateway `RewritePath`(`/api/(?<segment>.*)` → `/api/v1/${segment}`)를 서블릿 필터로 옮긴 **전환 기간 임시 필터**다. 보안 체인보다 앞(order -150)에서 요청 URI·servletPath를 `/api/v1/...`로 감싸 Security 매처와 MVC가 새 경로로 판단한다. Gateway 라우트의 경로·메서드 조합(예: `/api/animals/**`는 GET/OPTIONS/POST/PUT/PATCH/DELETE, `/api/places`는 GET/OPTIONS, `/api/carts/items/{skuId}`는 PATCH/DELETE/OPTIONS)만 바꾸고 나머지는 건드리지 않아 기존 `denyAll`이 막는다(`/api/carts/reset`, `/api/batch/**`, `/internal/**` 등). `/api/payments/**`도 `/api/v1/payments/**`로 재작성한다(결제 승인 경로가 `/api/v1/payments/confirm`으로 통일되어, 원본에서 재작성 제외였던 이유가 사라졌다). `/api/v1/users/internal/**`·`/api/users/internal/**`는 원본 JWT 필터와 같은 404 본문을 낸다. `/api/v1/**` 요청은 변하지 않는다. 내부 경로 404 판단과 재작성 후 servletPath는 디코딩된 경로 기준이다. 병합 후 PostgreSQL 스모크(`f2_ci.py`, `f3_ci.py`, `f12_ci.py`)는 구 별칭이 v1과 같은 응답을 주고 내부 사용자 경로가 404인 새 계약을 단언하도록 고쳤다. `boot` MockMvc 테스트 중 구 별칭 거부를 단언하는 것들은 보안 체인만 로드하므로(재작성 필터는 체인 밖) 그대로이며, 재작성 동작은 `GatewayFeaturesHttpTest`가 다룬다. 구 경로의 `POST /api/animals/lost-candidates`는 원본에서 보호소·관리자 전용 경로로만 닿았으므로 재작성하지 않는다(공개 업로드 경로가 구 별칭으로 열리지 않게). 원본 JWT 필터의 `X-User-*` 헤더 주입은 옮기지 않는다. 이 실행기는 Bearer 토큰을 자체 서명 검증으로 처리하고 요청 헤더의 사용자 정보를 신뢰하지 않으며, 헤더를 받는 별도 서비스가 없다. **제거 계획**: 프론트가 `/api/v1`로 바뀐 뒤 `pawbridge.legacy-api-paths.enabled=false`로 끄고(기본 true) 문제가 없으면 `LegacyApiPathFilter`와 설정·테스트를 삭제한다.
+- **헬스체크**: `spring-boot-starter-actuator`를 추가하고 `management.endpoints.web.exposure.include=health,info,prometheus`와 프로브 활성(`/actuator/health/liveness`·`/readiness`)으로 노출을 제한한다(관리 포트를 분리한 뒤에는 관리 포트에서만 제공된다). 보안 설정은 `GET /actuator/health`와 `/actuator/health/**`만 permitAll이며 `info`를 포함한 나머지는 기존 `denyAll`에 걸린다. `show-details`는 원본의 `always` 대신 `never`다(인증 없이 DB 등 세부 상태가 보이지 않게). Prometheus 지표는 별도 관리 포트에서만 노출한다(아래 "내부 지표 엔드포인트"). 쿠버네티스 프로브는 세부 지표가 섞이지 않는 `/actuator/health/liveness`·`/readiness`를 쓰고, 전체 `/actuator/health`에서는 메일 지표를 끈다(`management.health.mail.enabled=false`).
+- **구 경로 호환(임시)**: `LegacyApiPathFilter`는 Gateway `RewritePath`(`/api/(?<segment>.*)` → `/api/v1/${segment}`)를 서블릿 필터로 옮긴 **전환 기간 임시 필터**다. 보안 체인보다 앞(order -150)에서 요청 URI·servletPath를 `/api/v1/...`로 감싸 Security 매처와 MVC가 새 경로로 판단한다. Gateway 라우트의 경로·메서드 조합(예: `/api/animals/**`는 GET/OPTIONS/POST/PUT/PATCH/DELETE, `/api/places`는 GET/OPTIONS, `/api/carts/items/{skuId}`는 PATCH/DELETE/OPTIONS)만 바꾸고 나머지는 건드리지 않아 기존 `denyAll`이 막는다(`/api/carts/reset`, `/api/batch/**`, `/internal/**` 등). `/api/payments/**`도 `/api/v1/payments/**`로 재작성한다(결제 승인 경로가 `/api/v1/payments/confirm`으로 통일되어, 원본에서 재작성 제외였던 이유가 사라졌다). `/api/v1/users/internal/**`·`/api/users/internal/**`는 원본 JWT 필터와 같은 404 본문을 낸다. `/api/v1/**` 요청은 변하지 않는다. 내부 경로 404 판단과 재작성 후 servletPath는 디코딩된 경로 기준이다. `boot` MockMvc 테스트 중 구 별칭 거부를 단언하는 것들은 보안 체인만 로드하므로(재작성 필터는 체인 밖) 그대로이며, 재작성 동작은 `GatewayFeaturesHttpTest`가 다룬다. 구 경로의 `POST /api/animals/lost-candidates`는 원본에서 보호소·관리자 전용 경로로만 닿았으므로 재작성하지 않는다(공개 업로드 경로가 구 별칭으로 열리지 않게). 원본 JWT 필터의 `X-User-*` 헤더 주입은 옮기지 않는다. 이 실행기는 Bearer 토큰을 자체 서명 검증으로 처리하고 요청 헤더의 사용자 정보를 신뢰하지 않으며, 헤더를 받는 별도 서비스가 없다. **제거 계획**: 프론트가 `/api/v1`로 바뀐 뒤 `pawbridge.legacy-api-paths.enabled=false`로 끄고(기본 true) 문제가 없으면 `LegacyApiPathFilter`와 설정·테스트를 삭제한다.
 
-원본 Gateway의 경로별 특수 처리 대조: 방문자 경로의 Authorization 제거는 이 실행기에서 방문자 경로가 토큰을 읽지 않으므로 동등하고(F16 검사가 불량 Authorization을 보낸다), SSE 무제한 응답 시간은 `PrivateNoteStreamRegistry`의 emitter가 토큰 수명으로 직접 관리하므로 Gateway 타임아웃에 해당하는 것이 없으며, WebSocket은 `/api/v1/chats/socket`을 보안이 permitAll하고 `pawbridge.chat.allowed-origins`로 origin을 검사하며(구 경로 `/api/chats/socket`으로의 업그레이드는 시험하지 않았다), OAuth 경로는 `GoogleOAuthConfiguration`의 별도 체인이 인증 없이 처리한다. 원본이 외부에서 막던 `/internal/**`는 서비스 간 호출(`/internal/animals/lost-gallery` 등, `X-Internal-Api-Key` 검증)이 같은 포트를 쓰므로 막지 않는다. 외부 노출 차단은 인그레스 쪽 책임이다.
+원본 Gateway의 경로별 특수 처리 대조: 방문자 경로의 Authorization 제거는 이 실행기에서 방문자 경로가 토큰을 읽지 않으므로 동등하고, SSE 무제한 응답 시간은 `PrivateNoteStreamRegistry`의 emitter가 토큰 수명으로 직접 관리하므로 Gateway 타임아웃에 해당하는 것이 없으며, WebSocket은 `/api/v1/chats/socket`을 보안이 permitAll하고 `pawbridge.chat.allowed-origins`로 origin을 검사하며(구 경로 `/api/chats/socket`으로의 업그레이드는 시험하지 않았다), OAuth 경로는 `GoogleOAuthConfiguration`의 별도 체인이 인증 없이 처리한다. 원본이 외부에서 막던 `/internal/**`는 서비스 간 호출(`/internal/animals/lost-gallery` 등, `X-Internal-Api-Key` 검증)이 같은 포트를 쓰므로 막지 않는다. 외부 노출 차단은 인그레스 쪽 책임이다.
 
 ## 내부 지표 엔드포인트
 
@@ -116,11 +116,10 @@ F17과 F18의 새 RO TX에서 연결 생성·시스템 완료·deadline 실패�
 | F3_JWT_SECRET | PAWBRIDGE_JWT_SECRET |
 | F3_STORAGE_ENDPOINT / REGION / BUCKET / PUBLIC_BASE_URL / OBJECT_PREFIX / ACCESS_KEY_ID / SECRET_ACCESS_KEY | PAWBRIDGE_STORAGE_ENDPOINT / REGION / BUCKET / PUBLIC_BASE_URL / OBJECT_PREFIX / ACCESS_KEY_ID / SECRET_ACCESS_KEY |
 
-`F2_TEST_*`, `F3_TEST_*`, `F*_CI_OWNER` 같은 이름은 CI 스크립트·시험 하네스만 쓰며 앱은 읽지 않는다.
 - 읽기 보호: 풀이 아니라 트랜잭션 단위로 한다. 읽기 템플릿(`readOnlyTransaction`·`searchReadOnlyTransaction` 등)은 readOnly이고 `transactionManager`는 `enforceReadOnly`라서 PostgreSQL에 `SET TRANSACTION READ ONLY`를 보낸다. 읽기 템플릿 timeout 3초/5초, `writeTransaction` 10초 등 기존 값은 그대로다.
 - 중첩 트랜잭션: 읽기 TM과 쓰기 TM이 같은 DataSource를 쓰므로 쓰기 트랜잭션 안의 REQUIRED 읽기 템플릿은 같은 연결에 참여한다(readOnly·timeout은 바깥 값이 적용되고, 안쪽 실패는 바깥을 rollback-only로 만든다). 그래서 실패를 대체값으로 삼키는 조회는 쓰기 트랜잭션 밖에서 한다(`JdbcAnimalReports`의 닉네임). 같은 풀에서 연결을 하나 더 잡는 REQUIRES_NEW 중첩은 두지 않는다: 보호소 승인 안의 `ModuleAnimalShelterReads`는 REQUIRED로 참여하고, `JdbcAnimalMemberReads`의 읽기 템플릿도 REQUIRED이며(유일한 호출처가 트랜잭션 밖에서 호출하므로 동작은 같고, 나중에 중첩되어도 두 번째 연결을 잡지 않는다), `JdbcUserAnimalActivities`의 Animal 조회는 User 읽기 트랜잭션이 끝난 뒤 실행한다. 공유 DataSource에서 JPA 트랜잭션 매니저를 다른 트랜잭션 안에서 시작하지 않는다(JDBC 안의 JPA, JPA 안의 JPA 중첩 금지): 같은 DataSource에 이미 바인딩된 연결 때문에 실패하므로 만들지 않는다.
 - `TransactionSynchronizationManager.hasResource(source)`로 "writer 트랜잭션 안"을 확인하는 가드(`JdbcStoreOrderActors`, `JdbcStoreOrderAdministrators`, `JdbcAnimalShelterMembers`, `JdbcAnimalCommandActors`, `SearchDocumentWriter`, `MembershipLockedAnimalShelterReads`)는 이제 같은 DataSource의 어떤 트랜잭션(읽기 TM, 읽기 JPA TM 포함)에서도 통과하므로 예전보다 약하다. 코드는 바꾸지 않았고, 이 가드에 기대는 새 호출은 실제 writer 트랜잭션 안에서만 만든다.
-- 앞선 F 단계 설명의 reader/writer 별도 계정·풀 크기(reader 기본 2, writer 기본 1) 문구는 당시 기록이다. 현재 구성은 이 절이 기준이다. CI 계약 스크립트는 기존 reader·writer 역할을 그대로 두고, 앱만 두 역할을 상속한 로그인 역할 `pawbridge_app`(`f3_fixture.sql`)으로 접속하며 `PAWBRIDGE_DB_POOL_MAX_SIZE='4'`를 쓴다.
+- 앞선 F 단계 설명의 reader/writer 별도 계정·풀 크기(reader 기본 2, writer 기본 1) 문구는 당시 기록이다. 현재 구성은 이 절이 기준이다.
 
 읽기용 transaction manager와 쓰기용 transaction manager를 명시적으로 구분한다(DataSource는 위 단일 풀). 읽기는 `pawbridge_community.posts`, `pawbridge_community.comments`, `pawbridge_community.post_search_documents`, `pawbridge_user.users`, `pawbridge_user.favorites`, `pawbridge_community.home_videos`, `pawbridge_community.daily_visit_count`, `pawbridge_user.contact_deletions`, `pawbridge_community.private_note_blocks`의 필요한 열만 읽는다. Community 읽기 조합은 게시글·댓글 tx를 종료하고 연결을 반환한 뒤 User 닉네임 조회 tx를 시작한다. 이 읽기 조합에는 application 외곽 tx나 REQUIRES_NEW를 두지 않는다. F13 닉네임 수정은 별도로 기존 writer의 application 트랜잭션 하나를 사용한다. SQL의 schema와 parameter binding을 명시한다.
 
@@ -164,7 +163,7 @@ DB의 `TIMESTAMP(6)`와 기존 Hibernate UTC JDBC 추출 의미를 보존하도�
 
 미디어는 명시 public-base·bucket·object-prefix 안의 DB 저장 URL만 처리한다. object-prefix가 비어 있으면 prefix 소유 범위 검사는 없고 public-base URL 안의 key만 대상이며, 경로·인코딩 우회 방지 가드는 그대로 적용한다. 업로더가 생성하는 `posts/images|videos/UUIDv4`와 마지막 점부터의 suffix는 원문 객체 key로 인식해 SDK에 그대로 전달한다. 이 경우 `%`, `?`, `#`, 구분자·제어문자를 URL로 재해석하거나 디코딩하지 않으며, 일반 key에는 기존 경로·인코딩 우회 방지 가드를 유지한다. URL별 검증/SDK 실패 후에도 다음 URL과 DB 처리를 계속하며 null·중복·순서를 임의 정규화하지 않는다. 파일 삭제 성공 후 DB rollback이 확정되면 파일은 복원되지 않고, 저장소 실패 후 DB 삭제가 성공하면 파일이 남을 수 있다. commit 결과 불명은 원래 오류로 전달하며 새 자동 재시도·객체 복원·보상 큐를 추가하지 않는다. SDK의 기존 같은 key 재시도와 새 애플리케이션 재처리는 구분한다. 오류 로그에는 URL·키·예외 메시지·원본 Throwable을 전달하지 않는다.
 
-기존 reader max2/writer max1과 F3 설정을 재사용한다. F4 단계는 CI writer에 `UPDATE(deleted_at,updated_at)` 및 검색 문서 DELETE를 보완했다. F5는 같은 역할에 title/content/image_urls 수정만 추가하며 posts 물리 DELETE·작성자/게시판/생성일 수정·User 쓰기·DDL은 계속 거부한다. 실제 운영 역할/ACL·라우팅·R2 권한은 이 후보가 변경하지 않는다. 외부 I/O 중 연결 미점유와 실제 두 연결의 행잠금은 별도 합성 계약으로 검증하며 pool1의 대기를 행잠금 근거로 사용하지 않는다.
+기존 reader max2/writer max1과 F3 설정을 재사용한다. 실제 운영 역할/ACL·라우팅·R2 권한은 이 후보가 변경하지 않는다.
 
 ## F5 본인 수정과 첨부 교체
 
@@ -200,7 +199,7 @@ exact 목록 GET만 보안 허용 목록에 추가한다. 공개 목록은 불�
 
 검색용 JDBC·읽기 트랜잭션 timeout은 각각5초이며 기존 reader DataSource와 transaction manager를 사용한다. 단건·목록의3초와 기존 단일 pool 구성은 유지한다. 5초는 전체 HTTP 응답시간 SLA가 아니며 Top10도 전역 readiness의 DB 비용 상한을 보장하지 않는다. 실행기는 여전히 기존 writer/JWT/S3 설정이 필요하다.
 
-합성 CI fixture에는 기존 reader의 `post_search_documents(post_id,title_hash,content_hash,analyzer_version,tokens)` SELECT만 추가한다. 새 schema·index·계정·pool·설치와 운영 권한 변경은 없다. 운영 후보 인계 시 실제 읽기 계정 권한·전체 데이터 성능·단일 작업 소유권과 Gateway 라우팅은 별도 확인해야 한다. 이 기능의 CI 성공을 운영 전환·검색 전체 인계 완료로 해석하지 않는다.
+검색은 새 schema·index·계정·pool·설치와 운영 권한 변경을 만들지 않는다. 운영 후보 인계 시 실제 읽기 계정 권한·전체 데이터 성능·단일 작업 소유권과 Gateway 라우팅은 별도 확인해야 한다.
 
 ## F8 공개 댓글 목록
 
@@ -210,7 +209,7 @@ exact 목록 GET만 보안 허용 목록에 추가한다. 공개 목록은 불�
 
 전체 댓글 행을 매핑하고 연결을 반환한 뒤 `UserNicknameQuery`로 순차 조회한다. 같은 작성자도 행마다 조회하며 cache·추가 pool·User SQL JOIN은 없다. 명시된 사용자 부재·조회 불가만 `사용자{id}`로 처리하고 빈 닉네임의 null 호환과 공백을 보존한다. legacy 원격 helper의 넓은 `catch(Exception)`을 그대로 재현했다고 주장하지 않는다. 댓글 SQL·행 매핑·예상 밖 닉네임 오류는 전체 안전한500이며, 부분200·오류 행 생략·실패를 빈 배열로 숨기는 처리는 없다.
 
-실행기에는 기존 단일 pool과 writer/JWT/S3 필수 설정이 유지된다. 합성 CI의 F8 단계에서만 소유권 marker를 확인한 기존 PostgreSQL에 실제 baseline과 같은 댓글 표와 reader의 7개 SELECT 열을 추가한다. F4의 별도 FK 댓글·쪽지 fixture는 보존하며 F8은 댓글 쓰기 권한을 추가하지 않는다. F9의 합성 writer 보완은 아래 별도 계약이며 운영 스키마·권한을 변경하지 않는다. 전체 댓글·행별 닉네임의 운영 데이터량 성능과 Gateway 전환은 별도 검증 대상이다.
+실행기에는 기존 단일 pool과 writer/JWT/S3 필수 설정이 유지된다. F8은 댓글 쓰기 권한을 추가하지 않으며 운영 스키마·권한을 변경하지 않는다. 전체 댓글·행별 닉네임의 운영 데이터량 성능과 Gateway 전환은 별도 검증 대상이다.
 
 ## F9 인증된 댓글 작성
 
@@ -222,7 +221,7 @@ exact 목록 GET만 보안 허용 목록에 추가한다. 공개 목록은 불�
 
 작성자 부재·명시적 조회 불가는 `사용자{id}`, 빈 닉네임은null, 공백은 원문을 유지한다. 예상 밖 User 오류는 쓰기 전500으로 닫는다. legacy의 INSERT 뒤 Feign 호출·넓은 `catch(Exception)` 순서와 모든 장애를 동등하게 재현했다고 주장하지 않는다. 확정 SQL/commit rollback은 댓글 행을 남기지 않으며 sequence gap은 허용한다. commit 결과 불명·응답 전송 실패를 확정 rollback으로 표현하거나 서버가 POST를 자동 재시도하지 않는다. 즉시 응답 시각의 정밀도와 DB `TIMESTAMP(6)`를 재조회한 정밀도를 억지로 같게 만들지 않는다.
 
-Outbox·검색 projection·S3는 호출하지 않는다. 기존 단일 pool·JDBC URL·writer/JWT/S3 필수 설정을 재사용하며 새 운영 환경 변수는 없다. 기존 JSON Bean Validation에 필요한 `starter-validation`/validation API만 추가하고 버전은 BOM을 따른다. 실행 JAR 검사는 정상 `BOOT-INF/lib/hibernate-validator-<version>.jar`만 좁게 허용하며 Hibernate ORM·JPA·레거시·테스트 artifact 차단을 유지한다.
+Outbox·검색 projection·S3는 호출하지 않는다. 기존 단일 pool·JDBC URL·writer/JWT/S3 필수 설정을 재사용하며 새 운영 환경 변수는 없다. 기존 JSON Bean Validation에 필요한 `starter-validation`/validation API만 추가하고 버전은 BOM을 따른다.
 
 ## F10 본인 댓글 삭제
 
@@ -234,9 +233,7 @@ Outbox·검색 projection·S3는 호출하지 않는다. 기존 단일 pool·JDB
 
 구조화된 community rollback charset SQLState23514만 기존 메시지400으로 보존하고 다른 CHECK·SQL·commit 오류는 안전한500이다. 이는 DELETE 본문 문자 검증을 추가하는 것이 아니다. 확정 rollback의 행 보존을 확인하며 commit 결과 불명·응답 전송 실패를 확정 rollback으로 표현하지 않는다.
 
-CI는 F3~F9의 원래 ACL 검증을 모두 끝낸 뒤 F10 권한을 보완한다. F10 준비 전 `f9.require_fixture()`의 strict 검사를 유지하고, 준비 후에는 F8의 owner/정확한 loopback port 체인과 F9/F10 owner·marker, 기존 문자 CHECK/7열 및 정확한 확장 ACL을 확인한다. 기존 writer에 `SELECT(author_id,deleted_at)`, `UPDATE(deleted_at,updated_at)`만 추가하며 물리 DELETE·본문 UPDATE·sequence·User 쓰기·schema CREATE 권한은 없다. F10 단계에서 F9 strict helper를 재호출하지 않고 작성은 실제 F9 HTTP API로 확인한다.
-
-기존 F8 packaged 거부 검사에서도 새 DELETE 익명 응답만401로 갱신한다.
+이 기능의 writer 권한은 comments의 `SELECT(author_id,deleted_at)`, `UPDATE(deleted_at,updated_at)`만 추가하며 물리 DELETE·본문 UPDATE·sequence·User 쓰기·schema CREATE 권한은 필요하지 않다.
 
 ## F11 본인 댓글 수정
 
@@ -248,9 +245,7 @@ CI는 F3~F9의 원래 ACL 검증을 모두 끝낸 뒤 F10 권한을 보완한다
 
 구조화된 community rollback charset23514만 기존 고정400이며 NUL·다른 SQL/CHECK/commit은 안전한500이다. 자동 재시도·Outbox·검색·S3 호출은 추가하지 않는다. 기존 단일 pool과 JDBC/TM·writer·필수 운영 설정을 재사용하며 새 runtime 환경 변수는 없다.
 
-CI는 기존 F9·F10의 strict ACL과 JAR 회귀를 끝낸 뒤 F11을 준비한다. `f10.require_fixture()`로 변경 전 상태를 확인하고 F11 owner/marker와 기존 writer의 `UPDATE(content)` 한 열만 추가한다. 확장 뒤에는 F8의 실제 단일 loopback port·owner 체인과 F9/F10/F11 owner·marker, 7열·문자 CHECK·정확한 ACL을 직접 확인한다. INSERT5·SELECT(id,author,deleted_at)는 유지하고 UPDATE는 content/deleted_at/updated_at만 허용하며 sequence·물리 DELETE·User 쓰기·schema CREATE는 금지한다. F9/F10 strict helper를 재호출하지 않는다. 기존 F8 익명 PUT 한 입력은401로 바꾸고 인접 경로 거부는 유지한다.
-
-packaged JVM은 Asia/Seoul로 실행한다. 후속 GET 시각은 실제 reader의 UTC Calendar 조회와 `Timestamp.toLocalDateTime()` 의미에 맞춰 raw 저장 TIMESTAMP를 UTC에서 Seoul로 변환한 값과 대조한다. 이전 GET과 PUT 응답의 oldupdatedAt 비교는 그대로 유지한다. 날짜 경계를 넘는 변환과 stale·잘못된 새 시각 거부는 DB 없는 Python 회귀로 보호한다.
+이 기능의 writer 권한은 기존 INSERT5·SELECT(id,author,deleted_at)에 `UPDATE(content)` 한 열만 추가한다. UPDATE는 content/deleted_at/updated_at만 허용하며 sequence·물리 DELETE·User 쓰기·schema CREATE는 필요하지 않다.
 
 ## F12 인증된 본인 정보 조회
 
@@ -260,9 +255,7 @@ packaged JVM은 Asia/Seoul로 실행한다. 후속 GET 시각은 실제 reader�
 
 User 내부 `UserProfileQuery.require(id)`가 같은 reader의 3초 read-only 트랜잭션 안에서7열을 schema-qualified 조회하고 부재 application 예외를 발생시킨다. 단순 위임 usecase·미사용 공개 profile API·빈 domain이나 전체 User aggregate는 없다. 기존 UserNicknameQuery와 Community production은 유지하며, 같은 단일 pool/JDBC/TM·writer/JWT/S3 필수 설정을 재사용한다. 새 runtime 환경 변수·쓰기 권한·Outbox·검색·S3 호출은 없다. 실제 NOT NULL·role CHECK가 보장하는 저장 문자열을 신뢰하며 제약을 제거한 손상 데이터의 legacy enum 처리까지 동등하다고 주장하지 않는다.
 
-CI는 원래 두 열 User fixture의 F3~F11 JAR 회귀를 모두 끝낸 뒤 F12를 준비한다. DDL 전에 `f11.require_fixture()`로 단일 loopback port·owner/marker·기존 comment writer ACL을 확인한다. 새9열 중 email/name/provider/role은 기존 합성 ID별 값으로 채운 뒤 NOT NULL과 검증된3역할 CHECK를 적용하며, created_at·password/care_reg_no/provider_id/updated_at은 실제 nullable 의미를 유지한다. 확장 전후 기존 ID/nickname 배열이 같아야 추가 SELECT를 부여한다. reader에는 기존2열에 email/name/provider/role/created_at만 더해 정확7열 SELECT를 허용하고 민감4열 SELECT·양 계정 User 쓰기·schema CREATE는 금지한다. F12 marker와11열 타입/길이/nullability·CHECK·ACL을 검사하고 ancestor 초기화 smoke를 재실행하지 않는다.
-
-JAR는 현재 단계에서 기존 실제 발급기로 갱신한 합성 토큰과 별도 본인 ID를 사용해 역할·위조 ID·현재 DB·빈/공백/null·회원 부재·권한 실패/회복·요청 간 principal 정리를 확인한다. raw 날짜는 기존 F11의 순수 UTC→Seoul 비교를 재사용한다. 요청마다 User/댓글/posts/F4 댓글·쪽지/Outbox/search/S3 전체 불변, 민감값 비노출·단일 pool 정상 종료·연결0을 확인한다.
+이 기능의 reader 권한은 기존2열에 email/name/provider/role/created_at만 더한 정확7열 SELECT이며 민감4열 SELECT·User 쓰기·schema CREATE는 필요하지 않다.
 
 ## F13 본인 닉네임 수정
 
@@ -321,27 +314,19 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
 - `:boot:contractTest`: Testcontainers PostgreSQL 위의 DB 계약 시험(아래 "DB 계약 시험").
 - `:boot:jarSmokeTest`: 실제 `bootJar` 산출물을 자식 프로세스로 띄우는 기동·종료 시험(아래 "패키지 JAR 기동·종료 시험"). `:boot:bootJar`에 의존하므로 항상 새 JAR로 돈다.
 
-Python 패키지 JAR 스모크(`scripts/fN_ci.py`)와 병합 후 shard·증거 검증 스크립트, 옛 MSA 서비스 CI는 삭제했다. 아래 F 단계 절의 CI 스크립트·shard·fixture 언급은 당시 기록이며 현재 검증 방법이 아니다.
-
 ## F22 본인 쪽지 단건 조회
 
-F21 병합 dev `c3c2376c9abd418d9fe2ca2b55ebe6615aeab054`를 기준으로 편입한다. 로컬 단위·구조/컴파일/실행 JAR 검사를 완료했다. 실제 JAR9는 hosted CI에서 확인한다.
+F22는 기존 `GET /api/v1/notes/{id}`만 편입한다. caller 활성 확인 뒤 Clock1회→본인 mailbox+strict expiry 단건→nullable counterpart single→active INBOX에만 기존 양방향 block 조회를 수행한다. 응답은 원본 body/닉네임·nullable ID/context/readAt·Instant의 정확10필드이고 차단된 쪽지도200/canReply=false다. read_at/favorite·원문·요청/차단 상태를 쓰지 않으며 SSE·cleanup·새 User API·외곽 TX는 추가하지 않는다. UUID 변환·정적 경로 우선순위는 Boot/MVC가 책임진다. F22 당시 기본거부였던 exact `/stream`은 F26으로 인계하고, `/stream/extra` 인접 경로 거부는 유지한다.
 
-F22는 기존 `GET /api/v1/notes/{id}`만 편입한다. caller 활성 확인 뒤 Clock1회→본인 mailbox+strict expiry 단건→nullable counterpart single→active INBOX에만 기존 양방향 block 조회를 수행한다. 응답은 원본 body/닉네임·nullable ID/context/readAt·Instant의 정확10필드이고 차단된 쪽지도200/canReply=false다. read_at/favorite·원문·요청/차단 상태를 쓰지 않으며 SSE·cleanup·새 User API·외곽 TX는 추가하지 않는다. UUID 변환·정적 경로 우선순위는 Boot/MVC가 책임진다. F22 당시 기본거부였던 exact `/stream`은 F26으로 인계하고, 선행 JAR 회귀는 `/stream/extra` 인접 경로 거부를 유지한다.
-
-F21 모든 stage를 기존 notes4/mailboxes5 권한으로 끝낸 다음 F22는 recipient_id/body/context_type/context_id와 favorite의 SELECT5열만 확장한다. 새 DDL·표·인덱스·스키마·marker·writer/sequence 권한은0이다. 확장 뒤 F21 strict checker나 F21 READABLE monkeypatch는 사용하지 않는다. 기존 F20 User/blocks 검사를 유지하고 F21의 순수 constraint/index query만 재사용하여 원본 두 표 전체 shape/PK/FK/CHECK/index·owner postgres·notes8(reply_to 제외)/mailboxes6·writer0/no-sequence를 명시적으로 검사한다. 임시 body SELECT 회수 중에는 F19 marker identity와 exact F20/F21/F22 receipt 확인 뒤에만 GRANT하고, 복원 뒤 full 검사한다. 복원 실패는 passed result를 남기지 않는다.
-
-Seoul JAR는 성공 INSERT 이후 소유 User2/member3/note4/mailbox4 키만 사용한다. 예상9요청은 GET8(성공4/거부4)+PUT1이다: INBOX/SENT/null sender3성공, foreign404, body SELECT 회수503→복원성공1, missing JWT401, GET stream/extra403, PUT read/extra403. 모든 요청의 전후16표 전체 row·S3 snapshot, readAt/favorite 불변, 타입·body·null·µs JSON/no-store/no-cookie를 비교한다. 이 인접 stream/write 거부는 기존 보안 envelope/cache와 비교하며 F26 exact endpoint 거부를 뜻하지 않는다. 마지막 PG에서 실제 발급한 F22_CALLER9976001만600초로 갱신하고 기존 키/0600을 보존하며, 각 요청 snapshot 뒤 인증 직전 사용키 TTL60만 다시 검사한다. 무토큰 요청은 reload0이다. privatebody/nickname/email/토큰/비밀값 로그0·단일 pool 정상 종료/연결0·mailbox→note→member→User FK 정리와 baseline 복귀를 검사한다.
+F22가 추가로 읽는 열은 recipient_id/body/context_type/context_id와 favorite의 SELECT5열뿐이며 새 DDL·표·인덱스·스키마·writer/sequence 권한은0이다.
 
 ## F23 본인 쪽지 목록 조회
 
 기존 `GET /api/v1/notes`의 받은/보낸 쪽지와 즐겨찾기 페이지를 편입한다. page0..10000 → 정확한 INBOX/SENT → 현재 회원 → Clock1회 → count → 최대10행 목록 → nonnull 상대의 최초 순 distinct batch1회 → active INBOX 행마다 양방향 차단 순서다. count0이어도 목록을 읽고 요청 page를 보존한다. 정렬은 mailbox.created_at와 PostgreSQL UUID DESC, 응답 createdAt은 note.created_at이다. Page는 정확5필드, 행은 기존 단건과 같은10필드이며 raw body/닉네임·nullable ID/readAt/context·Instant를 그대로 돌려준다. 조회로 읽음·즐겨찾기·쪽지·차단을 쓰지 않는다.
 
-기존 F22 single reader SAM·단건 조립·User single/batch·block reader·Clock·단일 pool을 유지하고 목록 전용 두 SQL adapter만 추가한다. count와 list는 각각 기존 RO3초 TX를 반환한 뒤 다음 단계로 간다. 외곽 TX·재시도·pair cache를 추가하지 않으므로 count/list 사이 원래 경쟁 창을 닫았다고 주장하지 않는다. 최대10 active INBOX의 source상 DB 호출 상한은14이며 실제 소유 PG 시험으로 별도 확인한다. 기존 exact root GET 거부2항목만 새 목록 계약에 인계했다. F26에 인계한 exact stream/읽음 PUT 외 나머지 쓰기·ADMIN·단건/static 경계와 stream/extra 인접 거부는 유지한다.
+기존 F22 single reader SAM·단건 조립·User single/batch·block reader·Clock·단일 pool을 유지하고 목록 전용 두 SQL adapter만 추가한다. count와 list는 각각 기존 RO3초 TX를 반환한 뒤 다음 단계로 간다. 외곽 TX·재시도·pair cache를 추가하지 않으므로 count/list 사이 원래 경쟁 창을 닫았다고 주장하지 않는다. 최대10 active INBOX의 source상 DB 호출 상한은14이다. 기존 exact root GET 거부2항목만 새 목록 계약에 인계했다. F26에 인계한 exact stream/읽음 PUT 외 나머지 쓰기·ADMIN·단건/static 경계와 stream/extra 인접 거부는 유지한다.
 
-F22 전체 stage 뒤 `f23_ci.py prepare`는 현재 notes8/mailboxes6·blocks3 reader ACL과16표를 변경 없이 검증한다. 새 DDL·표·권한·writer·sequence·marker는0이다. SELECT 회수 중 복원은 기존 identity/F20·F21·F22 receipts를 먼저 확인하고 GRANT 후에만 strict를 재검사한다.
-
-단일 Seoul JAR의 계획12요청은 목록GET9(성공6·거절3), 기존 detail GET1·stream/extra 인접 거부1·POST 거부1이다. 본인 INBOX12행의10/2/빈 page·SENT·favorites·page 우선400·mailbox timestamp SELECT503/복구·auth 선행을 확인한다. 각 요청 snapshot 뒤 사용키 TTL60초를 확인하며 무토큰에는 loader를 호출하지 않는다. 16표/S3 불변·성공한 자기 키만 FK 순 정리·단일 pool 정상 종료/연결0을 검사한다.
+F23은 기존 notes8/mailboxes6·blocks3 reader 권한만 쓰며 새 DDL·표·권한·writer·sequence는0이다.
 
 ## F24 본인 쪽지 차단 해제
 
@@ -349,11 +334,7 @@ F22 전체 stage 뒤 `f23_ci.py prepare`는 현재 notes8/mailboxes6·blocks3 re
 
 application의 좁은 동기 callback을 adapter가 잠금 뒤 정확1회 호출한다. User 정책은 application에 두며 callback 저장·비동기·재시도·예외 삼킴은 없다. 기존 writeJdbc와 writeTransactionManager를 재사용하고 이 operation 전용15초 TransactionTemplate만 조립한다. 같은 datasource의 활성 TX 잔여시간이 기존 queryTimeout5를 덮으므로 새 JdbcTemplate·pool·TM를 추가하지 않고 기존 공통10초 설정도 바꾸지 않는다. Clock·SSE·afterCommit·Outbox·새 User API는 없다. 원본 쓰기 오류 정책대로 typed User는 회원503, DAO만 저장소503이며 구체 TX3타입을 포함한 다른 Runtime은 일반503이다. scoped 로그에는 타입만 남기고 throwable·SQL·회원값을 전달하지 않는다.
 
-F23 전체 smoke까지 기존 strict·writer0 검사를 완료한 뒤 `f24_ci.py prepare`가 기존 members의 SELECT/INSERT/UPDATE(member_id), blocks의 SELECT(member_id,blocked_id)와 DELETE만 추가한다. 새 DDL·표·스키마·marker·sequence 권한은0이다. 확장 뒤 선행 writer0 checker를 다시 호출하거나 monkeypatch하지 않고 F24 명시 검사로 원본 shape/PK/FK/CHECK/index·postgres 소유·reader/최소 writer ACL을 확인한다. 회수 중에는 ACL 비의존 identity와 F20/F21/F22/F23/F24 exact receipts로 소유를 확인한 뒤 GRANT하고 복원 후에만 strict를 확인한다. 복원 실패를 passed로 처리하지 않는다.
-
-기존 Seoul 자원 관리로 실제 JAR의 계획12요청을 수행한다: DELETE8(성공5/거부3), 차단 목록 GET2, stream/extra GET 거부1, target/extra PUT 거부1이다. 읽기→해제→읽기·중복 해제·없는 target의 member 생성과 DELETE 권한 저장소503/복원·User nickname 권한 회원503/복원·인증 선행을 비교한다. 각 요청은16표/S3 snapshot 뒤 사용키 TTL60초를 확인하고 무토큰 reload는0이다. 마지막 PG에서 F24_CALLER9978001만 실제 발급기로600초 갱신하며 이전 키와0600을 보존한다. 요청별로 outgoing 차단1행 삭제와 없는 target member1행 추가만 허용하고 나머지 row/S3·private body/회원값/비밀 로그 불변을 검사한다. 성공 INSERT 소유 키만 FK 순 정리하며 두 child의 실패 시 종료, 단일 pool 정상 종료/잔여 연결0, 시작 전16표로 복귀를 확인한다.
-
-workflow는 F23 smoke → 무자원 F24 guard → prepare → JAR smoke 순서를 지키며 기존 always owned cleanup·증거 보존·발행/배포 차단을 유지한다. 선행 F23의 check 상한40분을 그대로 유지한다. F22의 이전30분 취소 및 F23 추가 단계에 따른35→40 조정과 F24의 실제 실행시간을 구분하며, 아직 실제 F24 실행시간·성공 근거는 아니다. 추가 상향은 실제 선행 측정 후 별도 검토한다. F24 기능 브랜치의 base는 F23 병합 뒤 재확인하며. 실제 feature head의 결과는 해당 run 산출물로 확인한다.
+F24가 추가로 쓰는 권한은 기존 members의 SELECT/INSERT/UPDATE(member_id), blocks의 SELECT(member_id,blocked_id)와 DELETE뿐이며 새 DDL·표·스키마·sequence 권한은0이다.
 
 ## F25 본인 outgoing 쪽지 차단 생성 준비
 
@@ -361,31 +342,21 @@ workflow는 F23 smoke → 무자원 F24 guard → prepare → JAR smoke 순서�
 
 application `CreateNoteBlock`이 두 회원 활성 정책과 Clock를 소유하고, `NoteBlockCreation`의 좁은 동기 Supplier가 잠금 뒤 그 순서를 실행한다. 기존 F24 Runnable SAM이나 User single/batch API는 바꾸지 않는다. Boot의4bean은 기존 writeJdbc/writerTM 위 operation 전용 TT15와 기존 readClock를 재사용한다. 공통 TT10/JDBC5·User RO3·단일 pool을 유지하며 새 datasource/TM/Clock·외곽 TX·SSE·afterCommit·Outbox는 없다. typed User는 회원503, DAO만 저장소503, 구체 TX3·usage·Clock/기타 Runtime은 일반503이다. 실제 commit이 DAO로 번역되면 실제 타입대로 처리하며 phase만으로 분류하지 않는다. scoped 로그에는 타입만 남긴다.
 
-F24 마지막 strict/PG/MVC/JAR를 마친 뒤 `f25_ci.py prepare`가 blocks의 INSERT(member_id,blocked_id,created_at)만 추가한다. 기존 members SELECT/INSERT/UPDATE(member_id)와 blocks SELECT두ID/DELETE, reader User7/pending1/blocks3/notes8/mailboxes6을 보존한다. writer created_at SELECT/UPDATE·새 schema/표/업무 DDL/index/marker/sequence 권한은0이다. 확장 뒤 INSERT0을 요구하는 F24 strict를 재호출하거나 약화하지 않고 F25 exact shape/PK/FK/CHECK/index/owner/ACL 검사를 사용한다. 회수 중에는 ACL 비의존 identity와 선행/F25 exact receipts로 소유를 확인한 뒤 GRANT하고 복원 뒤에만 strict를 검사한다. 부분 grant·복원·정리 실패를 passed로 처리하지 않는다.
+F25가 추가로 쓰는 권한은 blocks의 INSERT(member_id,blocked_id,created_at)뿐이다. 기존 members SELECT/INSERT/UPDATE(member_id)와 blocks SELECT두ID/DELETE, reader User7/pending1/blocks3/notes8/mailboxes6은 그대로 쓰며, writer created_at SELECT/UPDATE·새 schema/표/업무 DDL/index/sequence 권한은0이다.
 
-단일 Seoul JAR의 현재 정적 계획은18요청(PUT8: 성공4/거절4, GET7, DELETE3)이다. 생성 후 기존 차단 목록/상태/recipient의 결과, 중복 시각 불변, F24 DELETE 복구와 대표 INSERT/User503·복구·인증/인접 거부만 맡긴다. 허용 delta가 있는6요청·중복1·저장소/회원 실패 각1·복구2·인증1·인접 거부2를 helper와 workflow가 비교하며, 이는 실제 JAR 성공 수가 아니다. 마지막 PG에서 F25 사용키만 원본 발급기로600초 갱신하고 기존 전체 키/0600을 보존한다. 각 인증 요청은16표/S3 snapshot 다음 요청 직전에 사용하는 키 TTL60초를 다시 확인하고 무토큰에는 reload하지 않는다. outgoing INSERT(또는 중복0)·소유 member 생성/기존 해제에 필요한 변경만 허용하며 나머지 row/column/S3·private body/비밀 로그를 보호한다. 성공 소유 키·관측 member만 FK 순 정리하고 두 child 실패 종료·단일 pool 정상 종료/잔여 연결0·초기 상태 복귀를 확인한다. JAR caller 실패를 늦은 target/commit/lock 실패의 증거로 확대하지 않는다.
-
-기존 거부 세 곳만 새 계약에 인계한다. Boot Remove HTTP의 PUT target403은 새 성공 계약으로, Status HTTP의 PUT status403은 새 long binding400으로 옮긴다. 선행 F24 JAR의 PUT target403은 미편입 target/extra403으로 교체해 기존12요청과 보호 snapshot을 유지한다. 이 F24 helper/guard 변경은 해당 담당자가 맡는다. F20 PUT blocks root403·stream/extra 기본403·나머지 미편입 mutation은 보존한다. exact stream과 읽음 PUT의 정상 계약은 F26에서 별도로 보호한다.
-
-workflow는 F24 전체 smoke → F25 무자원 guard → INSERT3 prepare → 단일 JAR smoke 순서다. always owned cleanup·bounded 실패 증거·발행/배포 차단·contents read·고정 runner와 selection5분/result2분을 보존한다. check 상한은40분 그대로며 F24/F25 실제 소요시간을 아직 측정하지 않았다. artifact에는 `f25-results.json`만 명시 추가하고 token이나 모든 JSON glob을 넣지 않는다. 이 로컬 준비 기록은 CI 연결을 정적으로 검토한 결과이며, 실제 feature head의 PG/JAR·CI 결과는 해당 run 산출물로 확인한다. 기능 브랜치 생성은 F24 실제 PG/JAR/CI와 dev 병합 뒤 fresh base를 확인하는 조건을 따른다. 로컬 컴파일과 운영 검증을 구분한다.
+기존 거부 중 PUT target403은 새 성공 계약으로, PUT status403은 새 long binding400으로 옮긴다. F20 PUT blocks root403·stream/extra 기본403·나머지 미편입 mutation은 보존한다. exact stream과 읽음 PUT의 정상 계약은 F26에서 별도로 보호한다.
 
 ## F26 본인 쪽지 읽음과 본인 SSE resync 준비
 
-기존 `PUT /api/v1/notes/{id}/read`와 `GET /api/v1/notes/stream?clientId={UUID}`를 같은 사용자 결과로 준비한다. 본인 읽음 commit 뒤 본인의 다른 연결에 resync를 보내고, 기존 알림/단건/목록 REST를 다시 조회해 readAt·unreadCount를 확인한다. rollback·commit 실패에는 알림을 보내지 않는다. 기존 send/withdraw가 다른 JVM에서 실행되면 이 registry에 자동으로 전달되지 않으므로 전체 실시간 알림·Gateway 전환 완료로 표현하지 않는다. 실제 F26 feature base와 게시/병합은 부모 F25의 실제 검증·dev 병합 뒤 확인하는 별도 조건이다.
+기존 `PUT /api/v1/notes/{id}/read`와 `GET /api/v1/notes/stream?clientId={UUID}`를 같은 사용자 결과로 준비한다. 본인 읽음 commit 뒤 본인의 다른 연결에 resync를 보내고, 기존 알림/단건/목록 REST를 다시 조회해 readAt·unreadCount를 확인한다. rollback·commit 실패에는 알림을 보내지 않는다. 기존 send/withdraw가 다른 JVM에서 실행되면 이 registry에 자동으로 전달되지 않으므로 전체 실시간 알림·Gateway 전환 완료로 표현하지 않는다.
 
 읽음은 TX15 → current member INSERT/FOR UPDATE → callback 안 requireId/active → 본인 mailbox JOIN·strict expiry 조회(clock1) → note lock → 동일 소유/만료 재조회(clock2) → INBOX `read_at=COALESCE(read_at,?)` UPDATE(clock3) → afterCommit resync 순서다. ID 검증을 TX 앞으로 옮기지 않아 비양수 direct call의 member CHECK DAO 선행과 HTTP JWT 양수 guard를 구분한다. 반복 INBOX도 UPDATE/세 번째 시각을 수행하지만 첫 readAt을 보존하고, SENT는 영향0으로 성공·resync한다. 세 번째 expiry 검사나 상대/차단 조회를 추가하지 않는다. app의 좁은 MissingOwnedNote만404로 바꾸며 typed User는 회원503, DAO는 저장소503, 그 밖의 구체 TX/Runtime은 일반503이다. 실제 commit에서 DAO로 번역되면 실제 타입을 따른다. 등록 실패·SQL·TX 예외는 전파하고, afterCommit 내부 hints의 Runtime만 타입 로그 후 성공을 유지한다.
 
 Boot의 정확한 두 matcher를 같은 인증 filter/인가에 넣고 기존 ADMIN 우선·다른 경로 기본거부를 보존한다. 한 번 검증한 같은 JWT Claims의 exp를 JDK Instant details로 전달하며 헤더의 사용자/만료값을 신뢰하지 않는다. 기존 REST의 exp 선택 정책은 보존하고 SSE만 exp를 필수로 한다. 같은 요청의 ASYNC dispatch는 request-attribute context를 복원하며 새 연결은 새 JWT를 검증한다. 세션·raw token 저장·일반 REST context save·전역 ASYNC permitAll은 추가하지 않는다. 같은 registry가 읽음 hints를 구현하고 기존 readClock/writeJdbc/writerTM의 operation 전용 TT15를 조립한다. User API·단일 pool/두 TM·공통 TT10/JDBC5는 유지한다.
 
-registry의 원문14개 선택 메서드와 writeLock 안 expiry 재확인·교체 identity를 보존한다. 연결 TTL은 JWT 잔여와5분 중 작은 값, heartbeat15초, 회원 logical3/pending replacement3·전체 physical500, write2/queue256·completion2/queue500이다. 종료는 서버의 열린 SSE 대기보다 먼저 실행하며 공유 monotonic5초 예산 안에서 소유 executor 종료를 확인한다. `isRunning=false`·daemon·pool 종료만으로 SSE 자원 종료를 선언하지 않는다. 실제 JAR gate는 성공 로그와 열린 연결의 server-side EOF, `stream_resources_stopped=true`, `server_closed_open_streams=2`, 단일 pool 정상 종료·잔여 연결0을 함께 요구한다. 미완전 종료 경고는 성공 근거가 아니다. 원본 scheduler·expire cleanup·send/withdraw API는 등록하지 않는다.
+registry의 원문14개 선택 메서드와 writeLock 안 expiry 재확인·교체 identity를 보존한다. 연결 TTL은 JWT 잔여와5분 중 작은 값, heartbeat15초, 회원 logical3/pending replacement3·전체 physical500, write2/queue256·completion2/queue500이다. 종료는 서버의 열린 SSE 대기보다 먼저 실행하며 공유 monotonic5초 예산 안에서 소유 executor 종료를 확인한다. `isRunning=false`·daemon·pool 종료만으로 SSE 자원 종료를 선언하지 않는다. 원본 scheduler·expire cleanup·send/withdraw API는 등록하지 않는다.
 
-F25 전체 guard/prepare/JAR 뒤에 F26 fixture guard와 별도 stream probe guard → `f26_ci.py prepare` → 단일 Seoul JAR smoke를 실행하도록 연결한다. prepare는 마지막 F25 full strict 뒤 notes의 SELECT(note_id,expires_at)/UPDATE(note_id)와 mailboxes의 SELECT(member_id,note_id,direction,read_at)/UPDATE(read_at)만 원자적으로 추가한다. note_id UPDATE 권한은 FOR UPDATE 잠금용이며 실제 note_id 갱신 SQL을 추가하지 않는다. reader·기존 members/blocks writer·전체16표를 보존하고 새 DDL/표/schema/index/marker/sequence/PG image는0이다. 확장 뒤 F25 writer-zero strict나 monkeypatch를 쓰지 않고 명시한5표의 shape/default/owner/PK/FK/CHECK/index와 exact ACL을 검사한다. read_at UPDATE·User nickname SELECT 회수 중 복원은 ACL 비의존 identity와 선행/F26 exact receipts를 먼저 확인하고 GRANT 뒤에만 full strict를 실행한다.
-
-JAR probe는 실제 발급기 F26_CALLER/F26_OTHER의600초 토큰과 기존 전체 키/regular0600을 보존하고, 각 snapshot 뒤 요청/연결 직전 실제 사용키 TTL60초를 확인한다. 짧은 수명·exp없음·expired 입력은 명시한 합성 입력으로 분리하며 짧은 토큰은 파일에 저장하지 않는다. 본인 ready→read commit→resync→REST 재조회, 타인 resync0, 만료·재연결·권한 실패/복원·인증 선행과 전체16표/S3의 승인 delta만 검사한다. 현재 runtime 담당자의 정적 계약은 HTTP22회=PUT7(성공5/거부2)+GET15이며 nonstreaming19에는 거부 SSE3이 포함되고 성공 SSE3을 별도로 센다. 이는 실제 성공 건수가 아니다. 요청/event 계수는 runtime helper와 prefix의 검토된 counter 계약을 일치시킨 뒤 결과에서 exact 비교한다. 실제 JAR 성공 수는 아직 없다. 성공 소유 키만 FK 순으로 정리하고 `owned_cleanup_restored=true`, protected_database_changes/S3요청0·두 child/열린 SSE 종료·단일 pool/연결0을 확인한다.
-
-기존 F22~F25 Python JAR의 exact stream403 네 호출과 F22 exact read403 한 호출은 각각 GET `/stream/extra`와 PUT `/{id}/read/extra`의 기존403 envelope/cache 거부로 인계한다. 요청수·카운터·TTL·snapshot·cleanup은 유지한다. F22/F23의 계승 필드 `stream_denied_checks`는 이제 이 인접 경로 거부를 센다. exact stream 자체가 여전히 거부된다는 뜻이 아니다. Boot도 선행 목록 HTTP를 포함한 기존 거부 provider만 같은 깊은 경로로 인계하고 새 exact endpoint의 정상/실패는 새 계약의 가까운 시험에서 보호한다.
-
-always owned cleanup·실패 증거 보존·발행/배포 차단·contents read·고정 runner와 selection5분/result2분을 보존한다. 완료한 F25 실제 CI validator가39분18초(run39285667745)였고 새 F26 PG·MVC·SSE 정상종료 단계를 더하므로 이 격리 check job 상한만40→45분으로 조정한다. selection5분/result2분·각 단계의 제한과 always 소유 정리·증거 보존·발행 차단은 유지한다.45분은 F26 실제 실행시간 측정값이나 후속 F27까지 충분하다는 보장이 아니며 다음 단계는 실제 tail을 다시 확인한다. artifact에는 `f26-results.json`만 명시 추가하고 token·모든 JSON glob은 넣지 않는다. 실제 feature head의 관측/PG/JAR·CI 결과는 해당 run 산출물로 별도 확인한다.
+F26이 추가로 쓰는 권한은 notes의 SELECT(note_id,expires_at)/UPDATE(note_id)와 mailboxes의 SELECT(member_id,note_id,direction,read_at)/UPDATE(read_at)뿐이다. note_id UPDATE 권한은 FOR UPDATE 잠금용이며 실제 note_id 갱신 SQL을 추가하지 않는다. 새 DDL/표/schema/index/sequence는0이다.
 
 전체 결정·계획·문제 해결 기록은 Obsidian `Projects/pawbridge`의 F2·F3·F4·F5·F6·F7·F8·F9·F10·F11·F12·F13·F14·F15·F16·F17·F18·F19·F20·F21·F22·F23·F24·F25·F26 계획과 모듈형 모놀리스 전환 노트를 따른다.
 
@@ -395,37 +366,21 @@ always owned cleanup·실패 증거 보존·발행/배포 차단·contents read�
 
 Community의 명시적인 app policy/좁은 port/JDBC/scoped REST 계약과 Boot의 exact PUT matcher·기존 writeJdbc/writerTM/privateTT15/readClock/NoteChangeHints를 조립한다. 새 User API·pool/TM/Clock·SSE registry·범용 mutate 프레임워크는 없다. 원문에서처럼 hook 안 실제 hint Runtime만 타입명 로그 뒤 성공 처리하고 SQL·등록·commit 오류는 전파한다. 인증은 binder보다 먼저이며 기존 일반 REST의 exp 선택 정책·ADMIN/default deny를 유지한다. primitive boolean body의 생략/null/잘못된 JSON 등은 원문 actual MVC 관측 후 비교 provider를 확정한다.
 
-F26 전체 검증 뒤 `f27_ci.py prepare`가 기존 mailbox writer에 `UPDATE(favorite)` 한 열만 추가한다. reader와 F26 writer SELECT/잠금/read_at·기존 blocks 권한은 유지하고 새 DDL/표/index/schema/sequence는0이다. 권한 회수 복구는 marker-only 선행/current exact receipt로 대상을 확인하고 GRANT 뒤 strict를 실행한다. nickname이 회수된 동안 User ACL을 검사하는 이전 strict를 호출하지 않는다.
-
-합성 JAR probe는 본인/다른 회원의 SSE와 실제 발급기 F27_CALLER/OTHER600초 토큰을 사용해 true·동일값 반복·false·SENT·권한 실패/회복·조회 projection/필터를 검증하도록 준비한다. 승인 delta는 본인 favorite boolean 한 셀이고 read_at/unread는 불변이다. 본인 resync와 타인0,16표/S3·소유 seed/FK 정리, 열린 SSE2의 server EOF·registry 종료·단일 pool/conn0를 모두 요구한다. raw token/비밀값/개인 본문은 산출물이나 로그에 남기지 않는다. 실제 실행 전 mock/정적 카운터를 성공으로 세지 않는다.
-
-workflow는 선행 F26의 fixture/JAR 완료 뒤 F27 무자원 guard → 최소 GRANT → JAR 순서다. always owned cleanup/실패 증거/contents read/발행 차단은 유지한다. artifact에는 f27-results.json만 추가하고 token 또는 모든 JSON glob을 넣지 않는다. 실제 기능 브랜치는 F26 검수·CI·dev 병합 뒤 fresh base/input bytes를 확인하고 만든다.
+F27이 추가로 쓰는 권한은 기존 mailbox writer의 `UPDATE(favorite)` 한 열뿐이다. reader와 F26 writer SELECT/잠금/read_at·기존 blocks 권한은 유지하고 새 DDL/표/index/schema/sequence는0이다.
 
 ## F28 본인 쪽지 메일함 삭제 준비
 
 기존 DELETE `/api/v1/notes/{id}`는 TX15/member INSERT·잠금/current active/find(clock1)/note 잠금/find(clock2) 뒤 본인 mailbox를 지우고, 남은 mailbox가 없을 때만 원본 note를 지운다. 상대 mailbox가 있으면 원본과 상대 row를 보존하고, 마지막 mailbox 삭제 때 원문의 FK로 request.note_id와 자식 note.reply_to가 NULL이 된다. 반복 삭제는404/hint0이며 성공은빈200/no-store/noCookie, afterCommit 실제 hints Runtime만 타입 로그 후 성공을 유지한다. 상대 상태·차단 조회·새Clock/트랜잭션·범용 mutate 추출은 추가하지 않는다.
 
-새 exact DELETE matcher는 원문처럼 `/notes/blocks`·`/notes/notifications`도 인증 뒤 UUID400으로 보낸다. 예약어403 예외를 새로 만들지 않고 옛 negative4곳은 충돌 없는 깊은 미편입403 경로로 인계한다. 기존 ADMIN/REST/JWT·read/favorite/stream과 operation 전용TT15/두pool을 유지한다.
+새 exact DELETE matcher는 원문처럼 `/notes/blocks`·`/notes/notifications`도 인증 뒤 UUID400으로 보낸다. 예약어403 예외를 새로 만들지 않는다. 기존 ADMIN/REST/JWT·read/favorite/stream과 operation 전용TT15/두pool을 유지한다.
 
-선행 fixture는 requests가 없는16표이므로 F27 전체 검증 뒤 F28 synthetic에서만 고정 V6 requests5열/PK·2FK·rate index1과 V7 partial index2를 원문 LF fragment4에서 qualification만 해 추가한다. 이 표의 앱 reader/writer 권한은0이고 기존 mailbox/note DELETE 두 권한만 추가한다. 운영 Flyway/DDL/ACL은 변경하지 않는다. 단계 이전16표와 이후17표를 구분하며 old strict를 확장 뒤 다시 호출하거나 약화하지 않는다. identity·선행/current exact receipt 확인 뒤 ACL을 복구하고 마지막에만 full strict를 확인한다.
+F28이 추가로 쓰는 권한은 기존 mailbox/note DELETE 두 권한뿐이며 requests 표의 앱 reader/writer 권한은0이다. 운영 Flyway/DDL/ACL은 변경하지 않는다.
 
-JAR 계획은 정상 actual issuer600초 F28_CALLER/OTHER, 직전TTL60·소유0600/기존키 보존, 본인/other SSE두개를 사용한다. A의본인INBOX만삭제하고 otherSENT/원본을보존, B의마지막SENT삭제로 own request.note_id와자식C.reply_to NULL전이, C삭제 뒤 알림empty를 확인하도록 준비한다. 각DELETE권한·User실패/복구·반복404·인증/깊은경로를 포함하는정적18HTTP=DELETE9/GET9이며 아직actual요청수가아니다. 승인delta는mailbox3/note2/requestNULL1/replyNULL1뿐이고 read_at/favorite/다른17표/S3는보존한다. ACK seed외참조는삭제하지않으며응답실패뒤commit재관측/모든stream·child정리와최종17baseline복구를요구한다. 열린SSE2 serverEOF/registry성공1/두pool·연결0/비밀로그0 뒤에만 passed다.
-
-workflow는 F27 전체 → 무자원 F28 guards → 원문 requests1표/index3/DELETE2 atomic stage → JAR 순서다. 항상소유정리·실패증거·발행차단·특정 f28-results.json만보존한다. 첫 결합 상한55분은 위 실제 부모 시간에 근거한 여유이며 F28 실제 소요시간은 hosted 결과에서 확인한다.
-
-
-## F29 본인 쪽지 발송의 CI 연결 준비
+## F29 본인 쪽지 발송 준비
 
 기존 POST `/api/v1/notes`의 입력6필드·strip/hash·멱등 요청키·분/Seoul일 한도·답장·POST/REPORT 문맥을 보존한다. TX15의 정렬 회원 잠금과 현재/수신자 User 조회, 기존 요청의 gone/conflict/replay, 양방향 차단과 한도/문맥 검사 뒤 새 UUID1개로 note1/mailbox2/request1을 저장한다. commit 뒤 수신자에게만 기존 알림7필드 note 이벤트를 전달하고, 같은 키 재전송은 같은 receipt를 반환하며 새 행·알림을 만들지 않는다. 기존 조회·resync·registry 예산을 바꾸지 않으며 발송 SAM만 같은 registry에 연결한다. F27·F28 메일함 상태 관리와 별도 기능 계약이다.
 
-선행 F28 전체 성공 뒤 F29 fixture가 마지막17표 strict/snapshot을 확인한다. 고정 f06의 V4/V5 report 원문 조각으로 synthetic report 표1/identity/index/check만 추가해18표를 비교하며 운영 DDL·migration·reader report ACL·앱 sequence ACL은 변경하지 않는다. writer 추가는 notes의 sender SELECT/발송9열 INSERT, mailbox5열 INSERT, requests5열 SELECT/INSERT, reports의 report_id/author_id/deleted_at SELECT로 제한한다. 권한 회수 중에는 marker/prior/current exact receipt로 소유 대상을 먼저 확인하고 GRANT 복원 뒤에만 새 full strict를 실행한다. 확장 후 이전17표 strict를 재호출해 완화하지 않는다.
-
-workflow는 source object 확인/hosted 거부, 무자원 guard, prepare, 필수 `jar_f29` 순서다. 새 selector나 검증 모드는 없고 모든 `jar_f3..jar_f29`27개 및 owned cleanup까지28개 결과를 같은 source/head/base/tree/run/JAR에 묶어 감사한다. pilot 자격·기존6skip 조건은 넓히지 않으므로 이 기능은 full만 실행한다. package 한 번/동일 JAR·실패 gate·정리·발행 차단은 보존한다.
-
-실제 부모 PR183의55분 check 상한과 F26 full39분58초/이전42분20초에 근거한 여유 판단을 그대로 보존한다. F29까지의 실제 hosted 총시간이나55분 충분성을 보장하지 않는다. 개별 helper 예산·정확 결과 판정·항상 소유 정리 조건을 완화하지 않는다.
-
-실제 F29 기준은 F26 post-CI와 결합 F27/F28의 검수·필수 CI/dev 통합 뒤 fresh base로 확인한다. 이 private 연결은 미래 branch/base나 게시를 확정하지 않는다. artifact에는 기존 txt/log와 특정 `f29-results.json`만 추가하며 토큰·전체 환경·전체 step outputs는 보존하지 않는다.
-
+F29가 추가로 쓰는 writer 권한은 notes의 sender SELECT/발송9열 INSERT, mailbox5열 INSERT, requests5열 SELECT/INSERT, reports의 report_id/author_id/deleted_at SELECT로 제한한다. 운영 DDL·migration·reader report ACL·앱 sequence ACL은 변경하지 않는다.
 
 ### 쪽지 만료 정리 후보
 
@@ -436,11 +391,7 @@ workflow는 source object 확인/hosted 거부, 무자원 guard, prepare, 필수
 원문 pin/SQL은 비교용으로 보존하고 그 사례의 관측을 상한 검증 성공으로 세지 않는다. 후보는 정확한 oldest300·잔류1·18표 전체 변경 범위를 별도로 검증한다.
 조건부 ordinary scheduler는 새 예약을 막고 기존 phase 10초 대기 뒤 destroy의 지역 대기 5초를 사용한다.
 이는 전체 15초 종료나 JDBC interrupt 보장이 아니다. TX 잔여 timeout은 JDBC query timeout보다 우선할 수 있다.
-CI는 기존 F29 원문/JpaTM·18표 소유 fixture를 재사용하여 UTC expiry tag 6사례를 별도 선택한다.
-동일 클래스의 기존 F29 26사례와 Seoul 1사례에서는 expiry tag를 제외한다.
-실제 활성 작업의 FK 잠금→context close→정상 잠금 해제→commit/연결 반환→pool 종료를 확인한다.
-이 증거는 실행 JAR의 강제 취소나 운영 예약 인수 완료를 뜻하지 않는다. 새 HTTP/JAR 여정은 복제하지 않는다.
-
+이 정리는 실행 JAR의 강제 취소나 운영 예약 인수 완료를 보장하지 않는다.
 
 ## 관리자 회원 삭제와 Community 정리
 
@@ -452,12 +403,7 @@ Community 정리는 쪽지 member 잠금과 pending 재검증 뒤 본인 mailbox
 
 Community 실패는 pending을 보존하고503을 반환한다. Community가 커밋된 뒤 User 최종 TX가 실패하면500이며 pending 상태에서 권한 있는 재시도로 마무리한다. 최종 User 조회 시 이미 부재하면 원문 deleteById처럼 성공하고, 조회 후 동시 삭제로 DELETE가0행이면 optimistic 실패로 최종 TX를 원복한다. 모든 단계를 감싸는 새 outer TX나 추가 행 잠금은 없다.
 
-`f29_ci.py member-cleanup-prepare`는 F29 발송 여정이 끝난 뒤에만 원문 User2표·설치된 chat4표와 필요한 열 권한을 합성 fixture에 더한다. 원래18표 단계의 strict를24표 단계에 다시 적용하거나 완화하지 않는다. 이어 같은 실행 JAR의 `member-cleanup-smoke`(`jar_f31`)가 관리자 삭제의 Community rollback503 → User rollback500 → 권한 있는 retry200, 본인 SSE 종료·생존자 resync와 원본 본문 보존을 확인한다. JWT 없는401·위조 ADMIN 거부403·pending의 정상 JWT 재연결403도 구분한다. 실제 소켓·PG 성공은 해당 hosted 결과로만 판정한다.
-
-새 필수 `jar_f31`은 기존 `jar_f3..jar_f29`27개와 별개로 계약 plan/audit에 포함한다. 항상 실행하는 자기 fixture cleanup까지 성공해야 하며, 원문 백업·운영·Windows·R2에 접근하지 않는다. 이 문단은 실제 CI나 운영 성공을 선언하는 기록이 아니다.
-
-후기 회원 삭제의 원시 자식 로그는 처음부터 소유 RUNNER_TEMP/0700 폴더와0600 파일에만 기록한다. 모든 종료 경로에서 제한 크기·비밀값을 검사하며, 두 자식의 정상 정지와 검사 성공이 확인될 때만 업로드 경로에 사본을 만든다. 실패·정지 미확인·민감값 감지 시 원시 로그 사본은0이고 incomplete 결과만 보존한다.
-
+관리자 삭제는 Community rollback503 → User rollback500 → 권한 있는 retry200으로 이어지고, 본인 SSE는 종료되며 생존자에게 resync가 전달되고 원본 본문은 보존된다. JWT 없는401·위조 ADMIN 거부403·pending의 정상 JWT 재연결403도 구분한다.
 
 ## 관리자 회원 상세 조회
 
@@ -465,20 +411,17 @@ ADMIN GET `/api/v1/admin/users/{userId}`는 기존 `UserProfileQuery`와 같은 
 
 서명된 ADMIN 권한을 경로 바인딩/조회보다 먼저 확인하며 X-User 헤더나 query의 userId로 대상을 바꾸지 않는다. 아직 편입하지 않은 `/users/search`는 이 단건 matcher에서 제외하고 목록·검색·미편입 이웃 경로의 기본 거부를 유지한다. 기존 관리자 DELETE는 그대로다.
 
-이 변화의 가장 가까운 보호는 실제 MVC의 JWT·대상 바인딩·7필드/오류·인접 경로와 명시 조립 시험이다. 기존 F12의 변경 없는7열 SQL/실제 PG 근거를 재사용하고 API마다 별도 PG fixture·JAR 여정을 복제하지 않는다. 새 기능의 실제 Git 기준/hosted CI/병합은 해당 PR 실행 근거와 구분한다.
+이 변화의 가장 가까운 보호는 실제 MVC의 JWT·대상 바인딩·7필드/오류·인접 경로와 명시 조립 시험이다. 기존 F12의 변경 없는7열 SQL/실제 PG 근거를 재사용한다.
 
 ## 관리자 가입통계
 
 ADMIN GET `/api/v1/admin/users/stats/daily-signups?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`는 nullable UTC 저장 `created_at`에 9시간을 더한 날짜를 양끝 포함 집계하고 정렬한다. 빈 날짜를 채우지 않으며 역순 구간은 원문처럼 빈 결과다. GET `/api/v1/admin/users/stats/signup-periods`는 Seoul 오늘을 한 번 구하고 한 read-only 트랜잭션 안에서 오늘·최근7일·최근30일·이번달을 네 번 조회한 뒤 각 구간의 빠진 날을0으로 채운다. 네 결과가 하나의 snapshot이라고 가정하지 않는다.
 
-기존 reader/Clock/열 권한·응답 envelope·ADMIN 선행 인가를 재사용하며 새 schema/권한/pool은 없다. 필수 날짜 누락400과 원문의 날짜 변환 Runtime500을 구분한다. 기존 F19 JAR의 음성 경로는 이제 미편입 `/api/v1/admin/users/stats/daily-signups/extra`로 옮기고6요청·역할·복구·DB/S3 불변 검증은 유지한다.
-
-private 앱 준비에서 단위·실제 JWT MVC·조립·기존 회원수 회귀5XML52건을 확인했다. 새 JAR 여정은 추가하지 않는다. 이 기록은 private 준비 근거다. 실제 feature head의 PG/hosted CI·병합 결과는 해당 run 산출물로 확인하며, local compile이나 모의 journey를 실제 PG/JAR 성공으로 세지 않는다.
+기존 reader/Clock/열 권한·응답 envelope·ADMIN 선행 인가를 재사용하며 새 schema/권한/pool은 없다. 필수 날짜 누락400과 원문의 날짜 변환 Runtime500을 구분한다.
 
 ## 관리자 회원 수정
 
 ADMIN PUT `/api/v1/admin/users/{userId}`는 기존 writer의 한 TX에서 회원을 `FOR UPDATE`로 읽고, 보호소 승인 필요 조건 → 닉네임 중복 → 변경 순서를 유지한다. 관리자 전용 nullable 닉네임 Pattern(2~10자 영문·숫자·한글), 세 역할과 careRegNo의 원문 제약을 보존한다. 같은 raw 닉네임은 중복 조회를 하지 않고, 실제 dirty가 있을 때만 감사시각과 UPDATE를 수행한다. 선행 중복은409, SQL unique 경합과 commit 실패는500이며 새로운 retry나 역할 승격 정책을 추가하지 않는다. 기존 writer/TM·TT15를 재사용하고 무제한 대기까지 원문과 같다고 주장하지 않는다.
-
 
 ## 방문 식별·집계와 관리자 기간 통계
 
@@ -525,7 +468,6 @@ ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`�
 
 관리자 PUT/DELETE는 명시적인 AsAdmin 진입점으로 작성자 검사를 생략한다. 개인 수정·삭제의 소유권 검사는 유지하며 실제 게시글 작성자 ID를 기존 writer·닉네임·payload에 사용한다. 기존 JDBC/locking SQL·TX·R2·Outbox·검색 정리를 재사용한다. 첨부의 부분 실패를 자동 보상하거나 외부 I/O와 DB를 새 단일 트랜잭션으로 묶지 않는다. 새 업무표·SQL·권한·풀은 추가하지 않는다.
 
-
 ## 회원 채팅의 REST·실시간 전송 편입
 
 기존 회원 채팅의 업무 메서드와 20개 SQL을 JDBC 구현으로 재사용하고, User의 명시 조회 API와 기존 차단·쪽지·탈퇴 정리에 연결한다. REST는 서명 검증된 사용자와 JWT 만료 시각으로만 본인을 결정한다. 익명 WebSocket handshake 뒤 STOMP CONNECT에서 30초짜리 일회용 Redis ticket을 원자적으로 소비하며, 인증 전 SEND·SUBSCRIBE와 다른 사용자 큐 접근을 거부한다. 기존 Origin·frame·세션 수·만료·중복 전송·본문 보관 정책을 유지한다.
@@ -533,7 +475,6 @@ ADMIN GET `/api/v1/admin/posts`, GET/PUT/DELETE `/api/v1/admin/posts/{postId}`�
 `pawbridge.chat.enabled`는 기본 false다. false에서는 채팅 Redis·소켓·유지관리 scheduler를 만들지 않는다. true일 때 명시 Redis 연결과 namespace를 요구한다. `pawbridge.jobs.cleanup-enabled=false`이면 true 채팅에서도 보관 기한 정리는 실행하지 않으며, 세션 lease 관리는 별도 유지한다. 기존 설치 데이터의 회원 탈퇴 정리는 이 옵션과 별개로 기존 흐름에서 한 번만 처리한다. DB 커밋 뒤 WITHDRAWN 신호로 본인 연결을 닫고 살아 있는 연결에는 재조회 신호를 보낸다.
 
 종료 시 로컬 세션을 먼저 분리해 동기·지연 close callback의 중복 Redis/User I/O를 막고 기존 lease 만료를 사용한다. 이는 모의 callback 검증이며 실제 JVM·소켓 종료 시간의 증거는 아니다. 신규·관련 단위/HTTP·인가·프로토콜·조립과 계층 검사는 수행했으나 실제 Redis Lua/리스너·WebSocket·채팅 DB 통합은 아직 미실행이다.
-
 
 ## Naver 로그인 추가
 
@@ -553,7 +494,6 @@ Google의 이메일/공급자로 기존 회원을 우선 찾고 LOCAL 충돌은 
 
 가까운 업무·설정·state/오류·JWT REST·기본 비활성·DEBUG 회귀의 고유30사례는 분할 실행으로 통과했고 계층383class도 검사했다. 실제 Google 인증 교환/브라우저 쿠키·활성 JAR·DB/Redis 통합은 아직 미실행이다.
 
-
 ## 관리자 회원 목록·검색
 
 ADMIN GET `/api/v1/admin/users`와 `/api/v1/admin/users/search`는 기존 reader·읽기 전용 TX·회원7필드 projection을 재사용한다. 기본20건/createdAt DESC와 Page wire·부분 페이지의 count 생략, 원문의 trim/escape 없는 email/name/nickname LIKE와 role AND 필터를 유지한다. JWT ADMIN 판정을 바인딩·DB 조회보다 먼저 수행하며 외부 사용자 헤더를 신뢰하지 않는다.
@@ -562,29 +502,27 @@ ADMIN GET `/api/v1/admin/users`와 `/api/v1/admin/users/search`는 기존 reader
 
 원문·후보 SQL의 실제 PostgreSQL LIKE/collation·정렬·동시 count/JPA 동등성은 아직 미실행이다. 가까운 JDBC/HTTP/명시 조립의 첫 선택41사례/5XML와 계층390class는 통과했으며 모의 transaction을 실제 PG 롤백으로 표현하지 않는다.
 
-
 ## User HTTP 편입 묶음
 
-Google·관리자 회원 목록/검색·보호소 신청/승인·본인 동물 활동을 개별 대기열 대신 User 모듈의 한 편입 PR로 정리한다. 원문53개 앱/시험 파일의 연속 before/after와 최종 활동 사본 바이트를 전수 대조했으며 업무 코드를 다시 작성하지 않았다. 기존 private 준비와 실패 증거는 보존한다.
+Google·관리자 회원 목록/검색·보호소 신청/승인·본인 동물 활동을 개별 대기열 대신 User 모듈의 한 편입 PR로 정리한다. 원문53개 앱/시험 파일의 연속 before/after와 최종 활동 사본 바이트를 전수 대조했으며 업무 코드를 다시 작성하지 않았다.
 
 보호소는 `pawbridge.shelter-membership.enabled=false`, 동물 활동은 `pawbridge.user-animal-activities.enabled=false`가 기본이다. true에서는 명시 Animal origin을 요구한다. 보호소는 현재 DB 관리자 확인과 User→신청 재잠금, TX 안 Animal 조회, 승인 역할/등록번호·감사시각, 원문의 RR 기간 통계를 유지한다. 찜 추가/제거는 기존 Favorite와 Outbox를 같은 TX에 저장하고 payload eventId와 Outbox event_id를 별도로 생성한다. 삭제0행에서는 이벤트를 만들지 않는다. 본인 동물 조회의 DELETED fallback과 원문 Page wire도 유지한다.
 
 Kafka 보상 소비/manualACK·재시도·processed 저장·정리 예약의 소유권은 아직 편입하지 않았다. LOCAL 가입/로그인·이메일, Store 활동 조회와 P8 계정 정책도 이 묶음에 없다. 이 상태로 구 User 실행기 종료나 Kafka 종료를 완료했다고 표시하지 않는다.
 
-코드 활성화 전에는 선택한 writer의 실제 DML 권한, Google/Animal/Redis/Kafka·DB 통합 및 JPA flush/감사시각/경합을 격리 환경에서 검증해야 한다. CI cleanup 역할을 새 true 기능에 그대로 재사용할 수 있다고 가정하지 않는다. 이 작업은 실제 권한이나 운영 설정을 변경하지 않았다.
+코드 활성화 전에는 선택한 writer의 실제 DML 권한, Google/Animal/Redis/Kafka·DB 통합 및 JPA flush/감사시각/경합을 격리 환경에서 검증해야 한다. 이 작업은 실제 권한이나 운영 설정을 변경하지 않았다.
 
 새로운 User SQL/외부 연동의 미실증은 명시적으로 남기며 운영 인계 성공으로 확대하지 않는다.
 
 ## 실종·목격 제보
 
-`pawbridge.animal-reports.enabled`는 기본 false다. 선택 reader/writer의 실제 제보 조회·DML/행잠금·생성키 권한과 격리 요청을 검증한 뒤에만 명시 true로 활성화한다. false에서는 제보 빈과 보안 matcher를 만들지 않고5경로를 기본 거부한다. 이는 원문과 다른 기동 보호이며 기존 CI 최소계정의 권한을 임의 확장하지 않는다. 기동 성공은 제보 준비 완료가 아니며 이 gate 전에는 외부 라우팅을 인계하지 않는다.
+`pawbridge.animal-reports.enabled`는 기본 false다. 선택 reader/writer의 실제 제보 조회·DML/행잠금·생성키 권한과 격리 요청을 검증한 뒤에만 명시 true로 활성화한다. false에서는 제보 빈과 보안 matcher를 만들지 않고5경로를 기본 거부한다. 이는 원문과 다른 기동 보호다. 기동 성공은 제보 준비 완료가 아니며 이 gate 전에는 외부 라우팅을 인계하지 않는다.
 
 명시 활성화에서 공개 GET `/api/v1/reports`와 `/{reportId}`, JWT 본인 POST/PUT/DELETE를 조립한다. 기존 목록 필터·Page wire·상세22필드·소유권·soft-delete·사진/종류 변경 제한과 닉네임 fallback을 유지한다. reader/writer·TM·R2·User nickname 조회를 재사용한다. 원문 JPA의 int 범위를 넘는 offset은 읽기 TX 안·SQL 전에 같은 예외로 거부하며 공개 조회를 큰 OFFSET SQL로 넘기지 않는다.
 
 사진은 reports/images 경로를 사용하고 부분 업로드 실패는 앞서 올린 객체를 정리한다. INSERT 본문/saveAndFlush 상당 실패는 업로드를 정리하지만 proxy commit 실패는 원문처럼 별도 보상하지 않는다. soft-delete에서 사진을 지우거나 새 Outbox를 만들지 않는다. JPA preflush 응답의 이전 updatedAt을 보존한다. 이런 원문 동작을 새로운 보상 정책으로 대체하지 않았다.
 
-비작성 서브가 생산8/시험4·변경23메서드를 대조했다. 고유49사례는 분할 선택 성공 합집합이고 초과 offset 신규1은 RED→GREEN으로 SQL0을 확인했다. User와 함께 명시 조립을 합친 뒤 새 조립1·466class 계층 검사도 수행했다. 실제 PG 권한/SQL·JPA 감사시각/경합·R2/활성 JAR은 아직 미실행이며 코드 편입만으로 운영 인계를 완료했다고 표시하지 않는다. 고정130 선택 CI의 관리자 페이지 PG11은 제보 연동 시험이 아니다.
-
+비작성 서브가 생산8/시험4·변경23메서드를 대조했다. 고유49사례는 분할 선택 성공 합집합이고 초과 offset 신규1은 RED→GREEN으로 SQL0을 확인했다. User와 함께 명시 조립을 합친 뒤 새 조립1·466class 계층 검사도 수행했다. 실제 PG 권한/SQL·JPA 감사시각/경합·R2/활성 JAR은 아직 미실행이며 코드 편입만으로 운영 인계를 완료했다고 표시하지 않는다.
 
 ## 홈 영상 관리·갱신
 
@@ -594,11 +532,9 @@ ADMIN 목록/미리보기/등록/수정/게시/전체순서/재검사7경로는 
 
 비작성 서브가16파일·30시험메서드와 원문 관리15본문/저장소11/YouTube client4본문·URL 변환을 대조했다. 고유69사례는 분할 성공 합집합이다. User/Report와 합친 새 조립1·466class 검사는4초에 통과했다. 실제 PG 잠금/rollback·YouTube·예약 true의 실행/활성 종료·JAR은 미실행이며 운영 스케줄러 소유권이 인계된 상태가 아니다.
 
-
 ## Community HTTP 편입 묶음
 
-제보와 홈 영상 관리25경로를 이미 편입한 User HTTP 위에 묶는다. 독립 검수한22개 업무/시험 파일을 재사용하고 App·Security·조립시험3경로를 병합했다. 이후 무조건 제보 노출을 막기 위해 ReportConfig/HTTP와 공동Security/AppTest4경로의 기본 비활성을 보완했다. User의 Google/보호소/활동 조립·인가와 기존 공개 홈 조회를 보존한다. 기존 고정108에 Community25−공통3을 더한130 입력으로 공통 단위/구조·기존 페이지 PG11·소유 정리를 실행한다. 선택 PG11은 제보/YouTube/예약 또는 실제 writer 권한 검증을 대신하지 않는다. 새 운영 권한·설정·데이터·스케줄러는 변경하지 않는다.
-
+제보와 홈 영상 관리25경로를 이미 편입한 User HTTP 위에 묶는다. 독립 검수한22개 업무/시험 파일을 재사용하고 App·Security·조립시험3경로를 병합했다. 이후 무조건 제보 노출을 막기 위해 ReportConfig/HTTP와 공동Security/AppTest4경로의 기본 비활성을 보완했다. User의 Google/보호소/활동 조립·인가와 기존 공개 홈 조회를 보존한다. 새 운영 권한·설정·데이터·스케줄러는 변경하지 않는다.
 
 ### Google 실패·경합 보완과 남은 실제 연동 검증
 
@@ -608,13 +544,11 @@ Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/
 
 오류 redirect에 기존 query가 있으면 두 번째 물음표가 붙는 결함도 URI builder로 보완했다. 새2 RED 실패→기존 포함7 GREEN, 기존 오류 문구·query 없는 응답·토큰 미기록을 유지했다. fragment 시험은 handler 경계이며 Boot의 fragment 거부 정책은 그대로다.
 
-
 ### 제보·홈 관리의 활성화 전 권한 인수
 
-합성 CI 계정은 제보·홈 관리 전체를 지원하는 운영 계정이 아니다. Reader/Writer는 필수 외부 설정으로 선택되며, 기존 fixture 역할을 그대로 적용하면 새 조회·저장에 실패한다. 제보 기본 off와 홈 관리 기본 off를 유지하고 선택 계정의 실제 테이블/열·잠금·생성키 권한과 격리 요청·외부 연동을 확인하기 전 true/라우팅/예약 인계를 하지 않는다. 기존 strict 최소권한 계약을 느슨하게 만들거나 실제 GRANT를 실행하지 않았다.
+Reader/Writer는 필수 외부 설정으로 선택되며, 기존 최소 권한 역할을 그대로 적용하면 새 조회·저장에 실패한다. 제보 기본 off와 홈 관리 기본 off를 유지하고 선택 계정의 실제 테이블/열·잠금·생성키 권한과 격리 요청·외부 연동을 확인하기 전 true/라우팅/예약 인계를 하지 않는다. 실제 GRANT를 실행하지 않았다.
 
 제보 기존활성 HTTP16과 비활성5경로의403·호출0, 기본off/명시true조립2의 실제23사례는 RED6→GREEN23/3XML/각5초로 검증하고 비작성 검수했다. 변경4파일/11메서드 전수 대조, 새 프로덕션 타입·architecture 반복은 없다. 이 결과는 실제 PG 권한/SQL·R2·활성 서버 검증이 아니다.
-
 
 ### 본인 스토어 내정보 조회
 
@@ -626,7 +560,6 @@ Google 가입/저장 단위16건은 RED9 실패→GREEN16으로 rollback 종료/
 
 Store의 non-2xx 응답은 본문 변환 전에 세 조회에서 모두 거부합니다. 리다이렉트를 정상 Page나 없는 장바구니204로 받아들이지 않으며 Location도 따라가지 않습니다. 정상200/204와 기존4xx/5xx 실패는 유지합니다.
 
-
 ### Community 검색 재구축
 
 `pawbridge.community-maintenance.enabled`는 기본 false입니다. 전체 기능과 `pawbridge.search.rebuild-enabled`를 명시 true로 지정해야 검색 재구축을 조립합니다. 하위 기능이 꺼져 있으면 스케줄러도 만들지 않습니다. Outbox·Processed 이벤트 보존 작업은 outbox 제거(Debezium·Kafka·outbox를 모놀리스에서 제거하기로 결정)와 함께 삭제했고 `pawbridge.jobs.cleanup-enabled`는 이 기능에서 더 이상 쓰지 않습니다(Note/Chat 정리는 계속 사용).
@@ -634,7 +567,6 @@ Store의 non-2xx 응답은 본문 변환 전에 세 조회에서 모두 거부�
 검색 재구축은 기존 writer의 Nori·해시·upsert를 재사용합니다. 같은 writer TX에서 최대100개의 누락·불일치 문서를 PK 순서로 잠그고 갱신하며 주기 기본값은5초입니다.
 
 명시 활성화된 작업만 단일 소유 스케줄러를 사용합니다. 단위·조립 시험에서는 SQL 바인딩, 조건 분기와 실패 전파를 검증했고 실제 PG 잠금·rollback·예약 실행·종료 대기는 검증하지 않았습니다. 기존 스케줄러 소유권, 대상 표·열과 행 잠금/UPSERT 권한을 확인하기 전 활성화하거나 구 실행기를 종료하지 않습니다. 새 Kafka/ES 런타임·DDL·GRANT·운영 변경은 없습니다.
-
 
 ### Animal 목록·상세·추천 조회 편입
 
@@ -644,10 +576,7 @@ Animal 업무 모듈은 목록/필터 검색·상세와 비슷한 동물 추천�
 
 Boot는 기존 selected reader/TM과 단일 Nori 수명을 공유합니다. 추천 활성화 시 기존 `lost-search.python-url` → `python-ai-service.url` 우선순위를 따르고 둘 다 없으면 구성 실패입니다. 키는 런타임 인자로만 받습니다. URL이 있고 키가 없으면 ETC는 빈 결과, DOG/CAT는 요청503입니다. Feign core13.5의 연결3초/읽기45초·redirect 금지·애플리케이션 재시도 없음 계약을 재사용하며 새 Spring Cloud/legacy Animal 런타임을 넣지 않습니다.
 
-source20·추천30·정책5·새 Boot11은 각 독립 합성 검증 결과이며 한 번의 전체 실행 합계로 표현하지 않습니다. TX 순서 지적의 신규 반례1은 RED→관련3 GREEN으로 닫았습니다. 새 조립은 실제 business525 검사와 일반 독립 검수를 통과했습니다. 실제 PG SQL/최소권한·락/격리·Python/TLS/AI·실행 JAR은 아직 미검증이며 기존 관리자 페이지 PG11을 Animal 검증으로 확대하지 않습니다.
-
-CI는 검수한 Animal40경로와 변경 F9 guard를 포함한 고정184입력 및 알려진 workflow 지문을 확인합니다. JAR 허용 예외는 정확한 feign-core13.5 하나뿐입니다. 알 수 없는 workflow/입력은 선택 회귀를 거부하고 전체 회귀 경로를 유지합니다. 공통 selector를 바꾸지 않아 이번 workflow 변경의 기존 서비스3 검증은 그대로 수행합니다. 실제 이 단계의 CI 시간 절감을 보장하지 않습니다.
-
+source20·추천30·정책5·새 Boot11은 각 독립 합성 검증 결과이며 한 번의 전체 실행 합계로 표현하지 않습니다. TX 순서 지적의 신규 반례1은 RED→관련3 GREEN으로 닫았습니다. 새 조립은 실제 business525 검사와 일반 독립 검수를 통과했습니다. 실제 PG SQL/최소권한·락/격리·Python/TLS/AI·실행 JAR은 아직 미검증입니다.
 
 ### Store 상품 탐색·상세 조회 편입
 
@@ -661,7 +590,6 @@ Store 업무 모듈은 상품 목록/검색/상세·SKU/옵션·카테고리 조
 
 Root는 공통 Gradle/Boot/정책/인가 합집합을 독립 대조했습니다. 실제 PostgreSQL CTE/FTS·권한/view security·락/시간/타입/timeout·Redis/실행 JAR은 미검증입니다. 최소 reader 권한과 라우팅/단일 소유권을 확인하기 전 활성화하지 않습니다.
 
-
 ### User 내정보의 Store 모듈 호출
 
 기존 `pawbridge.user-store-mypage.enabled`는 기본 false입니다. 활성화하면 User의 회원 확인 트랜잭션을 끝낸 뒤 Store 공개 API로 본인의 위시리스트·주문·장바구니를 조회합니다. 구 Store 서비스 HTTP 경로와 `pawbridge.user-store-mypage.backend`·`service.store.url` 설정은 제거했습니다. 본인 JWT와 기존 3GET·cart 없음204 계약을 재사용합니다.
@@ -669,7 +597,6 @@ Root는 공통 Gradle/Boot/정책/인가 합집합을 독립 대조했습니다.
 Store는 동일 reader/TM에 별도 readOnly REPEATABLE_READ·TX5/query5초를 조립합니다. 주문 헤더·상품 조회를 같은 스냅샷에 두기 위한 후보 선택이며 원문 기본 격리/timeout과 완전히 같다는 주장은 아닙니다. User→Store.api만 허용하고, Community→User→Store의 실제 resolved artifact는 허용하면서 Community의 Store 직접 의존/실제 API 참조/임의 파일 우회는 계속 거부합니다.
 
 Store 공개 API/JDBC 최소30사례와 User 어댑터25사례, 새 Boot4/TestKit4의8사례·12초 및 실제 business556 클래스 검사가 통과했습니다. 성공 사례는 반복하지 않았고 실제 SQL/권한·동시성·NULL/collation/시간·GRANT/라우팅·운영 활성화는 미검증입니다. Wishlist의 페이지/옵션은 단일 CTE로 처리합니다. 임의 JPA 중첩 sort 전체 호환은 주장하지 않으며, 기존 User의 sort 쉼표 flatten 동작과 고정 Store Feign serializer의 배열 순서를 비교해 보존합니다.
-
 
 ### Animal 보호소·통계 조회 편입
 
@@ -679,8 +606,7 @@ Store 공개 API/JDBC 최소30사례와 User 어댑터25사례, 새 Boot4/TestKi
 
 동일 reader/TM을 사용하고 보호소 discovery만 기존 RO/RR·5초를, 일반보호소/통계는 원문 RO/default isolation/timeout을 유지합니다. 새 풀/TM/analyzer/외부요청/예약을 추가하지 않습니다. 보호소 source56·새조립12/8초, 통계 source36·새조립7/7초와business578 검사가 통과했습니다. 성공시험은 반복하지 않았으며 실제PG집계/SQL·최소GRANT·격리/콜레이션/시간·실행JAR/운영활성화는 미검증입니다.
 
-User→Store 모듈 연결과 Animal 보호소/통계를 실제 함께 조립한 뒤, 변경된 조합의 기존 기본 App 시험 클래스8사례와 생산 컴파일·business592 검사를8초에 확인했습니다. 신규8계약으로 세지 않습니다. 원문 source/HTTP/전체 구조 시험은 반복하지 않았습니다. 고정 입력230 시험1은0.012초에 성공했습니다. 이는 실제 서비스·데이터베이스 실행 시험이 아닙니다.
-
+User→Store 모듈 연결과 Animal 보호소/통계를 실제 함께 조립한 뒤, 변경된 조합의 기존 기본 App 시험 클래스8사례와 생산 컴파일·business592 검사를8초에 확인했습니다. 신규8계약으로 세지 않습니다. 원문 source/HTTP/전체 구조 시험은 반복하지 않았습니다.
 
 ### Store 위시리스트 명령 편입
 
@@ -691,7 +617,6 @@ User→Store 모듈 연결과 Animal 보호소/통계를 실제 함께 조립한
 source25사례·일반 독립검수와 새 합집합 Boot22사례·production compile/Business600 검사가8초에 성공했습니다. 원래 Boot22와 합집합22를44고유사례로 합산하지 않습니다. 위시리스트 source12 조립 단계에서 공통 App/보안/Storebuild 외 다른803부모파일과 source6을 보존했습니다. ID삭제 소유정책·실제PG/RETURNING/시간정밀도·writer 최소권한/identity sequence·commit/rollback·동시성·실제pool 종료는 미검증이며 활성화 전 확인해야 합니다. 운영·DB·결제/재고/Outbox/Redis·기존 데이터 변경은 없습니다.
 
 별도의 새 PG17.11 ARM64 컨테이너1에서 실제 SELECT/CTE·INSERT RETURNING·owner DELETE의 합성 SQL12사례가 psql 단일 세션으로 성공했습니다. networknone/포트0/hostmount0/volume0·tmpfs·512MiB/CPU1 한도였고 해당 컨테이너만 정상 종료·삭제했습니다. 이는 JDBC/ResultSet 매핑·최소권한·인가·rollback/동시성의 증거가 아니며, source SQL의 schema/placeholder를 합성 값으로 바꾼 구문·결과 형태 확인입니다. 기존 서비스·DB·자격증명을 사용하지 않았습니다.
-
 
 ### 보호소 회원승인의 Animal 모듈 조회
 
@@ -705,7 +630,7 @@ Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named 
 
 `pawbridge.store-wishlist.enabled=true`에서만 JWT 회원의 `DELETE /api/v1/wishlists/{wishlistId}`를 허용합니다. body·query·헤더의 회원 ID 대신 검증된 principal을 사용하며, 항목 ID와 회원 ID를 같은 DELETE 조건에 묶습니다. 없음·다른 회원 소유·반복 삭제는 동일한 204이고 DB/TX 오류는 성공으로 숨기지 않습니다. 기존 POST와 SKU 기반 DELETE는 유지합니다.
 
-회원 찜 조회 정렬의 `skuPrice`·`sku_price`는 기존 `sku.price`와 같은 컬럼을 사용합니다. Store의 전체 재귀·컬렉션 JPA 정렬 호환성은 아직 미완료입니다. 이 변경과 합성 시험·CI는 운영 배포 또는 전체 회원 조회 전환 완료를 뜻하지 않습니다.
+회원 찜 조회 정렬의 `skuPrice`·`sku_price`는 기존 `sku.price`와 같은 컬럼을 사용합니다. Store의 전체 재귀·컬렉션 JPA 정렬 호환성은 아직 미완료입니다. 이 변경과 합성 시험은 운영 배포 또는 전체 회원 조회 전환 완료를 뜻하지 않습니다.
 
 ## User 동물 조회와 찜 단일 트랜잭션
 
@@ -717,12 +642,11 @@ Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named 
 
 락 순서: Animal 명령은 User 행 `FOR UPDATE` → Animal 행 순서이고, 찜은 `favorites` INSERT(users FK의 `FOR KEY SHARE`) → Animal 행 UPDATE 순서이며 한 트랜잭션이 Animal 행을 하나만 잡는다. 코드 검토상 순환은 찾지 못했다. 같은 회원의 명령과 찜은 users 행에서 먼저 직렬화되고, 다른 회원끼리는 서로 다른 users 행을 쥔 채 Animal 행 하나를 기다릴 뿐이며, Animal 모듈에는 users 행을 요청하는 경로가 없다. 단 실제 PostgreSQL 동시 실행으로는 검증하지 않았다(불확실). 인기 동물은 Animal 행 UPDATE에서 짧게 직렬화된다. `animal_search_changed` 트리거는 breed 등 검색 열이 바뀔 때만 동작하므로 찜 증감은 검색 dirty를 만들지 않는다.
 
-활성화 전 조건: 선택한 User writer에 `pawbridge_animal` 스키마 USAGE와 `pawbridge_animal.animals`의 `SELECT(id, favorite_count, updated_at)`·`UPDATE(favorite_count, updated_at)`가 필요하다(WHERE·SET·CASE가 세 열을 읽는다). `pawbridge_user.outbox_events` INSERT는 더 이상 필요 없다. 누적 F29 CI writer ACL(`backend-app/scripts/f29_ci.py`)에는 이 권한이 없고 owned PostgreSQL 증분 SQL과 시험은 추가하지 않았으므로 운영 역할에 직접 부여하고 확인한다. 이 단일 트랜잭션 SQL·권한·락은 단위·조립 시험(mock JDBC)으로만 확인했고 실제 PostgreSQL 시험은 하지 않았다. 이전 전달기·Debezium 소비자(구 user/animal-service)를 먼저 멈추고 미전달 `Favorite` Outbox 행이 없는 것을 확인한 뒤 켠다. User Outbox·Processed 보존 작업(`UserMaintenanceConfiguration`, `pawbridge.user-maintenance.*`)은 outbox 제거와 함께 삭제했다. 컷오버 때 community/user Debezium 커넥터와 `outbox_events`/`processed_events` 테이블 정리는 이 변경의 범위 밖이다.
-
+활성화 전 조건: 선택한 User writer에 `pawbridge_animal` 스키마 USAGE와 `pawbridge_animal.animals`의 `SELECT(id, favorite_count, updated_at)`·`UPDATE(favorite_count, updated_at)`가 필요하다(WHERE·SET·CASE가 세 열을 읽는다). `pawbridge_user.outbox_events` INSERT는 더 이상 필요 없다. owned PostgreSQL 증분 SQL과 시험은 추가하지 않았으므로 운영 역할에 직접 부여하고 확인한다. 이 단일 트랜잭션 SQL·권한·락은 단위·조립 시험(mock JDBC)으로만 확인했고 실제 PostgreSQL 시험은 하지 않았다. 이전 전달기·Debezium 소비자(구 user/animal-service)를 먼저 멈추고 미전달 `Favorite` Outbox 행이 없는 것을 확인한 뒤 켠다. User Outbox·Processed 보존 작업(`UserMaintenanceConfiguration`, `pawbridge.user-maintenance.*`)은 outbox 제거와 함께 삭제했다. 컷오버 때 community/user Debezium 커넥터와 `outbox_events`/`processed_events` 테이블 정리는 이 변경의 범위 밖이다.
 
 P6 이후 파일 기반 합성 PG 시험은 실행할 클래스의 환경변수 이름을 `PAWBRIDGE_OWNED_SETTINGS_ENV=P13_PG_SETTINGS`처럼 하나 명시하고, 해당 `P13_PG_SETTINGS`에는 소유 설정 파일의 절대경로를 지정한다. 이름은 `P[1-9][0-9]*_PG_SETTINGS`만 허용하며 이름·대응 값이 없거나 경로가 절대·정규·비심볼릭 일반 파일이 아니면 고정 오류로 실패한다. 실제 경로나 파일 내용은 출력하지 않는다. 이 task는 설정을 다른 변수나 클래스에 주입하지 않는다. 선택한 각 클래스는 계속 자기 Pn 환경변수와 파일0600·DB·역할·marker를 독립 검증한다. 환경이 다르면 실패하며 0건·skip은 성공이 아니다. 예: `PAWBRIDGE_OWNED_SETTINGS_ENV=P13_PG_SETTINGS`를 지정한 상태에서 기존 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreOrderAdministrationTest`를 선택한다. 이 이름 지정 규칙은 이후 P7~P14 설명의 파일 기반 호출에도 공통 적용된다. 기존 직접 환경변수형 Animal 회원 조회 시험의 예외는 `PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED=owned-fixture-only`와 CLI `--tests com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest`의 정확한 단일 선택에만 적용한다(같은 FQN의 정확한 메서드 하나도 허용). configured include/exclude는 비어 있어야 한다. 단순 이름·와일드카드·전체·여러 선택·legacy flag 단독은 예외가 아니며 기존 Pn 설정 선택 검증을 통과해야 한다. 클래스 자체 소유권 검증은 유지한다.
 
-합성 PG 시험은 `owned-postgresql` 태그로 일반 `test`/CI에서 제외한다. 전용 `:boot:ownedPostgresqlTest --tests ...`는 새 전용 환경만 사용하며 0건 또는 skip이 있으면 실패한다. 동물 조회는 `PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED=owned-fixture-only`와 시험이 검증하는 전용 환경값 및 정확한 `--tests com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest` 선택, 이벤트는 엄격한 권한의 `P6_PG_SETTINGS` 파일이 필요하다. 두 클래스는 각각 별도로 선택해야 하며 실제 계정·접속값은 예시나 Git에 넣지 않는다. SQL resource는 새 시험 DB 준비용으로만 보관한다. 시험 자체는 DDL/권한 변경을 하지 않고 생성한 행만 정리한다.
+합성 PG 시험은 `owned-postgresql` 태그로 일반 `test`에서 제외한다. 전용 `:boot:ownedPostgresqlTest --tests ...`는 새 전용 환경만 사용하며 0건 또는 skip이 있으면 실패한다. 동물 조회는 `PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED=owned-fixture-only`와 시험이 검증하는 전용 환경값 및 정확한 `--tests com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest` 선택, 이벤트는 엄격한 권한의 `P6_PG_SETTINGS` 파일이 필요하다. 두 클래스는 각각 별도로 선택해야 하며 실제 계정·접속값은 예시나 Git에 넣지 않는다. SQL resource는 새 시험 DB 준비용으로만 보관한다. 시험 자체는 DDL/권한 변경을 하지 않고 생성한 행만 정리한다.
 
 ## Store 회원 목록의 원문 JPA 재사용
 
@@ -731,7 +655,6 @@ P6 이후 파일 기반 합성 PG 시험은 실행할 클래스의 환경변수 
 Store EMF는 entity9와 mapped superclass1만 명시하고 공유 단일 pool(`pawbridge-db`)을 쓴다. 별도 명명 JpaTM의 RO/RR/5초 안에서 entity→DTO 변환까지 마친다. 전역 JPA/entity/repository 자동스캔, OSIV, schema 생성·변경·validate는 켜지 않는다. schema는 pawbridge_store, 물리 naming과 UTC를 고정하며 bootstrap JDBC metadata 조회도 끈다. 기존 JdbcTM은 다른 업무에서 그대로 유지한다. 같은 DataSource에서 JPA 트랜잭션 매니저를 다른 트랜잭션 안에서 시작하지 않는다.
 
 부모 ID의 closed projection만 먼저 SQL LIMIT/OFFSET으로 조회하고, 같은 RO/RR 트랜잭션에서 memberId와 선택 ID에 해당하는 graph만 가져온다. ID 페이지가 비면 graph를 조회하지 않으며, 부모 ID 페이지의 순서·total·Sort로 DTO를 조립한다. 선택 ID가 상세 결과에서 빠지면 부분 성공으로 반환하지 않는다. 새 임의 ID tie-break나 자식 MIN/MAX 정렬은 추가하지 않는다. 선택한 부모의 자식 전체는 여전히 로드하므로 고정 메모리 사용을 보장한다고 표현하지 않는다. 읽기5초 제한은 기존 모듈 경계이며 원문 무제한 실행과 구분한다.
-
 
 ## Animal JSON 명령과 현재 회원 권한
 
@@ -752,8 +675,7 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 공유 단일 pool(`p
 
 초기 보완에서는 소유 합성 PostgreSQL 17.11의 실제 보안→MVC→JPA 16계약과 당시 코어 단위 48사례를 확인했다. 이후 동시성 보완의 현재 검증은 아래에서 구분한다. PG는 최초 실행의 15성공과 UTC Calendar로 비교를 교정한 상태 응답 1사례의 수정 전 RED·수정 후 GREEN으로 검증했으며, 비교 방식 교정 뒤 성공한 나머지를 반복하지 않았다. 서버의 시간대·값·허용 오차는 변경하지 않았고 응답/DB 감사 시각 차이는 1µs 미만이어야 한다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK 실패의 rollback, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
 
-전용 시험은 `P8_PG_SETTINGS`의 제한된 소유 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalCommandTest`로만 실행한다. SQL resource는 새 DB/marker 확인 후 소유 관리자가 한 번 준비하는 자료다. 실제 계정·키·접속값은 Git에 넣지 않는다. 일반 CI는 owned 태그를 제외하며 이 PG 시험을 실행했다고 표시하지 않는다. 기존 운영의 DML·행 잠금·감사 및 단일 실행기 소유권을 인계하기 전 flag와 공개 라우팅을 활성화하지 않는다.
-
+전용 시험은 `P8_PG_SETTINGS`의 제한된 소유 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalCommandTest`로만 실행한다. SQL resource는 새 DB/marker 확인 후 소유 관리자가 한 번 준비하는 자료다. 실제 계정·키·접속값은 Git에 넣지 않는다. 일반 `test`는 owned 태그를 제외하며 이 PG 시험을 실행했다고 표시하지 않는다. 기존 운영의 DML·행 잠금·감사 및 단일 실행기 소유권을 인계하기 전 flag와 공개 라우팅을 활성화하지 않는다.
 
 ### 동시 Animal 명령과 자동 공고번호
 
@@ -763,8 +685,7 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 공유 단일 pool(`p
 
 이번 수정의 단일 오프라인 호출 10초에서 코어 단위 59사례와 신규 동시성 PG3·영향 기존 PG2가 모두 통과했다. 서로 다른 ADMIN/SHELTER와 실제 두 PG PID의 잠금 대기를 관찰해 동시 상태·설명 보존과 동시 자동번호의 분리를 검증했고 중간 번호 삭제도 재현 후 회복했다. 3개 신규 계약은 기존 코드에서 먼저 RED였다. 다른 성공 PG/JAR와 전체19사례를 반복 실행한 결과가 아니다. 시험은 pool 한도를 임시2로 늘린 뒤 worker 종료가 확인됐을 때만1로 복귀하고 정확한 소유 행을 정리한다. worker 종료가 불확실하면 후속 시험·행 삭제·pool close를 거부해 근거를 보존하며 실패 경로의 전체 자원 정상 종료까지 주장하지 않는다. 이 시험과 mock TX metadata 단위 검증은 운영 또는 실제 AI 검증이 아니다.
 
-READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수준 기대값 한 곳을 같은 RC 계약으로 맞췄다. REQUIRED·기본 timeout·writer 연결·readOnly 단언은 유지했다. 해당 구성 클래스12사례를 별도7초 호출로 통과했고 PG·업무 단위·JAR를 반복하지 않았다. 고정 CI 입력은 이 구성 시험까지 실제 source hash로 결속한다.
-
+READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수준 기대값 한 곳을 같은 RC 계약으로 맞췄다. REQUIRED·기본 timeout·writer 연결·readOnly 단언은 유지했다. 해당 구성 클래스12사례를 별도7초 호출로 통과했고 PG·업무 단위·JAR를 반복하지 않았다.
 
 ## 바로구매와 본인 주문 상세 편입
 
@@ -776,7 +697,6 @@ READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수�
 
 운영 활성화에는 새 실행기의 DB 권한·라우팅·이벤트 소비자 및 기존 Store 실행기와의 소유권 인계가 별도로 필요하다. 현재 운영·Kafka/CDC·장바구니·결제·복구 자료는 이 변경으로 제어하지 않는다.
 
-
 ## 새 사진 기반 실종동물 후보 검색 편입
 
 `pawbridge.animal-lost-search.enabled=true`에서만 공개 multipart `POST /api/v1/animals/lost-candidates`를 조립한다. 기본값과 `on` 별칭은 비활성이다. `lost-search.python-url`이 `python-ai-service.url`보다 우선하며 서버 내부 키는 `python-ai-service.internal-api-key`에서 런타임에 주입한다. 사용자 헤더를 내부 키로 사용하거나 응답·키·원격 오류 본문을 로그에 남기지 않는다.
@@ -786,7 +706,6 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 공개 활성화 전에는 기존 Gateway admission 계약(실제 요청 전체6MiB, 동시2, 인스턴스당 분당30회, 전체50초, 외부 인증·내부 키 헤더 제거)을 별도로 인계해야 한다. 서비스의5MiB 검사와 permit1은 multipart 파싱 전 메모리·전송 제한의 대체물이 아니다. 이 구성의 로컬 합성 성공만으로 공개 운영 준비 완료라고 판단하지 않는다.
 
 `P10_PG_SETTINGS`의 소유 marker·SELECT 전용 계정을 검증한 경우에만 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalLostSearchTest`를 선택한다. 이 시험은 새 합성 동물과 임시127.0.0.1 Python 응답 대역을 사용하고 Animal/Shelter 전체 행 불변을 확인한다. 실제 AI 품질·R2·운영 검증은 포함하지 않는다. 비밀설정·데이터·로그·실행 JAR는 Git에 넣지 않는다.
-
 
 ## 장바구니 관리와 주문 생성 편입
 
@@ -808,10 +727,9 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 누락 SKU만 남은 Cart는 400과 함께 보존한다. 유효·누락 SKU가 섞이면 기존처럼 유효 품목을 주문하고 전체 Cart를 비운다. 중복 SKU 저장 상태는 임의 보정 없이 실패하며, 금액·수량 overflow는 400이다. 새 멱등키나 PENDING 만료, 결제·환불 정책을 만들지 않는다. 동시에 같은 Cart를 주문하면 한 번 소비하지만, 두 주문 사이에 새 추가가 있으면 별도 주문이 생길 수 있다.
 
-소유 PG 검증은 `P12_PG_SETTINGS`와 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreCartOrderTest`를 사용한다. 별도 새 DB·제한 writer·표식을 확인한 fixture에만 적용한다. 기존 `P11_PG_SETTINGS` Cart 전용 최소권한은 유지한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다. ordinary CI는 owned 태그를 실행한 것으로 표시하지 않는다.
+소유 PG 검증은 `P12_PG_SETTINGS`와 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreCartOrderTest`를 사용한다. 별도 새 DB·제한 writer·표식을 확인한 fixture에만 적용한다. 기존 `P11_PG_SETTINGS` Cart 전용 최소권한은 유지한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다.
 
 공개 활성화 전에는 기존 Redis 미동기화 Cart 인계, 기존 Cart API·동기화 실행기와 새 실행기의 배타적 소유권, DB 권한과 라우팅을 별도로 확인해야 한다. 이 소스 편입은 기존 운영·Kafka/CDC·외부 결제나 데이터·복구 자료를 제어하지 않는다.
-
 
 ## 관리자 주문 조회·배송 관리
 
@@ -827,7 +745,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 원문 그대로 `status` 열 하나만 바꿉니다. 허용 전이 검사, 결제·환불·재고·검색·Outbox·이벤트 연동이 없어 PAID→PENDING, 결제 없이 PAID, CANCELLED 전환 시 재고·결제 미복구 같은 임의 전이가 가능합니다. 이 원문 결함은 고치지 않고 활성화 전 확인 항목으로 둡니다. 변경 로그(원문 info)는 남기지 않습니다. Jackson 기본 설정이라 `{"status":1}`처럼 숫자 enum도 받아들입니다(원문과 같음). 주문을 잠그지 않는 결제 결과 처리(`JpaStorePaymentEvents`)와 동시에 실행되면 오래된 스냅샷이 관리자 변경을 덮거나 그 반대가 될 수 있으며 원문에도 잠금·`@Version`이 없습니다.
 
-활성화 전 writer에는 기존 관리자 주문 기능과 같은 권한(`pawbridge_store`·`pawbridge_user` USAGE, 대상 표 SELECT, `users` UPDATE(user_id) 행 잠금용, `orders` 표 단위 UPDATE — `Order`에 `@DynamicUpdate`가 없어 JPA가 전체 열을 UPDATE하므로 열 단위 grant로는 실패합니다)이 필요합니다(`admin-order-owned-schema.sql`과 같음). 누적 F29 CI writer ACL에는 Store 주문 권한이 없으므로 그 역할로 켜면 권한 오류 500이 됩니다. 공유 단일 pool(기본 최대 10)을 다른 쓰기와 함께 씁니다. 단위·MVC·Security 시험은 mock 저장소 기준이며 이 경로의 실제 PostgreSQL 검증은 추가하지 않았습니다. 금전 상태를 바꾸므로 CHECK 제약·표 단위 UPDATE grant·행 잠금을 배송 변경의 `OwnedPostgresqlStoreOrderAdministrationTest`와 같은 방식으로 검증한 뒤 켜야 합니다.
+활성화 전 writer에는 기존 관리자 주문 기능과 같은 권한(`pawbridge_store`·`pawbridge_user` USAGE, 대상 표 SELECT, `users` UPDATE(user_id) 행 잠금용, `orders` 표 단위 UPDATE — `Order`에 `@DynamicUpdate`가 없어 JPA가 전체 열을 UPDATE하므로 열 단위 grant로는 실패합니다)이 필요합니다(`admin-order-owned-schema.sql`과 같음). 공유 단일 pool(기본 최대 10)을 다른 쓰기와 함께 씁니다. 단위·MVC·Security 시험은 mock 저장소 기준이며 이 경로의 실제 PostgreSQL 검증은 추가하지 않았습니다. 금전 상태를 바꾸므로 CHECK 제약·표 단위 UPDATE grant·행 잠금을 배송 변경의 `OwnedPostgresqlStoreOrderAdministrationTest`와 같은 방식으로 검증한 뒤 켜야 합니다.
 
 ### 관리자 주문 목록의 품목 일괄 조회
 
@@ -835,13 +753,11 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 소유 P13의 새 회귀 1건은 수정 전 쿼리 상한 실패와 수정 후 성공으로 확인했다. 두 주문을 size100으로 조회할 때 Hibernate SQL2, 빈 첫 페이지 SQL1을 관측하고 품목·역순·total·15표 불변을 확인했다. 이 데이터의 count는 추론되므로 count SQL을 실제 실행했다는 근거로 확대하지 않는다. 기존 null 배송의 안전한500과 로그 차단은 유지한다.
 
-
 ## 공개 여행 장소 조회
 
 `pawbridge.animal-travel.enabled=true`와 `pawbridge.animal-query.backend=postgresql`을 함께 지정할 때 `/api/v1/places/regions`, `/api/v1/places`, `/api/v1/places/{contentId}`의 세 GET만 활성화합니다. 기본 비활성이고 기존 reader JDBC·트랜잭션 관리자를 공유합니다. 지역·상세는 읽기 전용, 목록의 count와 page는 원문과 같이 같은 읽기 전용 REPEATABLE_READ 트랜잭션으로 조회합니다. 별도 pool·EMF·DDL은 추가하지 않습니다.
 
 원문 PostgreSQL의 여행 카탈로그 7개 테이블과 응답·가용 상태·이미지 이용 조건을 사용하며, 응답 중 TourAPI·R2·AI 호출을 하지 않습니다. 수집·스케줄러·갱신 API는 이 구성에 포함하지 않습니다. 새 합성 DB 검증은 SELECT 전용 reader와 `P14_PG_SETTINGS`를 사용하는 `OwnedPostgresqlAnimalTravelTest`로 분리합니다. 기존 수집기의 실행 소유권 인계와 실제 운영 활성화는 별도 미완료 항목입니다.
-
 
 ### Animal 이미지 업로드·삭제
 
@@ -857,7 +773,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 `animals/{uuid}{확장자}` 키, 부분 업로드 실패 시 앞 객체 유지, 삭제 실패·외부 URL 무시와 200 응답을 유지한다. 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다.
 
-원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있고, 원문의 삭제 실패 error 로그는 남기지 않는다. 이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 역할 조회는 기존 Animal 쓰기와 같은 `JdbcAnimalCommandActors`이므로 선택한 writer에 `pawbridge_user` USAGE, `users`·`contact_deletions` SELECT, `FOR UPDATE`용 `users` UPDATE(user_id)가 필요하다(`animal-command-owned-schema.sql`과 같음). 누적 F29 CI writer ACL은 `contact_deletions`에 INSERT(user_id)만 주므로 그 역할로 켜면 단건 업로드·삭제가 권한 오류 500으로 실패한다. 활성화 전 권한을 별도로 부여·검증한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
+원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있고, 원문의 삭제 실패 error 로그는 남기지 않는다. 이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 역할 조회는 기존 Animal 쓰기와 같은 `JdbcAnimalCommandActors`이므로 선택한 writer에 `pawbridge_user` USAGE, `users`·`contact_deletions` SELECT, `FOR UPDATE`용 `users` UPDATE(user_id)가 필요하다(`animal-command-owned-schema.sql`과 같음). 선택한 writer에 이 권한이 없으면 단건 업로드·삭제가 권한 오류 500으로 실패한다. 활성화 전 권한을 별도로 부여·검증한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
 
 ### 보호소 관리 쓰기와 회원 승인 직렬화
 
@@ -878,7 +794,6 @@ P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
 시험 전용 fixture는 축소 User 모델과 원문 Animal 8표로 구성되며 실제 운영 migration·권한 변경 근거가 아니다. 실제 API 활성화·기존 수집기/회원 승인 경로의 배타 인계는 별도 미완료 항목이다.
 
 보호소 수정은 감사 리스너의 `updatedAt`을 반영하도록 DTO 변환 전에 같은 writer 트랜잭션을 flush한다. 신규 격리 PUT 계약은 이전 시각 및 기존 NULL 감사값을 모두 다루며 응답과 커밋된 값의 일치를 PostgreSQL 마이크로초 정밀도로 확인한다. JDBC 관측은 기존 Animal 명령 시험과 같은 UTC Calendar를 사용한다. 실제 운영 데이터나 API는 변경하지 않았다.
-
 
 ### 내부 AI 갤러리 입력 자료 조회
 
@@ -911,9 +826,6 @@ APMS 번호는 원문 번호 그대로 검색하며 기존 Shelter JOIN과 NON_N
 선택 구성 시험은 13사례(.854초), 새 전용 PostgreSQL fixture의 수집·Batch·기존 조회·session lock·정상 scheduler 종료·실패·quota/orphan 계약은 5사례(.954초)로 각각 성공했다. 두 실행과 기존 business 단위38은 분리된 근거다. provider는 대역이며 실제 외부 HTTP/API 키·운영 수집·배포는 검증하지 않았다. 첫 PG 실행의 provider 관측은 빈 Spring ConnectionHolder binding까지 금지해 실패했다. 원시 active borrow1/TX0와 cached 동작을 확인해 이 과잉 조건만 고쳤으며 실제 TX0·추가 borrow0·동일 lock PID/autocommit/pg_locks·최종 자원 반환 관측은 유지했다. Catalog 11메서드 TT 추가안은 적용하지 않았다. 첫 실패 DB·RUNNING 가능 기록·claim과 원시 근거는 보존하고 재사용하지 않았다.
 
 owned 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P17_PG_SETTINGS`와 정확한 `P17_PG_SETTINGS=/private/tmp/pawbridge-owned-pg-night-20261020/travel-collection-recovery-1/travel-collection.properties`를 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlTravelCollectionTest`로 한 클래스를 명시 선택한다. 설정이 없거나 대상·역할·marker·권한·초기 상태가 다르면 skip하지 않고 거부한다. 준비 helper/실행 결과/설정 자격파일은 게시하지 않는다. 이 시험은 새 이력과 마지막 RUNNING 행을 남기므로 동일 DB를 자동 재실행하거나 reset하지 않는다.
-
-새 Batch 의존성으로 현재 Boot build 지문이 과거 자체회귀 참조 입력과 달라진다. 과거 reference RUN39481336774/head217cb7a의 16개 지문은 그대로 두며 새 Boot 지문으로 승격하지 않는다. 따라서 해당 reference는 거부되고 기존 workflow의 `execute-current-selftests`가 현재 TestKit108을 실행해야 한다. 실제 architecture·module unit·Boot JAR·필수 계약·cleanup/fence를 줄이지 않는다.
-
 
 ## APMS 예약 수집에서 동물·보호소 검색 반영까지
 
@@ -956,7 +868,6 @@ APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사
 
 단위 시험은 client 9·collector 6·store 4사례와 구성 시험(기본 off·`on` 별칭·같은 writer·Job/step·scheduler 계약)이다. 저장소·HTTP·DB는 mock이며 실제 공공데이터 API·PostgreSQL 잠금·권한·운영 활성화는 검증하지 않았다.
 
-
 ## APMS 사진 보관 예약 경로 편입
 
 `apms-photo-archive.enabled=true`를 명시할 때만 APMS 사진 발견·재시도·보관 작업을 조립한다. 기본 off에서는 archive writer/HTTP/S3/scheduler를 만들지 않으며, APMS 수집 자체나 Gallery 공개·내부 제공 기능을 자동 활성화하지 않는다. 수동 사진 업로드/삭제 API는 이 범위에 없다.
@@ -970,7 +881,6 @@ R2 객체는 항상 raw 원본인 것이 아니라 Photo 계약의 원본 fallba
 기본 scan50/maxPhotos25/maxRun300초/lease300초/recheck7일, 최초 지연60초·주기15분을 유지한다. 종료는 새 claim을 막고 현재 항목을 기다린다. `apms-photo-archive.shutdown-timeout-seconds`는1..300/기본15이며, 초과·중단이면 interrupt와 고정 미완료 경고를 남긴다. scheduler의 isRunning=false나 context close 반환은 모든 원격 I/O/worker 완주를 보장하지 않는다. 실제 운영 인계에는 기존 scheduler 중단·배타 소유·전용 권한·키·Photo/R2 실제 검증이 별도로 필요하다.
 
 최초 업무·HTTP·Root 구성/종료 단위 35사례와 새 P19 합성 PostgreSQL 전체 6사례를 검증했다. P19는 source SELECT-only·전 열 불변, 외부 대역 callback의 실제 TX/활성 연결0, READY→기존 Gallery slot1, 실제 세션 잠금/SKIP LOCKED와 claim·lease·재시도·협력 종료를 다룬다. 두 claim SQL의 동시 중첩, 동시 source UPDATE, 전체 Spring context 종료와 실 APMS/R2/Photo·운영 활성화는 검증하지 않았다. P19는 정확한 전체 OwnedPostgresqlApmsPhotoArchiveTest와 전용 P19_PG_SETTINGS/PAWBRIDGE_OWNED_SETTINGS_ENV를 선택하고 XML6/완료6을 확인한다. 성공한 fixture를 자동 초기화·재실행하지 않는다.
-
 
 ## 동물·보호소 검색 문서 수선 예약
 
@@ -990,13 +900,11 @@ Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유�
 
 기본 off·alias off와 익명/이웃 경로 차단을 유지한다. 새 pool/EMF/table·생산 DDL·주문 상태 전이·결제·상품 CUD는 추가하지 않는다. 실제 운영 활성화와 결제 전체 흐름 인수는 별도 작업이다.
 
-
 ## 실제 Main 코어 조립 검증
 
 `PawBridgeCoreIntegrationTest`는 실제 `PawBridgeApplication`에서 User의 Animal/Store module 조회와 Animal 명령·Store 바로 주문 writer를 함께 활성화한다. 업무·actor·facade·DataSource 대역 없이 단일 pool1(`dataSource`·`writeDataSource` 같은 인스턴스), JPA factory3와 transaction manager5의 실제 소비자 연결, 인증·역할·메서드 거부7경로, 소유 writer TX 밖 actor 거부, DB borrow0과 정상 close를 검증한다.
 
 기존 각 기능의 별도 DB 검증은 보존한다. 이 코어 조합 시험은 정상 인증 DB 응답·실 Redis/OAuth/R2·외부 수집·예약 인수·운영 준비 완료를 의미하지 않는다. 외부 기능과 예약은 이 시험에서 비활성이다.
-
 
 ## Animal remaining flows
 
@@ -1005,7 +913,6 @@ Boot는 `animal-search-projection-` 이름의 단일 daemon scheduler를 소유�
 `pawbridge.shelter-observations.schedule-enabled=true` enables the original daily 04:00 Asia/Seoul observation. One writer SQL snapshot counts PROTECT animals including zero for empty shelters, preserving the first observation of each day. The existing shelter observation GET consumes these rows. Scheduling defaults off and does not run immediately at startup.
 
 Unit, configuration, actual Security/JWT and architecture checks cover development contracts. Real Redis/Python, production scheduling and operating data are not validated or changed. Original forwarded-header trust, quota/message-cap races, post-AI persistence failure and retention policies remain deferred activation gates.
-
 
 ## Store catalog management
 
@@ -1058,7 +965,7 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 - `pawbridge.store-payment-events.enabled=true`가 함께 필요하며 없으면 시작이 실패한다. 이 flag는 랭킹용 Redis(`spring.data.redis.host` 또는 `memberChatRedis`)를 요구한다.
 - 운영은 앱 계정 하나로 `pawbridge_store`와 `pawbridge_payment`를 모두 쓴다. writer 계정에 `pawbridge_payment` 스키마 USAGE, `payments` SELECT·INSERT, `payment_compensation_records` SELECT·INSERT와 `pawbridge_store.orders` 행 잠금·UPDATE, 재고·검색 문서 권한이 필요하다. reader는 `orders.user_id`를 읽는다.
 - 공유 단일 pool(기본 최대 10)을 쓴다. 운영 동시 결제량에 맞춰 `PAWBRIDGE_DB_POOL_MAX_SIZE`를 정한다.
-- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`infrastructure/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 Flyway 위치·CI 픽스처 밖에 있어 자동으로 실행되지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
+- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`infrastructure/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 Flyway 위치 밖에 있어 자동으로 실행되지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
 - `toss.secret-key`(필수)와 `toss.base-url`.
 
 알려진 한계: 승인 응답이 DONE이 아닌 경우(가상계좌 `WAITING_FOR_DEPOSIT` 등)는 원래처럼 응답만 돌려주며 웹훅 처리는 없다. 서블릿 기본 오류 로그에 Toss 오류 본문이 남을 수 있다(비밀값은 없음).
@@ -1073,7 +980,7 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 
 원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **소유자·금액·실제 결제 확인 없이 아무 회원이나 다른 회원의 주문을 PAID로 바꿀 수 있다.** 프런트는 이 경로를 쓰지 않으며 운영에서 켜지 않는 것을 전제로 한다. 주문 행 잠금이 없고 UPDATE가 모든 열을 다시 쓰므로 Toss 결제 결과 처리와 경합할 수 있다(Toss ABORTED가 CANCELLED로 바꾸고 재고를 복구한 뒤 모의 결제가 PAID로 덮어쓰면 재고가 복구된 PAID 주문이 남고, 관리자 배송·상태 PATCH와 동시에 실행되면 바뀐 `delivery_status`를 이전 값으로 되돌릴 수 있다). 재고·랭킹은 바꾸지 않는다. 운영에서 켜면 주문 위조가 노출된다. 원문과 다른 점으로, 등록되지 않은 메서드·alias(`/api/orders/...`)·하위 경로는 원문 405/라우팅 대신 공통 보안 기본 거부 403이며, 원문 전역 advice의 문자셋 위반 C007 분기는 이 경로에서 입력 문자열이 없어 두지 않았다. 트랜잭션은 Store writer 기본 timeout 15초를 상속한다(원문은 timeout 없음).
 
-활성화 전 선택한 writer에 `pawbridge_store` USAGE, `orders` SELECT·UPDATE(`@DynamicUpdate`가 없어 Hibernate가 갱신 가능한 모든 열과 `updated_at`을 다시 씀)가 필요하다(outbox 권한은 더 이상 필요 없다). 이 경로가 `store-payment-events.enabled`를 요구하므로 해당 절의 Redis(`spring.data.redis.host` 또는 `memberChatRedis`) 전제도 함께 필요하다. 누적 F29 CI ACL(`backend-app/scripts/f29_ci.py`)에는 Store 권한이 없고, 기존 직접 주문 합성 권한도 `orders` UPDATE를 주지 않는다. Store writer는 공유 `writeDataSource`(기본 최대 1개·연결 대기 2초)를 쓰므로 다른 쓰기와 연결을 다툴 수 있다. 단위·구성·실제 Security/JWT MVC 시험은 mock 업무 기준이며 실제 PostgreSQL 검증이 아니다.
+활성화 전 선택한 writer에 `pawbridge_store` USAGE, `orders` SELECT·UPDATE(`@DynamicUpdate`가 없어 Hibernate가 갱신 가능한 모든 열과 `updated_at`을 다시 씀)가 필요하다(outbox 권한은 더 이상 필요 없다). 이 경로가 `store-payment-events.enabled`를 요구하므로 해당 절의 Redis(`spring.data.redis.host` 또는 `memberChatRedis`) 전제도 함께 필요하다. Store writer는 공유 `writeDataSource`(기본 최대 1개·연결 대기 2초)를 쓰므로 다른 쓰기와 연결을 다툴 수 있다. 단위·구성·실제 Security/JWT MVC 시험은 mock 업무 기준이며 실제 PostgreSQL 검증이 아니다.
 
 ### 실제 Main 조립과 격리 PostgreSQL 계약 검증
 
@@ -1081,9 +988,9 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 
 `OwnedPostgresqlShelterObservationTest`의 2사례는 별도 합성 PostgreSQL의 축소된 3개 업무 테이블에서 실제 관측 기록 SQL과 기존 통계 조회 SQL을 실행한다. DB의 한국 날짜, 빈 보호소와 PROTECT 수, 기존 관측 보존, 같은 날짜 재기록의 중복 방지, 트랜잭션 롤백과 서버의 읽기 전용 쓰기 거부를 확인했다. 이 시험은 실제 Boot 구성의 recorder 조립 메서드를 직접 사용하며 Main·04시 스케줄러·HTTP를 기동하지 않는다. 관측 시험 2사례의 추가는 시험·SQL만의 변경이며 결제·상품·Animal 생산 코드를 바꾸지 않는다.
 
-Animal·Store·Payment 생산 코드를 합친 최종 조립에서는 기존 Main 무DB 2사례와 위 Main PostgreSQL 3사례, 총 5사례를 한 번 재검증했다. 새 고유 5사례로 합산하지 않는다. Payment→Store 공개 계약·내부 참조 거부·6모듈 의존 그래프의 선택 구조 시험 3사례, 현재 architecture/business-package 검사, 실행 JAR 생성도 통과했다. 해당 JAR의 실제 런타임 라이브러리 162개는 기존 CI 경계 검사에서 추가 허용 예외 없이 통과했다. 이 근거는 전체 TestKit 시험 성공이나 실행 JAR 기동·Kafka 소비·Redis·Toss·R2·AI·운영 배포 성공을 뜻하지 않는다. 관측 PostgreSQL 2사례는 이 최종 조립 검증 뒤 별도로 최초 실행됐다.
+Animal·Store·Payment 생산 코드를 합친 최종 조립에서는 기존 Main 무DB 2사례와 위 Main PostgreSQL 3사례, 총 5사례를 한 번 재검증했다. 새 고유 5사례로 합산하지 않는다. Payment→Store 공개 계약·내부 참조 거부·6모듈 의존 그래프의 선택 구조 시험 3사례, 현재 architecture/business-package 검사, 실행 JAR 생성도 통과했다. 이 근거는 전체 TestKit 시험 성공이나 실행 JAR 기동·Kafka 소비·Redis·Toss·R2·AI·운영 배포 성공을 뜻하지 않는다. 관측 PostgreSQL 2사례는 이 최종 조립 검증 뒤 별도로 최초 실행됐다.
 
-두 PostgreSQL 시험은 명시적인 전용 설정 선택자와 소유권·권한·기준 자료 검증을 요구하며 입력이 없거나 잘못되면 건너뛰거나 다른 DB로 대체하지 않고 실패한다. 게시하는 파일은 시험 Java 2개와 합성 스키마 SQL 2개다. 자료 준비 helper, 동적 설정, 인증정보, 소유권 상태·영수증과 덤프는 게시하지 않는다. CI에서 이 자료를 새로 준비하거나 운영 기능을 켰다는 의미도 아니다.
+두 PostgreSQL 시험은 명시적인 전용 설정 선택자와 소유권·권한·기준 자료 검증을 요구하며 입력이 없거나 잘못되면 건너뛰거나 다른 DB로 대체하지 않고 실패한다. 게시하는 파일은 시험 Java 2개와 합성 스키마 SQL 2개다. 자료 준비 helper, 동적 설정, 인증정보, 소유권 상태와 덤프는 게시하지 않는다.
 
 ### 기존 LOCAL 로그인 편입
 
@@ -1107,15 +1014,13 @@ JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경�
 
 원문 결함과 차이는 고치지 않고 활성화 전 확인 항목으로 남긴다. 비밀번호 변경은 같은 트랜잭션에서 그 회원의 refresh 세션을 모두 폐기한다(auth sessions가 켜졌을 때). 이미 발급된 access token은 만료까지 유효하다. 회원 행 잠금이 없어 동시 변경은 마지막 쓰기가 남는다. 원문은 JPA 전체 행 flush였지만 후보는 `password`·`updated_at`만 갱신하므로 동시에 바뀐 다른 열을 덮지 않는다. 삭제 대기 등 회원 상태는 원문처럼 확인하지 않는다. 현재 비밀번호 확인에 시도 횟수 제한이 없어 탈취한 access token으로 온라인 대입이 가능하다(원문과 같음). 원문 검증 실패 handler는 `rejected value`를 포함한 예외 메시지를 error 로그에 남겨 패턴 검증에 실패한 새 비밀번호가 평문으로 기록될 수 있었으나, 후보는 이 로그를 재현하지 않는다.
 
-#### 비밀번호 변경 writer 권한 증분과 적용 순서
+#### 비밀번호 변경 writer 권한
 
-누적 writer `pawbridge_f3_writer` 권한은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `UPDATE(user_id,nickname,updated_at,role,care_reg_no)`이고, LOCAL 로그인 증분을 적용했다면 `SELECT(password)`가 더해진다. 비밀번호 변경은 `provider`·`password` 조회와 `password` UPDATE가 추가로 필요하므로 이 권한만으로는 실패한다(SQLSTATE 42501). `boot/src/test/resources/owned-postgresql/user-password-writer-grants.sql`은 `SELECT(provider,password),UPDATE(password)`만 추가한다(이미 있는 `SELECT(password)` 재부여는 변화 없음). 기존 권한은 회수하지 않는다.
+비밀번호 변경은 `users`의 `provider`·`password` 조회와 `password` UPDATE가 필요하며, 이 권한이 없으면 실패한다(SQLSTATE 42501). `boot/src/test/resources/owned-postgresql/user-password-writer-grants.sql`은 `SELECT(provider,password),UPDATE(password)`만 추가한다. 기존 권한은 회수하지 않는다.
 
-1. 기존 strict F29 준비와 그 검증(필요하면 LOCAL 로그인 증분)을 먼저 끝낸다.
-2. 테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v password_writer=pawbridge_f3_writer -f user-password-writer-grants.sql`로 한 번 적용한다.
-3. 적용 뒤에는 writer `users` 열 집합이 F29 strict 정확 집합과 달라지므로 같은 역할에 strict F29를 다시 실행하지 않는다. 다시 실행하려면 먼저 추가 권한을 `REVOKE`한다.
+테이블 owner(또는 GRANT 권한을 가진 관리 역할)가 `psql -v password_writer=<writer 역할> -f user-password-writer-grants.sql`로 한 번 적용한다.
 
-이 증분은 실제 PostgreSQL에서 실행·검증하지 않았고 CI도 준비·검증하지 않는다. 단위(JDBC 계약·순서·BCrypt)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며, 실제 PG 권한·운영 DB 역할 결정·기능 활성화는 이 문서가 승인하는 범위가 아니다.
+이 증분은 실제 PostgreSQL에서 실행·검증하지 않았다. 단위(JDBC 계약·순서·BCrypt)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며, 실제 PG 권한·운영 DB 역할 결정·기능 활성화는 이 문서가 승인하는 범위가 아니다.
 
 ### LOCAL 가입·이메일 인증·비밀번호 재설정
 
@@ -1127,13 +1032,11 @@ JDBC 계약13·구성8·실제 Security/BCrypt/HTTP15의 새36사례와 변경�
 
 원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. **`POST /api/v1/email/send`는 인증 없이 임의 주소로 메일을 보낼 수 있다**(제한은 주소별 5분 5회뿐이라 서로 다른 수신자나 IP 단위 제한이 없다). Redis 키가 이메일 대소문자를 그대로 쓰는데 계정 조회는 대소문자를 무시하므로 같은 계정을 가리키는 대소문자 변형마다 발송·검증 횟수 제한이 따로 적용되어 6자리 코드 추측 제한을 우회할 수 있다. 검증 횟수 확인과 증가가 원자적이지 않아 동시 요청이 5회를 넘길 수 있다. 인증 표지는 이메일 문자열에만 묶여 1시간 동안 유효하다. 가입 비밀번호 규칙은 6자 이상뿐이다(변경·재설정은 8~20자 패턴). 닉네임 충돌 재시도와 동시 가입 충돌이 같은 PostgreSQL 트랜잭션 안에서 다시 시도하므로 실패한 문장 뒤 재시도는 대개 500으로 끝난다(실제 DB에서 검증하지 않음). 재설정 성공은 같은 트랜잭션에서 refresh 세션을 모두 폐기하지만(auth sessions가 켜졌을 때) 이미 발급된 access token은 만료까지 유효하다. 재설정 요청 응답은 같지만 계정이 있을 때만 메일을 보내므로 응답 시간 차이로 계정 존재를 추정할 수 있다. 발송 실패도 발송 횟수를 소모한다.
 
-#### 가입·재설정 writer 권한 증분과 활성화 전 조건
+#### 가입·재설정 writer 권한과 활성화 전 조건
 
-누적 writer `pawbridge_f3_writer` 권한은 `users`의 `SELECT(user_id,nickname,role,care_reg_no,email,name)`, `UPDATE(user_id,nickname,updated_at,role,care_reg_no)`이고, LOCAL 로그인·비밀번호 변경 증분을 적용했다면 `SELECT(password,provider)`, `UPDATE(password)`가 더해진다. 가입은 여기에 `email`·`provider` 조회와 `INSERT(email,name,nickname,password,role,care_reg_no,provider,provider_id,created_at,updated_at)`가, 재설정은 `email`·`provider` 조회와 `UPDATE(password)`가 필요하다(`user_id` IDENTITY 기본값은 시퀀스 권한을 확인하지 않는다는 가정이며 실제 DB에서 확인하지 않았다). `boot/src/test/resources/owned-postgresql/local-signup-writer-grants.sql`이 이 증분이다.
+가입은 `users`의 `email`·`provider` 조회와 `INSERT(email,name,nickname,password,role,care_reg_no,provider,provider_id,created_at,updated_at)`가, 재설정은 `email`·`provider` 조회와 `UPDATE(password)`가 필요하다(`user_id` IDENTITY 기본값은 시퀀스 권한을 확인하지 않는다는 가정이며 실제 DB에서 확인하지 않았다). `boot/src/test/resources/owned-postgresql/local-signup-writer-grants.sql`이 이 증분이다.
 
-1. 기존 strict F29 준비와 그 검증(필요하면 LOCAL 로그인·비밀번호 변경 증분)을 먼저 끝낸다.
-2. 테이블 owner가 `psql -v auth_writer=pawbridge_f3_writer -f local-signup-writer-grants.sql`로 한 번 적용한다. 켜지 않을 기능의 절은 지우고 적용한다.
-3. 적용 뒤에는 같은 역할에 strict F29를 다시 실행하지 않는다. 다시 실행하려면 먼저 추가 권한을 `REVOKE`한다.
+테이블 owner가 `psql -v auth_writer=<writer 역할> -f local-signup-writer-grants.sql`로 한 번 적용한다. 켜지 않을 기능의 절은 지우고 적용한다.
 
-이 증분은 실제 PostgreSQL에서 실행·검증하지 않았고 CI도 준비·검증하지 않는다. 활성화 전에는 ① Redis(`spring.data.redis.*`)와 SMTP(`spring.mail.host/username/password`, 계정은 Google 앱 비밀번호 같은 비밀값이며 이 변경은 어떤 비밀값도 포함하지 않는다) 설정과 구 user-service 가입·메일 발송과의 단일 소유권, ② 공유 단일 pool(기본 최대 10, 연결 대기 5초; 가입·재설정 DB 작업과 다른 쓰기가 연결을 다툰다. 특히 공개 재설정 요청은 readOnly 트랜잭션으로 공유 pool 연결을 SMTP 전송(연결·읽기·쓰기 timeout 각 5초)이 끝날 때까지 쥐므로, 인증 없이 반복 호출하면 풀이 고갈되면 모놀리스 전체 쓰기가 연결 대기 5초 후 실패할 수 있고 대소문자만 바꾼 주소는 주소별 제한을 각각 받는다. 원문은 서비스 전용 pool이라 영향이 user-service에 그쳤다. 켜기 전에 pool 크기나 프록시 단위 제한을 정한다), ③ 위 공개 메일 발송 경로를 외부에 노출해도 되는지(프록시·WAF의 IP 단위 제한 등)를 확인해야 한다. 구현 변경은 `user`·`boot`의 `build.gradle`에 Redis·`spring-context-support`·`jakarta.mail`·`spring-boot-starter-mail` 의존성을 추가한다. 이 두 파일은 구조 selftest 재사용 기준(run 39577223965)의 입력 해시에 들어 있어 기준과 달라지므로 `verify_architecture_selftest_inputs`가 거짓이 되고 workflow는 이전 실행을 참조하지 않고 현재 구조 selftest를 직접 실행한다(실패가 아니다). 해시 상수는 마지막 성공 실행의 입력 그대로 둔다. 새 런타임 jar는 JAR 격리 검사의 금지 패턴에 해당하지 않는다. `user`가 `jakarta.mail-api`를 implementation으로 두어 boot 런타임에 전이되므로 starter-mail의 Angus 구현과 `jakarta.mail.*` 클래스가 중복 포함되는지는 로컬에서 확인하지 못했다(`:boot:dependencies --configuration runtimeClasspath`로 확인하고 중복이면 `compileOnly`로 바꾼다). 활성화는 공개 `/api/v1/email/send`를 함께 노출한다(원문도 같았다). 단위(순서·키·Lua 인자·SQL 바인딩)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 SMTP 전송·Redis 서버·PostgreSQL 권한과 운영 활성화는 검증하지 않았다.
+이 증분은 실제 PostgreSQL에서 실행·검증하지 않았다. 활성화 전에는 ① Redis(`spring.data.redis.*`)와 SMTP(`spring.mail.host/username/password`, 계정은 Google 앱 비밀번호 같은 비밀값이며 이 변경은 어떤 비밀값도 포함하지 않는다) 설정과 구 user-service 가입·메일 발송과의 단일 소유권, ② 공유 단일 pool(기본 최대 10, 연결 대기 5초; 가입·재설정 DB 작업과 다른 쓰기가 연결을 다툰다. 특히 공개 재설정 요청은 readOnly 트랜잭션으로 공유 pool 연결을 SMTP 전송(연결·읽기·쓰기 timeout 각 5초)이 끝날 때까지 쥐므로, 인증 없이 반복 호출하면 풀이 고갈되면 모놀리스 전체 쓰기가 연결 대기 5초 후 실패할 수 있고 대소문자만 바꾼 주소는 주소별 제한을 각각 받는다. 원문은 서비스 전용 pool이라 영향이 user-service에 그쳤다. 켜기 전에 pool 크기나 프록시 단위 제한을 정한다), ③ 위 공개 메일 발송 경로를 외부에 노출해도 되는지(프록시·WAF의 IP 단위 제한 등)를 확인해야 한다. 구현 변경은 `user`·`boot`의 `build.gradle`에 Redis·`spring-context-support`·`jakarta.mail`·`spring-boot-starter-mail` 의존성을 추가한다. `user`가 `jakarta.mail-api`를 implementation으로 두어 boot 런타임에 전이되므로 starter-mail의 Angus 구현과 `jakarta.mail.*` 클래스가 중복 포함되는지는 로컬에서 확인하지 못했다(`:boot:dependencies --configuration runtimeClasspath`로 확인하고 중복이면 `compileOnly`로 바꾼다). 활성화는 공개 `/api/v1/email/send`를 함께 노출한다(원문도 같았다). 단위(순서·키·Lua 인자·SQL 바인딩)·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 SMTP 전송·Redis 서버·PostgreSQL 권한과 운영 활성화는 검증하지 않았다.
 
