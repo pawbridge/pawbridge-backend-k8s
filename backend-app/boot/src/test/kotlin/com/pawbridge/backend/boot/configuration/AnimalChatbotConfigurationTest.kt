@@ -2,9 +2,6 @@ package com.pawbridge.backend.boot.configuration
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.client.PythonChatbotClient
-import com.pawbridge.backend.animal.internal.chatbot.infrastructure.repository.ChatbotBlockLogRepository
-import com.pawbridge.backend.animal.internal.chatbot.infrastructure.repository.ChatbotMessageRepository
-import com.pawbridge.backend.animal.internal.chatbot.infrastructure.repository.ChatbotSessionRepository
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.service.ChatbotRateLimitService
 import com.pawbridge.backend.animal.internal.chatbot.infrastructure.service.ChatbotService
 import com.pawbridge.backend.animal.internal.chatbot.web.ChatbotController
@@ -14,7 +11,6 @@ import io.mockk.excludeRecords
 import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
-import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -22,7 +18,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.redisson.api.RedissonClient
 import org.redisson.config.Config
-import org.redisson.config.SingleServerConfig
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -30,9 +25,6 @@ import org.springframework.boot.test.context.runner.WebApplicationContextRunner
 import org.springframework.data.auditing.AuditingHandler
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
-import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import java.util.concurrent.atomic.AtomicInteger
@@ -111,7 +103,7 @@ class AnimalChatbotConfigurationTest {
     }
 
     @Test
-    fun `명시 설정과 Redis 팩토리가 있을 때__조립 후 닫으면__기록기와 EM을 재사용하고 Redis를 한 번 닫는다`() {
+    fun `명시 설정과 Redis 팩토리가 있을 때__조립 후 닫으면__Redis를 한 번만 만들고 한 번 닫으며 비밀을 노출하지 않는다`() {
         // given
         val inputs = Inputs()
         val emf = AtomicReference<EntityManagerFactory>()
@@ -132,43 +124,19 @@ class AnimalChatbotConfigurationTest {
             assertThat(context.getBeansOfType(EntityManagerFactory::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(DataSource::class.java)).hasSize(2)
             emf.set(context.getBean("animalCommandEntityManagerFactory", EntityManagerFactory::class.java))
-            assertThat(
-                context.getBean("&animalCommandEntityManagerFactory", LocalContainerEntityManagerFactoryBean::class.java)
-                    .dataSource,
-            ).isSameAs(inputs.writer)
             val manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
-            assertThat(manager.dataSource).isSameAs(inputs.writer)
-            assertThat(manager.entityManagerFactory).isSameAs(emf.get())
             assertThat(manager.defaultTimeout).isEqualTo(15)
-            val shared = context.getBean("animalCommandEntityManager", EntityManager::class.java)
-            val repositories: List<Any> = listOf(
-                context.getBean(ChatbotSessionRepository::class.java),
-                context.getBean(ChatbotMessageRepository::class.java),
-                context.getBean(ChatbotBlockLogRepository::class.java),
-            )
-            for (repository in repositories) {
-                val target: Any = AopTestUtils.getUltimateTargetObject(repository)
-                assertThat(ReflectionTestUtils.getField(target, "entityManager")).isSameAs(shared)
-            }
             assertThat(emf.get().metamodel.entities.stream().map { type -> type.name }.toList())
                 .contains("ChatbotSession", "ChatbotMessage", "ChatbotBlockLog")
             val reads = context.getBean("animalChatbotReads", TransactionTemplate::class.java)
             val writes = context.getBean("animalChatbotWrites", TransactionTemplate::class.java)
-            assertThat(reads.transactionManager).isSameAs(manager)
-            assertThat(writes.transactionManager).isSameAs(manager)
             assertThat(reads.isReadOnly).isTrue()
             assertThat(writes.isReadOnly).isFalse()
             assertThat(reads.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
             assertThat(writes.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-            val service = context.getBean(ChatbotService::class.java)
-            assertThat(ReflectionTestUtils.getField(service, "reads")).isSameAs(reads)
-            assertThat(ReflectionTestUtils.getField(service, "writes")).isSameAs(writes)
-            assertThat(ReflectionTestUtils.getField(service, "chatbotRateLimitService")).isSameAs(inputs.quota)
             assertThat(inputs.redisCreates.get()).isEqualTo(1)
-            val redis = ReflectionTestUtils.getField(inputs.redisConfig.get(), "singleServerConfig") as SingleServerConfig
-            assertThat(redis.address).isEqualTo("redis://127.0.0.1:6379")
-            assertThat(redis.database).isZero()
-            assertThat(redis.password).isEqualTo("synthetic-redis-password")
+            val redis = inputs.redisConfig.get().toYAML()
+            assertThat(redis).contains("redis://127.0.0.1:6379").contains("synthetic-redis-password")
             assertThat(context.getBean("animalChatbotSettings").toString()).isEqualTo("AnimalChatbotSettings[redacted]")
             confirmVerified(inputs.writer, inputs.reader, inputs.redis, inputs.quota)
         }

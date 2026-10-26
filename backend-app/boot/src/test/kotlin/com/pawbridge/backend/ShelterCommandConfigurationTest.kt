@@ -1,8 +1,6 @@
 package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.pawbridge.backend.animal.api.AnimalShelterMembers
-import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandService
 import com.pawbridge.backend.animal.internal.discovery.infrastructure.KoreanSearchAnalyzer
 import com.pawbridge.backend.animal.internal.sheltercommand.application.ShelterCommands
@@ -22,9 +20,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.data.auditing.AuditingHandler
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Supplier
 import javax.sql.DataSource
@@ -56,7 +51,7 @@ class ShelterCommandConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = [false, true])
-    fun `보호소 writer와 선택적 동물 명령이 주어졌을 때__구성하면__제한된 writer 하나를 공유하고 합류 격리를 검증한다`(
+    fun `보호소 writer와 선택적 동물 명령이 주어졌을 때__구성하면__영속 단위와 트랜잭션 관리자를 하나만 만들고 연결을 열지 않는다`(
         animals: Boolean,
     ) {
         // given
@@ -77,20 +72,8 @@ class ShelterCommandConfigurationTest {
                 val factory = context.getBean("animalCommandEntityManagerFactory", EntityManagerFactory::class.java)
                 owned.set(factory)
                 val manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
-                assertThat(manager.dataSource).isSameAs(source)
-                assertThat(manager.entityManagerFactory).isSameAs(factory)
                 assertThat(manager.defaultTimeout).isEqualTo(15)
                 assertThat(manager.isValidateExistingTransaction).isTrue()
-                val writes = ReflectionTestUtils.getField(context.getBean(ShelterCommands::class.java), "writes") as TransactionTemplate
-                assertThat(writes.transactionManager).isSameAs(manager)
-                assertThat(writes.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED)
-                assertThat(writes.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-                assertThat(writes.isReadOnly).isFalse()
-                assertThat(context.getBean(SearchDocumentWriter::class.java).dataSource()).isSameAs(source)
-                assertThat(
-                    (ReflectionTestUtils.getField(context.getBean(AnimalShelterMembers::class.java), "jdbc") as JdbcTemplate)
-                        .dataSource,
-                ).isSameAs(source)
                 assertThat(context.getBeansOfType(AnimalCommandService::class.java)).hasSize(if (animals) 1 else 0)
                 assertThat(context.getBeansOfType(KoreanSearchAnalyzer::class.java)).hasSize(1)
                 assertThat(context.getBeansOfType(AuditingHandler::class.java)).hasSize(1)

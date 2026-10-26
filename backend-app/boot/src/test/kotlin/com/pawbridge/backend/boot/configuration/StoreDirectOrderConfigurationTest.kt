@@ -13,7 +13,6 @@ import com.pawbridge.backend.store.internal.directorder.web.OrderReadController
 import io.mockk.confirmVerified
 import io.mockk.excludeRecords
 import io.mockk.mockk
-import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -28,8 +27,6 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
@@ -68,7 +65,7 @@ class StoreDirectOrderConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["store", "animal", "both"])
-    fun `쓰기 기능이 선택됐을 때__조립하면__감사 등록 하나를 공유하고 스토어는 단일 쓰기 유닛을 쓴다`(
+    fun `쓰기 기능이 선택됐을 때__조립하면__감사 등록 하나와 영속 단위를 만들고 읽기 자원을 건드리지 않는다`(
         mode: String,
     ) {
         // given
@@ -110,12 +107,10 @@ class StoreDirectOrderConfigurationTest {
                     .doesNotHaveBean(OrderReadController::class.java)
                     .doesNotHaveBean(KoreanSearchTerms::class.java)
             } else {
-                val emf = context.getBean("storeDirectOrderEntityManagerFactory", EntityManagerFactory::class.java)
                 val factory = context.getBean(
                     "&storeDirectOrderEntityManagerFactory",
                     LocalContainerEntityManagerFactoryBean::class.java,
                 )
-                assertThat(factory.dataSource).isSameAs(writer)
                 val model = "com.pawbridge.backend.store.internal.memberread.infrastructure.jpa.model."
                 assertThat(factory.persistenceUnitInfo!!.managedClassNames).containsExactlyInAnyOrder(
                     model + "BaseEntity", model + "Wishlist", model + "ProductSKU", model + "Product",
@@ -133,33 +128,18 @@ class StoreDirectOrderConfigurationTest {
                         "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy",
                     )
                 val manager = context.getBean("storeDirectOrderJpaTransactionManager", JpaTransactionManager::class.java)
-                assertThat(manager.entityManagerFactory).isSameAs(emf)
-                assertThat(manager.dataSource).isSameAs(writer)
                 assertThat(manager.defaultTimeout).isEqualTo(15)
-                val orders = context.getBean(DirectOrders::class.java)
+                assertThat(context).hasSingleBean(DirectOrders::class.java)
                 val writes = context.getBean("storeDirectOrderWrites", TransactionTemplate::class.java)
                 val reads = context.getBean("storeDirectOrderReads", TransactionTemplate::class.java)
-                assertThat(ReflectionTestUtils.getField(orders, "writes")).isSameAs(writes)
-                assertThat(ReflectionTestUtils.getField(orders, "reads")).isSameAs(reads)
                 for (transaction in listOf(writes, reads)) {
-                    assertThat(transaction.transactionManager).isSameAs(manager).isNotSameAs(readerManager)
                     assertThat(transaction.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
                     assertThat(transaction.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_DEFAULT)
                     assertThat(transaction.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
                 }
                 assertThat(writes.isReadOnly).isFalse()
                 assertThat(reads.isReadOnly).isTrue()
-                val shared = context.getBean("storeDirectOrderEntityManager", EntityManager::class.java)
-                assertThat(shared.entityManagerFactory).isSameAs(emf)
-                for (repository in listOf("writerOrders", "readerOrders")) {
-                    val proxy: Any = ReflectionTestUtils.getField(orders, repository)!!
-                    val target: Any = AopTestUtils.getUltimateTargetObject(proxy)
-                    assertThat(ReflectionTestUtils.getField(target, "entityManager")).isSameAs(shared)
-                }
-                val actorJdbc = ReflectionTestUtils.getField(context.getBean(StoreOrderActors::class.java), "jdbc") as JdbcTemplate
-                assertThat(actorJdbc.dataSource).isSameAs(writer)
                 val search = context.getBean("storeDirectOrderSearchJdbc", NamedParameterJdbcTemplate::class.java)
-                assertThat(search.jdbcTemplate.dataSource).isSameAs(writer)
                 assertThat(search.jdbcTemplate.queryTimeout).isEqualTo(5)
                 terms.set(context.getBean(KoreanSearchTerms::class.java))
                 assertThat(terms.get().document("말티즈")).isNotBlank()

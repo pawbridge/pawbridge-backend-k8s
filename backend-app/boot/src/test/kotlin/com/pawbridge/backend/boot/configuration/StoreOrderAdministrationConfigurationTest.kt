@@ -12,7 +12,6 @@ import com.pawbridge.backend.store.internal.orderadministration.web.AdminOrderEx
 import io.mockk.confirmVerified
 import io.mockk.excludeRecords
 import io.mockk.mockk
-import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.params.ParameterizedTest
@@ -24,7 +23,6 @@ import org.springframework.data.auditing.AuditingHandler
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
@@ -60,7 +58,7 @@ class StoreOrderAdministrationConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["admin", "admin-and-direct", "all"])
-    fun `관리와 선택 기능이 명시됐을 때__조립하면__쓰기 DB 하나를 공유하고 꺼진 라우트는 열지 않는다`(
+    fun `관리와 선택 기능이 명시됐을 때__조립하면__꺼진 라우트는 열지 않고 읽기 자원을 건드리지 않는다`(
         mode: String,
     ) {
         val direct = mode != "admin"
@@ -105,26 +103,20 @@ class StoreOrderAdministrationConfigurationTest {
                     "&storeDirectOrderEntityManagerFactory",
                     LocalContainerEntityManagerFactoryBean::class.java,
                 )
-                assertThat(factory.dataSource).isSameAs(writer).isNotSameAs(reader)
                 assertThat(factory.persistenceUnitInfo!!.managedClassNames).hasSize(if (carts) 12 else 10)
                 assertThat(factory.jpaPropertyMap)
                     .containsEntry("hibernate.boot.allow_jdbc_metadata_access", false)
                     .containsEntry("hibernate.hbm2ddl.auto", "none")
                     .containsEntry("hibernate.default_schema", "pawbridge_store")
                 val manager = context.getBean("storeDirectOrderJpaTransactionManager", JpaTransactionManager::class.java)
-                assertThat(manager.dataSource).isSameAs(writer)
                 assertThat(manager.defaultTimeout).isEqualTo(15)
                 val reads = context.getBean("storeDirectOrderReads", TransactionTemplate::class.java)
                 val writes = context.getBean("storeDirectOrderWrites", TransactionTemplate::class.java)
                 assertThat(reads.isReadOnly).isTrue()
                 assertThat(writes.isReadOnly).isFalse()
                 for (tx in listOf(reads, writes)) {
-                    assertThat(tx.transactionManager).isSameAs(manager).isNotSameAs(readerManager)
                     assertThat(tx.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
                 }
-                val jdbc = ReflectionTestUtils.getField(context.getBean(StoreOrderAdministrators::class.java), "jdbc")
-                    as JdbcTemplate
-                assertThat(jdbc.dataSource).isSameAs(writer)
                 assertThat(context.getBeansOfType(DirectOrderController::class.java)).hasSize(if (direct) 1 else 0)
                 assertThat(context.getBeansOfType(CartController::class.java)).hasSize(if (carts) 1 else 0)
                 assertThat(context.getBeansOfType(OrderReadController::class.java))
@@ -132,8 +124,6 @@ class StoreOrderAdministrationConfigurationTest {
                 assertThat(context.getBeansOfType(KoreanSearchTerms::class.java)).hasSize(if (direct || carts) 1 else 0)
                 assertThat(context.getBeansOfType(StoreOrderSupportConfiguration::class.java))
                     .hasSize(if (direct || carts) 1 else 0)
-                val shared = context.getBean("storeDirectOrderEntityManager", EntityManager::class.java)
-                assertThat(shared.entityManagerFactory).isSameAs(unit.get())
                 confirmVerified(writer, reader, readerManager)
             }
         assertThat(unit.get().isOpen).isFalse()

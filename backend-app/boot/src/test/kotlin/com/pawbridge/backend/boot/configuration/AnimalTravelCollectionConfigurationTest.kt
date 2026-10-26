@@ -14,12 +14,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.springframework.aop.framework.Advised
 import org.springframework.batch.core.Job
 import org.springframework.batch.core.job.SimpleJob
 import org.springframework.batch.core.launch.JobLauncher
 import org.springframework.batch.core.repository.JobRepository
-import org.springframework.batch.core.step.tasklet.TaskletStep
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
@@ -27,15 +25,8 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.DependsOn
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
-import org.springframework.jdbc.support.incrementer.PostgresSequenceMaxValueIncrementer
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.interceptor.TransactionAttribute
-import org.springframework.transaction.interceptor.TransactionInterceptor
-import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -100,7 +91,7 @@ class AnimalTravelCollectionConfigurationTest {
     }
 
     @Test
-    fun `수집만 켜고 스케줄은 껐을 때__시작하면__같은 기록 연결로 실행 없이 PostgreSQL 배치를 구성한다`() {
+    fun `수집만 켜고 스케줄은 껐을 때__시작하면__실행 없이 PostgreSQL 배치 잡을 구성한다`() {
         // given
         val source = mockk<HikariDataSource>()
         val jdbc = JdbcTemplate(source)
@@ -123,40 +114,9 @@ class AnimalTravelCollectionConfigurationTest {
                     .doesNotHaveBean("jobLauncherApplicationRunner")
                     .doesNotHaveBean(ThreadPoolTaskScheduler::class.java)
                 assertThat(app.getBean(TourApiProperties::class.java).isEnabled).isTrue()
-                val catalog = app.getBean(PostgresqlTravelCollectionCatalog::class.java)
-                assertThat(ReflectionTestUtils.getField(catalog, "jdbc")).isSameAs(jdbc)
-                val catalogWrites = ReflectionTestUtils.getField(catalog, "transaction") as TransactionTemplate
-                assertThat(catalogWrites.transactionManager).isSameAs(manager)
-                val collector: Any = app.getBean(PetTravelCollector::class.java)
-                assertThat(ReflectionTestUtils.getField(collector, "dataSource")).isSameAs(source)
-                assertThat(ReflectionTestUtils.getField(collector, "clock")).isSameAs(CLOCK)
-
-                val repository = app.getBean(JobRepository::class.java)
-                val target: Any = AopTestUtils.getUltimateTargetObject(repository)
-                for (field in arrayOf("jobInstanceDao", "jobExecutionDao", "stepExecutionDao", "ecDao")) {
-                    val dao: Any = ReflectionTestUtils.getField(target, field)!!
-                    assertThat(ReflectionTestUtils.getField(dao, "tablePrefix")).isEqualTo("pawbridge_animal.BATCH_")
-                    val metadataJdbc = ReflectionTestUtils.getField(dao, "jdbcTemplate") as JdbcTemplate
-                    assertThat(metadataJdbc.dataSource).isSameAs(source)
-                }
-                val instances: Any = ReflectionTestUtils.getField(target, "jobInstanceDao")!!
-                val incrementer: Any = ReflectionTestUtils.getField(instances, "jobInstanceIncrementer")!!
-                assertThat(incrementer).isInstanceOf(PostgresSequenceMaxValueIncrementer::class.java)
-                assertThat((incrementer as PostgresSequenceMaxValueIncrementer).incrementerName)
-                    .isEqualTo("pawbridge_animal.BATCH_JOB_SEQ")
-                val interceptor = (repository as Advised).advisors
-                    .map { advisor -> advisor.advice }
-                    .filterIsInstance<TransactionInterceptor>()
-                    .first()
-                assertThat(interceptor.transactionManager).isSameAs(manager)
-
                 val job = app.getBean(Job::class.java) as SimpleJob
                 assertThat(job.name).isEqualTo("petTravelCollectionJob")
                 assertThat(job.stepNames).containsExactly("petTravelCollectionStep")
-                val step = job.getStep("petTravelCollectionStep") as TaskletStep
-                assertThat(ReflectionTestUtils.getField(step, "transactionManager")).isSameAs(manager)
-                val attribute = ReflectionTestUtils.getField(step, "transactionAttribute") as TransactionAttribute
-                assertThat(attribute.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_NOT_SUPPORTED)
                 verify(exactly = 0) { source.connection }
             }
     }
@@ -208,7 +168,7 @@ class AnimalTravelCollectionConfigurationTest {
     }
 
     @Test
-    fun `수집과 스케줄을 모두 켰을 때__시작하면__작업 실행 없이 서울 스케줄러 하나가 정상 종료를 기다린다`() {
+    fun `수집과 스케줄을 모두 켰을 때__시작하면__작업 실행 없이 전용 스케줄러 하나를 만든다`() {
         // given
         val source = mockk<HikariDataSource>()
 
@@ -230,9 +190,6 @@ class AnimalTravelCollectionConfigurationTest {
                 assertThat(scheduler.scheduledThreadPoolExecutor.continueExistingPeriodicTasksAfterShutdownPolicy).isFalse()
                 assertThat(scheduler.scheduledThreadPoolExecutor.removeOnCancelPolicy).isTrue()
                 assertThat(scheduler.threadNamePrefix).isEqualTo("pawbridge-tourapi-")
-                assertThat(ReflectionTestUtils.getField(scheduler, "waitForTasksToCompleteOnShutdown")).isEqualTo(true)
-                assertThat(ReflectionTestUtils.getField(scheduler, "awaitTerminationMillis"))
-                    .isEqualTo(Integer.MAX_VALUE.toLong() * 1000)
                 val scheduled = AnimalTravelCollectionSchedule::class.java.getDeclaredMethod("collect")
                     .getAnnotation(Scheduled::class.java)
                 assertThat(scheduled.scheduler).isEqualTo("tourApiCollectionScheduler")

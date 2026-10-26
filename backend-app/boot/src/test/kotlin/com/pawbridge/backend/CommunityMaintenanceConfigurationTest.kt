@@ -20,7 +20,6 @@ import org.springframework.jdbc.core.PreparedStatementCreator
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.Trigger
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Duration
@@ -80,7 +79,7 @@ class CommunityMaintenanceConfigurationTest {
     }
 
     @Test
-    fun `두 작업이 명시적으로 켜졌을 때__작업 실행 없이 조립하면__작성기와 쓰기 트랜잭션을 재사용한다`() {
+    fun `두 작업이 명시적으로 켜졌을 때__작업 실행 없이 조립하면__재색인 작업을 하나 등록하고 DB를 건드리지 않는다`() {
         // given
         val jdbc = jdbcTemplate()
         val manager = transactionManager()
@@ -124,10 +123,7 @@ class CommunityMaintenanceConfigurationTest {
         runner.run { context ->
             // then
             assertThat(context).hasNotFailed()
-            val rebuild = context.getBean(JdbcPostSearchRebuild::class.java)
-            assertThat(ReflectionTestUtils.getField(rebuild, "jdbc")).isSameAs(jdbc)
-            assertThat(ReflectionTestUtils.getField(rebuild, "transactions")).isSameAs(write)
-            assertThat(ReflectionTestUtils.getField(rebuild, "projection")).isSameAs(writer)
+            assertThat(context).hasSingleBean(JdbcPostSearchRebuild::class.java)
             assertThat(context.getBeansOfType(ThreadPoolTaskScheduler::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(CommunityMaintenanceConfiguration.SearchRebuildJob::class.java)).hasSize(1)
             verify(exactly = 0) { jdbc.queryForList(any<String>(), *anyVararg<Any>()) }

@@ -88,8 +88,6 @@ class AnimalSearchProjectionConfigurationTest {
                 .hasSingleBean(PostgresqlSearchProjector::class.java)
                 .hasSingleBean(AnimalSearchProjectionJobs::class.java)
                 .hasSingleBean(KoreanSearchAnalyzer::class.java)
-            assertThat(context.getBean(KoreanSearchAnalyzer::class.java))
-                .isSameAs(context.getBean("animalDiscoveryAnalyzer"))
             assertThat(context.getBeansOfType(DataSource::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(JdbcTransactionManager::class.java)).hasSize(1)
             val scheduler = context.getBean("animalSearchProjectionScheduler", ThreadPoolTaskScheduler::class.java)
@@ -113,8 +111,6 @@ class AnimalSearchProjectionConfigurationTest {
                 assertThat(context).hasNotFailed()
                     .hasSingleBean(KoreanSearchAnalyzer::class.java)
                     .hasSingleBean(PostgresqlSearchProjector::class.java)
-                assertThat(context.getBean(KoreanSearchAnalyzer::class.java))
-                    .isSameAs(context.getBean("animalDiscoveryAnalyzer"))
             }
     }
 

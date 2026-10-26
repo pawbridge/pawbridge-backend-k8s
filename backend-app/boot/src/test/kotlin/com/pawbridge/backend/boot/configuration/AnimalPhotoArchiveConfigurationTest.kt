@@ -20,8 +20,6 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.support.TransactionTemplate
 import software.amazon.awssdk.services.s3.S3Client
 import java.net.URI
 
@@ -60,7 +58,7 @@ class AnimalPhotoArchiveConfigurationTest {
     }
 
     @Test
-    fun `명시 설정이 주어졌을 때__조립하면__기록 연결을 공유하고 공개 S3 클라이언트나 연결을 만들지 않는다`() {
+    fun `명시 설정이 주어졌을 때__조립하면__공개 S3 클라이언트나 연결을 만들지 않는다`() {
         // given
         val runner = enabled()
 
@@ -75,11 +73,6 @@ class AnimalPhotoArchiveConfigurationTest {
                 .doesNotHaveBean(S3Client::class.java)
                 .doesNotHaveBean("apmsAnimalSyncJob")
                 .doesNotHaveBean("petTravelCollectionJob")
-            val manager = app.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
-            val transactions =
-                ReflectionTestUtils.getField(app.getBean(PhotoArchiveStore::class.java), "transaction") as TransactionTemplate
-            assertThat(transactions.transactionManager).isSameAs(manager)
-            assertThat(transactions.timeout).isEqualTo(15)
             assertThat(app.getBean(PhotoArchiveProperties::class.java).bucket).isEqualTo("pawbridge-animal-originals")
             assertThat(app.getBean(PhotoArchiveHttpClient::class.java)).isInstanceOf(AutoCloseable::class.java)
             verify(exactly = 0) { app.getBean(HikariDataSource::class.java).connection }

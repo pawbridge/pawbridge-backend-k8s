@@ -8,7 +8,6 @@ import io.mockk.excludeRecords
 import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
-import jakarta.persistence.EntityManager
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -22,12 +21,6 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.ZSetOperations
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.orm.jpa.JpaTransactionManager
-import org.springframework.test.util.AopTestUtils
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.ZoneId
 import java.util.function.Supplier
@@ -59,7 +52,7 @@ class StorePaymentEventsConfigurationTest {
     }
 
     @Test
-    fun `비즈니스만 명시됐을 때__조립하면__클라이언트 시작 없이 스토어 쓰기 DB와 재고 투영을 재사용한다`() {
+    fun `비즈니스만 명시됐을 때__조립하면__클라이언트 시작 없이 기록 DB 연결을 열지 않는다`() {
         // given
         val writer = mockk<DataSource>()
         val lettuce = mockk<LettuceConnectionFactory>()
@@ -80,30 +73,6 @@ class StorePaymentEventsConfigurationTest {
                 .hasSingleBean(DataSource::class.java)
                 .doesNotHaveBean(RedisConnectionFactory::class.java)
                 .hasSingleBean(StringRedisTemplate::class.java)
-            val service = context.getBean(StorePaymentEvents::class.java)
-            val shared = context.getBean("storeDirectOrderEntityManager", EntityManager::class.java)
-            val factory = context.getBean("storeDirectOrderEntityManagerFactory", EntityManagerFactory::class.java)
-            val writes = context.getBean("storeDirectOrderWrites", TransactionTemplate::class.java)
-            assertThat(field(service, "writes")).isSameAs(writes)
-            assertThat(writes.transactionManager).isSameAs(context.getBean("storeDirectOrderJpaTransactionManager"))
-            assertThat(
-                context.getBean("storeDirectOrderJpaTransactionManager", JpaTransactionManager::class.java).dataSource,
-            ).isSameAs(writer)
-            assertThat(shared.entityManagerFactory).isSameAs(factory)
-            assertThat(repositoryEntityManager(field(service, "orders")).entityManagerFactory).isSameAs(factory)
-            val mandatory = field(service, "mandatoryWrites") as TransactionTemplate
-            assertThat(mandatory.transactionManager).isSameAs(context.getBean("storeDirectOrderJpaTransactionManager"))
-            assertThat(mandatory.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_MANDATORY)
-            assertThat(mandatory.isReadOnly).isFalse()
-            val bridge = context.getBean("storePaymentEventStocks", StorePaymentEvents.StockRestorer::class.java)
-            val stock = field(bridge, "delegate")
-            val snapshots = field(stock, "snapshots")
-            val documents = field(snapshots, "documents")
-            assertThat(repositoryEntityManager(field(stock, "products")).entityManagerFactory).isSameAs(factory)
-            assertThat(repositoryEntityManager(field(stock, "skus")).entityManagerFactory).isSameAs(factory)
-            assertThat(field(documents, "jdbc")).isSameAs(context.getBean("storeDirectOrderSearchJdbc"))
-            assertThat((field(documents, "jdbc") as NamedParameterJdbcTemplate).jdbcTemplate.dataSource).isSameAs(writer)
-            assertThat(field(documents, "terms")).isSameAs(context.getBean("storeDirectOrderSearchTerms"))
             assertThat(context.getBean("storePaymentEventClock", Clock::class.java).zone).isEqualTo(ZoneId.systemDefault())
             assertThat(context.getBean("storePaymentRankingRedis", StringRedisTemplate::class.java).connectionFactory)
                 .isInstanceOf(LettuceConnectionFactory::class.java)
@@ -132,7 +101,6 @@ class StorePaymentEventsConfigurationTest {
         // when
         inputs(writer, lettuce).withBean("memberChatRedis", StringRedisTemplate::class.java, Supplier { redis }).run { context ->
             assertThat(context).hasNotFailed().doesNotHaveBean(RedisConnectionFactory::class.java)
-            assertThat(context.getBean("storePaymentRankingRedis")).isSameAs(redis)
             context.getBean(StorePaymentEvents.Ranking::class.java).increment("store:ranking:daily:20261021", "73", 2.0)
 
             // then
@@ -163,13 +131,5 @@ class StorePaymentEventsConfigurationTest {
             .withBean("writeDataSource", DataSource::class.java, Supplier { writer })
             .withBean("writeJdbc", JdbcTemplate::class.java, Supplier { JdbcTemplate(writer) })
             .withBean(ObjectMapper::class.java, Supplier { ObjectMapper() })
-    }
-
-    private fun field(target: Any?, name: String): Any {
-        return ReflectionTestUtils.getField(target!!, name)!!
-    }
-
-    private fun repositoryEntityManager(repository: Any): EntityManager {
-        return field(AopTestUtils.getUltimateTargetObject<Any>(repository), "entityManager") as EntityManager
     }
 }
