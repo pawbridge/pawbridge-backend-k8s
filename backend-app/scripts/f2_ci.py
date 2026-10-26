@@ -204,8 +204,8 @@ def smoke():
                 absent = expect(base, path, 404)
                 if absent['message'] != '게시글을 찾을 수 없습니다.' or absent['data'] is not None:
                     raise AssertionError('Missing post contract changed')
-            expect(base, '/api/v1/posts/read/abc', 500)
-            expect(base, '/api/v1/posts/read/9223372036854775808', 500)
+            expect(base, '/api/v1/posts/read/abc', 400)
+            expect(base, '/api/v1/posts/read/9223372036854775808', 400)
             for method, path in [('GET','/error'),('HEAD','/api/v1/posts/read/42'),
                                  ('OPTIONS','/api/v1/posts/read/42'),('POST','/api/v1/posts/read/42')]:
                 expect(base, path, 403, method)

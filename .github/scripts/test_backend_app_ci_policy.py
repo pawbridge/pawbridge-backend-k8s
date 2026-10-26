@@ -251,9 +251,11 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('        if: always()', cleanup)
         self.assertNotRegex(check, r'--tests\b|--exclude-task\b|(?:^|\s)-x(?:\s|$)')
         # The auth session contract moved to the contract job; nothing of its fixture harness stays in a shard.
+        # The V4/V5 DDL files stay in the sparse checkout only because the F29 guard self-tests still read them.
+        shard_steps = check.split('          sparse-checkout-cone-mode: false\n', 1)[1]
         for removed in ('authSessionCompatibility', 'auth-sessions', 'auth_sessions', 'admin-update', 'fixture_admin_update'):
             with self.subTest(removed=removed):
-                self.assertNotIn(removed, check)
+                self.assertNotIn(removed, shard_steps)
 
     def test_given_candidate_build__when_running__then_use_the_runner_cpus_without_skipping_any_task(self):
         package = self.job('package')

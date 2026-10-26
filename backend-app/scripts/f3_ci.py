@@ -400,7 +400,7 @@ def smoke():
             for missing in ('999999', '0', '-1'):
                 expect(base, '/api/v1/posts/read/' + missing, 404)
             for invalid in ('abc', '9223372036854775808'):
-                expect(base, '/api/v1/posts/read/' + invalid, 500)
+                expect(base, '/api/v1/posts/read/' + invalid, 400)
             for method, path in [('GET','/error'),('HEAD','/api/v1/posts/read/42'),
                 ('OPTIONS','/api/v1/posts/read/42'),('POST','/api/v1/posts/read/42')]:
                 expect(base, path, 403, method)
