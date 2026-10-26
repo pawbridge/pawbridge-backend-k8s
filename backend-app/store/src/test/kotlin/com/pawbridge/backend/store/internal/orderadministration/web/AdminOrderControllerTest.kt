@@ -186,7 +186,7 @@ class AdminOrderControllerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["list", "get", "write"])
+    @ValueSource(strings = ["list", "get", "write", "status"])
     fun `현재 DB 기준 관리자가 거부됐을 때__어느 엔드포인트든 호출하면__403과 C006 코드를 돌려준다`(op: String) {
         // given
         current(7L)
@@ -196,6 +196,8 @@ class AdminOrderControllerTest {
             every { orders.list(any(), any()) } throws failure
         } else if (op == "get") {
             every { orders.get(any(), any()) } throws failure
+        } else if (op == "status") {
+            every { orders.updateStatus(any(), any(), any()) } throws failure
         } else {
             every { orders.updateDelivery(any(), any(), any()) } throws failure
         }
@@ -214,16 +216,19 @@ class AdminOrderControllerTest {
 
         every { orders.get(any(), any()) } throws AdminOrderNotFoundException()
         every { orders.updateDelivery(any(), any(), any()) } throws IllegalArgumentException("private missing id")
+        every { orders.updateStatus(any(), any(), any()) } throws IllegalArgumentException("private missing id")
 
         // when
         val readResult = mvc.perform(request("get"))
         val writeResult = mvc.perform(request("write"))
+        val statusResult = mvc.perform(request("status"))
 
         // then
         readResult.andExpect(status().isNotFound())
             .andExpect(jsonPath("\$.code").value("O001"))
             .andExpect(jsonPath("\$.message").value("Order not found"))
         writeResult.andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C001"))
+        statusResult.andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C001"))
     }
 
     @ParameterizedTest
@@ -244,12 +249,15 @@ class AdminOrderControllerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["get", "write"])
+    @ValueSource(strings = ["get", "write", "status"])
     fun `주문 ID 타입이 잘못됐을 때__접근하면__원래의 잘못된 타입 계약을 따른다`(op: String) {
         // given
         current(7L)
         val call = if (op == "get") {
             get("/api/v1/admin/orders/bad")
+        } else if (op == "status") {
+            patch("/api/v1/admin/orders/bad/status").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"PAID\"}")
         } else {
             patch("/api/v1/admin/orders/bad/delivery-status").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"deliveryStatus\":\"READY\"}")
@@ -362,46 +370,6 @@ class AdminOrderControllerTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["missing", "text"])
-    fun `주체가 없거나 숫자가 아닐 때__주문 상태를 변경하면__애플리케이션 호출 없이 401을 돌려준다`(kind: String) {
-        // given
-        if (kind == "text") {
-            current("99")
-        }
-
-        // when
-        val result = mvc.perform(
-            patch("/api/v1/admin/orders/33/status").header("X-User-Role", "ROLE_ADMIN")
-                .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        )
-
-        // then
-        result.andExpect(status().isUnauthorized()).andExpect(content().string(""))
-        confirmVerified(orders)
-    }
-
-    @Test
-    fun `관리자가 거부됐거나 없는 주문일 때__주문 상태를 변경하면__원래의 403과 400을 돌려준다`() {
-        // given
-        current(7L)
-
-        every { orders.updateStatus(7, 33, "PAID") } throws AdministratorRejectedException()
-        every { orders.updateStatus(7, 34, "PAID") } throws IllegalArgumentException("private missing id")
-
-        // when
-        val rejected = mvc.perform(
-            patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        )
-        val missing = mvc.perform(
-            patch("/api/v1/admin/orders/34/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        )
-
-        // then
-        rejected.andExpect(status().isForbidden()).andExpect(jsonPath("\$.code").value("C006"))
-        missing.andExpect(status().isBadRequest()).andExpect(jsonPath("\$.code").value("C001"))
-    }
-
-    @ParameterizedTest
     @ValueSource(strings = ["{}", "{\"status\":null}"])
     fun `주문 상태 값이 null일 때__주문 상태를 변경하면__원래의 500 일반 실패 계열을 유지한다`(body: String) {
         // given
@@ -439,28 +407,13 @@ class AdminOrderControllerTest {
         confirmVerified(orders)
     }
 
-    @Test
-    fun `주문 ID 타입이 잘못됐을 때__주문 상태를 변경하면__원래의 잘못된 타입 계약을 따른다`() {
-        // given
-        current(7L)
-
-        // when
-        val result = mvc.perform(
-            patch("/api/v1/admin/orders/bad/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"PAID\"}"),
-        )
-
-        // then
-        result.andExpect(status().isBadRequest())
-            .andExpect(jsonPath("\$.code").value("C005"))
-            .andExpect(jsonPath("\$.errors[0].field").value("orderId"))
-        confirmVerified(orders)
-    }
-
     companion object {
         fun request(op: String): MockHttpServletRequestBuilder {
             return when (op) {
                 "list" -> get("/api/v1/admin/orders")
                 "get" -> get("/api/v1/admin/orders/33")
+                "status" -> patch("/api/v1/admin/orders/33/status").contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"status\":\"PAID\",\"deliveryStatus\":\"SHIPPING\",\"role\":\"ROLE_ADMIN\",\"userId\":99}")
                 else -> patch("/api/v1/admin/orders/33/delivery-status").contentType(MediaType.APPLICATION_JSON)
                     .content("{\"deliveryStatus\":\"SHIPPING\",\"role\":\"ROLE_ADMIN\",\"userId\":99,\"status\":\"PAID\"}")
             }
@@ -469,7 +422,7 @@ class AdminOrderControllerTest {
         @JvmStatic
         fun principals(): Stream<Arguments> {
             return Stream.of("missing", "text")
-                .flatMap { kind -> Stream.of("list", "get", "write").map { op -> Arguments.of(kind, op) } }
+                .flatMap { kind -> Stream.of("list", "get", "write", "status").map { op -> Arguments.of(kind, op) } }
         }
     }
 }
