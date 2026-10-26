@@ -1,5 +1,7 @@
 package com.pawbridge.backend.contract
 
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.sql.Connection
@@ -8,7 +10,6 @@ import java.util.HexFormat
 import org.slf4j.LoggerFactory
 import org.springframework.core.io.ClassPathResource
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 
@@ -26,6 +27,7 @@ object ContractPostgres {
     const val APP_ROLE = "pawbridge_app"
     const val USER_SCHEMA = "pawbridge_user"
     const val COMMUNITY_SCHEMA = "pawbridge_community"
+    const val ANIMAL_SCHEMA = "pawbridge_animal"
 
     /** The image the packaged-JAR smokes use in CI, pinned by digest. */
     const val DEFAULT_IMAGE =
@@ -42,7 +44,11 @@ object ContractPostgres {
     private val migrations = listOf(
         USER_SCHEMA to "schema/user-service",
         COMMUNITY_SCHEMA to "schema/community-service",
+        ANIMAL_SCHEMA to "schema/animal-service",
     )
+
+    /** Extensions the database owner provisions in public before the animal migrations (they check for them). */
+    private val animalExtensions = listOf("vector", "pg_trgm")
 
     private val running: Running by lazy { start() }
 
@@ -80,10 +86,11 @@ object ContractPostgres {
     /** Every row of every table in the application schemas, so a test can prove it left no trace. */
     fun snapshot(): Map<String, String> {
         val tables = admin.queryForList(
-            "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname IN (?, ?) ORDER BY 1",
+            "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname IN (?, ?, ?) ORDER BY 1",
             String::class.java,
             USER_SCHEMA,
             COMMUNITY_SCHEMA,
+            ANIMAL_SCHEMA,
         )
         return tables.associateWith { table ->
             admin.queryForObject(
@@ -112,7 +119,16 @@ object ContractPostgres {
             )
         container.start()
         val jdbcUrl = "jdbc:postgresql://${container.host}:${container.firstMappedPort}/$DATABASE"
-        val admin = JdbcTemplate(DriverManagerDataSource(jdbcUrl, ADMIN_USER, adminPassword))
+        // Pooled on purpose: one new TCP connection per seeding statement exhausts the ephemeral ports of the host
+        // when the suite (or two suites) run back to back, which shows up as BindException in unrelated tests.
+        val pool = HikariConfig()
+        pool.jdbcUrl = jdbcUrl
+        pool.username = ADMIN_USER
+        pool.password = adminPassword
+        pool.maximumPoolSize = 2
+        pool.minimumIdle = 1
+        pool.poolName = "contract-admin"
+        val admin = JdbcTemplate(HikariDataSource(pool))
         val running = Running(jdbcUrl, adminPassword, appPassword, admin, image)
         prepareDatabase(running)
         return running
@@ -121,6 +137,14 @@ object ContractPostgres {
     private fun prepareDatabase(running: Running) {
         DriverManager.getConnection(running.jdbcUrl, ADMIN_USER, running.adminPassword).use { connection ->
             for ((schema, directory) in migrations) {
+                if (schema == ANIMAL_SCHEMA) {
+                    // Fail the whole suite instead of skipping the schema: a missing schema would only surface later
+                    // as confusing animal test failures, or hide them entirely.
+                    check(provisionAnimalExtensions(connection)) {
+                        "pgvector or pg_trgm is not available in this image; run with " +
+                            "-PcontractPostgresImage=pawbridge-it/postgres:17.11-pgvector-prodmatch"
+                    }
+                }
                 connection.createStatement().use { it.execute("CREATE SCHEMA $schema") }
                 // The reviewed migrations name tables without a schema (V1-V8) or with it (V9 and later),
                 // so every file runs with the owning schema first on the search path.
@@ -140,6 +164,22 @@ object ContractPostgres {
             }
             connection.createStatement().use { it.execute(readResource("schema/app-grants.sql")) }
         }
+    }
+
+    /** True when every extension the animal migrations need is installed in public (the image must provide them). */
+    private fun provisionAnimalExtensions(connection: Connection): Boolean {
+        val available = connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT name FROM pg_available_extensions").use { rows ->
+                generateSequence { if (rows.next()) rows.getString(1) else null }.toSet()
+            }
+        }
+        if (!available.containsAll(animalExtensions)) {
+            return false
+        }
+        for (extension in animalExtensions) {
+            connection.createStatement().use { it.execute("CREATE EXTENSION IF NOT EXISTS $extension SCHEMA public") }
+        }
+        return true
     }
 
     /** `V<number>__name.sql` files of a directory sorted by version number (V10 after V9). */
