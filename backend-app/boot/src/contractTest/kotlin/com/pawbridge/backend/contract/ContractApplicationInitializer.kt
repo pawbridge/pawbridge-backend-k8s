@@ -13,8 +13,7 @@ import org.springframework.context.ConfigurableApplicationContext
  * `postWriteSettings`. The database values point at the shared contract PostgreSQL and the application role.
  *
  * The signing key is random per JVM, so no key is committed. Tests read it back from the registered
- * [PostWriteSettings]. The storage values are valid but unreachable: no contract in this source set writes
- * to object storage.
+ * [PostWriteSettings]. The storage values point at [ContractFakeS3], the in-JVM object storage.
  */
 class ContractApplicationInitializer : ApplicationContextInitializer<ConfigurableApplicationContext> {
     override fun initialize(context: ConfigurableApplicationContext) {
@@ -36,21 +35,22 @@ class ContractApplicationInitializer : ApplicationContextInitializer<Configurabl
             "PAWBRIDGE_DB_PASSWORD" to ContractPostgres.appPassword,
             // Four connections: two concurrent refreshes plus the pool's own idle connection fit comfortably.
             "PAWBRIDGE_DB_POOL_MAX_SIZE" to "4",
-            "PAWBRIDGE_JWT_SECRET" to JWT_SECRET,
-            "PAWBRIDGE_STORAGE_ENDPOINT" to "http://127.0.0.1:39001",
-            "PAWBRIDGE_STORAGE_BUCKET" to "contract-test-bucket",
-            "PAWBRIDGE_STORAGE_PUBLIC_BASE_URL" to "https://storage.contract.invalid",
-            "PAWBRIDGE_STORAGE_OBJECT_PREFIX" to "contract-test/",
-            "PAWBRIDGE_STORAGE_ACCESS_KEY_ID" to "contract-access",
-            "PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY" to "contract-secret",
+            "PAWBRIDGE_JWT_SECRET" to jwtSecret,
+            "PAWBRIDGE_STORAGE_ENDPOINT" to ContractFakeS3.endpoint,
+            "PAWBRIDGE_STORAGE_BUCKET" to ContractFakeS3.BUCKET,
+            "PAWBRIDGE_STORAGE_PUBLIC_BASE_URL" to ContractFakeS3.PUBLIC_BASE_URL,
+            "PAWBRIDGE_STORAGE_OBJECT_PREFIX" to ContractFakeS3.OBJECT_PREFIX,
+            "PAWBRIDGE_STORAGE_ACCESS_KEY_ID" to ContractFakeS3.ACCESS_KEY,
+            "PAWBRIDGE_STORAGE_SECRET_ACCESS_KEY" to ContractFakeS3.SECRET_KEY,
             "PAWBRIDGE_STORAGE_REGION" to "us-east-1",
         )
     }
 
-    private companion object {
-        val JWT_SECRET: String = randomHex(32)
+    companion object {
+        /** The signing secret of this JVM. Tests only compare against it, for example to prove a log does not hold it. */
+        val jwtSecret: String = randomHex(32)
 
-        fun randomHex(byteCount: Int): String {
+        private fun randomHex(byteCount: Int): String {
             val bytes = ByteArray(byteCount)
             SecureRandom().nextBytes(bytes)
             return HexFormat.of().formatHex(bytes)
