@@ -1,0 +1,9 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'pawbridge-backend-app'
+include 'boot', 'user', 'community', 'animal', 'store', 'payment'

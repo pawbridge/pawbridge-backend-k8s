@@ -1,0 +1,193 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot'
+}
+
+sourceSets {
+    architectureTest
+    // Real-database contracts: the whole application on Tomcat against a Testcontainers PostgreSQL.
+    contractTest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    contractTestImplementation.extendsFrom implementation, testImplementation
+    contractTestRuntimeOnly.extendsFrom runtimeOnly, testRuntimeOnly
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.redisson:redisson:3.45.0'
+    implementation 'io.github.openfeign:feign-core:13.5'
+    implementation 'com.bucket4j:bucket4j_jdk17-core:8.13.1'
+    implementation 'org.springframework.data:spring-data-commons'
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.batch:spring-batch-core'
+    implementation 'org.springframework:spring-orm'
+    implementation 'jakarta.persistence:jakarta.persistence-api'
+    testImplementation 'org.hibernate.orm:hibernate-core'
+    implementation 'org.springframework.data:spring-data-jpa'
+    runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'org.springframework:spring-aspects'
+    implementation project(':user')
+    implementation project(':community')
+    implementation project(':animal')
+    implementation project(':store')
+    implementation project(':payment')
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.5'
+    implementation platform('io.awspring.cloud:spring-cloud-aws-dependencies:3.0.3')
+    implementation 'software.amazon.awssdk:s3'
+
+    testImplementation platform('org.springframework.boot:spring-boot-dependencies:3.4.11')
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'org.postgresql:postgresql'
+
+    // Versions come from the Spring Boot 3.4.11 platform declared above. Only the contract test classpath gets them.
+    contractTestImplementation 'org.testcontainers:postgresql'
+    contractTestImplementation 'org.testcontainers:junit-jupiter'
+
+    architectureTestImplementation platform('org.junit:junit-bom:5.11.4')
+    architectureTestImplementation 'org.junit.jupiter:junit-jupiter'
+    architectureTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    architectureTestImplementation gradleTestKit()
+}
+
+tasks.named('bootJar') { archiveFileName = 'pawbridge-backend-app.jar' }
+tasks.named('jar') { enabled = false }
+
+// TestKit has a Gradle logging provider; isolate it from Spring/compatibility tests.
+tasks.register('architectureTest', Test) {
+    group = 'verification'
+    description = 'Exercises the production Gradle boundary guard in isolated TestKit fixtures.'
+    testClassesDirs = sourceSets.architectureTest.output.classesDirs
+    classpath = sourceSets.architectureTest.runtimeClasspath
+    shouldRunAfter tasks.named('test')
+    systemProperty 'test.gradle.home', gradle.gradleHomeDir.absolutePath
+    systemProperty 'architecture.guard.file', rootProject.file('gradle/architecture.gradle').absolutePath
+    systemProperty 'architecture.gradle.user.home', gradle.gradleUserHomeDir.absolutePath
+}
+
+// architectureTest is not part of check: it runs in the separate architecture CI job.
+
+// Database contracts against a real PostgreSQL started by Testcontainers (one container per test JVM).
+// They are not part of check: Docker is required, so they run in their own CI job on pushes to dev.
+// contractTest runs both variants one after the other; the JVM time zone is fixed per task because
+// user.timezone cannot be switched inside a running JVM.
+def registerContractTest = { String taskName, String zone, String taskDescription, Closure platform ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = taskDescription
+        testClassesDirs = sourceSets.contractTest.output.classesDirs
+        classpath = sourceSets.contractTest.runtimeClasspath
+        useJUnitPlatform(platform)
+        maxHeapSize = '768m'
+        systemProperty 'user.timezone', zone
+        systemProperty 'pawbridge.contract.expected-zone', zone
+        // The permission contracts revoke and restore privileges database-wide, so nothing may run in parallel.
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        // Testcontainers 1.20 (Spring Boot 3.4 platform) asks the Docker daemon for API 1.32, which Docker Engine 29
+        // refuses. 1.44 is the minimum of Engine 29 and is served by every Engine since 25; override with
+        // -PdockerApiVersion=... for another daemon.
+        systemProperty 'api.version', project.findProperty('dockerApiVersion') ?: '1.44'
+        systemProperty 'pawbridge.contract.legacy-root', rootProject.projectDir.parentFile.absolutePath
+        if (project.hasProperty('contractPostgresImage')) {
+            systemProperty 'pawbridge.contract.postgres-image', project.property('contractPostgresImage')
+        }
+        filter { failOnNoMatchingTests = true }
+        // A contract that did not run proves nothing: no tests or any skipped test fails the task.
+        afterSuite { descriptor, result ->
+            if (descriptor.parent == null && (result.testCount == 0 || result.skippedTestCount > 0)) {
+                throw new GradleException('Contract tests must execute without skipped tests')
+            }
+        }
+        outputs.upToDateWhen { false }
+    }
+}
+
+// The packaged-JAR contracts start the real bootJar output as a child process; they have their own task (jarSmokeTest).
+registerContractTest('contractTestUtc', 'UTC',
+        'Runs every database contract against PostgreSQL with the JVM in UTC.') { excludeTags 'packaged-jar' }
+registerContractTest('contractTestSeoul', 'Asia/Seoul',
+        'Runs the time-zone sensitive database contracts with the JVM in Asia/Seoul.') {
+    includeTags 'timezone-sensitive'
+}
+tasks.named('contractTestSeoul') { mustRunAfter tasks.named('contractTestUtc') }
+
+// The real bootJar output as a process: startup, management and public ports, a public read, an authenticated write,
+// refused starts and a clean SIGTERM shutdown, against the same Testcontainers PostgreSQL. It always builds the JAR first.
+registerContractTest('jarSmokeTest', 'UTC',
+        'Starts the packaged bootJar against PostgreSQL and checks startup, requests, refusals and shutdown.') {
+    includeTags 'packaged-jar'
+}
+tasks.named('jarSmokeTest') {
+    dependsOn tasks.named('bootJar')
+    systemProperty 'pawbridge.contract.jar', layout.buildDirectory.file('libs/pawbridge-backend-app.jar').get().asFile.absolutePath
+}
+
+tasks.register('contractTest') {
+    group = 'verification'
+    description = 'Runs the database contracts in UTC and the time-zone sensitive ones in Asia/Seoul.'
+    dependsOn tasks.named('contractTestUtc'), tasks.named('contractTestSeoul')
+}
+
+// Actual database contracts use an explicit disposable fixture, never the ordinary unit-test task.
+tasks.named('test') {
+    useJUnitPlatform { excludeTags 'owned-postgresql' }
+}
+tasks.register('ownedPostgresqlTest', Test) {
+    group = 'verification'
+    description = 'Runs selected contracts only against an explicitly owned synthetic PostgreSQL fixture.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'owned-postgresql' }
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    filter { failOnNoMatchingTests = true }
+    doFirst {
+        // Gradle 8.14.3 stores --tests separately from configured includes; both filters intersect.
+        def legacyClass = 'com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest'
+        def commandLineIncludes = filter.getCommandLineIncludePatterns()
+        def legacySelection = commandLineIncludes.size() == 1 && filter.includePatterns.isEmpty() &&
+                filter.excludePatterns.isEmpty() && commandLineIncludes.every { name ->
+                    name == legacyClass || (name.startsWith(legacyClass + '.') &&
+                            name.substring(legacyClass.length() + 1) ==~ /[A-Za-z_$][A-Za-z0-9_$]*/)
+                }
+        def legacyFixture = System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') == 'owned-fixture-only' && legacySelection
+        if (!legacyFixture) {
+            def settingsEnvironment = System.getenv('PAWBRIDGE_OWNED_SETTINGS_ENV')
+            def settingsPath = settingsEnvironment ==~ /P[1-9][0-9]*_PG_SETTINGS/ ? System.getenv(settingsEnvironment) : null
+            def validPath = false
+            if (settingsPath != null && !settingsPath.isBlank()) {
+                try {
+                    def selected = java.nio.file.Path.of(settingsPath)
+                    validPath = selected.isAbsolute() && selected.normalize() == selected &&
+                            java.nio.file.Files.isRegularFile(selected, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                } catch (Exception ignored) {
+                    // Do not include a private path or cause in Gradle diagnostics.
+                }
+            }
+            if (!validPath) {
+                throw new GradleException('An explicit owned PostgreSQL settings file is required')
+            }
+        }
+    }
+    afterSuite { descriptor, result ->
+        if (descriptor.parent == null && (result.testCount == 0 || result.skippedTestCount > 0)) {
+            throw new GradleException('Owned PostgreSQL contracts must execute without skipped tests')
+        }
+    }
+    outputs.upToDateWhen { false }
+}

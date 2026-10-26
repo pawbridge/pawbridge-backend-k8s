@@ -1,0 +1,108 @@
+plugins {
+    id 'base'
+    id 'org.springframework.boot' version '3.4.11' apply false
+    // Kotlin 1.9.25 is the version managed by the Spring Boot 3.4.11 BOM (kotlin.version).
+    id 'org.jetbrains.kotlin.jvm' version '1.9.25' apply false
+    id 'org.jetbrains.kotlin.plugin.spring' version '1.9.25' apply false
+    id 'org.jetbrains.kotlin.plugin.jpa' version '1.9.25' apply false
+}
+
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
+allprojects {
+    group = 'com.pawbridge.backend'
+    version = '0.1.0-SNAPSHOT'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    // Every module accepts Kotlin next to Java: Kotlin compiles first and Java sees its classes,
+    // and a module without .kt files skips the Kotlin compiler (NO-SOURCE). The plugin is applied
+    // here, before each module script: applied from the plugins.withId('java') callback below,
+    // KGP 1.9.25 fails with "KotlinPluginLifecycle cannot be started in ProjectState 'EXECUTED'".
+    apply plugin: 'org.jetbrains.kotlin.jvm'
+    // all-open for Spring stereotypes, so @Configuration/@Transactional proxies still work.
+    apply plugin: 'org.jetbrains.kotlin.plugin.spring'
+    // no-arg constructors for @Entity/@Embeddable/@MappedSuperclass, as Hibernate requires.
+    apply plugin: 'org.jetbrains.kotlin.plugin.jpa'
+
+    // Coverage is reported only (no verification rules). The jacoco plugin ships with Gradle.
+    apply plugin: 'jacoco'
+
+    kotlin {
+        jvmToolchain(21)
+    }
+
+    // Keep JPA types non-final like their Java counterparts so Hibernate can still proxy them.
+    allOpen {
+        annotation('jakarta.persistence.Entity')
+        annotation('jakarta.persistence.MappedSuperclass')
+        annotation('jakarta.persistence.Embeddable')
+    }
+
+    tasks.withType(KotlinCompile).configureEach {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_21
+            // Treat Spring's @NonNull/@Nullable (JSR-305) as real Kotlin nullability.
+            freeCompilerArgs.add('-Xjsr305=strict')
+            // Write type-use annotations such as List<@NotNull UUID> to the class file like javac does;
+            // Bean Validation container element constraints are read from them.
+            freeCompilerArgs.add('-Xemit-jvm-type-annotations')
+        }
+    }
+
+    plugins.withId('java') {
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(21)
+            }
+        }
+
+        tasks.withType(JavaCompile).configureEach {
+            options.encoding = 'UTF-8'
+            options.release = 21
+        }
+
+        dependencies {
+            // Versions come from the Spring Boot platform each module already imports.
+            implementation 'org.jetbrains.kotlin:kotlin-reflect'
+            implementation 'com.fasterxml.jackson.module:jackson-module-kotlin'
+            testImplementation platform('org.junit:junit-bom:5.11.4')
+            testImplementation 'org.junit.jupiter:junit-jupiter'
+            testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+            // Test doubles and fake data shared by every module (versions pinned here, once):
+            // MockK 1.13.x targets Kotlin 1.9, springmockk 4.0.x targets Spring Boot 3, Datafaker 2.x needs Java 17+.
+            testImplementation 'io.mockk:mockk:1.13.17'
+            testImplementation 'com.ninja-squad:springmockk:4.0.2'
+            testImplementation 'net.datafaker:datafaker:2.4.2'
+        }
+
+        tasks.withType(Test).configureEach {
+            useJUnitPlatform()
+            maxHeapSize = '256m'
+            maxParallelForks = 1
+        }
+
+        tasks.named('test') {
+            finalizedBy tasks.named('jacocoTestReport')
+        }
+
+        tasks.named('jacocoTestReport') {
+            dependsOn tasks.named('test')
+            reports {
+                xml.required = true
+                html.required = true
+            }
+        }
+    }
+}
+
+apply from: 'gradle/architecture.gradle'
+
+tasks.named('check') {
+    dependsOn subprojects.collect { "${it.path}:check" }
+}

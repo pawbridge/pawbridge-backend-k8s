@@ -1,0 +1,441 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        // Build-time bytecode analysis only; never part of an application classpath.
+        classpath 'com.tngtech.archunit:archunit:1.5.1'
+    }
+}
+
+import com.tngtech.archunit.core.importer.ClassFileImporter
+import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.artifacts.result.ResolvedDependencyResult
+import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
+import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.language.jvm.tasks.ProcessResources
+
+// Business dependencies are a DAG. Boot is the sole composition/packaging root.
+def allowedDependencies = [
+    ':boot'     : [':user', ':community', ':animal', ':store', ':payment'] as Set,
+    ':user'     : [':store', ':animal'] as Set,
+    ':community': [':user'] as Set,
+    ':animal'   : [] as Set,
+    ':store'    : [] as Set,
+    ':payment'  : [':store'] as Set
+]
+def businessModules = [':user', ':community', ':animal', ':store', ':payment'] as Set
+
+def rejectArchitecture = { String detail ->
+    throw new GradleException("Architecture violation: ${detail}")
+}
+
+// Run the declaration preflight before Gradle constructs producer task dependencies.
+// Otherwise a forbidden cycle can fail as a compileJava task cycle before the guard runs.
+def verifyDeclaredGraph = {
+    if (rootProject.plugins.hasPlugin('java-base') ||
+        rootProject.extensions.findByType(SourceSetContainer) != null) {
+        rejectArchitecture('root project is a build aggregator and must not apply Java production plugins')
+    }
+    def expectedProjects = allowedDependencies.keySet()
+    if (rootProject.subprojects.collect { it.path }.toSet() != expectedProjects) {
+        rejectArchitecture('only boot, user, community, animal, store and payment projects are allowed')
+    }
+    if (!gradle.includedBuilds.empty) {
+        rejectArchitecture('included builds are not allowed in this isolated application')
+    }
+    rootProject.subprojects.each { module ->
+        if (businessModules.contains(module.path) && module.plugins.hasPlugin('org.springframework.boot')) {
+            rejectArchitecture("business modules must not apply Spring Boot plugin: ${module.path}")
+        }
+        if (businessModules.contains(module.path) && !module.plugins.hasPlugin('java-library')) {
+            rejectArchitecture("business modules must apply java-library plugin: ${module.path}")
+        }
+        def sourceSets = module.extensions.findByType(SourceSetContainer)
+        if (sourceSets == null) {
+            rejectArchitecture("${module.path} must apply a Java production plugin")
+        }
+        def main = sourceSets.named('main').get()
+        [main.compileClasspathConfigurationName,
+         main.runtimeClasspathConfigurationName,
+         main.annotationProcessorConfigurationName].each { name ->
+            module.configurations.getByName(name).allDependencies.withType(ProjectDependency).each { dependency ->
+                def target = dependency.dependencyProject.path
+                if (!expectedProjects.contains(target) || !allowedDependencies[module.path].contains(target)) {
+                    rejectArchitecture("forbidden project dependency ${module.path} -> ${target}")
+                }
+            }
+        }
+    }
+}
+
+def verifyArchitecture = tasks.register('verifyArchitecture') {
+    group = 'verification'
+    description = 'Checks the boot/user/community/animal/store/payment production Gradle dependency graph and input isolation.'
+
+    doLast {
+        verifyDeclaredGraph()
+        def expectedProjects = allowedDependencies.keySet()
+        def checkTarget = { String from, def target ->
+            if (!(target instanceof ProjectComponentIdentifier)) {
+                return
+            }
+            if (!expectedProjects.contains(from) || target.build.buildPath != ':' ||
+                !expectedProjects.contains(target.projectPath)) {
+                rejectArchitecture("${from} references a root, unknown or composite project: ${target}")
+            }
+            if (!allowedDependencies[from].contains(target.projectPath)) {
+                rejectArchitecture("forbidden project dependency ${from} -> ${target.projectPath}")
+            }
+        }
+
+        // Query locations only: the guard does not depend on or execute producer tasks.
+        // Keep project directories as a fallback, and also follow relocated outputs.
+        def productionLocations = rootProject.subprojects.collectEntries { candidate ->
+            def output = candidate.extensions.getByType(SourceSetContainer).named('main').get().output
+            def locations = [candidate.projectDir, candidate.layout.buildDirectory.get().asFile]
+            locations.addAll(output.files)
+            candidate.tasks.withType(AbstractArchiveTask).each { archive ->
+                def artifact = archive.archiveFile.orNull
+                if (artifact != null) {
+                    locations.add(artifact.asFile)
+                }
+            }
+            [(candidate): locations.collect { it.canonicalFile.toPath() }.toSet()]
+        }
+
+        rootProject.subprojects.each { module ->
+            def expectedDirectory = rootProject.file(module.name).canonicalFile
+            if (module.projectDir.canonicalFile != expectedDirectory) {
+                rejectArchitecture("${module.path} must use its own application directory")
+            }
+            def main = module.extensions.getByType(SourceSetContainer).named('main').get()
+            main.allSource.srcDirs.each { directory ->
+                if (!directory.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    rejectArchitecture("${module.path} production sources must stay inside the module")
+                }
+            }
+
+            // Include compileOnly and processors even though runtimeClasspath omits them.
+            def configurations = [main.compileClasspathConfigurationName,
+                                  main.runtimeClasspathConfigurationName,
+                                  main.annotationProcessorConfigurationName].collect {
+                module.configurations.getByName(it)
+            }
+            // Only exact artifacts resolved from a verified project graph may arrive transitively.
+            // Directory ownership alone does not authorize arbitrary files(...) or classpath overrides.
+            def resolvedProjectArtifacts = [:].withDefault { [] as Set }
+            configurations.each { configuration ->
+                configuration.incoming.resolutionResult.allDependencies.each { dependency ->
+                    if (dependency instanceof ResolvedDependencyResult &&
+                        dependency.selected.id instanceof ProjectComponentIdentifier) {
+                        def owner = dependency.from.id
+                        if (!(owner instanceof ProjectComponentIdentifier)) {
+                            rejectArchitecture("external dependency imports project ${dependency.selected.id}")
+                        }
+                        checkTarget(owner.projectPath, dependency.selected.id)
+                    }
+                }
+                // Fail on unresolved dependencies too; an incomplete graph is not evidence.
+                configuration.files
+                configuration.incoming.artifacts.artifacts.each { artifact ->
+                    def component = artifact.id.componentIdentifier
+                    if (component instanceof ProjectComponentIdentifier && component.build.buildPath == ':' &&
+                        expectedProjects.contains(component.projectPath)) {
+                        resolvedProjectArtifacts[artifact.file.canonicalFile.toPath()].add(component.projectPath)
+                    }
+                }
+            }
+            // File collections can bypass ProjectDependency. Check actual paths, including
+            // relocated outputs, compiler overrides, sourcepath and resource-copy inputs.
+            def compileJava = module.tasks.named(main.compileJavaTaskName).get()
+            compileJava.source.files.each { source ->
+                if (!source.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    rejectArchitecture("${module.path} production compiler sources must stay inside the module")
+                }
+            }
+            compileJava.options.sourcepath?.files?.each { directory ->
+                if (!directory.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    rejectArchitecture("${module.path} production compiler sourcepath must stay inside the module")
+                }
+            }
+            // Kotlin compiles the same main source set first. Its task type is not referenced here
+            // because TestKit fixtures apply this guard without the Kotlin Gradle plugin.
+            def compileKotlin = module.tasks.findByName(main.getCompileTaskName('kotlin'))
+            compileKotlin?.sources?.files?.each { source ->
+                if (!source.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    rejectArchitecture("${module.path} production compiler sources must stay inside the module")
+                }
+            }
+            def processResources = module.tasks.named(main.processResourcesTaskName).get()
+            processResources.source.files.each { resource ->
+                if (!resource.canonicalFile.toPath().startsWith(module.projectDir.canonicalFile.toPath())) {
+                    rejectArchitecture("${module.path} production resource inputs must stay inside the module")
+                }
+            }
+            def productionClasspaths = [main.compileClasspath, main.runtimeClasspath,
+                                        compileJava.classpath, compileJava.options.annotationProcessorPath,
+                                        module.configurations.getByName(main.annotationProcessorConfigurationName),
+                                        compileKotlin?.libraries]
+                                        .findAll { it != null }
+            productionClasspaths.each { classpath ->
+                classpath.files.each { artifact ->
+                    def artifactPath = artifact.canonicalFile.toPath()
+                    def owners = productionLocations.findAll { candidate, locations ->
+                        locations.any { artifactPath.startsWith(it) }
+                    }.keySet()
+                    if (owners.size() > 1) {
+                        rejectArchitecture("${module.path} production classpath has ambiguous output ownership")
+                    }
+                    def owner = owners.empty ? null : owners.first()
+                    if (owner != null && owner != module &&
+                        !allowedDependencies[module.path].contains(owner.path) &&
+                        !resolvedProjectArtifacts[artifactPath].contains(owner.path)) {
+                        rejectArchitecture("forbidden project dependency ${module.path} -> ${owner.path} through files")
+                    }
+                    def repositoryDirectory = rootProject.projectDir.parentFile.canonicalFile.toPath()
+                    if (artifactPath.startsWith(repositoryDirectory) &&
+                        !artifactPath.startsWith(rootProject.projectDir.canonicalFile.toPath())) {
+                        rejectArchitecture("${module.path} production classpath references a sibling service")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Match complete package segments rather than class-name substrings.
+def businessPrefix = 'com.pawbridge.backend.'
+def describeBusinessType = { String name ->
+    def normalized = name
+    while (normalized.endsWith('[]')) {
+        normalized = normalized.substring(0, normalized.length() - 2)
+    }
+    def moduleName = ['user', 'community', 'animal', 'store', 'payment'].find { normalized.startsWith("${businessPrefix}${it}.") }
+    if (moduleName == null) {
+        return null
+    }
+    def localName = normalized.substring("${businessPrefix}${moduleName}.".length())
+    def segments = localName.tokenize('.')
+    def boundary = segments.size() > 1 ? segments[0] : null
+    def role = null
+    if (boundary == 'internal') {
+        // Small contexts may omit the feature segment; larger ones retain feature cohesion.
+        if (segments.size() > 2 && segments[1] in ['domain', 'application', 'web', 'infrastructure']) {
+            role = segments[1]
+        } else if (segments.size() > 3 && segments[2] in ['domain', 'application', 'web', 'infrastructure']) {
+            role = segments[2]
+        }
+    }
+    [name: normalized, module: ":${moduleName}".toString(), boundary: boundary, role: role]
+}
+
+def httpTechnology = { String name ->
+    name.startsWith('java.net.http.') || name in ['java.net.URL', 'java.net.URLConnection',
+        'java.net.HttpURLConnection', 'java.net.JarURLConnection'] ||
+        ['com.sun.net.httpserver.', 'javax.net.', 'jakarta.ws.rs.', 'javax.ws.rs.', 'jakarta.servlet.', 'javax.servlet.',
+         'org.apache.http.', 'org.apache.hc.', 'okhttp3.', 'okio.', 'retrofit2.', 'io.netty.',
+         'reactor.netty.', 'org.glassfish.jersey.', 'io.ktor.client.'].any { name.startsWith(it) }
+}
+
+def jdbcTechnology = { String name ->
+    ['java.sql.', 'javax.sql.', 'org.jooq.', 'org.mybatis.', 'org.apache.ibatis.'].any {
+        name.startsWith(it)
+    }
+}
+
+def jdkTypeCache = [:]
+def isPureJdkType = { String name ->
+    if (!jdkTypeCache.containsKey(name)) {
+        def normalized = name
+        while (normalized.endsWith('[]')) {
+            normalized = normalized.substring(0, normalized.length() - 2)
+        }
+        def allowed = normalized in ['boolean', 'byte', 'char', 'short', 'int', 'long', 'float', 'double', 'void']
+        if (!allowed && !jdbcTechnology(normalized) && !httpTechnology(normalized)) {
+            try {
+                // Platform lookup never initializes or loads application classes and avoids
+                // treating external javax.* packages as if they belonged to the JDK.
+                Class.forName(normalized, false, ClassLoader.getPlatformClassLoader())
+                allowed = true
+            } catch (ClassNotFoundException ignored) {
+                allowed = false
+            }
+        }
+        jdkTypeCache[name] = allowed
+    }
+    jdkTypeCache[name]
+}
+
+// The Kotlin standard library and its nullability annotations are the language runtime that
+// kotlinc references from every class, as javac does java.lang. kotlinx.* libraries
+// (coroutines, serialization) stay ordinary external technology.
+def isLanguageRuntimeType = { String name ->
+    def normalized = name
+    while (normalized.endsWith('[]')) {
+        normalized = normalized.substring(0, normalized.length() - 2)
+    }
+    isPureJdkType(name) || normalized.startsWith('kotlin.') || normalized.startsWith('org.jetbrains.annotations.')
+}
+
+def verifyBusinessPackages = tasks.register('verifyBusinessPackages') {
+    group = 'verification'
+    description = 'Checks actual main bytecode for business API/internal and domain/application boundaries.'
+    dependsOn verifyArchitecture
+
+    doLast {
+        def reject = { String rule, String detail ->
+            throw new GradleException("Business package violation: [${rule}] ${detail}")
+        }
+        def mainOutputs = rootProject.subprojects.collectEntries { module ->
+            def main = module.extensions.getByType(SourceSetContainer).named('main').get()
+            [(module.path): main.output.classesDirs.files.findAll { it.isDirectory() }]
+        }
+        def classFiles = mainOutputs.collectEntries { module, directories ->
+            [(module): directories.collectMany { directory ->
+                rootProject.fileTree(directory).matching { include '**/*.class' }.files
+            }.toSet()]
+        }
+        def actualBusinessCount = businessModules.sum { classFiles[it].size() } as int
+        logger.lifecycle("Business package check: actual business classes=${actualBusinessCount}" +
+            (actualBusinessCount == 0 ? '; no actual business conformance' : ''))
+
+        // Import compiled main outputs only. Test/architectureTest fixtures are neither
+        // production evidence nor inputs to this rule, and the application is never loaded.
+        def paths = mainOutputs.values().flatten().collect { it.toPath() }
+        def classes = new ClassFileImporter().importPaths(paths)
+        def classOwners = [:]
+        classFiles.each { module, files ->
+            mainOutputs[module].each { directory ->
+                files.findAll { it.toPath().startsWith(directory.toPath()) }.each { file ->
+                    def relative = directory.toPath().relativize(file.toPath()).toString()
+                    def name = relative.substring(0, relative.length() - '.class'.length())
+                        .replace(File.separatorChar, '.' as char)
+                    def previous = classOwners.put(name, module)
+                    if (previous != null && previous != module) {
+                        reject('BUSINESS_PACKAGE', "duplicate main class ${name} in ${previous} and ${module}")
+                    }
+                }
+            }
+        }
+        def importedMainNames = classes.collect { it.name }.toSet()
+        def unreadableMainNames = classOwners.keySet() - importedMainNames
+        if (!unreadableMainNames.empty) {
+            reject('BUSINESS_PACKAGE', "main class files were not imported: ${unreadableMainNames.sort()}")
+        }
+        classes.each { type ->
+            def originModule = classOwners[type.name]
+            def origin = describeBusinessType(type.name)
+            if (businessModules.contains(originModule) &&
+                (origin == null || origin.module != originModule ||
+                    !(origin.boundary in ['api', 'internal']) ||
+                    (origin.boundary == 'internal' && origin.role == null))) {
+                reject('BUSINESS_PACKAGE', "${originModule} class ${type.name} must use its own api or internal.[feature.]role package")
+            }
+            if (!businessModules.contains(originModule)) {
+                // Boot owns DI/configuration and may refer to internal implementations.
+                return
+            }
+            def referencedTypes = [:]
+            type.directDependenciesFromSelf.each { dependency ->
+                // Array names may be JVM descriptors; classify the actual element type.
+                referencedTypes[dependency.targetClass.baseComponentType.name] = dependency.description
+            }
+            // ArchUnit's Dependency aggregation covers ordinary generic signatures but
+            // 1.5.1 omits JavaGenericArrayType in that aggregation. Its public JavaType
+            // traversal handles arrays, variables and bounds with a visited set.
+            def signatureTypes = []
+            signatureTypes.addAll(type.typeParameters)
+            if (type.superclass.present) {
+                signatureTypes.add(type.superclass.get())
+            }
+            signatureTypes.addAll(type.interfaces)
+            type.fields.each { signatureTypes.add(it.type) }
+            type.methods.each { signatureTypes.add(it.returnType) }
+            type.codeUnits.each { codeUnit ->
+                signatureTypes.addAll(codeUnit.parameterTypes)
+                signatureTypes.addAll(codeUnit.typeParameters)
+                signatureTypes.addAll(codeUnit.throwsClause.types)
+            }
+            signatureTypes.each { signature ->
+                signature.allInvolvedRawTypes.each { rawType ->
+                    referencedTypes.putIfAbsent(rawType.baseComponentType.name, "signature ${signature.name}")
+                }
+            }
+            referencedTypes.each { targetName, reason ->
+                def target = describeBusinessType(targetName)
+                def detail = "${type.name} -> ${targetName}: ${reason}"
+                if (target != null && classOwners[target.name] != target.module) {
+                    reject('BUSINESS_PACKAGE', "business type must belong to its actual main output: ${targetName}")
+                }
+                if (origin.boundary == 'api') {
+                    // Dependencies plus complete signatures include annotations, throws,
+                    // fields, inheritance and code accesses. Every allowed superclass is
+                    // itself an API (or JDK) type, so inherited API contracts are checked too.
+                    def allowedApi = target != null && target.boundary == 'api' &&
+                        (target.module == origin.module || allowedDependencies[origin.module].contains(target.module))
+                    if (!allowedApi && !isLanguageRuntimeType(targetName)) {
+                        reject('API_SIGNATURE', detail)
+                    }
+                }
+                if (origin.role == 'domain') {
+                    def ownDomain = target != null && target.module == origin.module && target.role == 'domain'
+                    if (!ownDomain && !isLanguageRuntimeType(targetName)) {
+                        reject('DOMAIN_JDK_ONLY', detail)
+                    }
+                }
+                if (target != null && target.module != origin.module &&
+                    (target.boundary != 'api' || !allowedDependencies[origin.module].contains(target.module))) {
+                    reject('BUSINESS_INTERNAL', detail)
+                }
+                if (origin.role == 'application') {
+                    def forbiddenOwnRole = target != null && target.module == origin.module &&
+                        target.role in ['web', 'infrastructure']
+                    def allowedTransactionType = targetName in [
+                        'org.springframework.transaction.annotation.Transactional',
+                        'org.springframework.transaction.annotation.Propagation',
+                        'org.springframework.transaction.annotation.Isolation']
+                    def forbiddenSpring = targetName.startsWith('org.springframework.') && !allowedTransactionType
+                    def forbiddenPersistence = ['jakarta.persistence.', 'javax.persistence.', 'org.hibernate.',
+                        'jakarta.transaction.', 'javax.transaction.', 'feign.'].any { targetName.startsWith(it) }
+                    if (forbiddenOwnRole || forbiddenSpring || forbiddenPersistence ||
+                        jdbcTechnology(targetName) || httpTechnology(targetName)) {
+                        reject('APPLICATION_DEPENDENCY', detail)
+                    }
+                }
+            }
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    verifyDeclaredGraph()
+    // Main classes only: depending on :check or architectureTest here would recurse
+    // into TestKit, whose fixtures deliberately use this same production guard entry.
+    verifyBusinessPackages.configure {
+        dependsOn rootProject.subprojects.collect { module -> module.tasks.named('classes') }
+    }
+}
+
+tasks.named('check') {
+    dependsOn verifyArchitecture, verifyBusinessPackages
+}
+subprojects {
+    plugins.withId('java') {
+        tasks.withType(JavaCompile).configureEach {
+            dependsOn verifyArchitecture
+        }
+        // Lazy name match: Kotlin compile tasks exist only where the Kotlin plugin is applied.
+        tasks.named { it ==~ /compile\w*Kotlin/ }.configureEach {
+            dependsOn verifyArchitecture
+        }
+        tasks.withType(ProcessResources).configureEach {
+            dependsOn verifyArchitecture
+        }
+        tasks.named('check') {
+            dependsOn verifyArchitecture, verifyBusinessPackages
+        }
+    }
+}

@@ -1,0 +1,211 @@
+package com.pawbridge.backend.community.internal.note.infrastructure
+
+import io.mockk.confirmVerified
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertArrayEquals
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
+import org.junit.jupiter.params.provider.ValueSource
+import org.springframework.dao.DataAccessResourceFailureException
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.support.AbstractPlatformTransactionManager
+import org.springframework.transaction.support.DefaultTransactionStatus
+import org.springframework.transaction.support.TransactionSynchronizationManager
+import org.springframework.transaction.support.TransactionTemplate
+import java.sql.Timestamp
+import java.time.Clock
+import java.time.Instant
+
+class JdbcNoteExpiryTest {
+
+    @ParameterizedTest
+    @ValueSource(ints = [0, 17])
+    fun `만료된 쪽지가 0건이거나 있을 때__만료 처리를 하면__트랜잭션 안에서 시각을 한 번 재고 두 배치를 지우고 쪽지 수만 돌려준다`(
+        deletedNotes: Int,
+    ) {
+        // given
+        val fixture = Fixture()
+        fixture.jdbc.deletedNotes = deletedNotes
+
+        every { fixture.clock.instant() } answers { fixture.sampleClock() }
+
+        // when
+        val expired = fixture.expiry.expire()
+
+        // then
+        assertEquals(deletedNotes, expired)
+        assertEquals(listOf("begin", "clock", "notes", "requests", "commit", "cleanup"), fixture.events)
+        assertEquals(listOf(NOTES_SQL, REQUESTS_SQL), fixture.jdbc.calls.map { it.sql })
+        assertArrayEquals(arrayOf<Any?>(Timestamp.from(NOW)), fixture.jdbc.calls[0].arguments)
+        assertArrayEquals(arrayOf<Any?>(Timestamp.from(NOW.minusSeconds(172800))), fixture.jdbc.calls[1].arguments)
+        assertEquals(1, fixture.manager.commits)
+        assertEquals(0, fixture.manager.rollbacks)
+        fixture.assertReturned()
+    }
+
+    @ParameterizedTest
+    @EnumSource(FailurePhase::class)
+    fun `시계나 두 삭제 중 하나가 실패할 때__만료 처리를 하면__같은 예외를 전파하고 이후 SQL 없이 롤백을 마친다`(
+        phase: FailurePhase,
+    ) {
+        // given
+        val fixture = Fixture()
+        val failure: RuntimeException =
+            if (phase == FailurePhase.CLOCK) {
+                IllegalStateException("synthetic clock")
+            } else {
+                DataAccessResourceFailureException("synthetic SQL")
+            }
+        if (phase == FailurePhase.CLOCK) {
+            fixture.clockFailure = failure
+        } else {
+            fixture.jdbc.failedStatement = if (phase == FailurePhase.NOTES) "notes" else "requests"
+            fixture.jdbc.failure = failure
+        }
+
+        every { fixture.clock.instant() } answers { fixture.sampleClock() }
+
+        // when
+        val thrown = assertThrows(RuntimeException::class.java) { fixture.expiry.expire() }
+
+        // then
+        assertSame(failure, thrown)
+        val expected = ArrayList(listOf("begin", "clock"))
+        if (phase != FailurePhase.CLOCK) {
+            expected.add("notes")
+        }
+        if (phase == FailurePhase.REQUESTS) {
+            expected.add("requests")
+        }
+        expected.addAll(listOf("rollback", "cleanup"))
+        assertEquals(expected, fixture.events)
+        assertEquals(
+            if (phase == FailurePhase.CLOCK) 0 else if (phase == FailurePhase.NOTES) 1 else 2,
+            fixture.jdbc.calls.size,
+        )
+        assertEquals(0, fixture.manager.commits)
+        assertEquals(1, fixture.manager.rollbacks)
+        fixture.assertReturned()
+    }
+
+    enum class FailurePhase { CLOCK, NOTES, REQUESTS }
+
+    private class Call(val sql: String, val arguments: Array<out Any?>)
+
+    private class Fixture {
+        val events = ArrayList<String>()
+        val manager = Manager(events)
+        val jdbc = RecordingJdbc(manager, events)
+        val clock: Clock = mockk<Clock>()
+        val expiry: JdbcNoteExpiry
+        var clockFailure: RuntimeException? = null
+
+        init {
+            val transaction = TransactionTemplate(manager)
+            transaction.timeout = 15
+            expiry = JdbcNoteExpiry(jdbc, transaction, clock)
+        }
+
+        fun sampleClock(): Instant {
+            assertTrue(manager.active)
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            events.add("clock")
+            if (clockFailure != null) {
+                throw clockFailure!!
+            }
+            return NOW
+        }
+
+        fun assertReturned() {
+            verify(exactly = 1) { clock.instant() }
+            confirmVerified(clock)
+            assertFalse(manager.active)
+            assertFalse(TransactionSynchronizationManager.isSynchronizationActive())
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+        }
+    }
+
+    private class RecordingJdbc(
+        private val manager: Manager,
+        private val events: MutableList<String>,
+    ) : JdbcTemplate() {
+        val calls = ArrayList<Call>()
+        var deletedNotes = 0
+        var failedStatement: String? = null
+        var failure: RuntimeException? = null
+
+        override fun update(sql: String, vararg arguments: Any?): Int {
+            assertTrue(manager.active)
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+            val normalized = sql.replace(Regex("\\s+"), " ").trim()
+            val statement: String
+            if (NOTES_SQL == normalized) {
+                statement = "notes"
+            } else {
+                assertEquals(REQUESTS_SQL, normalized)
+                statement = "requests"
+            }
+            calls.add(Call(normalized, arguments.clone()))
+            events.add(statement)
+            if (statement == failedStatement) {
+                throw failure!!
+            }
+            return if (statement == "notes") deletedNotes else 11
+        }
+    }
+
+    /** Real Spring synchronization with recording JDBC/TM; not database rollback, row-lock or FK evidence. */
+    private class Manager(private val events: MutableList<String>) : AbstractPlatformTransactionManager() {
+        var active = false
+        var commits = 0
+        var rollbacks = 0
+
+        override fun doGetTransaction(): Any = Any()
+
+        override fun doBegin(transaction: Any, definition: TransactionDefinition) {
+            assertEquals(15, definition.timeout)
+            assertFalse(definition.isReadOnly)
+            events.add("begin")
+            active = true
+        }
+
+        override fun doCommit(status: DefaultTransactionStatus) {
+            events.add("commit")
+            commits++
+            active = false
+        }
+
+        override fun doRollback(status: DefaultTransactionStatus) {
+            events.add("rollback")
+            rollbacks++
+            active = false
+        }
+
+        override fun doCleanupAfterCompletion(transaction: Any) {
+            active = false
+            events.add("cleanup")
+        }
+    }
+
+    private companion object {
+        val NOW: Instant = Instant.parse("2031-01-01T00:00:00.123456789Z")
+        const val NOTES_SQL =
+            "WITH expired_notes AS MATERIALIZED ( SELECT note_id FROM pawbridge_community.private_notes " +
+                "WHERE expires_at <= ? ORDER BY expires_at LIMIT 300 FOR UPDATE SKIP LOCKED ) " +
+                "DELETE FROM pawbridge_community.private_notes WHERE note_id IN (SELECT note_id FROM expired_notes)"
+        const val REQUESTS_SQL =
+            "WITH expired_requests AS MATERIALIZED ( SELECT sender_id, request_id " +
+                "FROM pawbridge_community.private_note_requests WHERE note_id IS NULL AND created_at < ? " +
+                "ORDER BY created_at LIMIT 300 FOR UPDATE SKIP LOCKED ) " +
+                "DELETE FROM pawbridge_community.private_note_requests " +
+                "WHERE (sender_id, request_id) IN (SELECT sender_id, request_id FROM expired_requests)"
+    }
+}

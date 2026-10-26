@@ -1,0 +1,66 @@
+name: Backend app check
+
+# Minimal GitHub check: the backend must compile (main and every test source set) and package
+# the executable JAR. Unit, architecture and Testcontainers contract tests run locally before
+# merge (see backend-app/README.md "검증"), so this workflow does not run them.
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile and package the backend JAR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend-app
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle with a dependency cache written only by dev pushes
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          validate-wrappers: true
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Compile every source set and package the executable JAR
+        run: >-
+          bash ./gradlew --max-workers=2 -Dorg.gradle.parallel=true
+          projects testClasses :boot:architectureTestClasses :boot:contractTestClasses :boot:bootJar
+
+  ci-result:
+    name: Backend app CI result
+    needs: [build]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require a successful build
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          if [ "$BUILD_RESULT" != success ]; then
+            printf 'Backend build failed: %s\n' "$BUILD_RESULT" >&2
+            exit 1
+          fi
