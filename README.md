@@ -4,7 +4,9 @@
 
 2026-10-19 기준 운영 환경은 Mac의 Docker Compose이며, PostgreSQL 17과 pgvector를 사용합니다. 기존 Java 17 마이크로서비스를 운영하고, 동물 사진 검색·추천용 Python AI는 별도 Mac 네이티브 프로세스로 실행합니다. 현재 Mac 운영에서도 Kafka·Debezium CDC·Redis를 계속 사용합니다.
 
-`dev`에서는 Java 21 기반 [모듈형 모놀리스 backend-app](https://github.com/pawbridge/pawbridge-backend-k8s/tree/dev/backend-app)을 개발·통합합니다.
+`dev`에서는 Java 21 기반 [모듈형 모놀리스 backend-app](https://github.com/pawbridge/pawbridge-backend-services/tree/dev/backend-app)을 개발·통합합니다.
+
+`python/`에는 동물 사진 검색·추천 AI와 사진 압축 서비스가 있습니다. 2026-10-26 기존 `pawbridge/pawbridge-python` 저장소의 dev(`844facb6`)를 Git 이력째 가져왔고, 원본 저장소는 보관용으로 남깁니다. 저장소 이름은 같은 날 `pawbridge-backend-k8s`에서 `pawbridge-backend-services`로 바뀌었으며 옛 주소는 GitHub이 새 주소로 넘겨줍니다.
 
 | 브랜치 | 역할 |
 | --- | --- |
