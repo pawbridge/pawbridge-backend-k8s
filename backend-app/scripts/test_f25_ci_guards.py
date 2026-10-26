@@ -423,8 +423,8 @@ class F25GuardTest(unittest.TestCase):
         workflow = (f25.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('scripts/test_f25_ci_guards.py')
         stage = workflow[boundary:]
-        self.assertLess(workflow.index('python3 scripts/f24_ci.py smoke'), boundary)
-        self.assertLess(stage.index('python3 scripts/f25_ci.py prepare'), stage.index('python3 scripts/f25_ci.py smoke'))
+        self.assertLess(workflow.index('python3 scripts/f24_ci.py prepare'), boundary)
+        self.assertIn('python3 scripts/f25_ci.py prepare', stage)
         self.assertNotIn('noteBlockCreateCompatibility', workflow)
         self.assertNotIn('python3 scripts/f25_ci.py results', workflow)
         cleanup=stage.index('- name: Remove only the owned disposable fixture');self.assertIn('if: always()',stage[cleanup:cleanup+180]);self.assertNotRegex(stage[:cleanup],r'python3 scripts/f(?:[2-9]|1[0-9]|2[0-4])_ci\.py (?:prepare|smoke)')

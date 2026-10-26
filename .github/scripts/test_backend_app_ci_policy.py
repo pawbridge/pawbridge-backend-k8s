@@ -428,7 +428,15 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         reproduced = []
         full_only = "matrix.profile == 'full'"
 
+        # F17 through F29 became Spring contract tests, so their smokes left SHARDS, but each fixture preparation
+        # step stays and keeps the condition of the shard its smoke used to run in.
+        retired = {'jar_f17': 1, 'jar_f18': 2, 'jar_f19': 2, 'jar_f20': 2, 'jar_f21': 2, 'jar_f22': 2,
+                   'jar_f23': 3, 'jar_f24': 3, 'jar_f25': 3, 'jar_f26': 3, 'jar_f27': 3,
+                   'jar_f28': 4, 'jar_f29': 4}
+
         def shard_of(key):
+            if key in retired:
+                return retired[key]
             return next(shard for shard, keys in shards.items() if key in keys)
 
         def runs_from(shard):
@@ -494,7 +502,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
         self.assertIn('run: python3 scripts/f4_ci.py prepare-shape\n', shape)
         for (mode, shard), actual in selected.items():
             self.assertEqual(list(backend_contract_profile.expected_smokes(mode, shard)), actual)
-        self.assertEqual(['jar_f' + str(n) for n in (12, 13, 14) + tuple(range(17, 30))] + ['jar_f31'],
+        self.assertEqual(['jar_f' + str(n) for n in (12, 13, 14)] + ['jar_f31'],
                          sorted(token_conditions, key=backend_contract_profile.ALL_SMOKES.index))
         for key, conditions in token_conditions.items():
             self.assertEqual(smoke_conditions[key], conditions, key)
@@ -543,7 +551,7 @@ class BackendAppCiPolicyTest(unittest.TestCase):
 
     def test_given_late_member_and_administrator_fixtures__when_wiring__then_keep_order_and_the_final_cleanup(self):
         check = self.job('check')
-        keys = ('jar_f29', 'fixture_member_cleanup', 'jar_f31', 'owned_cleanup')
+        keys = ('fixture_post_unrelated_f29', 'fixture_member_cleanup', 'jar_f31', 'owned_cleanup')
         for first, second in zip(keys, keys[1:]):
             self.assertLess(check.index('id: ' + first + '\n'), check.index('id: ' + second + '\n'))
         parts = re.split(r'(?=^      - name: )', check, flags=re.MULTILINE)[1:]

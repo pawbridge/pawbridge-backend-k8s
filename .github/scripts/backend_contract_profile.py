@@ -22,16 +22,16 @@ PILOT_PATHS = frozenset({
     '.github/scripts/test_backend_app_ci_policy.py',
     'backend-app/README.md',
 })
-ALL_SMOKES = tuple('jar_f' + str(number) for number in range(3, 30)) + ('jar_f31',)
-PILOT_SKIPS = tuple('jar_f' + str(number) for number in (16, 17, 19, 21, 22, 23))
+# F17 through F29 (private notes, administrator count, block list, stream, send) run as Spring contract tests in
+# the `contract` job; their fixture preparation steps stay in the workflow until the final packaged-JAR cleanup.
+ALL_SMOKES = tuple('jar_f' + str(number) for number in range(3, 17)) + ('jar_f31',)
+PILOT_SKIPS = tuple('jar_f' + str(number) for number in (16,))
 # The packaged smokes run as parallel matrix shards. Each shard is a fresh runner that re-provisions
 # the fixture from F2 up to its own last stage, then runs only its smokes in the original order.
 # Balanced by measured step time: the later shards pay for more fixture preparation.
 SHARDS = {
-    1: tuple('jar_f' + str(number) for number in range(3, 18)),
-    2: tuple('jar_f' + str(number) for number in range(18, 23)),
-    3: tuple('jar_f' + str(number) for number in range(23, 28)),
-    4: ('jar_f28', 'jar_f29', 'jar_f31'),
+    1: tuple('jar_f' + str(number) for number in range(3, 17)),
+    4: ('jar_f31',),
 }
 # Smokes that leave fixture state a later step reads, mapped to the workflow step that reproduces
 # exactly that state in shards that skip the smoke. The F4 smoke creates the two support tables

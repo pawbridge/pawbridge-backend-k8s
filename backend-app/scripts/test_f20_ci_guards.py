@@ -275,16 +275,15 @@ class F20GuardTest(unittest.TestCase):
     def test_given_workflow__when_adding_f20__then_f19_first_and_always_cleanup(self):
         workflow = (f20.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F20 exact extended ACL')
-        self.assertLess(workflow.index('python3 scripts/f19_ci.py smoke'), boundary); stage = workflow[boundary:]
-        for first, second in (('test_f20_ci_guards.py', 'python3 scripts/f20_ci.py prepare'),
-                              ('python3 scripts/f20_ci.py prepare', 'python3 scripts/f20_ci.py smoke')):
+        self.assertLess(workflow.index('python3 scripts/f19_ci.py prepare'), boundary); stage = workflow[boundary:]
+        for first, second in (('test_f20_ci_guards.py', 'python3 scripts/f20_ci.py prepare'),):  # the packaged smoke moved to the Spring contract tests; the guard file still runs before the fixture is prepared
             self.assertLess(stage.index(first), stage.index(second))
         self.assertNotIn('noteBlockListCompatibility', workflow)
         self.assertNotIn('python3 scripts/f20_ci.py results', workflow)
         cleanup = stage.index('- name: Remove only the owned disposable fixture')
         self.assertIn('if: always()', stage[cleanup:cleanup + 180]); self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-9])_ci\.py (?:prepare|smoke)')
         self.assertNotIn('f20_fixture', workflow)
-        for name in ('f20-fixture-reuse.txt', 'f20-helper-refusal.txt'): self.assertIn(name, workflow)
+        for name in ('f20-helper-refusal.txt',): self.assertIn(name, workflow)
 
     def test_given_f20_test_artifacts__when_filtering_jar__then_reject_without_widening_validator_exception(self):
         text = (f20.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()

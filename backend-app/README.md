@@ -310,7 +310,7 @@ JAR는 현재 단계에서 기존 실제 발급기로 갱신한 합성 토큰과
 
 1. PR과 dev push 모두 package job에서 `projects check :boot:bootJar`(모듈 unit/MVC/Security·구조 fixture·실행 JAR)와 `:boot:compileContractTestKotlin`(DB 계약 시험 컴파일만)을 실행하고, 실행 JAR에 시험·compatibility·계약 시험 코드와 Testcontainers가 들어가지 않았는지 확인한다.
 2. dev push에서만 check job이 digest로 고정한 공식 PostgreSQL 17.11 linux/amd64 컨테이너를 고유 run label로 만든다. loopback bind·CPU 2·RAM 512MiB·tmpfs 제한과 합성 schema/SELECT-only reader 계정에서 시작해 F3~F29 단계별 최소 fixture·권한을 차례로 확장한다. 운영 migration/owner/ACL을 변경하는 절차가 아니다.
-3. 각 단계는 `scripts/test_fN_ci_guards.py`의 자원 없는 가드 시험 → `fN_ci.py prepare` → 같은 실행 JAR의 packaged 시험(`jar_f3`~`jar_f29`, 관리자 회원 삭제 `jar_f31`) 순서다. packaged 시험은 run 전용 S3 HTTP stub과 실제 발급기 JWT로 HTTP 계약·무부작용·실패 후 복구·단일 pool 정상 종료를 확인한다.
+3. 각 단계는 `scripts/test_fN_ci_guards.py`의 자원 없는 가드 시험 → `fN_ci.py prepare` → 같은 실행 JAR의 packaged 시험(`jar_f3`~`jar_f16`, 관리자 회원 삭제 `jar_f31`) 순서다. F17~F29의 packaged 시험은 `boot/src/contractTest`의 Spring 계약 시험으로 옮겼고 그 fixture 준비 단계만 남아 있다(`jar_f17`~`jar_f29` 단계와 shard 2·3은 없다). packaged 시험은 run 전용 S3 HTTP stub과 실제 발급기 JWT로 HTTP 계약·무부작용·실패 후 복구·단일 pool 정상 종료를 확인한다.
 4. 같은 dev push에서 package job과 병렬인 `contract` job이 Testcontainers PostgreSQL 위에서 `:boot:contractTest`(아래)를 실행한다. 이 job은 packaged 시험과 fixture를 공유하지 않는다.
 5. always cleanup은 현재 run owner label의 합성 컨테이너만 정지/제거한다. 일반 prune·다른 컨테이너/볼륨 조작은 하지 않는다.
 
@@ -398,7 +398,7 @@ always owned cleanup·실패 증거 보존·발행/배포 차단·contents read�
 
 일반 실행은 `full`이며 기존 필수 검사 이름 `Backend app CI result`를 유지한다. 공통 `package` 작업에서 일반·구조 검사와 실행 JAR 빌드를 한 번 수행하고, 현재 workflow run의 같은 artifact와 SHA-256을 각 격리 검증 작업이 사용한다. ZIP 생성 시각이 다른 별도 빌드를 같은 바이너리로 간주하지 않는다. PG 단계를 진행한 뒤와 최종 정리 뒤에도 producer의 JAR 해시를 확인한다. 단위·구조 XML은 package 산출물에, 실제 PG XML은 각 모드 산출물에 있으므로 전체 집계 시 합치되 중복 계산하지 않는다.
 
-첫 실험의 `f25-six-smoke-pilot`은 같은 저장소의 `ci/backend-contract-regression-scope` PR, 기준 `0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3`, 명시된 CI/README 다섯 경로만 바뀐 경우에만 full과 함께 추가된다. F16·F17·F19·F21·F22·F23 JAR 단계만 생략 후보이며, F3~F15·F18·F20·F24·F25의 17개 JAR 단계와 모든 기존 준비·인가·TX·정리 검증은 유지한다. 준비 데이터를 남기는 smoke를 단순히 끄지 않는다. 두 모드는 별도 hosted runner와 임시 자원을 사용하며 `fail-fast: false`로 pilot 실패가 full을 취소하지 않는다. 비교를 위해 별도 full을 더 실행하지 않는다.
+첫 실험의 `f25-six-smoke-pilot`은 같은 저장소의 `ci/backend-contract-regression-scope` PR, 기준 `0c1579a8ddb93cdea376be1ea57ac3b5c98bddf3`, 명시된 CI/README 다섯 경로만 바뀐 경우에만 full과 함께 추가된다. F16 JAR 단계만 생략 후보이며, F3~F15의 JAR 단계와 모든 기존 준비·인가·TX·정리 검증은 유지한다. 준비 데이터를 남기는 smoke를 단순히 끄지 않는다. 두 모드는 별도 hosted runner와 임시 자원을 사용하며 `fail-fast: false`로 pilot 실패가 full을 취소하지 않는다. 비교를 위해 별도 full을 더 실행하지 않는다.
 
 `backend_contract_profile.py`는 profile·source/head/base/tree·run/attempt·JAR 해시에 묶인 계획과 실제 step outcome/conclusion을 판정한다. 필수 실행 누락, 예정 밖 skip, continue-on-error로 가린 실패, 잘못된 모드/후보, 미지 JAR 단계, 정리 실패는 통과하지 않는다. `contract-plan.txt`와 `contract-execution.txt`만 현재 evidence artifact에 남기며 전체 환경·step outputs·토큰은 저장하지 않는다. 새로운 JAR 계약을 추가할 때는 workflow step ID와 공통 목록/정책 시험을 함께 갱신해야 한다. 전체 결과 gate는 package와 선택한 모든 모드의 성공을 요구한다.
 
