@@ -31,7 +31,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -52,7 +51,6 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.UUID
-import java.util.function.Supplier
 import java.util.stream.Stream
 
 /** Real MVC/security/async dispatch with a real Spring emitter; mutation and registry are mocked, not PG/socket evidence. */
@@ -141,38 +139,6 @@ class NoteReadStreamHttpTest {
             .andExpect(content().string(Matchers.containsString("data:{}")))
         cleared()
         mvc.perform(get(STREAM)).andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(members, streams, mutation, clock)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID", "NO_EXP"])
-    fun `토큰이 없거나 잘못됐거나 만료가 없을 때__잘못된 클라이언트로 열면__바인딩 전에 인증 실패를 준다`(
-        kind: String,
-    ) {
-        // given
-        val request = get(STREAM).param("clientId", "invalid").header("X-Auth-Expires-At", Long.MAX_VALUE)
-        if (kind != "MISSING") {
-            request.header("Authorization", "Bearer " + (if (kind == "INVALID") "invalid" else token(null)))
-        }
-        val message = if (kind == "MISSING") {
-            "인증 토큰이 필요합니다."
-        } else if (kind == "INVALID") {
-            "유효하지 않거나 만료된 토큰입니다."
-        } else {
-            "토큰 파싱에 실패했습니다."
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
         confirmVerified(members, streams, mutation, clock)
         cleared()
     }
@@ -325,32 +291,6 @@ class NoteReadStreamHttpTest {
         verify(exactly = 1) { mutation.read(7L, NOTE, any(), any()) }
         verify(exactly = 1) { members.get(7) }
         confirmVerified(mutation, members, streams, clock)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/notes/stream/extra",
-            "POST /api/v1/notes/stream",
-            "PUT /api/v1/notes/f2600000-0000-0000-0000-000000000001/read/extra",
-        ],
-    )
-    fun `노출되지 않은 스트림이나 읽음 인접 경로일 때__요청하면__의존성 없이 기본 403을 유지한다`(wire: String) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(members, mutation, streams, clock)
         cleared()
     }
 

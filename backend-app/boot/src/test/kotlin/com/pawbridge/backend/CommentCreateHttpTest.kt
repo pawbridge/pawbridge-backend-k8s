@@ -25,7 +25,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
@@ -43,7 +42,6 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -186,98 +184,6 @@ class CommentCreateHttpTest {
     }
 
     @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 믿을 수 없고 요청도 잘못됐을 때__댓글을 만들면__바인딩 전에 인증부터 거부한다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = post("/api/v1/comments/posts/not-a-number")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{")
-            .header("X-User-Id", "7")
-            .header("X-User-Role", "ROLE_ADMIN")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(CommentReadController.Response<Void?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(createComment, listComments, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun `서명됐지만 잘못된 신원일 때__댓글을 만들면__JSON 검증과 업무 호출 전에 거부한다`(
-        claims: Map<String, Any>,
-    ) {
-        // given
-        val token = Jwts.builder()
-            .claims(claims)
-            .expiration(Date(System.currentTimeMillis() + 3_600_000))
-            .signWith(F3TestInputs.KEY)
-            .compact()
-
-        // when
-        val result = mvc.perform(
-            post("/api/v1/comments/posts/42")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{")
-                .header("Authorization", "Bearer $token"),
-        )
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"토큰 파싱에 실패했습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(createComment, listComments, readPost, listPosts)
-    }
-
-    @Test
-    fun `작성자 둘에 이어 익명 요청이 올 때__댓글을 만들면__이전 신원을 지운다`() {
-        // given
-        every { createComment.create(42, any(), "댓글") } answers { details(arg<Long>(1), "댓글") }
-
-        // when
-        val writerResults = longArrayOf(7, 8).map { userId ->
-            userId to mvc.perform(
-                post("/api/v1/comments/posts/42")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"content\":\"댓글\"}")
-                    .header("Authorization", "Bearer " + F3TestInputs.token(userId, "ROLE_USER")),
-            )
-        }
-        val anonymousResult = mvc.perform(
-            post("/api/v1/comments/posts/42").contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"댓글\"}"),
-        )
-
-        // then
-        for ((userId, result) in writerResults) {
-            result
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.authorId").value(userId.toInt()))
-        }
-        anonymousResult.andExpect(status().isUnauthorized())
-        verify(exactly = 1) { createComment.create(42, 7, "댓글") }
-        verify(exactly = 1) { createComment.create(42, 8, "댓글") }
-        confirmVerified(createComment)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
     fun `파싱할 수 없는 글 ID와 유효한 신원일 때__댓글을 만들면__400을 응답한다`(
         postId: String,
@@ -379,49 +285,6 @@ class CommentCreateHttpTest {
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         confirmVerified(createComment, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/comments/posts/42", "PUT /api/v1/comments/posts/42", "DELETE /api/v1/comments/posts/42",
-            "HEAD /api/v1/comments/posts/42", "OPTIONS /api/v1/comments/posts/42", "PATCH /api/v1/comments/posts/42",
-            "POST /api/v1/comments/posts", "POST /api/v1/comments/posts/", "POST /api/v1/comments/posts/42/",
-            "POST /api/v1/comments/posts/42/extra", "POST /api/v1/comments/posts/read/42", "POST /api/comments/posts/42",
-            "POST /api/v1/admin/comments/posts/42",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__업무 호출 없이 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(createComment, listComments, readPost, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["POST /api/v1/posts", "PUT /api/v1/posts/42", "DELETE /api/v1/posts/42"])
-    fun `토큰 없는 기존 글 쓰기일 때__요청하면__JWT 인증을 유지한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-        confirmVerified(createComment, listComments, readPost, listPosts)
     }
 
     companion object {

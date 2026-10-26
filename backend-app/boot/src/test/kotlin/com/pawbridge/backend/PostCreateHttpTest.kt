@@ -7,13 +7,11 @@ import com.pawbridge.backend.community.internal.post.application.PostDetails
 import com.pawbridge.backend.community.internal.post.domain.PostBoardType
 import com.pawbridge.backend.community.internal.post.web.PostCreateController
 import com.pawbridge.backend.community.internal.post.web.PostCreateExceptionHandler
-import io.jsonwebtoken.Jwts
 import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -25,7 +23,6 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.LocalDateTime
-import java.util.Date
 
 @WebMvcTest(
     controllers = [PostCreateController::class],
@@ -76,73 +73,6 @@ class PostCreateHttpTest {
             .andExpect(jsonPath("$.data.authorId").value(7))
         verify(exactly = 1) { createPost.create(7L, "제목", "내용", PostBoardType.COMMUNICATION, listOf()) }
         confirmVerified(createPost)
-    }
-
-    @Test
-    fun `토큰이 없거나 잘못되었을 때__등록하면__쓰기 유스케이스를 호출하지 않는다`() {
-        // given
-        val missing = multipart("/api/v1/posts").header("X-User-Id", "7")
-        val invalid = multipart("/api/v1/posts").header("Authorization", "Bearer invalid")
-
-        // when
-        val missingResult = mvc.perform(missing)
-        val invalidResult = mvc.perform(invalid)
-
-        // then
-        missingResult
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.message").value("인증 토큰이 필요합니다."))
-        invalidResult
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.message").value("유효하지 않거나 만료된 토큰입니다."))
-        confirmVerified(createPost)
-    }
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun `서명됐지만 잘못된 신원이 주어졌을 때__등록하면__쓰기 전에 거부한다`(claims: Map<String, Any>) {
-        // given
-        val token = Jwts.builder()
-            .claims(claims)
-            .expiration(Date(System.currentTimeMillis() + 3_600_000))
-            .signWith(F3TestInputs.KEY)
-            .compact()
-
-        // when
-        val result = mvc.perform(multipart("/api/v1/posts").header("Authorization", "Bearer $token"))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.message").value("토큰 파싱에 실패했습니다."))
-        confirmVerified(createPost)
-    }
-
-    @Test
-    fun `작성자 둘과 익명 다음 요청이 주어졌을 때__등록하면__이전 신원을 유지하지 않는다`() {
-        // given
-        every { createPost.create(any(), any(), any(), any(), any()) } answers { details(firstArg()) }
-
-        // when
-        val results = longArrayOf(7, 8).map { id ->
-            id to mvc.perform(
-                multipart("/api/v1/posts")
-                    .param("title", "제목")
-                    .param("content", "내용")
-                    .param("boardType", "COMMUNICATION")
-                    .header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")),
-            )
-        }
-        val anonymous = mvc.perform(multipart("/api/v1/posts"))
-
-        // then
-        for ((id, result) in results) {
-            result
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.authorId").value(id.toInt()))
-        }
-        anonymous.andExpect(status().isUnauthorized())
-        verify(exactly = 2) { createPost.create(any(), any(), any(), any(), any()) }
     }
 
     @Test

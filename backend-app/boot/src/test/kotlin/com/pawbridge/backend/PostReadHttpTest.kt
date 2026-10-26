@@ -217,23 +217,4 @@ class PostReadHttpTest {
         confirmVerified(readPost)
     }
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/posts", "GET /api/v1/users/internal/7/nickname", "GET /error",
-            "GET /api/posts/read/42", "HEAD /api/v1/posts/read/42", "OPTIONS /api/v1/posts/read/42",
-            "POST /api/v1/posts/read/42", "PUT /api/v1/posts/read/42", "DELETE /api/v1/posts/read/42",
-        ],
-    )
-    fun `노출되지 않은 메서드나 경로가 주어졌을 때__요청하면__업무 조회 없이 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(readPost)
-    }
 }

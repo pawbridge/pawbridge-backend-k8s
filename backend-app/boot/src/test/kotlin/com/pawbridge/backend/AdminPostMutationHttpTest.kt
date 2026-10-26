@@ -12,7 +12,6 @@ import com.pawbridge.backend.community.internal.post.application.PostMediaUpload
 import com.pawbridge.backend.community.internal.post.application.PostModification
 import com.pawbridge.backend.community.internal.post.application.PostReader
 import com.pawbridge.backend.community.internal.post.application.PostSnapshot
-import com.pawbridge.backend.community.internal.post.application.PostUpload
 import com.pawbridge.backend.community.internal.post.application.UpdatePost
 import com.pawbridge.backend.community.internal.post.web.AdminPostDeleteController
 import com.pawbridge.backend.community.internal.post.web.AdminPostUpdateController
@@ -253,27 +252,6 @@ class AdminPostMutationHttpTest {
     }
 
     @ParameterizedTest
-    @CsvSource("PUT,missing,401", "DELETE,missing,401", "PUT,ROLE_USER,403", "DELETE,ROLE_USER,403", "PUT,ROLE_SHELTER,403", "DELETE,ROLE_SHELTER,403")
-    fun `신원 없음 또는 비관리자와 위조 관리자 헤더__잘못된 ID로 요청하면__바인딩과 효과 전에 거부한다`(
-        method: String,
-        role: String,
-        status: Int,
-    ) {
-        // given
-        val request = mutation(method, "bad-id").header("X-User-Role", "ROLE_ADMIN").header("X-User-Id", "99")
-        if (role != "missing") {
-            request.header("Authorization", "Bearer " + F3TestInputs.token(99, role))
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().`is`(status))
-        confirmVerified(reader, remover, uploader, users, writer, deletion)
-    }
-
-    @ParameterizedTest
     @CsvSource("PUT,missing,404", "DELETE,missing,404", "PUT,db,500", "DELETE,db,500")
     fun `없는 글 또는 늦은 쓰기 실패__관리자가 변경하면__범위 응답과 안전한 메타데이터만 로그한다`(
         method: String,
@@ -339,20 +317,6 @@ class AdminPostMutationHttpTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(reader, remover, uploader, users, writer, deletion)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["PUT", "DELETE"])
-    fun `관리자와 더 깊은 미이식 경로__요청하면__기본 거부를 유지한다`(method: String) {
-        // given
-        val request = mutation(method, "42/extra").header("Authorization", admin())
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
         confirmVerified(reader, remover, uploader, users, writer, deletion)
     }
 

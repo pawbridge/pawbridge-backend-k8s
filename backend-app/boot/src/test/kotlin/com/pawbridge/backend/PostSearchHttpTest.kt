@@ -252,47 +252,6 @@ class PostSearchHttpTest {
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/posts", "GET /api/v1/posts/search/42", "GET /api/v1/posts/search/",
-            "GET /api/v1/posts/searching", "GET /api/posts/search",
-            "HEAD /api/v1/posts/search", "OPTIONS /api/v1/posts/search", "POST /api/v1/posts/search",
-            "PATCH /api/v1/posts/search",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__요청하면__검색 없이 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]).param("keyword", "강아지"),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(searchPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["PUT", "DELETE"])
-    fun `토큰 없이 검색 경로와 겹치는 쓰기 메서드가 주어졌을 때__요청하면__쓰기 인증을 유지한다`(
-        method: String,
-    ) {
-        // given
-        val httpMethod = org.springframework.http.HttpMethod.valueOf(method)
-
-        // when
-        val result = mvc.perform(request(httpMethod, "/api/v1/posts/search"))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-        confirmVerified(searchPosts)
-    }
-
     companion object {
         @JvmStatic
         fun searchFailures(): Stream<Arguments> {

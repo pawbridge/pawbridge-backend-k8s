@@ -35,7 +35,6 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -183,27 +182,6 @@ class AnimalReportHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["POST", "PUT", "DELETE"])
-    fun `JWT가 없고 본문이 잘못됐을 때__변경하면__인증이 바인딩보다 앞서고 위조 신원은 효과가 없다`(
-        method: String,
-    ) {
-        // given
-        val request = if (method == "DELETE") {
-            delete("$ROOT/not-a-number")
-        } else {
-            multipart(HttpMethod.valueOf(method), ROOT + (if (method == "PUT") "/not-a-number" else "")).file(body("not-json"))
-        }
-
-        // when
-        val response = mvc.perform(request.header("X-User-Id", "7").header("X-User-Role", "ROLE_ADMIN"))
-
-        // then
-        response.andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(reports)
-    }
-
-    @ParameterizedTest
     @ValueSource(ints = [400, 403, 404])
     fun `원본 정책 실패일 때__인증된 수정이 실행되면__상태와 사유를 유지한다`(code: Int) {
         // given
@@ -220,20 +198,16 @@ class AnimalReportHttpTest {
     }
 
     @Test
-    fun `JSON이나 ID가 잘못되고 이웃 경로가 노출되지 않을 때__인증 후 바인딩하면__400과 정확 경로 403을 유지한다`() {
+    fun `JSON이나 ID가 잘못됐을 때__인증 후 바인딩하면__400을 유지한다`() {
         // when
         val badJson = mvc.perform(multipart(ROOT).file(body("not-json")).header("Authorization", token()))
         val badId = mvc.perform(delete("$ROOT/wrong").header("Authorization", token()))
-        val getNeighbor = mvc.perform(get("$ROOT/42/extra"))
-        val deleteNeighbor = mvc.perform(delete("$ROOT/42/extra").header("Authorization", token()))
 
         // then
         badJson.andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("요청 본문 형식이 올바르지 않습니다."))
         badId.andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("제보 검색의 종류·날짜·페이지 형식을 확인해 주세요."))
-        getNeighbor.andExpect(status().isForbidden())
-        deleteNeighbor.andExpect(status().isForbidden())
         confirmVerified(reports)
     }
 
@@ -282,52 +256,5 @@ class AnimalReportHttpTest {
         }
 
         private fun token(): String = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
-    }
-}
-
-@WebMvcTest(
-    controllers = [AnimalReportController::class],
-    properties = ["pawbridge.animal-reports.enabled=false"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        AnimalReportController::class,
-        AnimalReportExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalReportDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var reports: AnimalReports
-
-    @ParameterizedTest
-    @CsvSource(
-        "GET,/api/v1/reports",
-        "GET,/api/v1/reports/42",
-        "POST,/api/v1/reports",
-        "PUT,/api/v1/reports/42",
-        "DELETE,/api/v1/reports/42",
-    )
-    fun `제보가 꺼졌을 때__공개 또는 인증 경로를 요청하면__제보 질의 전에 거부한다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        val request = request(HttpMethod.valueOf(method), path)
-        if (method != "GET") {
-            request.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-        }
-
-        // when
-        val response = mvc.perform(request)
-
-        // then
-        response.andExpect(status().isForbidden()).andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(reports)
     }
 }

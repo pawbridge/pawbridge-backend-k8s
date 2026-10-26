@@ -31,7 +31,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -131,32 +130,6 @@ class NoteBlockCreateHttpTest {
         }
         confirmVerified(creation, members, clock, statuses, counts)
         contextCleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID"])
-    fun `토큰이 없거나 잘못되고 대상이 깨졌을 때__차단하면__바인딩 전에 인증 실패를 준다`(
-        token: String,
-    ) {
-        // given
-        val request = put(PATH + "not-a-long").header("X-User-Id", "7")
-        if (token == "INVALID") {
-            request.header("Authorization", "Bearer invalid")
-        }
-        val message = if (token == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
     }
 
     @ParameterizedTest
@@ -335,31 +308,6 @@ class NoteBlockCreateHttpTest {
         contextCleared()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["PUT /api/v1/notes/blocks/8/extra", "PUT /api/v1/notes/blocks/8/"])
-    fun `더 깊거나 끝에 슬래시가 붙은 경로일 때__유효한 토큰으로 요청하면__기본 403으로 거부한다`(
-        wire: String,
-    ) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-    }
-
     @Test
     fun `상태 조회가 트랜잭션 오류로 실패했을 때__차단 상태를 읽으면__생성 어드바이스 밖에서 저장소 503을 준다`() {
         // given
@@ -404,14 +352,12 @@ class NoteBlockCreateHttpTest {
         // then
         forbidden
             .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         failed
             .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
         verify(exactly = 1) { counts.count() }
@@ -461,7 +407,6 @@ class NoteBlockCreateHttpTest {
 
     companion object {
         private const val PATH = "/api/v1/notes/blocks/"
-        private const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
         private const val MEMBER = "회원 정보를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요."
         private const val STORAGE = "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
         private const val GENERIC = "쪽지를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."

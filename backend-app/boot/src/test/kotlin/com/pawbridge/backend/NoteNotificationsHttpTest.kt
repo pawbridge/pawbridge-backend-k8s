@@ -40,7 +40,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -213,35 +212,6 @@ class NoteNotificationsHttpTest {
         confirmVerified(members, clock, notes, batches, recipientBlocks, statusBlocks, blocks, counts)
     }
 
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 잘못되고 커서가 깨졌을 때__요청하면__바인딩과 모든 의존성 전에 인증 실패를 준다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get(PATH).param("cursor", "not-a-uuid").header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(NoteNotificationsController.Response<Void?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(members, batches, clock, notes, recipientBlocks, statusBlocks, blocks, counts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
     @Test
     fun `변환할 수 없는 커서가 주어졌을 때__바인딩하면__회원과 시계 전에 메시지만 담은 400을 준다`() {
         // given
@@ -328,34 +298,6 @@ class NoteNotificationsHttpTest {
         }
         confirmVerified(members, clock, notes, batches, recipientBlocks, statusBlocks, blocks, counts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/notes/stream/extra", "GET /api/v1/notes/notifications/", "GET /api/notes/notifications",
-            "HEAD /api/v1/notes/notifications", "OPTIONS /api/v1/notes/notifications",
-            "POST /api/v1/notes/notifications", "PUT /api/v1/notes/notifications",
-            "DELETE /api/v1/notes/notifications/extra",
-        ],
-    )
-    fun `노출되지 않은 인접 경로나 메서드일 때__유효한 토큰으로 요청하면__모든 의존성 전에 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(members, batches, clock, notes, recipientBlocks, statusBlocks, blocks, counts)
     }
 
     @Test

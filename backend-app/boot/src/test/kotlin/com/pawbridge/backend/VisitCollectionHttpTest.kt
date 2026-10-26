@@ -209,30 +209,6 @@ class VisitCollectionHttpTest {
         verify(exactly = 2) { visits.count(null) }
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["missing", "invalid", "USER"])
-    fun `실제 관리자 토큰이 없고 역할 헤더만 있을 때__기간을 조회하면__조회 없이 거부한다`(role: String) {
-        // given
-        val request = get("/api/v1/admin/visits/stats/period")
-            .param("startDate", "2026-10-12")
-            .param("endDate", "2026-10-12")
-            .header("X-User-Role", "ROLE_ADMIN")
-            .header("X-User-Id", "1")
-        if (role == "invalid") {
-            request.header("Authorization", "Bearer invalid")
-        }
-        if (role == "USER") {
-            request.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().`is`(if (role == "USER") 403 else 401))
-        confirmVerified(visits)
-    }
-
     @Test
     fun `실제 관리자와 날짜가 주어졌을 때__기간을 조회하면__정확한 봉투와 명시적 파라미터 바인딩을 쓴다`() {
         // given

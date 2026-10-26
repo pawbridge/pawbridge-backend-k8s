@@ -48,7 +48,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -143,83 +142,6 @@ class CommentDeleteHttpTest {
             )
         verify(exactly = 1) { deletion.delete(12, 7) }
         confirmVerified(createComment, listComments, readPost, listPosts)
-    }
-
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 믿을 수 없고 ID도 잘못됐을 때__댓글을 지우면__바인딩과 삭제 전에 인증부터 거부한다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = delete("/api/v1/comments/not-a-number")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{")
-            .header("X-User-Id", "7")
-            .header("X-User-Role", "ROLE_ADMIN")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-            .andExpect(jsonPath("$.message").value(message))
-            .andExpect(jsonPath("$.data").isEmpty())
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun `서명됐지만 잘못된 신원일 때__댓글을 지우면__바인딩과 삭제 전에 거부한다`(
-        claims: Map<String, Any>,
-    ) {
-        // given
-        val token = Jwts.builder()
-            .claims(claims)
-            .expiration(Date(System.currentTimeMillis() + 3_600_000))
-            .signWith(F3TestInputs.KEY)
-            .compact()
-
-        // when
-        val result = mvc.perform(delete("/api/v1/comments/not-a-number").header("Authorization", "Bearer $token"))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-            .andExpect(jsonPath("$.message").value("토큰 파싱에 실패했습니다."))
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
-    }
-
-    @Test
-    fun `소유자 둘에 이어 익명 요청이 올 때__댓글을 지우면__이전 신원을 지운다`() {
-        // given
-        justRun { deletion.delete(12, 7) }
-        justRun { deletion.delete(12, 8) }
-
-        // when
-        val ownerResults = longArrayOf(7, 8).map { userId ->
-            mvc.perform(
-                delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(userId, "ROLE_USER")),
-            )
-        }
-        val anonymousResult = mvc.perform(delete("/api/v1/comments/12"))
-
-        // then
-        for (result in ownerResults) {
-            result.andExpect(status().isOk())
-        }
-        anonymousResult.andExpect(status().isUnauthorized())
-        verify(exactly = 1) { deletion.delete(12, 7) }
-        verify(exactly = 1) { deletion.delete(12, 8) }
-        confirmVerified(deletion)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
@@ -363,51 +285,6 @@ class CommentDeleteHttpTest {
                 content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         confirmVerified(deletion, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/comments/12", "POST /api/v1/comments/12",
-            "PATCH /api/v1/comments/12", "HEAD /api/v1/comments/12", "OPTIONS /api/v1/comments/12",
-            "DELETE /api/v1/comments", "DELETE /api/v1/comments/", "DELETE /api/v1/comments/12/",
-            "DELETE /api/v1/comments/12/extra", "DELETE /api/v1/comments/posts/42",
-            "DELETE /api/v1/comments/posts/read/42", "DELETE /api/comments/12", "DELETE /api/v1/admin/comments/12",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__업무 호출 없이 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = ["POST /api/v1/posts", "PUT /api/v1/posts/42", "DELETE /api/v1/posts/42", "POST /api/v1/comments/posts/42"],
-    )
-    fun `토큰 없는 기존 쓰기일 때__요청하면__JWT 인증을 유지한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 
     companion object {

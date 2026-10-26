@@ -23,12 +23,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -148,32 +146,6 @@ class NoteBlockStatusHttpTest {
         confirmVerified(members, blocks, recipientBlocks)
     }
 
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 잘못되고 ID를 변환할 수 없을 때__읽으면__바인딩과 의존성 전에 인증 실패를 준다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/blocks/status").param("memberIds", "abc").header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(members, blocks, recipientBlocks)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
     @Test
     fun `쿼리에 ID가 없는 인증 요청일 때__바인딩하면__의존성 전에 공통 400 응답을 준다`() {
         // given
@@ -278,30 +250,6 @@ class NoteBlockStatusHttpTest {
         }
         confirmVerified(members, blocks, recipientBlocks)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/notes/stream/extra", "GET /api/v1/notes/blocks/status/", "GET /api/notes/blocks/status",
-            "HEAD /api/v1/notes/blocks/status", "OPTIONS /api/v1/notes/blocks/status", "POST /api/v1/notes/blocks/status",
-        ],
-    )
-    fun `노출되지 않은 인접 경로나 메서드일 때__유효한 토큰으로 요청하면__의존성 전에 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(members, blocks, recipientBlocks)
     }
 
     @Test

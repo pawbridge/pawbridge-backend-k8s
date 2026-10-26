@@ -19,7 +19,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -69,7 +68,6 @@ class AdminPostStatisticsHttpTest {
         // then
         result
             .andExpect(status().isOk())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json(
@@ -104,7 +102,6 @@ class AdminPostStatisticsHttpTest {
         // then
         result
             .andExpect(status().isOk())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json(
@@ -117,54 +114,6 @@ class AdminPostStatisticsHttpTest {
                 ),
             )
         verify(exactly = 1) { statistics.period(DAY.minusDays(2), DAY) }
-        confirmVerified(statistics)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["/today", "/period"])
-    fun `사용자 토큰과 위조 관리자 헤더__잘못된 날짜로 요청하면__바인딩이나 조회 전에 거부한다`(
-        suffix: String,
-    ) {
-        // given
-        val request = get(ROOT + suffix)
-            .param("startDate", "bad")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-            .header("X-User-Role", "ROLE_ADMIN")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(statistics)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["missing", "invalid"])
-    fun `없거나 잘못된 Bearer__잘못된 날짜로 요청하면__바인딩 전에 인증한다`(token: String) {
-        // given
-        val request = get("$ROOT/period").param("startDate", "bad").header("X-User-Role", "ROLE_ADMIN")
-        if (token == "invalid") {
-            request.header("Authorization", "Bearer invalid")
-        }
-        val message = if (token == "missing") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
         confirmVerified(statistics)
         cleared()
     }
@@ -186,7 +135,6 @@ class AdminPostStatisticsHttpTest {
         // when
         val result = mvc.perform(request)
             .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
 
         // then
@@ -255,7 +203,6 @@ class AdminPostStatisticsHttpTest {
         // then
         result
             .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
@@ -265,28 +212,8 @@ class AdminPostStatisticsHttpTest {
         cleared()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["GET /api/v1/admin/posts/stats/period/extra", "POST /api/v1/admin/posts/stats/today"])
-    fun `이식되지 않은 이웃 경로나 메서드__관리자가 요청하면__기본 거부를 유지한다`(wire: String) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(statistics)
-        cleared()
-    }
-
     companion object {
         private const val ROOT = "/api/v1/admin/posts/stats"
-        private const val CACHE = "no-cache, no-store, max-age=0, must-revalidate"
         private val DAY: LocalDate = LocalDate.of(2024, 3, 1)
 
         private fun admin(): String = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")

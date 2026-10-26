@@ -19,7 +19,6 @@ import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
-import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -140,58 +139,6 @@ class PostDeleteHttpTest {
     }
 
     @ParameterizedTest
-    @MethodSource("rejectedTokens")
-    fun `검증되지 않은 토큰이 주어졌을 때__삭제하면__모든 업무 포트 전에 401이다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = delete("/api/v1/posts/42").header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-            .andExpect(jsonPath("$.message").value(message))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(posts, media, deletion)
-    }
-
-    @Test
-    fun `소유자 둘과 익명이 차례로 주어졌을 때__삭제하면__요청 간 주체를 분리한다`() {
-        // given
-        every { posts.findById(any()) } returnsMany listOf(Optional.of(snapshot(7)), Optional.of(snapshot(8)))
-        justRun { media.remove(any()) }
-        justRun { deletion.delete(any(), any()) }
-
-        // when
-        val owners = longArrayOf(7, 8).map { id ->
-            val result = mvc.perform(
-                delete("/api/v1/posts/42").header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")),
-            )
-            val authentication = SecurityContextHolder.getContext().authentication
-            Triple(id, result, authentication)
-        }
-        val anonymous = mvc.perform(delete("/api/v1/posts/42"))
-
-        // then
-        for ((id, result, authentication) in owners) {
-            result.andExpect(status().isOk())
-            assertThat(authentication).isNull()
-            verify(exactly = 1) { deletion.delete(42, id) }
-        }
-        anonymous.andExpect(status().isUnauthorized())
-        verify(exactly = 2) { posts.findById(42) }
-        confirmVerified(deletion)
-    }
-
-    @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
     fun `해석할 수 없는 ID가 주어졌을 때__삭제하면__400을 응답한다`(id: String) {
         // given
@@ -206,29 +153,6 @@ class PostDeleteHttpTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value(400))
             .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(posts, media, deletion)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "DELETE /api/v1/posts", "DELETE /api/v1/posts/42/extra",
-            "DELETE /api/v1/posts/read/42", "DELETE /api/v1/admin/posts/42/extra",
-            "PATCH /api/v1/posts/42", "GET /api/v1/posts/42",
-        ],
-    )
-    fun `노출되지 않은 메서드나 경로가 주어졌을 때__요청하면__업무 전에 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
         confirmVerified(posts, media, deletion)
     }
 

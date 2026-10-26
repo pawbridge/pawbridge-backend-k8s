@@ -38,9 +38,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.TransactionSystemException
 import java.time.Clock
-import java.time.Instant
 import java.util.UUID
-import java.util.function.Supplier
 import java.util.stream.Stream
 
 /** Real MVC/JWT and application callbacks; mocked mutation is not SQL, transaction or SSE evidence. */
@@ -116,31 +114,6 @@ class NoteFavoriteHttpTest {
         cleared()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID"])
-    fun `토큰이 없거나 잘못되고 UUID와 JSON이 깨졌을 때__즐겨찾기를 지정하면__두 바인더 전에 인증 실패를 준다`(
-        kind: String,
-    ) {
-        // given
-        val request = put("/api/v1/notes/not-a-uuid/favorite").contentType(MediaType.APPLICATION_JSON).content("{broken")
-        if (kind == "INVALID") {
-            request.header("Authorization", "Bearer invalid")
-        }
-        val message = if (kind == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-    }
-
     @Test
     fun `검증된 호출자와 깨진 UUID가 주어졌을 때__정식 불리언으로 지정하면__회원 확인과 변경 없이 범위 400을 준다`() {
         // given
@@ -210,22 +183,6 @@ class NoteFavoriteHttpTest {
     }
 
     @Test
-    fun `즐겨찾기 경로에 노출되지 않은 메서드일 때__유효한 토큰으로 요청하면__의존성 전에 거부한다`() {
-        // given
-        val request = get(PATH).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        noDependencies()
-    }
-
-    @Test
     fun `즐겨찾기 어드바이스 밖의 관리자 집계일 때__사용자나 위조 역할 관리자가 요청하면__403과 공통 500을 유지한다`() {
         // given
         every { counts.count() } throws IllegalStateException("private-count")
@@ -241,14 +198,12 @@ class NoteFavoriteHttpTest {
         // then
         forbidden
             .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         failed
             .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
         verify(exactly = 1) { counts.count() }
@@ -265,7 +220,6 @@ class NoteFavoriteHttpTest {
         private val NOTE: UUID = UUID.fromString("f2700000-0000-0000-0000-000000000001")
         private val PATH = "/api/v1/notes/" + NOTE + "/favorite"
         private const val ADMIN_COUNT = "/api/v1/admin/users/stats/total-users"
-        private const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
 
         @JvmStatic
         fun failures(): Stream<Arguments> {

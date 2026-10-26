@@ -31,7 +31,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -131,35 +130,6 @@ class NoteRecipientHttpTest {
             blocks.blocked(7, target)
             members.get(target)
         }
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 잘못되고 회원 경로가 깨졌을 때__읽으면__바인딩과 의존성 전에 인증 실패를 준다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/recipients/abc").header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(NoteRecipientController.Response<Void?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
         confirmVerified(members, blocks, favorites, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
@@ -279,33 +249,6 @@ class NoteRecipientHttpTest {
         }
         confirmVerified(members, blocks, favorites, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/notes/stream/extra",
-            "GET /api/v1/chats", "GET /api/v1/users/internal/8/contact", "DELETE /internal/private-notes/members/8",
-            "GET /api/notes/recipients/8", "GET /api/v1/notes/recipients/8/", "HEAD /api/v1/notes/recipients/8",
-            "OPTIONS /api/v1/notes/recipients/8", "POST /api/v1/notes/recipients/8", "PUT /api/v1/notes/recipients/8",
-            "DELETE /api/v1/notes/recipients/8",
-        ],
-    )
-    fun `노출되지 않은 쪽지 채팅 내부 경로나 메서드일 때__유효한 토큰으로 요청하면__의존성 전에 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     @Test

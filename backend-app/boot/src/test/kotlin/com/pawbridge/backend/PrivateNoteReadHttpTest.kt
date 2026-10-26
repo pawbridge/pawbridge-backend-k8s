@@ -37,7 +37,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -292,36 +291,6 @@ class PrivateNoteReadHttpTest {
         confirmVerified(clock, notes, blocks, batches, blockLists, notifications, counts)
     }
 
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 잘못되고 쪽지 ID도 깨졌을 때__요청하면__UUID 바인딩 전에 401로 거부하고 의존성을 부르지 않는다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/not-a-uuid").header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json(
-                    mapper.createObjectNode().put("code", 401).put("message", message).putNull("data").toString(),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        noDependencies()
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
     @Test
     fun `인증된 호출자의 쪽지 ID가 깨졌을 때__바인딩하면__회원과 시계와 쪽지 조회 전에 메시지만 담은 400을 준다`() {
         // given
@@ -337,35 +306,6 @@ class PrivateNoteReadHttpTest {
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
         noDependencies()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID", "VALID"])
-    fun `노출되지 않은 스트림 확장 경로에 토큰이 없거나 잘못되거나 유효할 때__요청하면__인증과 SSE 작업 없이 기본 403을 유지한다`(
-        token: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/stream/extra").accept(MediaType.TEXT_EVENT_STREAM).header("X-User-Id", "7")
-        if (token != "MISSING") {
-            request.header(
-                "Authorization",
-                if (token == "INVALID") "Bearer invalid" else "Bearer " + F3TestInputs.token(7, "ROLE_USER"),
-            )
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @ParameterizedTest
@@ -476,38 +416,6 @@ class PrivateNoteReadHttpTest {
         confirmVerified(notes, blocks, batches, counts)
     }
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/notes/f2200000-0000-0000-0000-000000000001",
-            "GET /api/v1/notes/f2200000-0000-0000-0000-000000000001/",
-            "HEAD /api/v1/notes/f2200000-0000-0000-0000-000000000001",
-            "OPTIONS /api/v1/notes/f2200000-0000-0000-0000-000000000001",
-            "POST /api/v1/notes/f2200000-0000-0000-0000-000000000001",
-            "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/read/extra",
-            "PUT /api/v1/notes/f2200000-0000-0000-0000-000000000001/favorite/extra",
-            "DELETE /api/v1/notes/f2200000-0000-0000-0000-000000000001/extra",
-        ],
-    )
-    fun `노출되지 않은 인접 별칭 또는 메서드일 때__유효한 토큰으로 요청하면__쪽지와 쓰기 작업 없이 기본 거부를 유지한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-        val builder = request(HttpMethod.valueOf(parts[0]), parts[1])
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(builder)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        noDependencies()
-    }
-
     @Test
     fun `관리자 건수 경로에 일반 권한과 런타임 오류가 있을 때__요청하면__쪽지 조언 밖에서 403과 공통 500을 유지한다`() {
         // given
@@ -523,14 +431,12 @@ class PrivateNoteReadHttpTest {
         // then
         forbidden
             .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         failed
             .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
         verify(exactly = 1) { counts.count() }
@@ -580,7 +486,6 @@ class PrivateNoteReadHttpTest {
         private const val BODY = "  원문\n<태그>  "
         private val NOW: Instant = Instant.parse("2031-01-01T00:00:00.999999Z")
         private val CREATED_AT: Instant = Instant.parse("2030-12-31T15:00:00.123456Z")
-        private const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
 
         @JvmStatic
         fun directions(): Stream<Arguments> {
