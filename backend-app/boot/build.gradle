@@ -118,13 +118,25 @@ def registerContractTest = { String taskName, String zone, String taskDescriptio
     }
 }
 
+// The packaged-JAR contracts start the real bootJar output as a child process; they have their own task (jarSmokeTest).
 registerContractTest('contractTestUtc', 'UTC',
-        'Runs every database contract against PostgreSQL with the JVM in UTC.') { }
+        'Runs every database contract against PostgreSQL with the JVM in UTC.') { excludeTags 'packaged-jar' }
 registerContractTest('contractTestSeoul', 'Asia/Seoul',
         'Runs the time-zone sensitive database contracts with the JVM in Asia/Seoul.') {
     includeTags 'timezone-sensitive'
 }
 tasks.named('contractTestSeoul') { mustRunAfter tasks.named('contractTestUtc') }
+
+// The real bootJar output as a process: startup, management and public ports, a public read, an authenticated write,
+// refused starts and a clean SIGTERM shutdown, against the same Testcontainers PostgreSQL. It always builds the JAR first.
+registerContractTest('jarSmokeTest', 'UTC',
+        'Starts the packaged bootJar against PostgreSQL and checks startup, requests, refusals and shutdown.') {
+    includeTags 'packaged-jar'
+}
+tasks.named('jarSmokeTest') {
+    dependsOn tasks.named('bootJar')
+    systemProperty 'pawbridge.contract.jar', layout.buildDirectory.file('libs/pawbridge-backend-app.jar').get().asFile.absolutePath
+}
 
 tasks.register('contractTest') {
     group = 'verification'
