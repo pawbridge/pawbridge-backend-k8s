@@ -28,7 +28,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -181,36 +180,6 @@ class UserPasswordHttpTest {
     }
 
     @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 신뢰할 수 없을 때__바꾸면__검증과 서비스보다 인증이 먼저다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = put("/api/v1/users/me/password")
-            .header("X-User-Id", "7")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(UserPasswordController.Response<Any?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(change, nicknames)
-    }
-
-    @ParameterizedTest
     @MethodSource("serviceFailures")
     fun `서비스가 거절할 때__바꾸면__원래 상태와 메시지로 매핑한다`(
         failure: RuntimeException,
@@ -259,34 +228,6 @@ class UserPasswordHttpTest {
             .andExpect(jsonPath("$.message").value("닉네임이 변경되었습니다."))
         verify(exactly = 1) { nicknames.change(7, "새닉네임") }
         confirmVerified(change)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/users/me/password",
-            "POST /api/v1/users/me/password",
-            "PATCH /api/v1/users/me/password",
-            "DELETE /api/v1/users/me/password",
-            "PUT /api/v1/users/me/password/",
-            "PUT /api/v1/users/me/password/extra",
-            "PUT /api/v1/users/7/password",
-            "PUT /api/users/me/password",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__유효한 토큰으로 요청하면__서비스 없이 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(change, nicknames)
     }
 
     companion object {

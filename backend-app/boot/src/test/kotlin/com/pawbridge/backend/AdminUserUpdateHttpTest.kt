@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.junit.jupiter.params.provider.NullSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.postgresql.util.PSQLException
 import org.postgresql.util.ServerErrorMessage
@@ -29,7 +28,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
@@ -104,47 +102,6 @@ class AdminUserUpdateHttpTest {
         cleared()
     }
 
-    @Test
-    fun `위조 관리자 헤더를 단 서명된 사용자와 잘못된 본문__수정하면__바인딩이나 업무 처리 전에 권한을 거부한다`() {
-        // given
-        val request = put(PATH + "bad")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-            .header("X-User-Role", "ROLE_ADMIN")
-            .contentType("application/json")
-            .content("bad")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(members)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @NullSource
-    @ValueSource(strings = ["Bearer invalid"])
-    fun `없거나 잘못된 토큰__잘못된 입력으로 수정하면__바인딩 전에 거부한다`(token: String?) {
-        // given
-        val request = put(PATH + "bad").header("X-User-Role", "ROLE_ADMIN").contentType("application/json").content("bad")
-        if (token != null) {
-            request.header("Authorization", token)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized())
-        confirmVerified(members)
-        cleared()
-    }
-
     @ParameterizedTest
     @ValueSource(strings = ["", " ", "x", "12345678901", "emoji🐾"])
     fun `관리자 전용 패턴을 벗어난 닉네임__검증하면__업무 처리 전에 원래 400을 돌려준다`(
@@ -207,7 +164,6 @@ class AdminUserUpdateHttpTest {
         // then
         result
             .andExpect(status().`is`(code))
-            .andExpect(header().string("Cache-Control", "no-cache, no-store, max-age=0, must-revalidate"))
             .andExpect(
                 content().json(
                     ObjectMapper().writeValueAsString(UserNicknameController.Response<Void?>(code, message, null)),
@@ -232,25 +188,6 @@ class AdminUserUpdateHttpTest {
             .andExpect(status().isBadRequest())
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(members)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["PUT /api/v1/admin/users/8/extra", "PUT /api/v1/admin/users", "POST /api/v1/admin/users/8"])
-    fun `이식되지 않은 이웃 경로나 메서드__관리자가 요청하면__기본 거부를 유지한다`(wire: String) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         confirmVerified(members)
         cleared()

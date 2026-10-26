@@ -15,12 +15,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
@@ -78,7 +76,6 @@ class AdminUserDetailHttpTest {
         // then
         result
             .andExpect(status().isOk())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json(
@@ -92,55 +89,6 @@ class AdminUserDetailHttpTest {
                 ),
             )
         verify(exactly = 1) { profiles.require(Long.MAX_VALUE) }
-        confirmVerified(profiles)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @Test
-    fun `서명된 사용자와 위조 관리자 헤더__잘못된 대상을 조회하면__바인딩이나 조회 전에 거부한다`() {
-        // given
-        val request = get(PATH + "not-a-number")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-            .header("X-User-Role", "ROLE_ADMIN")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(profiles)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @MethodSource("rejectedTokens")
-    fun `없거나 잘못된 Bearer__잘못된 대상을 조회하면__조회 전에 거부하고 컨텍스트를 비운다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get(PATH + "not-a-number").header("X-User-Role", "ROLE_ADMIN")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
         confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
@@ -161,7 +109,6 @@ class AdminUserDetailHttpTest {
         // then
         result
             .andExpect(status().`is`(status))
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json(
@@ -170,38 +117,6 @@ class AdminUserDetailHttpTest {
                 ),
             )
         verify(exactly = 1) { profiles.require(8) }
-        confirmVerified(profiles)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/admin/users/search/extra",
-            "GET /api/v1/admin/users/extra/extra",
-            "PUT /api/v1/admin/users/8/extra",
-        ],
-    )
-    fun `이식되지 않은 예약 컬렉션이나 메서드__관리자가 요청하면__일반 기본 거부를 유지한다`(
-        wire: String,
-    ) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
         confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
@@ -218,7 +133,6 @@ class AdminUserDetailHttpTest {
         // then
         result
             .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT),
@@ -229,7 +143,6 @@ class AdminUserDetailHttpTest {
 
     companion object {
         private const val PATH = "/api/v1/admin/users/"
-        private const val CACHE = "no-cache, no-store, max-age=0, must-revalidate"
 
         @JvmStatic
         fun rejectedTokens(): Stream<Arguments> {

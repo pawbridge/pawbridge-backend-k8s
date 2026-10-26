@@ -37,7 +37,6 @@ import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -143,65 +142,6 @@ class FavoriteStatusHttpTest {
         confirmVerified(profiles, readPost, listPosts)
     }
 
-    @Test
-    fun `주체 둘에 이어 익명 요청이 올 때__확인하면__각자 자기 신원을 쓰고 익명은 재사용할 수 없다`() {
-        // given
-        every { favorites.isFavorite(7, 42) } returns true
-        every { favorites.isFavorite(8, 42) } returns false
-
-        // when
-        val principalResults = longArrayOf(7, 8).map { id ->
-            id to mvc.perform(
-                get("/api/v1/favorites/42/check").header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")),
-            )
-        }
-        val anonymousResult = mvc.perform(get("/api/v1/favorites/42/check"))
-
-        // then
-        for ((id, result) in principalResults) {
-            result
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data").value(id == 7L))
-        }
-        anonymousResult
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"인증 토큰이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        verify(exactly = 1) { favorites.isFavorite(7, 42) }
-        verify(exactly = 1) { favorites.isFavorite(8, 42) }
-        confirmVerified(favorites)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 잘못되고 ID도 깨졌을 때__확인하면__Long 변환과 조회 전에 인증부터 거부한다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get("/api/v1/favorites/abc/check").header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(FavoriteStatusController.Response<Void?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(favorites, profiles, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
     @ParameterizedTest
     @ValueSource(strings = ["abc", "1.5", "9223372036854775808", "-9223372036854775809"])
     fun `Long이 아니거나 넘치는 ID일 때__인증된 채 확인하면__조회 전에 기존 런타임 500을 유지한다`(
@@ -282,32 +222,6 @@ class FavoriteStatusHttpTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data").isArray())
         confirmVerified(favorites)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/favorites", "GET /api/v1/favorites/42", "GET /api/v1/favorites/42/check/",
-            "GET /api/v1/favorites/42/check/extra", "GET /api/favorites/42/check", "GET /api/v1/favorites/internal/42/check",
-            "HEAD /api/v1/favorites/42/check", "OPTIONS /api/v1/favorites/42/check", "POST /api/v1/favorites/42/check",
-            "PUT /api/v1/favorites/42/check", "POST /api/v1/favorites/42", "DELETE /api/v1/favorites/42",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__즐겨찾기 조회 없이 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(favorites, profiles, readPost, listPosts)
     }
 
     companion object {

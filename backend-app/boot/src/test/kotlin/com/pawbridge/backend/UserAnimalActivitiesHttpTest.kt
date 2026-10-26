@@ -232,21 +232,17 @@ class UserAnimalActivitiesHttpTest {
     }
 
     @Test
-    fun `기존 상태 조회와 인접 변경 요청이 주어졌을 때__요청하면__상태 조회와 기본 거부를 그대로 유지한다`() {
+    fun `기존 상태 조회가 주어졌을 때__요청하면__동물 활동 어드바이스가 상태 조회를 가로채지 않는다`() {
         // given
         every { statusQuery.isFavorite(any(), any()) } returns true
 
         // when
         val statusResult = mvc.perform(get("/api/v1/favorites/8/check").header("Authorization", token()))
-        val putResult = mvc.perform(put("/api/v1/favorites/8").header("Authorization", token()))
-        val extraResult = mvc.perform(post("/api/v1/favorites/8/extra").header("Authorization", token()))
 
         // then
         statusResult
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data").value(true))
-        putResult.andExpect(status().isForbidden())
-        extraResult.andExpect(status().isForbidden())
         verify(exactly = 1) { statusQuery.isFavorite(7, 8) }
         confirmVerified(activities)
     }

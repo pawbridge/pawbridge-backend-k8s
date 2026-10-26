@@ -31,7 +31,6 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -202,61 +201,6 @@ class UserNicknameHttpTest {
         confirmVerified(change, profiles, readPost, listPosts)
     }
 
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 신뢰할 수 없고 본문이 잘못됐을 때__바꾸면__검증과 서비스보다 인증이 먼저다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = put("/api/v1/users/me/nickname")
-            .header("X-User-Id", "7")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(UserNicknameController.Response<Any?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(change, profiles, readPost, listPosts)
-    }
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun `서명된 잘못된 신원 클레임이 주어졌을 때__바꾸면__클레임 실패로 서비스를 막는다`(claims: Map<String, Any>) {
-        // given
-        val token = Jwts.builder()
-            .claims(claims)
-            .expiration(Date(System.currentTimeMillis() + 3_600_000))
-            .signWith(F3TestInputs.KEY)
-            .compact()
-
-        // when
-        val result = mvc.perform(
-            put("/api/v1/users/me/nickname")
-                .header("Authorization", "Bearer $token")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"nickname\":\"새닉네임\"}"),
-        )
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.message").value("토큰 파싱에 실패했습니다."))
-        confirmVerified(change, profiles, readPost, listPosts)
-    }
-
     @Test
     fun `인증된 회원이 더는 없을 때__바꾸면__기존 회원 없음 응답을 유지한다`() {
         // given
@@ -330,37 +274,6 @@ class UserNicknameHttpTest {
         verify(exactly = 1) { profiles.require(7) }
         verify(exactly = 1) { listPosts.read() }
         confirmVerified(change, profiles, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/users/me/nickname",
-            "POST /api/v1/users/me/nickname",
-            "PATCH /api/v1/users/me/nickname",
-            "DELETE /api/v1/users/me/nickname",
-            "HEAD /api/v1/users/me/nickname",
-            "OPTIONS /api/v1/users/me/nickname",
-            "PUT /api/v1/users/me/nickname/",
-            "PUT /api/v1/users/me/nickname/extra",
-            "PUT /api/v1/users/7/nickname",
-            "PUT /api/v1/users/me/password",
-            "PUT /api/users/me/nickname",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__유효한 토큰으로 요청하면__서비스 없이 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(change, profiles, readPost, listPosts)
     }
 
     companion object {

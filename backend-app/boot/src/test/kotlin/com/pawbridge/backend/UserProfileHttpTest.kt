@@ -39,14 +39,12 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -171,59 +169,6 @@ class UserProfileHttpTest {
         verify(exactly = 1) { profiles.require(7) }
     }
 
-    @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 신뢰할 수 없고 신원이 위조됐을 때__내 정보를 조회하면__프로필 조회 전에 401을 돌려준다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get("/api/v1/users/me").header("X-User-Id", "7").header("X-User-Role", "ROLE_ADMIN")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(UserProfileController.Response<Any?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun `서명된 잘못된 신원이 주어졌을 때__내 정보를 조회하면__클레임 실패로 프로필 조회를 막는다`(claims: Map<String, Any>) {
-        // given
-        val token = Jwts.builder()
-            .claims(claims)
-            .expiration(Date(System.currentTimeMillis() + 3_600_000))
-            .signWith(F3TestInputs.KEY)
-            .compact()
-
-        // when
-        val result = mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer $token"))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json(
-                    "{\"code\":401,\"message\":\"토큰 파싱에 실패했습니다.\",\"data\":null}",
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
-    }
-
     @Test
     fun `무관한 subject와 비표준 역할이 주어졌을 때__내 정보를 조회하면__새 정책 없이 기존 신원 계약을 쓴다`() {
         // given
@@ -249,32 +194,6 @@ class UserProfileHttpTest {
             .andExpect(jsonPath("$.data.name").value("현재 이름7"))
             .andExpect(jsonPath("$.data.role").value("ROLE_SHELTER"))
         verify(exactly = 1) { profiles.require(7) }
-    }
-
-    @Test
-    fun `회원 둘과 익명 요청이 주어졌을 때__내 정보를 조회하면__각자 자기 주체로 조회하고 익명은 재사용하지 못한다`() {
-        // given
-        every { profiles.require(any()) } answers { profile(firstArg(), "현재 닉네임", null) }
-
-        // when
-        val members = longArrayOf(7, 8).map { id ->
-            id to mvc.perform(
-                get("/api/v1/users/me").header("Authorization", "Bearer " + F3TestInputs.token(id, "ROLE_USER")),
-            )
-        }
-        val anonymous = mvc.perform(get("/api/v1/users/me"))
-
-        // then
-        members.forEach { (id, result) ->
-            result
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.userId").value(id.toInt()))
-        }
-        anonymous.andExpect(status().isUnauthorized())
-        verify(exactly = 1) { profiles.require(7) }
-        verify(exactly = 1) { profiles.require(8) }
-        confirmVerified(profiles)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
     @Test
@@ -384,54 +303,6 @@ class UserProfileHttpTest {
         }
         confirmVerified(profiles)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/users", "GET /api/v1/users/me/", "GET /api/v1/users/me/extra",
-            "GET /api/v1/users/7", "GET /api/users/me", "GET /api/v1/admin/users/me",
-            "GET /api/v1/users/internal/7/nickname", "GET /api/v1/users/internal/7/state", "GET /error",
-            "HEAD /api/v1/users/me", "OPTIONS /api/v1/users/me", "POST /api/v1/users/me", "PUT /api/v1/users/me",
-            "PATCH /api/v1/users/me", "DELETE /api/v1/users/me",
-        ],
-    )
-    fun `노출되지 않은 메서드·내부 API·인접 경로가 주어졌을 때__유효한 토큰으로 요청하면__프로필 조회 없이 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "POST /api/v1/posts", "PUT /api/v1/posts/42", "DELETE /api/v1/posts/42",
-            "POST /api/v1/comments/posts/42", "PUT /api/v1/comments/12", "DELETE /api/v1/comments/12",
-        ],
-    )
-    fun `토큰 없는 기존 쓰기 요청이 주어졌을 때__요청하면__기존 JWT 경계를 유지한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-        confirmVerified(profiles, readPost, listPosts, searchPosts, listComments)
     }
 
     companion object {

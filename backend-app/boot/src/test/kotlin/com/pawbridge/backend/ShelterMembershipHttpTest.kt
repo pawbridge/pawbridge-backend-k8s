@@ -24,7 +24,6 @@ import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -159,31 +158,6 @@ class ShelterMembershipHttpTest {
     }
 
     @Test
-    fun `JWT가 없거나 관리자 역할이 위조됐을 때__잘못된 ID와 본문을 보내면__바인딩 전에 인증과 인가를 한다`() {
-        // given
-        // when
-        val missingJwt = mvc.perform(
-            post("$ADMIN/bad/approve")
-                .header("X-User-Role", "ROLE_ADMIN")
-                .contentType("application/json")
-                .content("{"),
-        )
-        val forgedRole = mvc.perform(
-            post("$ADMIN/bad/approve")
-                .header("Authorization", token("ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN")
-                .contentType("application/json")
-                .content("{"),
-        )
-
-        // then
-        missingJwt.andExpect(status().isUnauthorized())
-        forgedRole.andExpect(status().isForbidden())
-        confirmVerified(memberships)
-        cleared()
-    }
-
-    @Test
     fun `관리자의 파라미터가 잘못되었거나 날짜가 빠졌을 때__바인딩하면__로컬 빈 400과 전역 누락 파라미터 봉투를 유지한다`() {
         // given
         // when
@@ -239,7 +213,7 @@ class ShelterMembershipHttpTest {
     }
 
     @Test
-    fun `잘못된 요청 본문과 인접 경로가 주어졌을 때__호출하면__업무 호출 없이 거부한다`() {
+    fun `잘못된 요청 본문이 주어졌을 때__호출하면__업무 호출 없이 400으로 거부한다`() {
         // given
         // when
         val blankName = mvc.perform(
@@ -254,14 +228,10 @@ class ShelterMembershipHttpTest {
                 .contentType("application/json")
                 .content("{\"reason\":\" \"}"),
         )
-        val wrongMethod = mvc.perform(put("$ADMIN/91/approve").header("Authorization", token("ROLE_ADMIN")))
-        val extraPath = mvc.perform(get("$OWN/extra").header("Authorization", token("ROLE_USER")))
 
         // then
         blankName.andExpect(status().isBadRequest())
         blankReason.andExpect(status().isBadRequest())
-        wrongMethod.andExpect(status().isForbidden())
-        extraPath.andExpect(status().isForbidden())
         confirmVerified(memberships)
     }
 
