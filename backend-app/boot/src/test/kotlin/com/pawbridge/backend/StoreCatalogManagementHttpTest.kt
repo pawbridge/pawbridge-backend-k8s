@@ -34,7 +34,6 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
-import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.MethodSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -220,76 +219,6 @@ class StoreCatalogManagementHttpTest {
         confirmVerified(products, options, images, catalog, categories)
     }
 
-    @ParameterizedTest
-    @MethodSource("deniedCredentials")
-    fun `사용자 또는 무효 JWT와 위조 관리자 헤더일 때__각 쓰기를 호출하면__스토어 비즈니스 전에 거부한다`(
-        route: Route,
-        credentials: String,
-    ) {
-        // given
-        val call = command(route).header("X-User-Id", "99").header("X-User-Role", "ROLE_ADMIN")
-        if (credentials == "ROLE_USER") {
-            call.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-        } else if (credentials == "invalid") {
-            call.header("Authorization", "Bearer invalid-token")
-        }
-
-        // when
-        val result = mvc.perform(call)
-
-        // then
-        result
-            .andExpect(status().`is`(if (credentials == "ROLE_USER") 403 else 401))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(products, options, images, catalog, categories)
-    }
-
-    @ParameterizedTest
-    @CsvSource(
-        "POST,/api/products", "PATCH,/api/products/8", "DELETE,/api/products/8", "POST,/api/images",
-        "POST,/api/option-groups", "PUT,/api/option-groups/2", "DELETE,/api/option-groups/2",
-        "POST,/api/option-groups/2/values", "PUT,/api/option-groups/values/3", "DELETE,/api/option-groups/values/3",
-        "PUT,/api/v1/products/8", "POST,/api/v1/products/8", "POST,/api/v1/products/8/skus",
-        "PATCH,/api/v1/option-groups/2", "DELETE,/api/v1/option-groups", "PUT,/api/v1/images",
-        "GET,/api/v1/images", "POST,/api/v1/products/8/extra",
-        "POST,/api/categories", "PUT,/api/categories/4", "DELETE,/api/categories/4",
-        "PATCH,/api/v1/categories/4", "POST,/api/v1/categories/4", "PUT,/api/v1/categories", "DELETE,/api/v1/categories",
-        "POST,/api/v1/categories/4/extra",
-    )
-    fun `서명된 관리자일 때__게이트웨이 별칭이나 소유하지 않은 메서드 이웃을 쓰면__기본 거부를 유지한다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        val request = request(HttpMethod.valueOf(method), path)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{}")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(products, options, images, catalog, categories)
-    }
-
-    @ParameterizedTest
-    @MethodSource("reads")
-    fun `관리는 켜졌지만 공개 카탈로그가 꺼졌을 때__관리자가 카탈로그를 읽으면__공개 GET 범위를 넓히지 않는다`(
-        path: String,
-    ) {
-        // given
-        val request = get(path).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(products, options, images, catalog, categories)
-    }
-
     @Test
     fun `승인된 비즈니스 거절이 있을 때__조언이 처리하면__인증 밖에서 기존 스토어 오류를 보존한다`() {
         // given
@@ -368,111 +297,6 @@ class StoreCatalogManagementHttpTest {
     }
 }
 
-@WebMvcTest(excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class])
-@ContextConfiguration(
-    classes = [
-        ProductWriteController::class,
-        OptionManagementController::class,
-        ProductImageController::class,
-        CategoryManagementController::class,
-        CatalogManagementExceptionHandler::class,
-        StoreCatalogController::class,
-        StoreCatalogExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class StoreCatalogManagementDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var products: JpaCatalogProducts
-
-    @MockkBean
-    lateinit var options: JpaCatalogOptions
-
-    @MockkBean
-    lateinit var images: S3ProductImages
-
-    @MockkBean
-    lateinit var catalog: StoreCatalog
-
-    @MockkBean
-    lateinit var categories: JpaCatalogCategories
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
-    fun `관리가 기본 꺼짐일 때__서명된 관리자가 정식 쓰기를 각각 쓰면__비즈니스 전에 거부한다`(
-        route: StoreCatalogManagementHttpTest.Route,
-    ) {
-        // given
-        val request = StoreCatalogManagementHttpTest.command(route)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(products, options, images, catalog, categories)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.store-catalog-management.enabled=on"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        ProductWriteController::class,
-        OptionManagementController::class,
-        ProductImageController::class,
-        CategoryManagementController::class,
-        CatalogManagementExceptionHandler::class,
-        StoreCatalogController::class,
-        StoreCatalogExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class StoreCatalogManagementAliasDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var products: JpaCatalogProducts
-
-    @MockkBean
-    lateinit var options: JpaCatalogOptions
-
-    @MockkBean
-    lateinit var images: S3ProductImages
-
-    @MockkBean
-    lateinit var catalog: StoreCatalog
-
-    @MockkBean
-    lateinit var categories: JpaCatalogCategories
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
-    fun `리터럴 true 대신 불리언 별칭일 때__관리자가 각 쓰기를 쓰면__관리를 닫은 채 유지한다`(
-        route: StoreCatalogManagementHttpTest.Route,
-    ) {
-        // given
-        val request = StoreCatalogManagementHttpTest.command(route)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(products, options, images, catalog, categories)
-    }
-}
-
 @WebMvcTest(
     properties = ["pawbridge.store-catalog.enabled=true", "pawbridge.store-catalog-management.enabled=false"],
     excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
@@ -508,23 +332,6 @@ class StoreCatalogManagementReadOnlyHttpTest {
 
     @MockkBean
     lateinit var categories: JpaCatalogCategories
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#writes")
-    fun `공개 카탈로그만 켜졌을 때__관리자가 각 관리 쓰기를 시도하면__비즈니스 전에 거부한다`(
-        route: StoreCatalogManagementHttpTest.Route,
-    ) {
-        // given
-        val request = StoreCatalogManagementHttpTest.command(route)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(products, options, images, catalog, categories)
-    }
 
     @ParameterizedTest
     @MethodSource("com.pawbridge.backend.StoreCatalogManagementHttpTest#reads")

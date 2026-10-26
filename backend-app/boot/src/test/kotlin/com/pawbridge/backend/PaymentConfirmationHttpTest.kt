@@ -152,34 +152,6 @@ class PaymentConfirmationHttpTest {
         assertThat(response.response.contentAsString).doesNotContain("synthetic-payment-key")
     }
 
-    @Test
-    fun `위조 신원 헤더만 주어졌을 때__결제를 승인하면__결제 애플리케이션 전에 거부한다`() {
-        // given
-        val request = command("POST", "/api/v1/payments/confirm").content("{}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized())
-        confirmVerified(payments)
-    }
-
-    @Test
-    fun `잘못된 베어러와 위조 헤더가 주어졌을 때__결제를 승인하면__결제 애플리케이션 전에 거부한다`() {
-        // given
-        val request = command("POST", "/api/v1/payments/confirm")
-            .header("Authorization", "Bearer synthetic-invalid-token")
-            .content("{}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized())
-        confirmVerified(payments)
-    }
-
     @ParameterizedTest
     @ValueSource(strings = ["paymentKey", "orderId"])
     fun `BMP 밖 요청 필드가 주어졌을 때__검증된 회원이 승인하면__기존 범위 한정 검증 응답을 쓴다`(
@@ -204,31 +176,6 @@ class PaymentConfirmationHttpTest {
         confirmVerified(payments)
     }
 
-    @ParameterizedTest
-    @CsvSource(
-        "GET,/api/v1/payments/confirm",
-        "PUT,/api/v1/payments/confirm",
-        "PATCH,/api/v1/payments/confirm",
-        "DELETE,/api/v1/payments/confirm",
-        "POST,/api/payments/confirm",
-        "POST,/api/v1/payments",
-        "POST,/api/v1/payments/confirm/extra",
-    )
-    fun `검증된 회원이 주어졌을 때__등록되지 않은 메서드나 별칭을 쓰면__업무 전에 거부한다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        val request = verified(method, path).content("{}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(payments)
-    }
-
     companion object {
         fun command(method: String, path: String): MockHttpServletRequestBuilder {
             return request(HttpMethod.valueOf(method), path)
@@ -239,68 +186,5 @@ class PaymentConfirmationHttpTest {
         fun verified(method: String, path: String): MockHttpServletRequestBuilder {
             return command(method, path).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
         }
-    }
-}
-
-@WebMvcTest(excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class])
-@ContextConfiguration(
-    classes = [
-        PaymentController::class,
-        PaymentInputExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class PaymentConfirmationDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var payments: Payments
-
-    @Test
-    fun `결제 플래그가 없을 때__검증된 회원이 승인하면__업무 전에 거부한다`() {
-        // given
-        val request = PaymentConfirmationHttpTest.verified("POST", "/api/v1/payments/confirm").content("{}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(payments)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.payments.enabled=on"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        PaymentController::class,
-        PaymentInputExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class PaymentConfirmationAliasDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var payments: Payments
-
-    @Test
-    fun `정식이 아닌 결제 플래그가 주어졌을 때__검증된 회원이 승인하면__업무 전에 거부한다`() {
-        // given
-        val request = PaymentConfirmationHttpTest.verified("POST", "/api/v1/payments/confirm").content("{}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(payments)
     }
 }

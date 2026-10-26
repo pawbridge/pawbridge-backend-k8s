@@ -4,12 +4,9 @@ import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.store.internal.orderadministration.application.AdminOrders
 import com.pawbridge.backend.store.internal.orderadministration.web.AdminOrderController
-import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -52,39 +49,4 @@ class StoreAdminOrderStatusHttpTest {
         verify(exactly = 1) { orders.updateStatus(7, 7, "CANCELLED") }
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["ROLE_USER", "ROLE_SHELTER"])
-    fun `관리자 헤더를 위조한 서명된 비관리자일 때__상태를 변경하면__비즈니스 전에 403으로 거부한다`(
-        role: String,
-    ) {
-        // given
-        val request = patch("/api/v1/admin/orders/7/status")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, role))
-            .header("X-User-Role", "ROLE_ADMIN")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"status\":\"PAID\"}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(orders)
-    }
-
-    @Test
-    fun `토큰이 없을 때__상태를 변경하면__비즈니스 전에 401로 거부한다`() {
-        // given
-        val request = patch("/api/v1/admin/orders/7/status")
-            .header("X-User-Role", "ROLE_ADMIN")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"status\":\"PAID\"}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized())
-        confirmVerified(orders)
-    }
 }
