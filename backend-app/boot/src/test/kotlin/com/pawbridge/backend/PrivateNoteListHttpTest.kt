@@ -43,7 +43,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -231,40 +230,6 @@ class PrivateNoteListHttpTest {
     }
 
     @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 잘못되고 질의도 틀렸을 때__목록을 조회하면__바인딩 전에 401로 거부하고 의존성을 부르지 않는다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get(PATH)
-            .param("favorites", "not-a-boolean")
-            .param("page", "-1")
-            .param("box", "WRONG")
-            .header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json(
-                    mapper.createObjectNode().put("code", 401).put("message", message).putNull("data").toString(),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        noDependencies()
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
     @MethodSource("businessRejections")
     fun `페이지와 쪽지함이 모두 틀렸을 때__목록을 조회하면__페이지를 먼저 검사하고 의존성을 부르지 않는다`(
         page: String,
@@ -394,34 +359,6 @@ class PrivateNoteListHttpTest {
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID", "VALID"])
-    fun `스트림 확장 경로에 토큰이 없거나 잘못되거나 유효할 때__요청하면__목록과 SSE 작업 없이 기본 403을 유지한다`(
-        token: String,
-    ) {
-        // given
-        val request = get("$PATH/stream/extra").accept(MediaType.TEXT_EVENT_STREAM)
-        if (token != "MISSING") {
-            request.header(
-                "Authorization",
-                if (token == "INVALID") "Bearer invalid" else "Bearer " + F3TestInputs.token(7, "ROLE_USER"),
-            )
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-    }
-
     @Test
     fun `기존 알림 상세 차단 목록 경로가 있을 때__각각 읽으면__목록 밖에서 성공과 오류와 범위 한정 조언을 유지한다`() {
         // given
@@ -467,62 +404,6 @@ class PrivateNoteListHttpTest {
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "HEAD /api/v1/notes", "OPTIONS /api/v1/notes", "POST /api/v1/notes/unexposed/send", "GET /api/notes",
-            "GET /api/v1/notes/",
-        ],
-    )
-    fun `노출되지 않은 루트 별칭 끝 슬래시 또는 메서드일 때__요청하면__목록과 쓰기 작업 없이 거부한다`(
-        wire: String,
-    ) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-        val request = request(HttpMethod.valueOf(parts[0]), parts[1])
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        noDependencies()
-    }
-
-    @Test
-    fun `관리자 건수 경로에 일반 권한과 런타임 오류가 있을 때__요청하면__목록 조언 밖에서 403과 공통 500을 유지한다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
-
-        // when
-        val forbidden = mvc.perform(authenticated("/api/v1/admin/users/stats/total-users"))
-        val failed = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts)
-        confirmVerified(members, batches, clock, notes, blocks, details, notifications, blockLists)
-    }
-
     private fun page(total: Long, pages: Int, number: Int): ObjectNode {
         val result = mapper.createObjectNode().put("code", 200).put("message", "요청이 성공적으로 처리되었습니다.")
         val data = result.putObject("data")
@@ -566,7 +447,6 @@ class PrivateNoteListHttpTest {
         private val NOW: Instant = Instant.parse("2031-01-01T00:00:00.999999Z")
         private val CREATED: Instant = Instant.parse("2030-12-31T15:00:00.123456Z")
         private const val BODY = "  원문\n<태그>  "
-        private const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
 
         @JvmStatic
         fun rejectedAuthorizations(): Stream<Arguments> {

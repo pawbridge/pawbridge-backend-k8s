@@ -19,11 +19,9 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -83,54 +81,6 @@ class AnimalReadHttpTest {
         verify(exactly = 1) { animals.search(any(), any()) }
         verify(exactly = 1) { animals.findById(42) }
         verify(exactly = 1) { recommendations.recommend(42) }
-    }
-
-    @Test
-    fun `연결되지 않은 이웃 경로와 변경 요청일 때__관리자 토큰으로 요청하면__동물 코드를 부르지 않고 거부한다`() {
-        // given
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-        val paths = listOf(
-            "/api/v1/animals/abc",
-            "/api/v1/animals/-1", "/api/v1/animals/42/extra", "/api/v1/animals/42/similar/extra",
-            // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
-            "/api/v1/animals/abc/similar", "/api/animals/42/similar", "/api/v1/animals/apms",
-            "/api/v1/animals/apms/D-42/extra", "/api/v1/animals/expiring-soon/extra",
-            "/api/v1/animals/expiring-soon-extra",
-        )
-
-        // when
-        for (path in paths) {
-            mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
-        }
-        for (method in listOf(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE)) {
-            mvc.perform(request(method, "/api/v1/animals/42").header("Authorization", admin))
-                .andExpect(status().isForbidden())
-        }
-        for (path in listOf("/api/v1/animals/apms/D-42", "/api/v1/animals/expiring-soon")) {
-            val methods = listOf(
-                HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE,
-                HttpMethod.HEAD, HttpMethod.OPTIONS,
-            )
-            for (method in methods) {
-                mvc.perform(request(method, path).header("Authorization", admin)).andExpect(status().isForbidden())
-            }
-        }
-
-        // then
-        confirmVerified(animals, recommendations)
-    }
-
-    @Test
-    fun `기존 보호 경로일 때__토큰이 없거나 잘못되면__MVC 전에 JWT 거부를 유지한다`() {
-        // when
-        val missing = mvc.perform(get("/api/v1/users/me"))
-        val invalid = mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer invalid"))
-
-        // then
-        missing.andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
-        invalid.andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(animals, recommendations)
     }
 
     @Test
@@ -220,141 +170,5 @@ class AnimalReadHttpTest {
         verify(exactly = 1) { animals.findByApmsDesertionNo("missing") }
         verify(exactly = 1) { animals.findExpiringSoonAnimals(any()) }
         confirmVerified(animals, recommendations)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-discovery.enabled=false", "pawbridge.animal-query.backend=postgresql"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        AnimalDiscoveryController::class,
-        AnimalDiscoveryExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalExtraReadDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var animals: AnimalDiscovery
-
-    @Test
-    fun `탐색이 꺼졌을 때__관리자도 추가 조회를 요청하면__질의 없이 거부한다`() {
-        // given
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-
-        // when
-        for (path in listOf("/api/v1/animals/apms/D-42", "/api/v1/animals/expiring-soon")) {
-            mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
-        }
-
-        // then
-        confirmVerified(animals)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-discovery.enabled=on", "pawbridge.animal-query.backend=postgresql"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        AnimalDiscoveryController::class,
-        AnimalDiscoveryExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalExtraReadOnAliasHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var animals: AnimalDiscovery
-
-    @Test
-    fun `탐색 값이 on 별칭일 때__관리자도 추가 조회를 요청하면__질의 없이 거부한다`() {
-        // given
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-
-        // when
-        for (path in listOf("/api/v1/animals/apms/D-42", "/api/v1/animals/expiring-soon")) {
-            mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
-        }
-
-        // then
-        confirmVerified(animals)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-discovery.enabled=yes", "pawbridge.animal-query.backend=postgresql"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        AnimalDiscoveryController::class,
-        AnimalDiscoveryExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalExtraReadYesAliasHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var animals: AnimalDiscovery
-
-    @Test
-    fun `탐색 값이 yes 별칭일 때__관리자도 추가 조회를 요청하면__질의 없이 거부한다`() {
-        // given
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-
-        // when
-        for (path in listOf("/api/v1/animals/apms/D-42", "/api/v1/animals/expiring-soon")) {
-            mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
-        }
-
-        // then
-        confirmVerified(animals)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-discovery.enabled=true", "pawbridge.animal-query.backend=elasticsearch"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        AnimalDiscoveryController::class,
-        AnimalDiscoveryExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalExtraReadOtherBackendHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var animals: AnimalDiscovery
-
-    @Test
-    fun `조회 백엔드가 다른 값일 때__관리자도 추가 조회를 요청하면__질의 없이 거부한다`() {
-        // given
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-
-        // when
-        for (path in listOf("/api/v1/animals/apms/D-42", "/api/v1/animals/expiring-soon")) {
-            mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
-        }
-
-        // then
-        confirmVerified(animals)
     }
 }

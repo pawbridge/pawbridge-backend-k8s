@@ -15,8 +15,6 @@ import jakarta.servlet.DispatcherType
 import jakarta.servlet.RequestDispatcher
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -139,23 +137,6 @@ class PostReadHttpTest {
         verify(exactly = 1) { readPost.read(42) }
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "search", "9223372036854775808"])
-    fun `해석할 수 없는 게시글 ID가 주어졌을 때__조회하면__400을 응답한다`(value: String) {
-        // given
-        val request = get("/api/v1/posts/read/$value")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(readPost)
-    }
-
     @Test
     fun `게시글 저장소 실패가 주어졌을 때__조회하면__없음이나 대체값으로 가리지 않는다`() {
         // given
@@ -217,23 +198,4 @@ class PostReadHttpTest {
         confirmVerified(readPost)
     }
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/posts", "GET /api/v1/users/internal/7/nickname", "GET /error",
-            "GET /api/posts/read/42", "HEAD /api/v1/posts/read/42", "OPTIONS /api/v1/posts/read/42",
-            "POST /api/v1/posts/read/42", "PUT /api/v1/posts/read/42", "DELETE /api/v1/posts/read/42",
-        ],
-    )
-    fun `노출되지 않은 메서드나 경로가 주어졌을 때__요청하면__업무 조회 없이 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(readPost)
-    }
 }

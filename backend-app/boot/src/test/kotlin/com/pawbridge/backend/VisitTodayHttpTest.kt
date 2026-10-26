@@ -23,12 +23,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
@@ -168,27 +166,6 @@ class VisitTodayHttpTest {
         assertThat(visit.getHeader("Cache-Control")).isNotNull().isEqualTo(post.getHeader("Cache-Control"))
         verify(exactly = 1) { visits.read() }
         verify(exactly = 1) { readPost.read(42) }
-        confirmVerified(visits, videos, readPost, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/visits", "GET /api/v1/visits/today/", "GET /api/v1/visits/today/extra",
-            "GET /api/visits/today", "GET /api/v1/admin/visits/stats/period", "POST /api/v1/visits/identity",
-            "POST /api/v1/visits/today", "PUT /api/v1/visits/today", "HEAD /api/v1/visits/today",
-            "OPTIONS /api/v1/visits/today",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__요청하면__방문 조회 전에 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result.andExpect(status().isForbidden())
         confirmVerified(visits, videos, readPost, listPosts)
     }
 

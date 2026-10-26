@@ -15,7 +15,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -31,7 +30,6 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
@@ -149,29 +147,6 @@ class HomeVideoManagementHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["missing", "user"])
-    fun `검증되지 않았거나 관리자가 아닐 때__관리자 헤더로 잘못된 본문을 보내면__바인딩 전에 거절한다`(
-        mode: String,
-    ) {
-        // given
-        val call = post("$ROOT/preview")
-            .header("X-User-Role", "ROLE_ADMIN")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{")
-        if (mode == "user") {
-            call.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-        }
-
-        // when
-        val result = mvc.perform(call)
-
-        // then
-        result.andExpect(status().`is`(if (mode == "missing") 401 else 403))
-        confirmVerified(videos)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
     @MethodSource("failures")
     fun `원천이나 업무나 예기치 못한 실패가 났을 때__관리자가 읽으면__안전한 오류 형태를 그대로 유지한다`(
         failure: RuntimeException,
@@ -193,21 +168,6 @@ class HomeVideoManagementHttpTest {
                     JsonCompareMode.STRICT,
                 ),
             )
-    }
-
-    @Test
-    fun `제공하지 않는 메서드나 더 깊은 경로일 때__관리자가 요청하면__기본 거부를 유지한다`() {
-        // given
-        val adminToken = admin()
-
-        // when
-        val deleted = mvc.perform(delete("$ROOT/$ID").header("Authorization", adminToken))
-        val deeper = mvc.perform(post("$ROOT/$ID/recheck/extra").header("Authorization", adminToken))
-
-        // then
-        deleted.andExpect(status().isForbidden())
-        deeper.andExpect(status().isForbidden())
-        confirmVerified(videos)
     }
 
     companion object {

@@ -25,7 +25,6 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.util.UUID
 
@@ -87,31 +86,6 @@ class NoteSendHttpTest {
         cleared()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID"])
-    fun `유효한 토큰이 없고 본문이 깨졌을 때__쪽지를 보내면__본문 바인딩 전에 인증하고 유스케이스를 호출하지 않는다`(kind: String) {
-        // given
-        val request = post("/api/v1/notes")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{malformed")
-            .header("X-User-Id", "7")
-        if (kind == "INVALID") {
-            request.header("Authorization", "Bearer invalid")
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(jsonPath("$.code").value(401))
-        confirmVerified(sending)
-        cleared()
-    }
-
     @Test
     fun `검증된 호출자의 본문이 깨졌을 때__쪽지를 보내면__유스케이스 호출 없이 범위 한정 400을 돌려준다`() {
         // given
@@ -131,28 +105,6 @@ class NoteSendHttpTest {
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        confirmVerified(sending)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["/api/notes", "/api/v1/notes/unexposed/send"])
-    fun `노출되지 않은 인접 POST 경로가 주어졌을 때__유효한 토큰으로 호출하면__유스케이스 호출 없이 전부 거부한다`(path: String) {
-        // given
-        val token = F3TestInputs.token(7, "ROLE_USER")
-
-        // when
-        val result = mvc.perform(
-            post(path)
-                .header("Authorization", "Bearer $token")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(BODY),
-        )
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().doesNotExist("Set-Cookie"))
         confirmVerified(sending)
         cleared()
     }

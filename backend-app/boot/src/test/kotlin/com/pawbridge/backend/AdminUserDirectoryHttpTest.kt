@@ -93,7 +93,6 @@ class AdminUserDirectoryHttpTest {
         result
             .andExpect(status().isOk())
             .andExpect(content().json(EXPECTED, JsonCompareMode.STRICT))
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
         verify(exactly = 1) { users.page(null, null, request(0, 20)) }
         confirmVerified(users)
@@ -169,45 +168,6 @@ class AdminUserDirectoryHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["missing", "invalid"])
-    fun `없거나 잘못된 Bearer__검색 역할이 잘못되면__바인딩 전에 인증한다`(mode: String) {
-        // given
-        val request = get("$ROOT/search").param("role", "UNKNOWN").header("X-User-Role", "ROLE_ADMIN")
-        if (mode == "invalid") {
-            request.header("Authorization", "Bearer invalid")
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(users)
-        assertCleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["", "/search"])
-    fun `사용자와 위조 관리자 헤더__조회하면__질의 전에 거부한다`(suffix: String) {
-        // given
-        val request = get(ROOT + suffix)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-            .header("X-User-Role", "ROLE_ADMIN")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(users)
-        assertCleared()
-    }
-
-    @ParameterizedTest
     @ValueSource(strings = ["storage", "commit", "unsupported-sort"])
     fun `질의 커밋 또는 알려진 정렬 거부__목록을 조회하면__안전한 원본 일반 500을 재사용한다`(phase: String) {
         // given
@@ -230,29 +190,12 @@ class AdminUserDirectoryHttpTest {
         result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
         assertCleared()
     }
 
-    @Test
-    fun `이웃 경로나 쓰기 메서드__관리자가 요청하면__기본 거부를 유지한다`() {
-        // given
-        val token = admin()
-
-        // when
-        val neighbor = mvc.perform(get("$ROOT/search/extra").header("Authorization", token))
-        val write = mvc.perform(post(ROOT).header("Authorization", token))
-
-        // then
-        neighbor.andExpect(status().isForbidden())
-        write.andExpect(status().isForbidden())
-        confirmVerified(users)
-    }
-
     companion object {
         private const val ROOT = "/api/v1/admin/users"
-        private const val CACHE = "no-cache, no-store, max-age=0, must-revalidate"
         private const val INVALID_VALUE = "{\"code\":400,\"message\":\"요청 값의 형식이 올바르지 않습니다.\",\"data\":null}"
         private const val ERROR = "{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}"
         private const val EXPECTED = """

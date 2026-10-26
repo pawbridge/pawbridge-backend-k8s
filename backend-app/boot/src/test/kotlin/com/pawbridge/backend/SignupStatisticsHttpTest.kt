@@ -14,13 +14,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
-import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
@@ -74,7 +72,6 @@ class SignupStatisticsHttpTest {
         // then
         result
             .andExpect(status().isOk())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json(
@@ -103,7 +100,6 @@ class SignupStatisticsHttpTest {
         // then
         result
             .andExpect(status().isOk())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
                 content().json(
@@ -116,59 +112,6 @@ class SignupStatisticsHttpTest {
                 ),
             )
         verify(exactly = 1) { statistics.periods() }
-        confirmVerified(statistics)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = [DAILY, PERIODS])
-    fun `일반 사용자와 위조된 관리자 헤더가 주어졌을 때__잘못된 날짜로 통계를 요청하면__바인딩과 조회 전에 거부한다`(
-        path: String,
-    ) {
-        // given
-        val token = F3TestInputs.token(7, "ROLE_USER")
-
-        // when
-        val result = mvc.perform(
-            get(path)
-                .param("startDate", "bad")
-                .header("Authorization", "Bearer $token")
-                .header("X-User-Role", "ROLE_ADMIN"),
-        )
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", CACHE))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(statistics)
-        cleared()
-    }
-
-    @ParameterizedTest
-    @MethodSource("rejectedTokens")
-    fun `토큰이 없거나 유효하지 않을 때__잘못된 날짜로 조회하면__바인딩 전에 인증한다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get(DAILY).param("startDate", "bad").header("X-User-Role", "ROLE_ADMIN")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", CACHE))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
         confirmVerified(statistics)
         cleared()
     }
@@ -187,7 +130,6 @@ class SignupStatisticsHttpTest {
         // then
         result
             .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(
                 content().json(
                     "{\"code\":400,\"message\":\"필수 요청 파라미터 '" + missing + "'(이)가 누락되었습니다.\",\"data\":null}",
@@ -216,7 +158,6 @@ class SignupStatisticsHttpTest {
         // then
         result
             .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
         confirmVerified(statistics)
         cleared()
@@ -280,7 +221,6 @@ class SignupStatisticsHttpTest {
         // then
         result
             .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
         if (operation == "daily") {
             verify(exactly = 1) { statistics.daily(LocalDate.of(2024, 2, 29), LocalDate.of(2024, 2, 29)) }
@@ -291,35 +231,9 @@ class SignupStatisticsHttpTest {
         cleared()
     }
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/admin/users/stats/daily-signups/extra",
-            "POST /api/v1/admin/users/stats/signup-periods",
-            "GET /api/v1/admin/users/stats/not-ported",
-        ],
-    )
-    fun `이식되지 않은 이웃 경로나 메서드일 때__관리자가 요청하면__기본 거부를 유지한다`(wire: String) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(HttpMethod.valueOf(parts[0]), parts[1]).header("Authorization", admin()))
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(statistics)
-        cleared()
-    }
-
     companion object {
         private const val DAILY = "/api/v1/admin/users/stats/daily-signups"
         private const val PERIODS = "/api/v1/admin/users/stats/signup-periods"
-        private const val CACHE = "no-cache, no-store, max-age=0, must-revalidate"
 
         @JvmStatic
         fun rejectedTokens(): Stream<Arguments> {

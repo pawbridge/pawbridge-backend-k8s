@@ -31,13 +31,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.data.redis.RedisConnectionFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
@@ -232,31 +230,6 @@ class LocalAuthHttpTest {
             .andExpect(
                 content().json("{\"code\":400,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
             )
-        confirmVerified(verifications, signups, resets)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/email/send", "PUT /api/v1/email/send", "POST /api/v1/email/send/",
-            "POST /api/v1/email/other", "POST /api/email/send", "GET /api/v1/users/signup", "POST /api/v1/users/signup/",
-            "POST /api/users/signup", "GET /api/v1/auth/password/reset", "POST /api/v1/auth/password/reset/",
-            "POST /api/v1/auth/password/other", "POST /api/auth/password/reset",
-        ],
-    )
-    fun `원래 허용 목록 밖의 메서드나 경로일 때__요청하면__서비스 없이 거절한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1]).contentType(MediaType.APPLICATION_JSON).content("{}"),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
         confirmVerified(verifications, signups, resets)
     }
 

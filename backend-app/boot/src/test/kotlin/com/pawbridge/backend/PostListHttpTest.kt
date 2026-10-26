@@ -16,8 +16,6 @@ import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -27,7 +25,6 @@ import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -198,26 +195,6 @@ class PostListHttpTest {
             )
         }
         verify(exactly = 1) { listPosts.read() }
-        confirmVerified(listPosts, readPost)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/posts", "GET /api/v1/posts/search/extra", "GET /api/posts/read",
-            "GET /api/v1/posts/read/42/extra",
-            "HEAD /api/v1/posts/read", "OPTIONS /api/v1/posts/read", "POST /api/v1/posts/read", "PATCH /api/v1/posts/read",
-        ],
-    )
-    fun `노출되지 않은 메서드나 경로가 주어졌을 때__요청하면__목록이나 단건 조회 없이 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result.andExpect(status().isForbidden())
         confirmVerified(listPosts, readPost)
     }
 

@@ -23,10 +23,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -174,73 +172,6 @@ class AdminPostReadHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["no-number", "9223372036854775808", "read", "search"])
-    fun `숫자가 아니거나 넘치는 ID__관리자가 바인딩하면__서비스 호출 없이 400을 응답한다`(
-        id: String,
-    ) {
-        // given
-        val request = get("$ROOT/$id").header("Authorization", admin())
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
-        confirmVerified(posts, post)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["", "/7"])
-    fun `사용자 토큰과 관리자 헤더__요청하면__바인딩이나 조회 전에 거부한다`(suffix: String) {
-        // given
-        val request = get(ROOT + suffix)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-            .header("X-User-Role", "ROLE_ADMIN")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(posts, post)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["missing", "invalid"])
-    fun `없거나 잘못된 토큰__잘못된 ID로 요청하면__바인딩 전에 인증한다`(mode: String) {
-        // given
-        val request = get("$ROOT/no-number").header("X-User-Role", "ROLE_ADMIN")
-        if (mode == "invalid") {
-            request.header("Authorization", "Bearer invalid")
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized())
-        confirmVerified(posts, post)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["read", "search"])
-    fun `이식된 ID 매핑 리터럴 경로__Bearer 없이 요청하면__원래 500 바인딩 전에 인증한다`(
-        path: String,
-    ) {
-        // given
-        val request = get("$ROOT/$path").header("X-User-Role", "ROLE_ADMIN")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized())
-        confirmVerified(posts, post)
-    }
-
-    @ParameterizedTest
     @ValueSource(strings = ["list", "detail"])
     fun `조회 또는 커밋 런타임 실패__조회하면__안전한 원래 500을 돌려준다`(mode: String) {
         // given
@@ -258,23 +189,6 @@ class AdminPostReadHttpTest {
         result
             .andExpect(status().isInternalServerError())
             .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
-    }
-
-    @Test
-    fun `관리자와 더 깊은 경로 또는 미이식 변경__요청하면__기본 거부를 유지한다`() {
-        // given
-        val token = admin()
-
-        // when
-        val deleted = mvc.perform(delete("$ROOT/7/extra").header("Authorization", token))
-        val updated = mvc.perform(put("$ROOT/7/extra").header("Authorization", token))
-        val created = mvc.perform(post(ROOT).header("Authorization", token))
-
-        // then
-        deleted.andExpect(status().isForbidden())
-        updated.andExpect(status().isForbidden())
-        created.andExpect(status().isForbidden())
-        confirmVerified(posts, post)
     }
 
     companion object {

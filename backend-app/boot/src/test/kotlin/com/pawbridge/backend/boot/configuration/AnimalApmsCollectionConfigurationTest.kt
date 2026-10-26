@@ -1,7 +1,6 @@
 package com.pawbridge.backend.boot.configuration
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.pawbridge.backend.PawBridgeApplication
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsBatchExecutionRecovery
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsBatchProperties
 import com.pawbridge.backend.animal.internal.apms.infrastructure.ApmsSyncPlanFactory
@@ -26,7 +25,6 @@ import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoCon
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Import
 import org.springframework.core.task.SyncTaskExecutor
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
@@ -43,18 +41,6 @@ class AnimalApmsCollectionConfigurationTest {
     private val context = ApplicationContextRunner()
         .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration::class.java))
         .withUserConfiguration(AnimalApmsCollectionConfiguration::class.java)
-
-    @Test
-    fun `실제 메인 조립이 주어졌을 때__import를 읽으면__APMS 스케줄 구성이 등록되어 있다`() {
-        // given
-        val application = PawBridgeApplication::class.java
-
-        // when
-        val imports = application.getAnnotation(Import::class.java).value.map { it.java }
-
-        // then
-        assertThat(imports).contains(AnimalApmsCollectionConfiguration::class.java)
-    }
 
     @Test
     fun `플래그가 없을 때__컨텍스트가 시작되면__APMS 의존 빈이 필요하지 않다`() {

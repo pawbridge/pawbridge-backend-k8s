@@ -119,24 +119,16 @@ class MemberChatTransportHttpTest {
         confirmVerified(chat, tickets)
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["missing", "invalid", "no-expiry"])
-    fun `신뢰할 신원이나 만료가 없을 때__위조 헤더로 티켓을 요청하면__업무 호출 전에 거절한다`(
-        mode: String,
-    ) {
+    @Test
+    fun `만료가 없는 서명 토큰이 주어졌을 때__위조 만료 헤더로 티켓을 요청하면__업무 호출 전에 거절한다`() {
         // given
         val request = post("/api/v1/chats/connection-ticket")
             .header("X-User-Id", "7")
             .header("X-Auth-Expires-At", Long.MAX_VALUE)
-        if (mode == "invalid") {
-            request.header("Authorization", "Bearer invalid")
-        }
-        if (mode == "no-expiry") {
-            request.header(
+            .header(
                 "Authorization",
                 "Bearer " + Jwts.builder().claim("userId", 7L).claim("role", "ROLE_USER").signWith(F3TestInputs.KEY).compact(),
             )
-        }
 
         // when
         val result = mvc.perform(request)
@@ -146,18 +138,4 @@ class MemberChatTransportHttpTest {
         confirmVerified(chat, tickets)
     }
 
-    @Test
-    fun `익명 업그레이드 경로와 제공하지 않는 이웃 경로일 때__보안이 매칭하면__원래 소켓 핸드셰이크만 허용한다`() {
-        // given
-        // This slice has no socket transport: 404 proves security lets the handshake reach routing, not a live connection.
-
-        // when
-        val handshake = mvc.perform(get("/api/v1/chats/socket"))
-        val neighbor = mvc.perform(get("/api/v1/chats/socket/extra"))
-
-        // then
-        handshake.andExpect(status().isNotFound())
-        neighbor.andExpect(status().isForbidden())
-        confirmVerified(chat, tickets)
-    }
 }

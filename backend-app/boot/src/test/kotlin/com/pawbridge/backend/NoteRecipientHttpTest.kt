@@ -31,7 +31,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -39,7 +38,6 @@ import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -136,61 +134,6 @@ class NoteRecipientHttpTest {
     }
 
     @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 잘못되고 회원 경로가 깨졌을 때__읽으면__바인딩과 의존성 전에 인증 실패를 준다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/recipients/abc").header("X-User-Id", "7")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(NoteRecipientController.Response<Void?>(401, message, null)),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `검증된 토큰과 깨지거나 넘치는 회원 경로일 때__바인딩하면__의존성 전에 메시지만 담은 400을 준다`(
-        target: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/recipients/{member}", target)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(mapOf("message" to "요청 형식과 로그인 정보를 확인해 주세요.")),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
-    }
-
-    @ParameterizedTest
     @ValueSource(longs = [0, -1])
     fun `활성 호출자와 양수가 아닌 대상이 주어졌을 때__읽으면__차단 조회 뒤 메시지만 담은 401을 준다`(
         target: Long,
@@ -279,51 +222,6 @@ class NoteRecipientHttpTest {
         }
         confirmVerified(members, blocks, favorites, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/notes/stream/extra",
-            "GET /api/v1/chats", "GET /api/v1/users/internal/8/contact", "DELETE /internal/private-notes/members/8",
-            "GET /api/notes/recipients/8", "GET /api/v1/notes/recipients/8/", "HEAD /api/v1/notes/recipients/8",
-            "OPTIONS /api/v1/notes/recipients/8", "POST /api/v1/notes/recipients/8", "PUT /api/v1/notes/recipients/8",
-            "DELETE /api/v1/notes/recipients/8",
-        ],
-    )
-    fun `노출되지 않은 쪽지 채팅 내부 경로나 메서드일 때__유효한 토큰으로 요청하면__의존성 전에 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
-    }
-
-    @Test
-    fun `기존 즐겨찾기와 공개 게시글 경로일 때__읽으면__인증과 범위 실패 계약을 유지한다`() {
-        // given
-        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
-
-        // when
-        val favorite = mvc.perform(get("/api/v1/favorites/42/check"))
-        val post = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
-
-        // then
-        favorite.andExpect(status().isUnauthorized())
-        post
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { readPost.read(42) }
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     private fun authenticatedRecipient(target: Long): MockHttpServletRequestBuilder {

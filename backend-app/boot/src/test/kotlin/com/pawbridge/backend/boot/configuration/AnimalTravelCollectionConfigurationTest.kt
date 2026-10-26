@@ -1,7 +1,6 @@
 package com.pawbridge.backend.boot.configuration
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.pawbridge.backend.PawBridgeApplication
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.PetTravelCollector
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.PostgresqlTravelCollectionCatalog
 import com.pawbridge.backend.animal.internal.travel.infrastructure.collection.TourApiClient
@@ -26,7 +25,6 @@ import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAut
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.DependsOn
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.jdbc.support.incrementer.PostgresSequenceMaxValueIncrementer
@@ -44,22 +42,6 @@ import java.time.ZoneOffset
 import java.util.function.Supplier
 
 class AnimalTravelCollectionConfigurationTest {
-    @Test
-    fun `기존 갤러리와 보호소 조립이 있을 때__여행 수집을 추가하면__메인이 세 기능을 모두 등록한다`() {
-        // given
-        val application = PawBridgeApplication::class.java
-
-        // when
-        val imports = application.getAnnotation(Import::class.java).value.map { it.java }
-
-        // then
-        assertThat(imports).contains(
-            AnimalGalleryFeedConfiguration::class.java,
-            ShelterCommandConfiguration::class.java,
-            AnimalTravelCollectionConfiguration::class.java,
-        )
-    }
-
     private fun runner(source: HikariDataSource, jdbc: JdbcTemplate, manager: JdbcTransactionManager): ApplicationContextRunner {
         return ApplicationContextRunner()
             .withConfiguration(

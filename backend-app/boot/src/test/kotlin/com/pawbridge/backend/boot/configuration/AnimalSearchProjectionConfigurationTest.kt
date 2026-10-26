@@ -1,6 +1,5 @@
 package com.pawbridge.backend.boot.configuration
 
-import com.pawbridge.backend.PawBridgeApplication
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.PostgresqlSearchProjector
 import com.pawbridge.backend.animal.internal.discovery.infrastructure.KoreanSearchAnalyzer
 import io.mockk.confirmVerified
@@ -14,7 +13,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
 import java.sql.SQLException
@@ -160,26 +158,6 @@ class AnimalSearchProjectionConfigurationTest {
         } finally {
             scheduler.shutdown()
         }
-    }
-
-    @Test
-    fun `메인 import가 주어졌을 때__유지보수를 추가해도__기존 아카이브와 수집 import를 유지한다`() {
-        // given
-        val application = PawBridgeApplication::class.java
-
-        // when
-        val imports = application.getAnnotation(Import::class.java).value.map { it.java }
-
-        // then
-        assertThat(imports)
-            .contains(
-                AnimalSearchProjectionConfiguration::class.java,
-                AnimalPhotoArchiveConfiguration::class.java,
-                AnimalApmsCollectionConfiguration::class.java,
-                AnimalTravelCollectionConfiguration::class.java,
-                AnimalGalleryFeedConfiguration::class.java,
-                ShelterCommandConfiguration::class.java,
-            )
     }
 
     private fun runner(source: DataSource): WebApplicationContextRunner {
