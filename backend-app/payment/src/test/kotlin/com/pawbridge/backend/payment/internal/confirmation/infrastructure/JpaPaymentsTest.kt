@@ -311,32 +311,6 @@ class JpaPaymentsTest {
     }
 
     @Test
-    fun `403 카드 거절일 때__승인하면__업무상 거절로 취급한다`() {
-        // given
-        val f = Fixture()
-
-        every { f.orders.getOrder("order-uuid") } answers {
-            f.outside("order")
-            f.pendingOrder
-        }
-        every { f.payments.findFirstByOrderIdAndStatusOrderByIdAsc("order-uuid", PaymentStatus.DONE) } returns
-            Optional.empty()
-        every { f.toss.confirmPayment(any(), any()) } answers {
-            f.outside("provider")
-            throw f.clientError(HttpStatus.FORBIDDEN, "{\"code\":\"REJECT_CARD_PAYMENT\",\"message\":\"synthetic\"}")
-        }
-        every { f.store.failPayment(any()) } returns true
-
-        // when
-        val result = f.service.confirmPayment(7L, f.request)
-
-        // then
-        assertThat(result.status).isEqualTo("ABORTED")
-        verify(exactly = 1) { f.store.failPayment("order-uuid") }
-        confirmVerified(f.compensations)
-    }
-
-    @Test
     fun `이미 처리되었고 기록된 결제가 있을 때__승인하면__짧은 읽기에서 저장된 DONE을 돌려준다`() {
         // given
         val f = Fixture()
@@ -504,13 +478,15 @@ class JpaPaymentsTest {
     @ParameterizedTest
     @ValueSource(
         strings = [
-            "REJECT_CARD_PAYMENT", "INVALID_CARD_NUMBER", "EXCEED_MAX_DAILY_PAYMENT_COUNT",
-            "INVALID_STOPPED_CARD", "BELOW_MINIMUM_AMOUNT", "NOT_FOUND_PAYMENT_SESSION", "FDS_ERROR",
+            "400:REJECT_CARD_PAYMENT", "400:INVALID_CARD_NUMBER", "400:EXCEED_MAX_DAILY_PAYMENT_COUNT",
+            "400:INVALID_STOPPED_CARD", "400:BELOW_MINIMUM_AMOUNT", "400:NOT_FOUND_PAYMENT_SESSION", "400:FDS_ERROR",
+            "403:REJECT_CARD_PAYMENT",
         ],
     )
-    fun `목록에 있는 고객 거절일 때__승인하면__조회 없이 주문을 취소한다`(code: String) {
+    fun `목록에 있는 고객 거절일 때__승인하면__조회 없이 주문을 취소한다`(input: String) {
         // given
         val f = Fixture()
+        val parts = input.split(":")
 
         every { f.orders.getOrder("order-uuid") } answers {
             f.outside("order")
@@ -520,7 +496,7 @@ class JpaPaymentsTest {
             Optional.empty()
         every { f.toss.confirmPayment(any(), any()) } answers {
             f.outside("provider")
-            throw f.clientError(HttpStatus.BAD_REQUEST, "{\"code\":\"" + code + "\"}")
+            throw f.clientError(HttpStatus.valueOf(parts[0].toInt()), "{\"code\":\"" + parts[1] + "\"}")
         }
         every { f.store.failPayment(any()) } returns true
 
@@ -531,6 +507,7 @@ class JpaPaymentsTest {
         assertThat(result.status).isEqualTo("ABORTED")
         verify(exactly = 1) { f.store.failPayment("order-uuid") }
         verify(exactly = 0) { f.toss.getPayment(any(), any()) }
+        confirmVerified(f.compensations)
     }
 
     @Test

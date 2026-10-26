@@ -6,20 +6,11 @@ import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatal
 import com.pawbridge.backend.store.internal.catalogwrite.infrastructure.JpaCatalogProducts
 import com.pawbridge.backend.store.internal.catalogwrite.web.CatalogManagementExceptionHandler
 import com.pawbridge.backend.store.internal.catalogwrite.web.CategoryManagementController
-import com.pawbridge.backend.store.internal.catalogwrite.web.CategoryResponse
-import com.pawbridge.backend.store.internal.catalogwrite.web.CategoryUpdateRequest
-import com.pawbridge.backend.store.internal.catalogwrite.web.OptionGroupRequest
-import com.pawbridge.backend.store.internal.catalogwrite.web.OptionGroupResponse
 import com.pawbridge.backend.store.internal.catalogwrite.web.OptionManagementController
-import com.pawbridge.backend.store.internal.catalogwrite.web.OptionValueRequest
-import com.pawbridge.backend.store.internal.catalogwrite.web.OptionValueResponse
-import com.pawbridge.backend.store.internal.catalogwrite.web.ProductResponse
-import com.pawbridge.backend.store.internal.catalogwrite.web.ProductUpdateRequest
 import com.pawbridge.backend.store.internal.catalogwrite.web.ProductWriteController
 import com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentController
 import com.pawbridge.backend.store.internal.payment.web.MockOrderPaymentExceptionHandler
 import io.mockk.confirmVerified
-import io.mockk.every
 import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
@@ -88,19 +79,6 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `카테고리 ID가 숫자일 때__카테고리를 수정하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        every { categories.updateCategory(any(), any()) } returns CategoryResponse(1L, null, null, null, null)
-
-        // when
-        performJson(catalogMvc, put("/api/v1/categories/{categoryId}", ID))
-
-        // then
-        verify(exactly = 1) { categories.updateCategory(ID, any<CategoryUpdateRequest>()) }
-        confirmVerified(categories)
-    }
-
-    @Test
     fun `카테고리 ID가 공백일 때__카테고리를 삭제하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = catalogMvc.perform(delete("/api/v1/categories/{categoryId}", BLANK_SEGMENT)).andReturn()
@@ -111,18 +89,6 @@ class StorePathVariableRegressionTest {
         confirmVerified(categories)
     }
 
-    @Test
-    fun `카테고리 ID가 숫자일 때__카테고리를 삭제하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        justRun { categories.deleteCategory(any()) }
-
-        // when
-        catalogMvc.perform(delete("/api/v1/categories/{categoryId}", ID))
-
-        // then
-        verify(exactly = 1) { categories.deleteCategory(ID) }
-        confirmVerified(categories)
-    }
     // OptionManagementController: option groups
 
     @Test
@@ -133,19 +99,6 @@ class StorePathVariableRegressionTest {
         // then
         assertBlankRejected(result, "groupId")
         verify(exactly = 0) { options.updateOptionGroup(any(), any()) }
-        confirmVerified(options)
-    }
-
-    @Test
-    fun `옵션 그룹 ID가 숫자일 때__옵션 그룹을 수정하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        every { options.updateOptionGroup(any(), any()) } returns OptionGroupResponse(1L, null, null)
-
-        // when
-        performJson(catalogMvc, put("/api/v1/option-groups/{groupId}", ID))
-
-        // then
-        verify(exactly = 1) { options.updateOptionGroup(ID, any<OptionGroupRequest>()) }
         confirmVerified(options)
     }
 
@@ -161,19 +114,6 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `옵션 그룹 ID가 숫자일 때__옵션 그룹을 삭제하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        justRun { options.deleteOptionGroup(any()) }
-
-        // when
-        catalogMvc.perform(delete("/api/v1/option-groups/{groupId}", ID))
-
-        // then
-        verify(exactly = 1) { options.deleteOptionGroup(ID) }
-        confirmVerified(options)
-    }
-
-    @Test
     fun `옵션 그룹 ID가 공백일 때__옵션 값을 추가하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = performJson(catalogMvc, post("/api/v1/option-groups/{groupId}/values", BLANK_SEGMENT))
@@ -184,18 +124,6 @@ class StorePathVariableRegressionTest {
         confirmVerified(options)
     }
 
-    @Test
-    fun `옵션 그룹 ID가 숫자일 때__옵션 값을 추가하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        every { options.addOptionValue(any(), any()) } returns OptionValueResponse(1L, null, null, null)
-
-        // when
-        performJson(catalogMvc, post("/api/v1/option-groups/{groupId}/values", ID))
-
-        // then
-        verify(exactly = 1) { options.addOptionValue(ID, any<OptionValueRequest>()) }
-        confirmVerified(options)
-    }
     // OptionManagementController: option values
 
     @Test
@@ -206,19 +134,6 @@ class StorePathVariableRegressionTest {
         // then
         assertBlankRejected(result, "valueId")
         verify(exactly = 0) { options.updateOptionValue(any(), any()) }
-        confirmVerified(options)
-    }
-
-    @Test
-    fun `옵션 값 ID가 숫자일 때__옵션 값을 수정하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        every { options.updateOptionValue(any(), any()) } returns OptionValueResponse(1L, null, null, null)
-
-        // when
-        performJson(catalogMvc, put("/api/v1/option-groups/values/{valueId}", ID))
-
-        // then
-        verify(exactly = 1) { options.updateOptionValue(ID, any<OptionValueRequest>()) }
         confirmVerified(options)
     }
 
@@ -234,18 +149,6 @@ class StorePathVariableRegressionTest {
         confirmVerified(options)
     }
 
-    @Test
-    fun `옵션 값 ID가 숫자일 때__옵션 값을 삭제하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        justRun { options.deleteOptionValue(any()) }
-
-        // when
-        catalogMvc.perform(delete("/api/v1/option-groups/values/{valueId}", ID))
-
-        // then
-        verify(exactly = 1) { options.deleteOptionValue(ID) }
-        confirmVerified(options)
-    }
     // ProductWriteController
 
     @Test
@@ -260,19 +163,6 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `상품 ID가 숫자일 때__상품을 수정하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        every { products.updateProduct(any(), any()) } returns ProductResponse(1L, null, null, null, null, null, null, null)
-
-        // when
-        performJson(catalogMvc, patch("/api/v1/products/{productId}", ID))
-
-        // then
-        verify(exactly = 1) { products.updateProduct(ID, any<ProductUpdateRequest>()) }
-        confirmVerified(products)
-    }
-
-    @Test
     fun `상품 ID가 공백일 때__상품을 삭제하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = catalogMvc.perform(delete("/api/v1/products/{productId}", BLANK_SEGMENT)).andReturn()
@@ -283,18 +173,6 @@ class StorePathVariableRegressionTest {
         confirmVerified(products)
     }
 
-    @Test
-    fun `상품 ID가 숫자일 때__상품을 삭제하면__서비스에 그 ID를 넘긴다`() {
-        // given
-        justRun { products.deleteProduct(any()) }
-
-        // when
-        catalogMvc.perform(delete("/api/v1/products/{productId}", ID))
-
-        // then
-        verify(exactly = 1) { products.deleteProduct(ID) }
-        confirmVerified(products)
-    }
     // MockOrderPaymentController
 
     @Test

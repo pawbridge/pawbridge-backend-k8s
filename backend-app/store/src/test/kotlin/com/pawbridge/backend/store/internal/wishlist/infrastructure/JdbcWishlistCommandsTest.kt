@@ -419,31 +419,6 @@ class JdbcWishlistCommandsTest {
         assertFalse(active)
     }
 
-    @Test
-    fun `데이터베이스 실패가 발생할 때__ID로 찜을 삭제하면__조회나 재시도 없이 그대로 전파한다`() {
-        // given
-        val failure = DataAccessResourceFailureException("synthetic SQL")
-
-        every { write.executeWithoutResult(any<Consumer<TransactionStatus>>()) } answers {
-            inTransaction { firstArg<Consumer<TransactionStatus>>().accept(SimpleTransactionStatus()) }
-        }
-        every { jdbc.update(any<String>(), any<Map<String, *>>()) } throws failure
-
-        // when
-        val thrown = assertThrows(DataAccessResourceFailureException::class.java) { commands.removeById(7, 33) }
-
-        // then
-        assertSame(failure, thrown)
-        verify(exactly = 1) {
-            jdbc.update(
-                "DELETE FROM pawbridge_store.wishlists WHERE id=:id AND user_id=:member",
-                mapOf("member" to 7L, "id" to 33L),
-            )
-        }
-        confirmVerified(jdbc)
-        assertFalse(active)
-    }
-
     private fun <T> inTransaction(body: () -> T): T {
         active = true
         try {

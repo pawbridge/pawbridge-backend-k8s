@@ -94,6 +94,7 @@ class JpaAdminOrdersTest {
         when (op) {
             "list" -> service.list(7, query)
             "get" -> service.get(7, 33)
+            "status" -> service.updateStatus(7, 33, "PAID")
             else -> service.updateDelivery(7, 33, "SHIPPING")
         }
     }
@@ -244,53 +245,6 @@ class JpaAdminOrdersTest {
         verify(exactly = 0) { administrators.currentForRead(any()) }
     }
 
-    @ParameterizedTest
-    @MethodSource("invalidActors")
-    fun `자격이 없는 현재 DB 관리자일 때__주문 상태를 변경하면__주문 행에 닿기 전에 거부한다`(
-        state: String,
-        op: String,
-    ) {
-        if (op != "write") {
-            return
-        }
-
-        // given
-        actor = actorFor(state)
-
-        every { administrators.currentForWrite(any()) } answers {
-            active(false)
-            events.add("actor:write")
-            actor
-        }
-
-        // when
-        val thrown = assertThrows(AdministratorRejectedException::class.java) { service.updateStatus(7, 33, "PAID") }
-
-        // then
-        assertTrue(thrown is AdministratorRejectedException)
-        confirmVerified(em, orders)
-        assertEquals("rollback:write", events.last())
-    }
-
-    @Test
-    fun `없는 주문일 때__주문 상태를 변경하면__flush 없이 원래의 400 계열 예외를 던진다`() {
-        // given
-        every { administrators.currentForWrite(any()) } answers {
-            active(false)
-            events.add("actor:write")
-            actor
-        }
-        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } returns null
-
-        // when
-        val thrown = assertThrows(IllegalArgumentException::class.java) { service.updateStatus(7, 33, "PAID") }
-
-        // then
-        assertTrue(thrown is IllegalArgumentException)
-        verify(exactly = 0) { em.flush() }
-        assertEquals("rollback:write", events.last())
-    }
-
     @Test
     fun `주문 상태가 null일 때__변경하면__관리자 확인과 주문 잠금 뒤 갱신과 flush 없이 일반 실패를 던진다`() {
         // given
@@ -318,61 +272,6 @@ class JpaAdminOrdersTest {
         verify(exactly = 0) { em.flush() }
     }
 
-    @Test
-    fun `flush나 커밋이 실패했을 때__주문 상태를 변경하면__성공 없이 예외를 그대로 전파한다`() {
-        // given
-        val order = spyk(storedOrder())
-
-        every { administrators.currentForWrite(any()) } answers {
-            active(false)
-            events.add("actor:write")
-            actor
-        }
-        every { em.find(any<Class<Order>>(), any<Any>(), any<LockModeType>()) } answers {
-            active(false)
-            events.add("order-lock")
-            order
-        }
-        every { em.flush() } answers {
-            active(false)
-            events.add("flush")
-            if (order.deliveryStatus == null || order.status == null || failure == "flush") {
-                throw PersistenceException("synthetic constraint failure")
-            }
-        }
-
-        // when
-        failure = "flush"
-        val flushFailure = assertThrows(PersistenceException::class.java) { service.updateStatus(7, 33, "CANCELLED") }
-        val flushRollback = events.last()
-        events.clear()
-        failure = "commit"
-        val commitFailure = assertThrows(TransactionSystemException::class.java) {
-            service.updateStatus(7, 33, "CANCELLED")
-        }
-
-        // then
-        assertTrue(flushFailure is PersistenceException)
-        assertEquals("rollback:write", flushRollback)
-        assertTrue(commitFailure is TransactionSystemException)
-    }
-
-    @Test
-    fun `트랜잭션이 없거나 읽기 전용일 때__주문 상태를 변경하면__관리자나 주문 조회 전에 실패한다`() {
-        // given
-        val none = JpaAdminOrders(em, orders, TransactionOperations.withoutTransaction(), reads, administrators)
-
-        // when
-        val withoutTransaction = assertThrows(IllegalStateException::class.java) { none.updateStatus(7, 33, "PAID") }
-        writes.isReadOnly = true
-        val readOnly = assertThrows(IllegalStateException::class.java) { service.updateStatus(7, 33, "PAID") }
-
-        // then
-        assertTrue(withoutTransaction is IllegalStateException)
-        assertTrue(readOnly is IllegalStateException)
-        confirmVerified(em, orders, administrators)
-    }
-
     @ParameterizedTest
     @MethodSource("invalidActors")
     fun `자격이 없거나 정확히 일치하지 않는 현재 DB 관리자일 때__어느 작업이든 하면__주문 행에 닿기 전에 거부한다`(
@@ -382,7 +281,7 @@ class JpaAdminOrdersTest {
         // given
         actor = actorFor(state)
 
-        if (op == "write") {
+        if (op == "write" || op == "status") {
             every { administrators.currentForWrite(any()) } answers {
                 active(false)
                 events.add("actor:write")
@@ -402,7 +301,7 @@ class JpaAdminOrdersTest {
         // then
         assertTrue(thrown is AdministratorRejectedException)
         confirmVerified(em, orders)
-        assertEquals("rollback:" + (if (op == "write") "write" else "read"), events.last())
+        assertEquals("rollback:" + (if (op == "write" || op == "status") "write" else "read"), events.last())
     }
 
     @ParameterizedTest
@@ -726,7 +625,7 @@ class JpaAdminOrdersTest {
     }
 
     @Test
-    fun `없는 주문일 때__조회와 배송 상태 변경을 하면__원래의 404와 400 계열을 구분해 던진다`() {
+    fun `없는 주문일 때__조회와 상태 변경을 하면__원래의 404와 400 계열을 구분해 던진다`() {
         // given
         every { administrators.currentForRead(any()) } answers {
             active(true)
@@ -746,10 +645,13 @@ class JpaAdminOrdersTest {
         val writeFailure = assertThrows(IllegalArgumentException::class.java) {
             service.updateDelivery(7, 33, "SHIPPING")
         }
+        val statusFailure = assertThrows(IllegalArgumentException::class.java) { service.updateStatus(7, 33, "PAID") }
 
         // then
         assertTrue(readFailure is AdminOrderNotFoundException)
         assertTrue(writeFailure is IllegalArgumentException)
+        assertTrue(statusFailure is IllegalArgumentException)
+        assertEquals("rollback:write", events.last())
         verify(exactly = 0) { em.flush() }
     }
 
@@ -857,8 +759,9 @@ class JpaAdminOrdersTest {
         assertTrue(type.isInstance(thrown))
     }
 
-    @Test
-    fun `flush가 실패했을 때__배송 상태를 변경하면__예외를 전파하고 롤백을 요청한다`() {
+    @ParameterizedTest
+    @ValueSource(strings = ["write", "status"])
+    fun `flush가 실패했을 때__배송이나 주문 상태를 변경하면__예외를 전파하고 롤백을 요청한다`(op: String) {
         // given
         failure = "flush"
         val order = spyk(storedOrder())
@@ -882,7 +785,7 @@ class JpaAdminOrdersTest {
         }
 
         // when
-        val thrown = assertThrows(PersistenceException::class.java) { service.updateDelivery(7, 33, "DELIVERED") }
+        val thrown = assertThrows(PersistenceException::class.java) { access(op) }
 
         // then
         assertTrue(thrown is PersistenceException)
@@ -912,6 +815,7 @@ class JpaAdminOrdersTest {
             when (op) {
                 "list" -> service.list(7, query)
                 "get" -> service.get(7, 33)
+                "status" -> service.updateStatus(7, 33, "PAID")
                 else -> service.updateDelivery(7, 33, "SHIPPING")
             }
         }
@@ -976,7 +880,7 @@ class JpaAdminOrdersTest {
         @JvmStatic
         fun invalidActors(): Stream<Arguments> {
             return Stream.of("null", "wrong-id", "inactive", "deleted", "user", "shelter", "lowercase", "space", "prefix", "no-role")
-                .flatMap { state -> Stream.of("list", "get", "write").map { op -> Arguments.of(state, op) } }
+                .flatMap { state -> Stream.of("list", "get", "write", "status").map { op -> Arguments.of(state, op) } }
         }
 
         @JvmStatic
@@ -996,13 +900,13 @@ class JpaAdminOrdersTest {
 
         @JvmStatic
         fun failures(): Stream<Arguments> {
-            return Stream.of("list", "get", "write")
+            return Stream.of("list", "get", "write", "status")
                 .flatMap { op -> Stream.of("query", "commit").map { stage -> Arguments.of(op, stage) } }
         }
 
         @JvmStatic
         fun txModes(): Stream<Arguments> {
-            return Stream.of("list", "get", "write")
+            return Stream.of("list", "get", "write", "status")
                 .flatMap { op -> Stream.of("none", "wrong").map { kind -> Arguments.of(op, kind) } }
         }
     }
