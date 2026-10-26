@@ -28,6 +28,7 @@ object ContractPostgres {
     const val USER_SCHEMA = "pawbridge_user"
     const val COMMUNITY_SCHEMA = "pawbridge_community"
     const val ANIMAL_SCHEMA = "pawbridge_animal"
+    const val STORE_SCHEMA = "pawbridge_store"
 
     /** The image the packaged-JAR smokes use in CI, pinned by digest. */
     const val DEFAULT_IMAGE =
@@ -45,6 +46,7 @@ object ContractPostgres {
         USER_SCHEMA to "schema/user-service",
         COMMUNITY_SCHEMA to "schema/community-service",
         ANIMAL_SCHEMA to "schema/animal-service",
+        STORE_SCHEMA to "schema/store-service",
     )
 
     /** Extensions the database owner provisions in public before the animal migrations (they check for them). */
@@ -86,11 +88,12 @@ object ContractPostgres {
     /** Every row of every table in the application schemas, so a test can prove it left no trace. */
     fun snapshot(): Map<String, String> {
         val tables = admin.queryForList(
-            "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname IN (?, ?, ?) ORDER BY 1",
+            "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname IN (?, ?, ?, ?) ORDER BY 1",
             String::class.java,
             USER_SCHEMA,
             COMMUNITY_SCHEMA,
             ANIMAL_SCHEMA,
+            STORE_SCHEMA,
         )
         return tables.associateWith { table ->
             admin.queryForObject(
