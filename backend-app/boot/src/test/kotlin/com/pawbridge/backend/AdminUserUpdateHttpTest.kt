@@ -220,7 +220,7 @@ class AdminUserUpdateHttpTest {
     }
 
     @Test
-    fun `관리자와 잘못된 경로 Long__바인딩하면__업무 처리 전에 원래 런타임 500을 유지한다`() {
+    fun `관리자와 잘못된 경로 Long__바인딩하면__업무 처리 전에 400을 응답한다`() {
         // given
         val request = put(PATH + "bad").header("Authorization", admin()).contentType("application/json").content("{}")
 
@@ -229,9 +229,9 @@ class AdminUserUpdateHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
+            .andExpect(status().isBadRequest())
             .andExpect(
-                content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
+                content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         confirmVerified(members)
         cleared()

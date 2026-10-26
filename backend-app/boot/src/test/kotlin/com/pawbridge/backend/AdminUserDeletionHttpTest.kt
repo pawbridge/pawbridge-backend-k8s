@@ -196,7 +196,7 @@ class AdminUserDeletionHttpTest {
     }
 
     @Test
-    fun `관리자와 잘못된 Long__삭제 전에 바인딩하면__기존 범위 지정 안전 런타임 봉투를 쓴다`() {
+    fun `관리자와 잘못된 Long__삭제 전에 바인딩하면__서비스 호출 없이 400을 응답한다`() {
         // given
         val request = delete(PATH + "not-a-number")
             .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
@@ -206,11 +206,11 @@ class AdminUserDeletionHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
+            .andExpect(status().isBadRequest())
             .andExpect(header().string("Cache-Control", CACHE))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(
-                content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT),
+                content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT),
             )
         confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
