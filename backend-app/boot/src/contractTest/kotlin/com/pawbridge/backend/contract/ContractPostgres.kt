@@ -137,9 +137,13 @@ object ContractPostgres {
     private fun prepareDatabase(running: Running) {
         DriverManager.getConnection(running.jdbcUrl, ADMIN_USER, running.adminPassword).use { connection ->
             for ((schema, directory) in migrations) {
-                if (schema == ANIMAL_SCHEMA && !provisionAnimalExtensions(connection)) {
-                    log.warn("pgvector or pg_trgm is not available in this image; the animal schema is not created")
-                    continue
+                if (schema == ANIMAL_SCHEMA) {
+                    // Fail the whole suite instead of skipping the schema: a missing schema would only surface later
+                    // as confusing animal test failures, or hide them entirely.
+                    check(provisionAnimalExtensions(connection)) {
+                        "pgvector or pg_trgm is not available in this image; run with " +
+                            "-PcontractPostgresImage=pawbridge-it/postgres:17.11-pgvector-prodmatch"
+                    }
                 }
                 connection.createStatement().use { it.execute("CREATE SCHEMA $schema") }
                 // The reviewed migrations name tables without a schema (V1-V8) or with it (V9 and later),
