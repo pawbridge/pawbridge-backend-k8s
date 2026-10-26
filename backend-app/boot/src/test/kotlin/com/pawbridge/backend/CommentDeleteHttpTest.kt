@@ -267,7 +267,7 @@ class CommentDeleteHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `파싱할 수 없는 댓글 ID와 유효한 신원일 때__지우면__기존 안전한 500을 유지한다`(
+    fun `파싱할 수 없는 댓글 ID와 유효한 신원일 때__지우면__400을 응답한다`(
         commentId: String,
     ) {
         // given
@@ -277,8 +277,8 @@ class CommentDeleteHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
         confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 

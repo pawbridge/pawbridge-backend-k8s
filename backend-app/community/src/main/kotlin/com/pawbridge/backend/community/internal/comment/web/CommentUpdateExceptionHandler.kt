@@ -11,6 +11,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice(assignableTypes = [CommentUpdateController::class])
 class CommentUpdateExceptionHandler {
@@ -43,6 +44,11 @@ class CommentUpdateExceptionHandler {
     ): ResponseEntity<CommentUpdateController.Response<Void>> =
         ResponseEntity.badRequest()
             .body(CommentUpdateController.Response<Void>(400, failure.message, null))
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun invalidPathVariable(failure: MethodArgumentTypeMismatchException): ResponseEntity<CommentUpdateController.Response<Void>> =
+        ResponseEntity.badRequest()
+            .body(CommentUpdateController.Response<Void>(400, "요청 경로의 식별자 형식이 올바르지 않습니다.", null))
 
     @ExceptionHandler(RuntimeException::class)
     fun serverError(failure: RuntimeException): ResponseEntity<CommentUpdateController.Response<Void>> {

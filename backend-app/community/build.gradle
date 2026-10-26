@@ -25,6 +25,7 @@ dependencies {
     implementation 'org.postgresql:postgresql'
     implementation 'org.apache.lucene:lucene-analysis-nori:9.12.3'
 
+    testImplementation 'org.springframework:spring-test'
     testImplementation 'org.assertj:assertj-core'
     testImplementation 'ch.qos.logback:logback-classic'
 }

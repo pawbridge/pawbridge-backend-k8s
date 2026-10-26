@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice(assignableTypes = [MemberChatController::class])
 class MemberChatExceptionHandler {
@@ -25,6 +26,11 @@ class MemberChatExceptionHandler {
     fun unreadable(): ResponseEntity<MemberChatController.Response<Void>> =
         ResponseEntity.badRequest()
             .body(MemberChatController.Response<Void>(400, "요청 본문 형식이 올바르지 않습니다.", null))
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun invalidPathVariable(failure: MethodArgumentTypeMismatchException): ResponseEntity<MemberChatController.Response<Void>> =
+        ResponseEntity.badRequest()
+            .body(MemberChatController.Response<Void>(400, "요청 경로의 식별자 형식이 올바르지 않습니다.", null))
 
     @ExceptionHandler(RuntimeException::class)
     fun failed(failure: RuntimeException): ResponseEntity<MemberChatController.Response<Void>> {
