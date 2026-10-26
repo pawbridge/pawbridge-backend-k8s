@@ -193,7 +193,7 @@ class PostDeleteHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `해석할 수 없는 ID가 주어졌을 때__삭제하면__기존 500을 유지한다`(id: String) {
+    fun `해석할 수 없는 ID가 주어졌을 때__삭제하면__400을 응답한다`(id: String) {
         // given
         val request = delete("/api/v1/posts/$id")
             .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
@@ -203,8 +203,9 @@ class PostDeleteHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
-            .andExpect(jsonPath("$.message").value("서버 에러!"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
         confirmVerified(posts, media, deletion)
     }
 

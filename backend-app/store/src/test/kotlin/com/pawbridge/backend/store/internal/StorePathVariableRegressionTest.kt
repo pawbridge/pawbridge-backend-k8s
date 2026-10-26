@@ -39,7 +39,7 @@ import org.springframework.web.bind.MissingPathVariableException
 import java.nio.charset.StandardCharsets
 
 /**
- * Locks in the Java behaviour of store path variables after the Java to Kotlin conversion.
+ * Locks in the required (boxed) behaviour of store path variables after the Java to Kotlin conversion.
  *
  * A Kotlin `@PathVariable id: Long?` makes Spring treat the variable as optional, so a blank
  * segment (`/%20`) reached the service as null. The Java original declared a required boxed
@@ -77,12 +77,13 @@ class StorePathVariableRegressionTest {
     // CategoryManagementController
 
     @Test
-    fun `카테고리 ID가 공백일 때__카테고리를 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `카테고리 ID가 공백일 때__카테고리를 수정하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = performJson(catalogMvc, put("/api/v1/categories/{categoryId}", BLANK_SEGMENT))
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "categoryId")
+        verify(exactly = 0) { categories.updateCategory(any(), any()) }
         confirmVerified(categories)
     }
 
@@ -100,12 +101,13 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `카테고리 ID가 공백일 때__카테고리를 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `카테고리 ID가 공백일 때__카테고리를 삭제하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = catalogMvc.perform(delete("/api/v1/categories/{categoryId}", BLANK_SEGMENT)).andReturn()
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "categoryId")
+        verify(exactly = 0) { categories.deleteCategory(any()) }
         confirmVerified(categories)
     }
 
@@ -124,12 +126,13 @@ class StorePathVariableRegressionTest {
     // OptionManagementController: option groups
 
     @Test
-    fun `옵션 그룹 ID가 공백일 때__옵션 그룹을 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `옵션 그룹 ID가 공백일 때__옵션 그룹을 수정하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = performJson(catalogMvc, put("/api/v1/option-groups/{groupId}", BLANK_SEGMENT))
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "groupId")
+        verify(exactly = 0) { options.updateOptionGroup(any(), any()) }
         confirmVerified(options)
     }
 
@@ -147,12 +150,13 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `옵션 그룹 ID가 공백일 때__옵션 그룹을 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `옵션 그룹 ID가 공백일 때__옵션 그룹을 삭제하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = catalogMvc.perform(delete("/api/v1/option-groups/{groupId}", BLANK_SEGMENT)).andReturn()
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "groupId")
+        verify(exactly = 0) { options.deleteOptionGroup(any()) }
         confirmVerified(options)
     }
 
@@ -170,12 +174,13 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `옵션 그룹 ID가 공백일 때__옵션 값을 추가하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `옵션 그룹 ID가 공백일 때__옵션 값을 추가하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = performJson(catalogMvc, post("/api/v1/option-groups/{groupId}/values", BLANK_SEGMENT))
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "groupId")
+        verify(exactly = 0) { options.addOptionValue(any(), any()) }
         confirmVerified(options)
     }
 
@@ -194,12 +199,13 @@ class StorePathVariableRegressionTest {
     // OptionManagementController: option values
 
     @Test
-    fun `옵션 값 ID가 공백일 때__옵션 값을 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `옵션 값 ID가 공백일 때__옵션 값을 수정하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = performJson(catalogMvc, put("/api/v1/option-groups/values/{valueId}", BLANK_SEGMENT))
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "valueId")
+        verify(exactly = 0) { options.updateOptionValue(any(), any()) }
         confirmVerified(options)
     }
 
@@ -217,13 +223,14 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `옵션 값 ID가 공백일 때__옵션 값을 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `옵션 값 ID가 공백일 때__옵션 값을 삭제하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = catalogMvc.perform(delete("/api/v1/option-groups/values/{valueId}", BLANK_SEGMENT))
             .andReturn()
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "valueId")
+        verify(exactly = 0) { options.deleteOptionValue(any()) }
         confirmVerified(options)
     }
 
@@ -242,12 +249,13 @@ class StorePathVariableRegressionTest {
     // ProductWriteController
 
     @Test
-    fun `상품 ID가 공백일 때__상품을 수정하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `상품 ID가 공백일 때__상품을 수정하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = performJson(catalogMvc, patch("/api/v1/products/{productId}", BLANK_SEGMENT))
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "productId")
+        verify(exactly = 0) { products.updateProduct(any(), any()) }
         confirmVerified(products)
     }
 
@@ -265,12 +273,13 @@ class StorePathVariableRegressionTest {
     }
 
     @Test
-    fun `상품 ID가 공백일 때__상품을 삭제하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `상품 ID가 공백일 때__상품을 삭제하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = catalogMvc.perform(delete("/api/v1/products/{productId}", BLANK_SEGMENT)).andReturn()
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "productId")
+        verify(exactly = 0) { products.deleteProduct(any()) }
         confirmVerified(products)
     }
 
@@ -289,12 +298,13 @@ class StorePathVariableRegressionTest {
     // MockOrderPaymentController
 
     @Test
-    fun `주문 ID가 공백일 때__모의 결제를 처리하면__MissingPathVariable 서버 오류가 되고 서비스를 호출하지 않는다`() {
+    fun `주문 ID가 공백일 때__모의 결제를 처리하면__400이 되고 서비스를 호출하지 않는다`() {
         // when
         val result = paymentMvc.perform(post("/api/v1/orders/{orderId}/payment", BLANK_SEGMENT)).andReturn()
 
         // then
-        assertJavaOriginalServerError(result)
+        assertBlankRejected(result, "orderId")
+        verify(exactly = 0) { payments.processPayment(any()) }
         confirmVerified(payments)
     }
 
@@ -317,21 +327,23 @@ class StorePathVariableRegressionTest {
         private const val ID = 10L
         private const val CATALOG_BODY = "{\"name\":\"x\"}"
 
-        /** Body written by [CatalogManagementExceptionHandler] for the Java original. */
-        private const val CATALOG_SERVER_ERROR_BODY =
-            "{\"message\":\"Server Error\",\"code\":\"C004\",\"errors\":[]}"
-
         // helpers
 
         private fun performJson(mvc: MockMvc, request: MockHttpServletRequestBuilder): MvcResult {
             return mvc.perform(request.contentType(MediaType.APPLICATION_JSON).content(CATALOG_BODY)).andReturn()
         }
 
-        /** Java original: 500, the handler's C004 body, and MissingPathVariableException as the resolved exception. */
-        private fun assertJavaOriginalServerError(result: MvcResult) {
-            assertThat(result.response.status).isEqualTo(500)
+        /**
+         * Blank segment: 400, the store C005 body naming the variable, and MissingPathVariableException as the
+         * resolved exception (the boxed Long path variable is kept so the blank value never reaches a service).
+         */
+        private fun assertBlankRejected(result: MvcResult, variable: String) {
+            assertThat(result.response.status).isEqualTo(400)
             assertThat(result.response.getContentAsString(StandardCharsets.UTF_8))
-                .isEqualTo(CATALOG_SERVER_ERROR_BODY)
+                .isEqualTo(
+                    "{\"message\":\"Invalid Type Value\",\"code\":\"C005\"," +
+                        "\"errors\":[{\"field\":\"$variable\",\"value\":\"\",\"reason\":\"typeMismatch\"}]}",
+                )
             assertThat(result.resolvedException).isInstanceOf(MissingPathVariableException::class.java)
         }
     }

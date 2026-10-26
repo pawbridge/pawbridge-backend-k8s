@@ -7,6 +7,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice(assignableTypes = [CommentCreateController::class])
 class CommentCreateExceptionHandler {
@@ -31,6 +32,11 @@ class CommentCreateExceptionHandler {
     fun unsupportedCharacters(
         failure: UnsupportedCommentCharactersException,
     ): ResponseEntity<CommentCreateController.Response<Void>> = badRequest(failure.message)
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun invalidPathVariable(failure: MethodArgumentTypeMismatchException): ResponseEntity<CommentCreateController.Response<Void>> =
+        ResponseEntity.badRequest()
+            .body(CommentCreateController.Response<Void>(400, "요청 경로의 식별자 형식이 올바르지 않습니다.", null))
 
     @ExceptionHandler(RuntimeException::class)
     fun serverError(failure: RuntimeException): ResponseEntity<CommentCreateController.Response<Void>> =
