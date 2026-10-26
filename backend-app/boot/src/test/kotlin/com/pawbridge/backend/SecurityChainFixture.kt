@@ -41,6 +41,7 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
         }
     }
 
+    /** The production chain and Spring MVC, with nothing behind them yet. */
     @Configuration(proxyBeanMethods = false)
     @EnableWebMvc
     @EnableWebSecurity
@@ -49,14 +50,17 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
         @Bean
         fun postTokenAuthenticator(): PostTokenAuthenticator = PostTokenAuthenticator(F3TestInputs.KEY)
 
-        @Bean
-        fun recorder(): Recorder = Recorder()
-
         companion object {
             @Bean
             @JvmStatic
             fun placeholders(): PropertySourcesPlaceholderConfigurer = PropertySourcesPlaceholderConfigurer()
         }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    class RecorderConfiguration {
+        @Bean
+        fun recorder(): Recorder = Recorder()
     }
 
     fun call(request: MockHttpServletRequestBuilder): Outcome {
@@ -96,13 +100,26 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
                 val context = AnnotationConfigWebApplicationContext()
                 context.servletContext = MockServletContext()
                 context.environment.propertySources.addFirst(MapPropertySource("flags", properties))
-                context.register(ChainConfiguration::class.java)
+                context.register(ChainConfiguration::class.java, RecorderConfiguration::class.java)
                 context.refresh()
-                val mvc = MockMvcBuilders.webAppContextSetup(context)
-                    .apply<DefaultMockMvcBuilder>(springSecurity())
-                    .build()
-                SecurityChainFixture(mvc, context.getBean(Recorder::class.java), context)
+                SecurityChainFixture(mvcOf(context), context.getBean(Recorder::class.java), context)
             }
+        }
+
+        /** The production chain in front of whatever [configuration] registers, with every route flag on. */
+        fun mvcWith(configuration: Class<*>): MockMvc {
+            val context = AnnotationConfigWebApplicationContext()
+            context.servletContext = MockServletContext()
+            context.environment.propertySources.addFirst(MapPropertySource("flags", SecurityRoutes.everythingOn))
+            context.register(ChainConfiguration::class.java, configuration)
+            context.refresh()
+            return mvcOf(context)
+        }
+
+        private fun mvcOf(context: AnnotationConfigWebApplicationContext): MockMvc {
+            return MockMvcBuilders.webAppContextSetup(context)
+                .apply<DefaultMockMvcBuilder>(springSecurity())
+                .build()
         }
 
         val everythingOn: SecurityChainFixture
