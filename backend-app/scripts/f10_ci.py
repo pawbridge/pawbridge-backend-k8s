@@ -210,7 +210,7 @@ def smoke():
             for absent in (9950999, 0, -1):
                 delete(absent, 404, '댓글을 찾을 수 없습니다.')
             for malformed in ('not-a-long', '9223372036854775808'):
-                delete(malformed, 500, '서버 에러!')
+                delete(malformed, 400, '요청 경로의 식별자 형식이 올바르지 않습니다.')
             delete(first, body=b'{"ignored-invalid-json":')
             delete(first, 404, '댓글을 찾을 수 없습니다.')
             for token in ('ROLE_ADMIN', 'ROLE_SHELTER'):

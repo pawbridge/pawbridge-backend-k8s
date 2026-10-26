@@ -197,7 +197,7 @@ def smoke():
             for post_id in (POST + 5, 9930999, 0, -1):
                 create(post_id, {'content': 'F9 부모 부재'}, 404, '게시글을 찾을 수 없습니다.')
             for invalid in ('not-a-long', '9223372036854775808'):
-                create(invalid, {'content': 'F9 잘못된 경로'}, 500, '서버 에러!')
+                create(invalid, {'content': 'F9 잘못된 경로'}, 400, '요청 경로의 식별자 형식이 올바르지 않습니다.')
             create(value={'content': 'F9 \U0001f600 문자'}, expected=400,
                    message='일부 이모지 등 지원하지 않는 문자를 제외해 주세요.')
             create(value={'content': 'F9 \x00 NUL'}, expected=500, message='서버 에러!')

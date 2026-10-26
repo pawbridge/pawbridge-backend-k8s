@@ -255,7 +255,7 @@ def smoke():
             for absent in (9970999, 0, -1, DELETED_COMMENT):
                 update(absent, expected=404, message='댓글을 찾을 수 없습니다.')
             for malformed in ('not-a-long', '9223372036854775808'):
-                update(malformed, expected=500, message='서버 에러!')
+                update(malformed, expected=400, message='요청 경로의 식별자 형식이 올바르지 않습니다.')
             for value in ({}, {'content': None}, {'content': ''}, {'content': ' \t\r\n\f'}):
                 update(first, expected=400, message='content: 내용은 필수입니다', raw=json.dumps(value).encode())
             for raw in (b'{"content":', b'', b'null'):
