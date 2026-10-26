@@ -38,6 +38,8 @@ import org.springframework.test.context.ContextConfiguration
         "jwt.access-token-expiration=120999",
         "jwt.refresh-token-expiration=600999",
         "pawbridge.cors.allowed-origin-patterns=https://contract.example.test",
+        // The read-only daily visit totals; the disabled route has its own context in VisitTotalsDisabledContractTest.
+        "pawbridge.visits.enabled=true",
     ],
 )
 @ContextConfiguration(classes = [PawBridgeApplication::class], initializers = [ContractApplicationInitializer::class])
