@@ -67,10 +67,25 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
             response.status,
             response.contentAsString,
             recorder.reached.get() - before,
+            response.getHeader("Set-Cookie"),
+            response.getHeader("Cache-Control"),
         )
     }
 
-    data class Outcome(val status: Int, val body: String, val reached: Int)
+    data class Outcome(
+        val status: Int,
+        val body: String,
+        val reached: Int,
+        val setCookie: String?,
+        val cacheControl: String?,
+    ) {
+        /** The security headers every answer of the chain carries, whoever wrote the body. */
+        fun hasSecurityHeaders(): Boolean = setCookie == null && cacheControl == SECURITY_CACHE
+
+        fun isEnvelope(code: Int, message: String): Boolean {
+            return body == "{\"code\":$code,\"message\":\"$message\",\"data\":null}" && hasSecurityHeaders()
+        }
+    }
 
     companion object {
         private val cache = HashMap<Map<String, String>, SecurityChainFixture>()
@@ -93,6 +108,7 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
         val everythingOn: SecurityChainFixture
             get() = with(SecurityRoutes.everythingOn)
 
+        const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
         const val ADMIN_MESSAGE = "관리자 권한이 필요합니다."
         const val GENERIC_MESSAGE = "접근할 수 없습니다."
         const val MISSING_TOKEN = "인증 토큰이 필요합니다."
@@ -131,9 +147,8 @@ class SecurityChainFixture private constructor(val mvc: MockMvc, val recorder: R
             ("Bearer " + Jwts.builder().claim("userId", 7).claim("role", "ROLE_ADMIN")
                 .expiration(Date(System.currentTimeMillis() + 3_600_000)).signWith(otherKey).compact()) to BAD_TOKEN,
             custom({ claim("userId", 7).claim("role", "ROLE_ADMIN") }, -60_000) to BAD_TOKEN,
-            custom({ }) to BAD_CLAIMS,
-            custom({ claim("userId", 0).claim("role", "ROLE_ADMIN") }) to BAD_CLAIMS,
-            custom({ claim("userId", 7) }) to BAD_CLAIMS,
-        )
+        ) + PostTokenAuthenticatorTest.invalidIdentity().toList().map { claims ->
+            custom({ claims(claims) }) to BAD_CLAIMS
+        }
     }
 }

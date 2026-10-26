@@ -13,15 +13,13 @@ import org.junit.jupiter.params.provider.MethodSource
  * (`on`) must not open a route whose flag the chain compares with the literal `true`.
  */
 class SecurityChainFlagHttpTest {
-    @ParameterizedTest(name = "{1}")
-    @MethodSource("groups")
-    fun `기능 플래그 하나만 켰을 때__모든 경로를 요청하면__그 기능의 경로만 열리고 나머지는 핸들러 전에 403이다`(
-        group: List<Requirement>,
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("contexts")
+    fun `기능 플래그 조합이 주어졌을 때__모든 경로를 요청하면__켜진 경로만 열리고 나머지는 핸들러 전에 403이다`(
         name: String,
+        properties: Map<String, String>,
     ) {
         // given
-        val properties = SecurityRoutes.propertiesOf(group)
-
         // when
         val results = outcomesIn(properties)
 
@@ -38,7 +36,11 @@ class SecurityChainFlagHttpTest {
                 }
             }
         }
-        assertThat(results.count { it.open }).isPositive()
+        assertThat(results.count { it.open }).describedAs(name).isEqualTo(
+            SecurityRoutes.routes.count { route ->
+                SecurityRoutes.isOpen(properties, route.method, route.example)
+            },
+        )
     }
 
     @ParameterizedTest(name = "{1}")
@@ -96,8 +98,25 @@ class SecurityChainFlagHttpTest {
     }
 
     companion object {
+        /**
+         * Each feature switched on alone, and, for features that need two properties, each property missing in turn
+         * (a flag on without the postgresql backend, the backend without the flag).
+         */
         @JvmStatic
-        fun groups(): List<Array<Any>> = SecurityRoutes.flagGroups.map { arrayOf(it, SecurityRoutes.describe(it)) }
+        fun contexts(): List<Array<Any>> = SecurityRoutes.flagGroups.flatMap { group ->
+            val full = listOf(arrayOf<Any>("${SecurityRoutes.describe(group)} 켜짐", SecurityRoutes.propertiesOf(group)))
+            val missingOne = if (group.size > 1) {
+                group.map { missing ->
+                    arrayOf<Any>(
+                        "${SecurityRoutes.describe(group)} 중 ${missing.property.removePrefix("pawbridge.")} 없음",
+                        SecurityRoutes.propertiesOf(group - missing),
+                    )
+                }
+            } else {
+                emptyList()
+            }
+            full + missingOne
+        }
 
         @JvmStatic
         fun strictGroups(): List<Array<Any>> = SecurityRoutes.flagGroups

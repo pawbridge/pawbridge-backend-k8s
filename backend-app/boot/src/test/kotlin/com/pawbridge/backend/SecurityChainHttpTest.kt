@@ -1,6 +1,7 @@
 package com.pawbridge.backend
 
 import com.pawbridge.backend.SecurityChainFixture.Companion.ADMIN_MESSAGE
+import com.pawbridge.backend.SecurityChainFixture.Companion.BAD_CLAIMS
 import com.pawbridge.backend.SecurityChainFixture.Companion.GENERIC_MESSAGE
 import com.pawbridge.backend.SecurityChainFixture.Companion.bearer
 import com.pawbridge.backend.SecurityChainFixture.Companion.rejectedTokens
@@ -42,9 +43,7 @@ class SecurityChainHttpTest {
         // then
         outcomes.forEach { (path, message, outcome) ->
             assertThat(outcome.status).describedAs("%s %s", route.method, path).isEqualTo(401)
-            assertThat(outcome.body).describedAs("%s %s", route.method, path)
-                .contains("\"code\":401")
-                .contains("\"message\":\"$message\"")
+            assertThat(outcome.isEnvelope(401, message)).describedAs("%s %s %s", route.method, path, outcome.body).isTrue()
             assertThat(outcome.reached).describedAs("%s %s", route.method, path).isZero()
         }
     }
@@ -54,7 +53,8 @@ class SecurityChainHttpTest {
     fun `관리자 경로가 주어졌을 때__관리자가 아닌 서명 토큰과 위조 헤더로 요청하면__핸들러 전에 403을 준다`(route: Route) {
         // given
         val message = if (route.access == Access.ADMIN) ADMIN_MESSAGE else GENERIC_MESSAGE
-        val callers = listOf(bearer(7, "ROLE_USER"), bearer(7, "ROLE_SHELTER"), bearer(7, "ROLE_ADMINISTRATOR"))
+        val callers = listOf("ROLE_USER", "ROLE_SHELTER", "ROLE_ADMINISTRATOR", "ROLE_ADMIN ", "ROLE_UNKNOWN", "", " ")
+            .map { bearer(7, it) }
 
         // when
         val outcomes = callers.map { chain.call(send(route.method, route.example, it)) }
@@ -63,7 +63,7 @@ class SecurityChainHttpTest {
         // then
         outcomes.forEach { outcome ->
             assertThat(outcome.status).isEqualTo(403)
-            assertThat(outcome.body).contains("\"message\":\"$message\"")
+            assertThat(outcome.isEnvelope(403, message)).describedAs(outcome.body).isTrue()
             assertThat(outcome.reached).isZero()
         }
         assertThat(admin.status).isEqualTo(200)
@@ -72,18 +72,29 @@ class SecurityChainHttpTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("memberRoutes")
-    fun `회원 경로가 주어졌을 때__어떤 역할이든 유효한 토큰으로 요청하면__핸들러에 닿는다`(route: Route) {
+    fun `회원 경로가 주어졌을 때__어떤 역할이든 유효한 토큰으로 요청하면__핸들러에 닿고 다음 익명 요청은 신원을 물려받지 않는다`(route: Route) {
         // given
-        val callers = listOf(bearer(7, "ROLE_USER"), bearer(7, "ROLE_SHELTER"), bearer(7, "ROLE_ADMIN"))
+        val callers = listOf(
+            bearer(7, "ROLE_USER"),
+            bearer(8, "ROLE_SHELTER"),
+            bearer(9, "ROLE_ADMIN"),
+            bearer(10, "ROLE_FUTURE"),
+            bearer(11, ""),
+            bearer(12, " "),
+        )
 
         // when
         val outcomes = callers.map { chain.call(send(route.method, route.example, it)) }
+        val anonymousAfterwards = chain.call(send(route.method, route.example, null))
 
         // then
         outcomes.forEach { outcome ->
             assertThat(outcome.status).isEqualTo(200)
             assertThat(outcome.reached).isEqualTo(1)
+            assertThat(outcome.hasSecurityHeaders()).isTrue()
         }
+        assertThat(anonymousAfterwards.status).isEqualTo(401)
+        assertThat(anonymousAfterwards.reached).isZero()
     }
 
     @ParameterizedTest(name = "{0}")
@@ -99,6 +110,7 @@ class SecurityChainHttpTest {
         outcomes.forEach { outcome ->
             assertThat(outcome.status).isEqualTo(200)
             assertThat(outcome.reached).isEqualTo(1)
+            assertThat(outcome.hasSecurityHeaders()).isTrue()
         }
     }
 
@@ -117,10 +129,12 @@ class SecurityChainHttpTest {
         assertThat(neighbors).isNotEmpty()
         outcomes.forEach { (method, path, outcome) ->
             assertThat(outcome.status).describedAs("%s %s", method, path).isEqualTo(403)
+            assertThat(outcome.isEnvelope(403, GENERIC_MESSAGE)).describedAs("%s %s %s", method, path, outcome.body).isTrue()
             assertThat(outcome.reached).describedAs("%s %s", method, path).isZero()
         }
         anonymous.forEach { outcome ->
             assertThat(outcome.status).isEqualTo(403)
+            assertThat(outcome.isEnvelope(403, GENERIC_MESSAGE)).isTrue()
             assertThat(outcome.reached).isZero()
         }
     }
@@ -154,13 +168,14 @@ class SecurityChainHttpTest {
 
         // then
         assertThat(stream.status).isEqualTo(401)
+        assertThat(stream.isEnvelope(401, BAD_CLAIMS)).isTrue()
         assertThat(stream.reached).isZero()
         assertThat(list.status).isEqualTo(200)
         assertThat(list.reached).isEqualTo(1)
     }
 
     companion object {
-        private val methods = listOf("GET", "POST", "PUT", "PATCH", "DELETE")
+        private val methods = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
 
         @JvmStatic
         fun allRoutes(): List<Route> = SecurityRoutes.routes
@@ -213,6 +228,9 @@ class SecurityChainHttpTest {
             "GET /api/v1/internal/places/refresh",
             "POST /api/v1/carts/reset",
             "POST /api/v1/auth/login/extra",
+            "GET /error",
+            "POST /api/v1/v1/batch/apms/sync",
+            "POST /api/v1/auth/login",
             "GET /actuator/info",
             "GET /actuator/prometheus",
         )
@@ -223,6 +241,7 @@ class SecurityChainHttpTest {
                 methods.forEach { add(it to route.example) }
                 methods.forEach { add(it to route.example + "/extra") }
                 methods.forEach { add(it to route.example + "/") }
+                methods.forEach { add(it to route.example + "-extra") }
                 val parent = route.example.substringBeforeLast('/')
                 methods.forEach { add(it to parent) }
                 methods.forEach { add(it to "$parent/unknown") }
