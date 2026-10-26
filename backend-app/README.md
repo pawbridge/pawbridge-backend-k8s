@@ -297,6 +297,25 @@ User 내부 `UserProfileQuery.require(id)`가 같은 reader의 3초 read-only �
 - 모듈 `build.gradle`에는 Kotlin plugin을 쓰지 않는다. 구조 TestKit fixture가 실제 모듈 스크립트를 Kotlin plugin 없는 루트에 복사해 적용하기 때문이다.
 - `.kt`는 `src/main/kotlin` 또는 `src/main/java`에 둘 수 있다. Kotlin이 먼저 컴파일되고 Java가 그 class를 본다. 같은 모듈의 Java Lombok 생성 멤버는 Kotlin에서 보이지 않으므로 Lombok class는 함께 Kotlin으로 옮기거나 일반 Java 접근자로 바꾼다.
 
+## 운영 배포
+
+운영 백엔드는 Mac mini의 Docker Compose 프로젝트 `pawbridge-prod`에서 `monolith` 컨테이너 하나로 돈다. GitHub Actions는 이미지를 만들거나 올리지 않으므로 배포는 Mac mini에서 수동으로 한다. 운영 이미지는 레지스트리에 올리지 않고 로컬에만 둔다.
+
+1. **main 커밋에서만 빌드한다.** dev 병합 → 병합 전 로컬 검증(아래 "검증") → main 병합 순서를 지킨 뒤, 배포할 main 커밋을 깨끗한 작업 폴더로 꺼낸다.
+2. **JAR과 이미지를 만든다.**
+   ```bash
+   cd backend-app
+   ./gradlew projects check :boot:bootJar
+   docker build --pull=false --build-arg GIT_SHA=$(git rev-parse HEAD) -t pawbridge-monolith:prod-$(git rev-parse --short=12 HEAD) .
+   ```
+   `Dockerfile`과 `.dockerignore`가 이 폴더에 있다. 빌드 맥락에는 `boot/build/libs/pawbridge-backend-app.jar`만 들어간다.
+3. **이미지를 교체한다.** 운영 compose 폴더(비밀 저장소 아래, 저장소에 두지 않음)에서 `compose.env`를 날짜 붙은 이름으로 백업하고 `MONOLITH_IMAGE` 한 줄만 새 태그로 바꾼 뒤 monolith만 다시 만든다.
+   ```bash
+   docker compose -p pawbridge-prod -f compose.json --env-file compose.env up -d --no-deps monolith
+   ```
+4. **확인한다.** 컨테이너가 `healthy`가 되고, 공개 API(예: `GET /api/v1/posts/read`, `GET /api/v1/animals`)가 정상 응답하며, 10분 동안 ERROR 로그와 운영 경고가 없는지 본다.
+5. **롤백한다.** 문제가 있으면 백업한 `compose.env`를 되돌리고 3의 명령을 다시 실행한다. 이전 이미지는 로컬에 남아 있다. DB 마이그레이션을 함께 적용했다면 이전 이미지와 호환되는지 먼저 확인한다.
+
 ## 검증
 
 GitHub Actions(`Backend app check`)는 최소 검사만 한다. 모든 source set(main, test, architectureTest, contractTest)을 컴파일하고 실행 JAR을 만든다. 단위·구조·DB 계약 시험은 GitHub에서 돌리지 않고, 병합 전에 PR head에서 로컬로 실행한다.
