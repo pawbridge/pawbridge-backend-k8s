@@ -10,6 +10,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice(assignableTypes = [AdminUserUpdateController::class])
 class AdminUserUpdateExceptionHandler {
@@ -37,6 +38,12 @@ class AdminUserUpdateExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun unreadable(failure: HttpMessageNotReadableException): ResponseEntity<UserNicknameController.Response<Void>> =
         existing.unreadable(failure)
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun invalidPathVariable(
+        failure: MethodArgumentTypeMismatchException,
+    ): ResponseEntity<UserNicknameController.Response<Void>> =
+        ResponseEntity.badRequest().body(UserNicknameController.Response<Void>(400, "요청 경로의 식별자 형식이 올바르지 않습니다.", null))
 
     @ExceptionHandler(RuntimeException::class)
     fun unexpected(failure: RuntimeException): ResponseEntity<UserNicknameController.Response<Void>> =

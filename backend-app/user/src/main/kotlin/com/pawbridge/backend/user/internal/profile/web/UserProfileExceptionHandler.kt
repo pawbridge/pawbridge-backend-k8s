@@ -5,7 +5,9 @@ import com.pawbridge.backend.user.internal.profile.application.UserNotFoundExcep
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import java.util.Collections
 import java.util.IdentityHashMap
 
@@ -22,6 +24,17 @@ class UserProfileExceptionHandler {
     fun userNotFound(failure: UserNotFoundException): ResponseEntity<UserProfileController.Response<Void>> =
         ResponseEntity.badRequest()
             .body(UserProfileController.Response<Void>(400, "존재하지 않는 회원입니다.", null))
+
+    // A non-numeric path or query value is a client error, not an unexpected failure.
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun invalidValue(failure: MethodArgumentTypeMismatchException): ResponseEntity<UserProfileController.Response<Void>> {
+        val message = if (failure.parameter.hasParameterAnnotation(PathVariable::class.java)) {
+            "요청 경로의 식별자 형식이 올바르지 않습니다."
+        } else {
+            "요청 값의 형식이 올바르지 않습니다."
+        }
+        return ResponseEntity.badRequest().body(UserProfileController.Response<Void>(400, message, null))
+    }
 
     @ExceptionHandler(RuntimeException::class)
     fun serverError(failure: RuntimeException): ResponseEntity<UserProfileController.Response<Void>> {
