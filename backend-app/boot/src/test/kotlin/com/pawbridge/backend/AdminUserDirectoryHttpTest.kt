@@ -154,7 +154,7 @@ class AdminUserDirectoryHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["role_user", "UNKNOWN"])
-    fun `잘못된 역할__관리자가 검색을 바인딩하면__조회 없이 원래 런타임 500을 유지한다`(role: String) {
+    fun `잘못된 역할__관리자가 검색을 바인딩하면__조회 없이 400을 응답한다`(role: String) {
         // given
         val request = get("$ROOT/search").param("role", role).header("Authorization", admin())
 
@@ -163,8 +163,8 @@ class AdminUserDirectoryHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().json(INVALID_VALUE, JsonCompareMode.STRICT))
         confirmVerified(users)
     }
 
@@ -253,6 +253,7 @@ class AdminUserDirectoryHttpTest {
     companion object {
         private const val ROOT = "/api/v1/admin/users"
         private const val CACHE = "no-cache, no-store, max-age=0, must-revalidate"
+        private const val INVALID_VALUE = "{\"code\":400,\"message\":\"요청 값의 형식이 올바르지 않습니다.\",\"data\":null}"
         private const val ERROR = "{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}"
         private const val EXPECTED = """
         {"code":200,"message":"요청이 성공적으로 처리되었습니다.","data":{

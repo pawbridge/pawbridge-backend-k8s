@@ -207,6 +207,43 @@ class UserPathVariableRegressionTest {
         verify(exactly = 1) { profiles.require(ID) }
     }
 
+    // Admin user detail, update and delete: a non-numeric id is a client error answered with 400
+
+    @Test
+    fun `숫자가 아닌 사용자 아이디일 때__관리자가 상세를 조회하면__400을 응답하고 서비스를 호출하지 않는다`() {
+        // when
+        val result = detailMvc.perform(get("/api/v1/admin/users/{userId}", NON_NUMERIC)).andReturn()
+
+        // then
+        assertInvalidPathVariable(result)
+        verify(exactly = 0) { profiles.require(any()) }
+    }
+
+    @Test
+    fun `숫자가 아닌 사용자 아이디일 때__관리자가 수정하면__400을 응답하고 서비스를 호출하지 않는다`() {
+        // given
+        val request = put("/api/v1/admin/users/{userId}", NON_NUMERIC)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(UPDATE_BODY)
+
+        // when
+        val result = updateMvc.perform(request).andReturn()
+
+        // then
+        assertInvalidPathVariable(result)
+        confirmVerified(update)
+    }
+
+    @Test
+    fun `숫자가 아닌 사용자 아이디일 때__관리자가 삭제하면__400을 응답하고 서비스를 호출하지 않는다`() {
+        // when
+        val result = deletionMvc.perform(delete("/api/v1/admin/users/{userId}", NON_NUMERIC)).andReturn()
+
+        // then
+        assertInvalidPathVariable(result)
+        confirmVerified(deletion)
+    }
+
     // UserAnimalActivitiesController: primitive Long path variable, answered by the feature's Response envelope
 
     @Test
