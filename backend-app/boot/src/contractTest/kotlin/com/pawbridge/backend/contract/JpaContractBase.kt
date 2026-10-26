@@ -11,11 +11,11 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ContextConfiguration
 
 /**
- * Base of the contracts for the JPA adapters (store catalog writes, carts, orders, payment events).
+ * Base of the contracts for the JPA adapters (store catalog writes, carts, orders, payment events; animal and shelter commands).
  *
  * The JPA adapters exist only when their feature flags are on, so the shared context of [ContractTestBase] does not
  * contain them. This is the second Spring context of the contract suite, on purpose: the same application, database
- * and application role, with the store writer flags switched on. Every JPA contract extends this class so they all
+ * and application role, with the store and animal writer flags switched on. Every JPA contract extends this class so they all
  * share that one context; none may add properties or mocks of its own.
  *
  * The adapters are taken from the context as beans, so the entity manager, the writer transaction and the actor
@@ -37,6 +37,8 @@ import org.springframework.test.context.ContextConfiguration
         "pawbridge.store-order-administration.enabled=true",
         "pawbridge.store-catalog-management.enabled=true",
         "pawbridge.store-payment-events.enabled=true",
+        "pawbridge.shelter-commands.enabled=true",
+        "pawbridge.animal-commands.enabled=true",
         // The ranking Redis client is created lazily and never connects in these contracts.
         "spring.data.redis.host=127.0.0.1",
     ],
@@ -52,6 +54,40 @@ abstract class JpaContractBase : StoreRepositoryContractBase() {
     protected fun seedDeletingMember(userId: Long) {
         seedMember(userId)
         execute("INSERT INTO pawbridge_user.contact_deletions(user_id) VALUES (?)", userId)
+    }
+
+    /** A member with the role and shelter registration the animal command adapters read from the account. */
+    protected fun seedKeeper(userId: Long, role: String, careRegNo: String?) {
+        seedMember(userId, role)
+        execute("UPDATE pawbridge_user.users SET care_reg_no = ? WHERE user_id = ?", careRegNo, userId)
+    }
+
+    protected fun seedShelter(id: Long, careRegNo: String = "CR-$id", name: String = "보호소 $id") {
+        execute(
+            "INSERT INTO pawbridge_animal.shelters(id, created_at, care_reg_no, name, address, phone) " +
+                "VALUES (?, '2026-01-01 00:00:00', ?, ?, '서울특별시 강남구', '02-000-0000')",
+            id, careRegNo, name,
+        )
+    }
+
+    @Suppress("LongParameterList")
+    protected fun seedAnimal(
+        id: Long,
+        shelter: Long,
+        status: String = "PROTECT",
+        species: String = "DOG",
+        apiSource: String = "APMS_ANIMAL",
+        noticeNo: String = "N-$id",
+        description: String? = null,
+        imageUrl: String? = null,
+    ) {
+        execute(
+            "INSERT INTO pawbridge_animal.animals(id, created_at, updated_at, api_source, apms_notice_no, birth_year, breed, color, " +
+                "description, favorite_count, gender, happen_date, happen_place, neuter_status, notice_end_date, notice_start_date, " +
+                "species, status, shelter_id, image_url) VALUES (?, '2026-03-01 00:00:00', '2026-03-01 00:00:00', ?, ?, 2022, '믹스견', " +
+                "'갈색', ?, 0, 'MALE', '2026-03-01', '합성 장소', 'UNKNOWN', '2026-03-20', '2026-02-01', ?, ?, ?, ?)",
+            id, apiSource, noticeNo, description, species, status, shelter, imageUrl,
+        )
     }
 
     protected fun stockOf(sku: Long): Int =
@@ -73,24 +109,30 @@ abstract class JpaContractBase : StoreRepositoryContractBase() {
     }
 
     /**
-     * Makes every [event] on a store table take [millis] more inside its transaction, for the duration of [action].
+     * Makes every [event] on a table of [schema] take [millis] more inside its transaction, for the duration of [action].
      * A race then no longer depends on thread timing: without the row lock under test the other workers read
      * their state while the first one is still writing, so the lost update or the oversell always happens.
      */
-    protected fun <T> withSlowWrites(table: String, event: String, millis: Int = 200, action: () -> T): T {
+    protected fun <T> withSlowWrites(
+        table: String,
+        event: String,
+        millis: Int = 200,
+        schema: String = "pawbridge_store",
+        action: () -> T,
+    ): T {
         execute(
-            "CREATE FUNCTION pawbridge_store.contract_slow() RETURNS trigger LANGUAGE plpgsql AS " +
+            "CREATE FUNCTION $schema.contract_slow() RETURNS trigger LANGUAGE plpgsql AS " +
                 "\$contract\$ BEGIN PERFORM pg_sleep($millis / 1000.0); IF TG_OP = 'DELETE' THEN RETURN OLD; END IF; RETURN NEW; END \$contract\$",
         )
         execute(
-            "CREATE TRIGGER contract_slow BEFORE $event ON pawbridge_store.$table FOR EACH ROW " +
-                "EXECUTE FUNCTION pawbridge_store.contract_slow()",
+            "CREATE TRIGGER contract_slow BEFORE $event ON $schema.$table FOR EACH ROW " +
+                "EXECUTE FUNCTION $schema.contract_slow()",
         )
         try {
             return action()
         } finally {
-            execute("DROP TRIGGER contract_slow ON pawbridge_store.$table")
-            execute("DROP FUNCTION pawbridge_store.contract_slow()")
+            execute("DROP TRIGGER contract_slow ON $schema.$table")
+            execute("DROP FUNCTION $schema.contract_slow()")
         }
     }
 

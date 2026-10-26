@@ -169,6 +169,9 @@ GRANT UPDATE (request_hash) ON pawbridge_community.member_chat_requests TO pawbr
 -- privileges on every table of the schema are enough; no animal contract revokes single columns.
 GRANT USAGE ON SCHEMA pawbridge_animal TO pawbridge_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pawbridge_animal TO pawbridge_app;
+-- The Spring Batch metadata ids come from three plain sequences (the other keys are identity columns and need no grant).
+GRANT USAGE ON SEQUENCE pawbridge_animal.batch_job_seq, pawbridge_animal.batch_job_execution_seq,
+    pawbridge_animal.batch_step_execution_seq TO pawbridge_app;
 
 -- store
 -- The store repositories read and write whole rows of their own tables (catalog, cart, orders, wishlists, search
