@@ -5,15 +5,16 @@ plugins {
 
 sourceSets {
     architectureTest
-    compatibilityTest {
+    // Real-database contracts: the whole application on Tomcat against a Testcontainers PostgreSQL.
+    contractTest {
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
     }
 }
 
 configurations {
-    compatibilityTestImplementation.extendsFrom implementation, testImplementation
-    compatibilityTestRuntimeOnly.extendsFrom runtimeOnly, testRuntimeOnly
+    contractTestImplementation.extendsFrom implementation, testImplementation
+    contractTestRuntimeOnly.extendsFrom runtimeOnly, testRuntimeOnly
 }
 
 dependencies {
@@ -55,6 +56,10 @@ dependencies {
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation 'org.postgresql:postgresql'
 
+    // Versions come from the Spring Boot 3.4.11 platform declared above. Only the contract test classpath gets them.
+    contractTestImplementation 'org.testcontainers:postgresql'
+    contractTestImplementation 'org.testcontainers:junit-jupiter'
+
     architectureTestImplementation platform('org.junit:junit-bom:5.11.4')
     architectureTestImplementation 'org.junit.jupiter:junit-jupiter'
     architectureTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -78,42 +83,53 @@ tasks.register('architectureTest', Test) {
 
 // architectureTest is not part of check: it runs in the separate architecture CI job.
 
-// The only remaining compatibility contract: cookie refresh sessions on the owned PostgreSQL fixture.
-tasks.register('authSessionCompatibilityTest', Test) {
-    group = 'verification'
-    description = 'Checks cookie refresh sessions with the owned twenty-four-table writer fixture plus auth_sessions.'
-    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
-    classpath = sourceSets.compatibilityTest.runtimeClasspath
-    useJUnitPlatform()
-    systemProperty 'user.timezone', 'UTC'
-    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
-    systemProperty 'member.cleanup.fixture.receipt', rootProject.file('build/ci/member-cleanup-fixture-write.txt').absolutePath
-    systemProperty 'admin.user.update.fixture.receipt', rootProject.file('build/ci/admin-user-update-fixture-write.txt').absolutePath
-    systemProperty 'auth.sessions.fixture.receipt', rootProject.file('build/ci/auth-sessions-fixture-write.txt').absolutePath
-    filter {
-        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
-        failOnNoMatchingTests = true
+// Database contracts against a real PostgreSQL started by Testcontainers (one container per test JVM).
+// They are not part of check: Docker is required, so they run in their own CI job on pushes to dev.
+// contractTest runs both variants one after the other; the JVM time zone is fixed per task because
+// user.timezone cannot be switched inside a running JVM.
+def registerContractTest = { String taskName, String zone, String taskDescription, Closure platform ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        description = taskDescription
+        testClassesDirs = sourceSets.contractTest.output.classesDirs
+        classpath = sourceSets.contractTest.runtimeClasspath
+        useJUnitPlatform(platform)
+        maxHeapSize = '768m'
+        systemProperty 'user.timezone', zone
+        systemProperty 'pawbridge.contract.expected-zone', zone
+        // The permission contracts revoke and restore privileges database-wide, so nothing may run in parallel.
+        systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+        // Testcontainers 1.20 (Spring Boot 3.4 platform) asks the Docker daemon for API 1.32, which Docker Engine 29
+        // refuses. 1.44 is the minimum of Engine 29 and is served by every Engine since 25; override with
+        // -PdockerApiVersion=... for another daemon.
+        systemProperty 'api.version', project.findProperty('dockerApiVersion') ?: '1.44'
+        systemProperty 'pawbridge.contract.legacy-root', rootProject.projectDir.parentFile.absolutePath
+        if (project.hasProperty('contractPostgresImage')) {
+            systemProperty 'pawbridge.contract.postgres-image', project.property('contractPostgresImage')
+        }
+        filter { failOnNoMatchingTests = true }
+        // A contract that did not run proves nothing: no tests or any skipped test fails the task.
+        afterSuite { descriptor, result ->
+            if (descriptor.parent == null && (result.testCount == 0 || result.skippedTestCount > 0)) {
+                throw new GradleException('Contract tests must execute without skipped tests')
+            }
+        }
+        outputs.upToDateWhen { false }
     }
-    outputs.upToDateWhen { false }
 }
 
-// One method, not a second business matrix: session times come from the database clock in either JVM zone.
-tasks.register('authSessionCompatibilitySeoulTest', Test) {
+registerContractTest('contractTestUtc', 'UTC',
+        'Runs every database contract against PostgreSQL with the JVM in UTC.') { }
+registerContractTest('contractTestSeoul', 'Asia/Seoul',
+        'Runs the time-zone sensitive database contracts with the JVM in Asia/Seoul.') {
+    includeTags 'timezone-sensitive'
+}
+tasks.named('contractTestSeoul') { mustRunAfter tasks.named('contractTestUtc') }
+
+tasks.register('contractTest') {
     group = 'verification'
-    description = 'Checks cookie refresh sessions with the owned twenty-four-table writer fixture plus auth_sessions.'
-    testClassesDirs = sourceSets.compatibilityTest.output.classesDirs
-    classpath = sourceSets.compatibilityTest.runtimeClasspath
-    useJUnitPlatform()
-    systemProperty 'user.timezone', 'Asia/Seoul'
-    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
-    systemProperty 'member.cleanup.fixture.receipt', rootProject.file('build/ci/member-cleanup-fixture-write.txt').absolutePath
-    systemProperty 'admin.user.update.fixture.receipt', rootProject.file('build/ci/admin-user-update-fixture-write.txt').absolutePath
-    systemProperty 'auth.sessions.fixture.receipt', rootProject.file('build/ci/auth-sessions-fixture-write.txt').absolutePath
-    filter {
-        includeTestsMatching 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest.givenCurrentClaimsAndAnActiveSession__whenRotating__thenIssueCurrentClaimsAndRecordTheRetiredHash'
-        failOnNoMatchingTests = true
-    }
-    outputs.upToDateWhen { false }
+    description = 'Runs the database contracts in UTC and the time-zone sensitive ones in Asia/Seoul.'
+    dependsOn tasks.named('contractTestUtc'), tasks.named('contractTestSeoul')
 }
 
 // Actual database contracts use an explicit disposable fixture, never the ordinary unit-test task.

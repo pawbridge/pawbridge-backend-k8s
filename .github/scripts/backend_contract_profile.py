@@ -13,24 +13,37 @@ import xml.etree.ElementTree as ET
 FULL = 'full'
 PILOT = 'f25-six-smoke-pilot'
 
-# PostgreSQL compatibility contracts that every full run must execute besides the packaged smokes.
-FULL_CONTRACTS = ('fixture_auth_sessions', 'pg_auth_sessions', 'restore_auth_sessions')
-
-AUTH_REPORT_CLASS = 'com.pawbridge.backend.compatibility.PostgresqlAuthSessionCompatibilityTest'
-AUTH_METHOD_CASES = (('givenCurrentClaimsAndAnActiveSession__whenRotating__thenIssueCurrentClaimsAndRecordTheRetiredHash', 1),
- ('givenInactiveOrUnknownTokens__whenRefreshing__thenRejectWithoutAnyMutation', 4),
- ('givenATwoGenerationsOldTokenAfterTheGraceWindow__whenRefreshing__thenRevokeOnlyThatSessionAndKeepTheRevocation', 1),
- ('givenALostRotationResponse__whenTheRetiredTokenReturnsAfter59Seconds__thenRotateAgainOnceAndRecordTheUnusedSuccessor', 1),
- ('givenTwoGraceRequestsWithTheSameRetiredToken__whenRefreshingConcurrently__thenOnlyOneRotatesAgain', 1),
- ('givenSixLoginsOfOneUser__whenCreatingSessions__thenKeepOnlyTheFiveMostRecentlyUsedActive', 1),
- ('givenLogoutRevokeAllOrCleanup__whenWriting__thenChangeOnlyTheTargetedSessions', 3),
- ('givenExactlyOneRequiredWriterPrivilegeIsRevoked__whenCalling__thenFailServerSideWithoutPartialMutationAndRecover', 4),
- ('givenADeletedUser__whenDeletingTheAccountRow__thenItsSessionsCascade', 1))
-# Single-case methods are reported as name(), parameterized ones as name[index].
-AUTH_REPORT_CASES = tuple(
-    method + '()' if count == 1 else method + '[' + str(index) + ']'
-    for method, count in AUTH_METHOD_CASES for index in range(1, count + 1))
-AUTH_SEOUL_METHOD = 'givenCurrentClaimsAndAnActiveSession__whenRotating__thenIssueCurrentClaimsAndRecordTheRetiredHash'
+# Database contract tests (backend-app/boot/src/contractTest) run in their own `contract` job on dev pushes.
+# A complete run reports exactly these cases: (class, ((test label, invocations), ...)). A test label is the
+# method name; a single-case method is reported as label(), a parameterized one as label(String)[index].
+CONTRACT_PACKAGE = 'com.pawbridge.backend.contract'
+AUTH_ROTATION = '활성 세션일 때__리프레시하면__현재 클레임을 주고 퇴역 해시를 남긴다'
+CONTRACT_CASES = (
+    ('AuthSessionContractTest', (
+        (AUTH_ROTATION, 1),
+        ('비활성이거나 모르는 토큰일 때__리프레시하면__변경 없이 거부한다', 4),
+        ('유예 이후 두 세대 전 토큰일 때__리프레시하면__그 세션만 폐기하고 폐기를 유지한다', 1),
+        ('회전 응답을 잃었을 때__59초 뒤 퇴역 토큰이 오면__한 번만 다시 회전하고 후계를 남긴다', 1),
+        ('같은 퇴역 토큰의 유예 요청 둘일 때__동시에 리프레시하면__한 요청만 다시 회전한다', 1),
+        ('한 사용자가 여섯 번 로그인할 때__세션을 만들면__최근 사용한 다섯 개만 활성으로 둔다', 1),
+        ('로그아웃 전체 폐기 정리일 때__쓰면__대상 세션만 바꾼다', 3),
+        ('필요한 쓰기 권한 하나를 회수했을 때__호출하면__부분 변경 없이 서버 오류이고 복구된다', 4),
+        ('계정 행을 삭제했을 때__그 사용자의 세션을 조회하면__함께 연쇄 삭제되어 있다', 1),
+        ('허용된 Origin의 쿠키 요청일 때__HTTP로 리프레시하면__새 쿠키를 주고 세션을 회전한다', 1),
+    )),
+    ('ContractInfrastructureTest', (
+        ('마이그레이션을 적용했을 때__테이블을 조회하면__두 스키마의 현재 테이블만 있다', 1),
+        ('앱 역할일 때__권한을 조회하면__슈퍼유저도 테이블 소유자도 아니다', 1),
+        ('열 권한을 회수했을 때__앱 역할로 조회하면__거부되고 끝나면 복구된다', 1),
+        ('본문이 실패했을 때__회수를 감싸면__예외를 그대로 던지고 권한은 복구된다', 1),
+    )),
+    ('SchemaSourcePinTest', (
+        ('사용자 서비스 마이그레이션이 있을 때__복사본을 비교하면__해시가 원본과 같다', 1),
+        ('커뮤니티 서비스 마이그레이션이 있을 때__복사본을 비교하면__해시가 원본과 같다', 1),
+    )),
+)
+# Only the tests tagged timezone-sensitive run a second time with the JVM in Asia/Seoul.
+CONTRACT_SEOUL_CASES = (('AuthSessionContractTest', ((AUTH_ROTATION, 1),)),)
 
 REPOSITORY = 'pawbridge/pawbridge-backend-k8s'
 PILOT_REF = 'ci/backend-contract-regression-scope'
@@ -53,8 +66,6 @@ SHARDS = {
     3: tuple('jar_f' + str(number) for number in range(23, 28)),
     4: ('jar_f28', 'jar_f29', 'jar_f31'),
 }
-# The PostgreSQL auth session contracts need the complete late fixture, so only the last shard runs them.
-CONTRACT_SHARD = 4
 # Smokes that leave fixture state a later step reads, mapped to the workflow step that reproduces
 # exactly that state in shards that skip the smoke. The F4 smoke creates the two support tables
 # that later business snapshots select from; no other smoke leaves state a later step reads.
@@ -75,35 +86,48 @@ def _paths(paths):
     return sorted(paths)
 
 
-def verify_auth_sessions_report(utc_directory, seoul_directory):
-    """Require every auth session method/index label and only the designated Seoul case."""
-    for folder, expected in ((utc_directory, AUTH_REPORT_CASES),
-                             (seoul_directory, (AUTH_SEOUL_METHOD + '()',))):
+def _case_names(label, count):
+    if count == 1:
+        return [label + '()']
+    return [label + '(String)[' + str(index) + ']' for index in range(1, count + 1)]
+
+
+def verify_contract_reports(utc_directory, seoul_directory):
+    """Require every pinned contract case in the UTC run and only the time-zone cases in the Seoul run."""
+    for folder, expected in ((utc_directory, CONTRACT_CASES), (seoul_directory, CONTRACT_SEOUL_CASES)):
         try:
             directory = Path(folder).absolute()
-            reports = list(directory.glob('TEST-*.xml'))
-            if (directory.is_symlink() or directory.resolve() != directory or len(reports) != 1
-                    or reports[0].is_symlink() or reports[0].resolve() != reports[0]
-                    or reports[0].name != 'TEST-' + AUTH_REPORT_CLASS + '.xml'):
-                raise ProfileBlocked('The auth session report is missing or redirected.')
-            suite = ET.parse(reports[0]).getroot()
-            cases = list(suite.iter('testcase'))
-            names = [case.attrib.get('name', '') for case in cases]
-            if (suite.tag != 'testsuite' or suite.attrib.get('name') != AUTH_REPORT_CLASS
-                    or int(suite.attrib.get('tests', -1)) != len(expected) or len(cases) != len(expected)
-                    or len(suite.findall('testcase')) != len(expected)
-                    or len(set(names)) != len(expected) or set(names) != set(expected)
-                    or any(int(suite.attrib.get(key, -1)) != 0 for key in ('failures', 'errors', 'skipped'))
-                    or any(int(node.attrib.get(key, 0)) != 0 for node in suite.iter()
-                           for key in ('failures', 'errors', 'skipped', 'disabled'))
-                    or any(node.tag in ('failure', 'error', 'skipped', 'disabled') for node in suite.iter())
-                    or any(case.attrib.get('classname') != AUTH_REPORT_CLASS
-                           or case.attrib.get('status', 'run') not in ('run', 'passed')
-                           or case.attrib.get('result', 'completed') not in ('completed', 'passed', 'success')
-                           for case in cases)):
-                raise ProfileBlocked('The auth session cases did not all execute successfully.')
+            if directory.is_symlink() or directory.resolve() != directory:
+                raise ProfileBlocked('The contract report directory is missing or redirected.')
+            reports = sorted(directory.glob('TEST-*.xml'))
+            wanted = sorted(directory / ('TEST-' + CONTRACT_PACKAGE + '.' + name + '.xml') for name, _ in expected)
+            if reports != wanted or any(path.is_symlink() or path.resolve() != path for path in reports):
+                raise ProfileBlocked('The contract report files are missing, extra or redirected.')
+            for name, cases in expected:
+                _verify_report_file(directory / ('TEST-' + CONTRACT_PACKAGE + '.' + name + '.xml'),
+                                    CONTRACT_PACKAGE + '.' + name,
+                                    [case for label, count in cases for case in _case_names(label, count)])
         except (OSError, ValueError, TypeError, ET.ParseError):
-            raise ProfileBlocked('The auth session report is invalid.') from None
+            raise ProfileBlocked('The contract report is invalid.') from None
+
+
+def _verify_report_file(path, class_name, expected):
+    suite = ET.parse(path).getroot()
+    cases = list(suite.iter('testcase'))
+    names = [case.attrib.get('name', '') for case in cases]
+    if (suite.tag != 'testsuite' or suite.attrib.get('name') != class_name
+            or int(suite.attrib.get('tests', -1)) != len(expected) or len(cases) != len(expected)
+            or len(suite.findall('testcase')) != len(expected)
+            or len(set(names)) != len(expected) or set(names) != set(expected)
+            or any(int(suite.attrib.get(key, -1)) != 0 for key in ('failures', 'errors', 'skipped'))
+            or any(int(node.attrib.get(key, 0)) != 0 for node in suite.iter()
+                   for key in ('failures', 'errors', 'skipped', 'disabled'))
+            or any(node.tag in ('failure', 'error', 'skipped', 'disabled') for node in suite.iter())
+            or any(case.attrib.get('classname') != class_name
+                   or case.attrib.get('status', 'run') not in ('run', 'passed')
+                   or case.attrib.get('result', 'completed') not in ('completed', 'passed', 'success')
+                   for case in cases)):
+        raise ProfileBlocked('The contract cases did not all execute successfully.')
 
 
 def select_profiles(context, paths):
@@ -205,11 +229,6 @@ def make_plan(context, paths, profile, jar_sha256, shard=None):
     if shard is not None:
         result['shard'] = shard
         result['reproduced_state'], result['skipped_state'] = state_steps(shard)
-    if profile == FULL and shard in (None, CONTRACT_SHARD):
-        result['required_contracts'] = list(FULL_CONTRACTS)
-    elif profile == FULL:
-        # Other full shards must prove that the auth contracts were skipped, not silently lost.
-        result['skipped_contracts'] = list(FULL_CONTRACTS)
     return result
 
 
@@ -223,12 +242,10 @@ def audit_execution(plan, context, paths, profile, jar_sha256, steps, shard=None
         raise ProfileBlocked('Packaged step identities are missing, unknown or duplicated.')
     results = {}
     required = set(expected['required_smokes'])
-    contracts = tuple(expected.get('required_contracts', ()))
-    skipped_contracts = tuple(expected.get('skipped_contracts', ()))
     reproduced = tuple(expected.get('reproduced_state', ()))
     skipped_state = tuple(expected.get('skipped_state', ()))
-    succeeded = required | set(contracts) | set(reproduced) | {'owned_cleanup'}
-    checked = ALL_SMOKES + contracts + skipped_contracts + reproduced + skipped_state + ('owned_cleanup',)
+    succeeded = required | set(reproduced) | {'owned_cleanup'}
+    checked = ALL_SMOKES + reproduced + skipped_state + ('owned_cleanup',)
     for key in checked:
         step = steps.get(key)
         wanted = 'success' if key in succeeded else 'skipped'
@@ -247,10 +264,6 @@ def audit_execution(plan, context, paths, profile, jar_sha256, steps, shard=None
     }
     if shard is not None:
         result['shard'] = shard
-    if contracts:
-        result['required_contracts'] = list(contracts)
-    if skipped_contracts:
-        result['skipped_contracts'] = list(skipped_contracts)
     return result
 
 

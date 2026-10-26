@@ -30,9 +30,6 @@ def steps(mode):
     result = {key: {'outcome': 'success' if key in required else 'skipped',
                     'conclusion': 'success' if key in required else 'skipped'}
               for key in profile.ALL_SMOKES}
-    if mode == profile.FULL:
-        for key in profile.FULL_CONTRACTS:
-            result[key] = {'outcome': 'success', 'conclusion': 'success'}
     result['owned_cleanup'] = {'outcome': 'success', 'conclusion': 'success'}
     return result
 
@@ -45,10 +42,6 @@ def shard_steps(mode, shard):
     """What one matrix shard reports: its own smokes ran, every other smoke was skipped."""
     required = set(profile.expected_smokes(mode, shard))
     result = {key: outcome('success' if key in required else 'skipped') for key in profile.ALL_SMOKES}
-    if mode == profile.FULL:
-        contracts_ran = shard == profile.CONTRACT_SHARD
-        for key in profile.FULL_CONTRACTS:
-            result[key] = outcome('success' if contracts_ran else 'skipped')
     reproduced, skipped = profile.state_steps(shard)
     for key in reproduced:
         result[key] = outcome('success')
@@ -137,14 +130,13 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual('passed', result['status'])
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
-                self.assertEqual(29 + (3 if mode == profile.FULL else 0), len(result['step_results']))
+                self.assertEqual(29, len(result['step_results']))
 
     def test_given_fixed_shards__when_splitting__then_cover_every_smoke_once_in_the_original_order(self):
         self.assertEqual([1, 2, 3, 4], sorted(profile.SHARDS))
         ordered = tuple(key for shard in sorted(profile.SHARDS) for key in profile.SHARDS[shard])
         # Contiguous ranges keep each shard's fixture stages a prefix of the sequential chain.
         self.assertEqual(profile.ALL_SMOKES, ordered)
-        self.assertEqual(max(profile.SHARDS), profile.CONTRACT_SHARD)
         for mode in (profile.FULL, profile.PILOT):
             with self.subTest(mode=mode):
                 union = tuple(key for shard in sorted(profile.SHARDS)
@@ -169,15 +161,9 @@ class ContractProfileTest(unittest.TestCase):
                     self.assertEqual(required, plan['required_smokes'])
                     self.assertEqual([key for key in profile.ALL_SMOKES if key not in required],
                                      plan['skipped_smokes'])
-                    if mode == profile.FULL and shard == profile.CONTRACT_SHARD:
-                        self.assertEqual(list(profile.FULL_CONTRACTS), plan['required_contracts'])
-                        self.assertNotIn('skipped_contracts', plan)
-                    elif mode == profile.FULL:
-                        self.assertEqual(list(profile.FULL_CONTRACTS), plan['skipped_contracts'])
-                        self.assertNotIn('required_contracts', plan)
-                    else:
-                        self.assertNotIn('required_contracts', plan)
-                        self.assertNotIn('skipped_contracts', plan)
+                    # The database contracts moved to their own job; no shard plans or audits them any more.
+                    self.assertNotIn('required_contracts', plan)
+                    self.assertNotIn('skipped_contracts', plan)
                     result = profile.audit_execution(plan, context(), PATHS, mode, JAR,
                                                      shard_steps(mode, shard), shard)
                     self.assertEqual('passed', result['status'])
@@ -190,8 +176,6 @@ class ContractProfileTest(unittest.TestCase):
         defects = {
             'other-shard-smoke-ran': ('jar_f3', outcome('success')),
             'own-smoke-skipped': ('jar_f18', outcome('skipped')),
-            'contract-ran-outside-its-shard': ('pg_auth_sessions', outcome('success')),
-            'contract-missing': ('restore_auth_sessions', None),
         }
         for defect, (key, state) in defects.items():
             actual = shard_steps(mode, shard)
@@ -204,11 +188,6 @@ class ContractProfileTest(unittest.TestCase):
         for other in (None, 1, 3):
             with self.subTest(other=other), self.assertRaises(profile.ProfileBlocked):
                 profile.audit_execution(plan, context(), PATHS, mode, JAR, shard_steps(mode, shard), other)
-        contract_plan = profile.make_plan(context(), PATHS, mode, JAR, profile.CONTRACT_SHARD)
-        actual = shard_steps(mode, profile.CONTRACT_SHARD)
-        actual['pg_auth_sessions'] = outcome('skipped')
-        with self.assertRaises(profile.ProfileBlocked):
-            profile.audit_execution(contract_plan, context(), PATHS, mode, JAR, actual, profile.CONTRACT_SHARD)
 
     def test_given_state_leaving_smoke__when_a_later_shard_skips_it__then_require_its_reproduction(self):
         self.assertEqual({'jar_f4': 'shape_f4'}, profile.STATE_STEPS)
@@ -387,47 +366,55 @@ class ContractProfileTest(unittest.TestCase):
         self.assertEqual('failed', write.call_args.args[2]['status'])
 
 
-class AuthSessionReportTest(unittest.TestCase):
-    """The only remaining PostgreSQL compatibility report: refresh/logout sessions."""
+class ContractReportTest(unittest.TestCase):
+    """The JUnit XML of the contract job: every pinned case in UTC, only the time-zone cases in Seoul."""
 
     def reports(self, root):
-        paths = []
-        for sub, names in (('utc', profile.AUTH_REPORT_CASES), ('seoul', (profile.AUTH_SEOUL_METHOD + '()',))):
+        for sub, groups in (('utc', profile.CONTRACT_CASES), ('seoul', profile.CONTRACT_SEOUL_CASES)):
             folder = root / sub
             folder.mkdir()
-            suite = ET.Element('testsuite', name=profile.AUTH_REPORT_CLASS, tests=str(len(names)),
-                               failures='0', errors='0', skipped='0')
-            for name in names:
-                ET.SubElement(suite, 'testcase', name=name, classname=profile.AUTH_REPORT_CLASS)
-            path = folder / ('TEST-' + profile.AUTH_REPORT_CLASS + '.xml')
-            ET.ElementTree(suite).write(path)
-            paths.append(path)
-        return paths
+            for name, cases in groups:
+                class_name = profile.CONTRACT_PACKAGE + '.' + name
+                names = [case for label, count in cases for case in profile._case_names(label, count)]
+                suite = ET.Element('testsuite', name=class_name, tests=str(len(names)),
+                                   failures='0', errors='0', skipped='0')
+                for case in names:
+                    ET.SubElement(suite, 'testcase', name=case, classname=class_name)
+                ET.ElementTree(suite).write(folder / ('TEST-' + class_name + '.xml'))
 
-    def test_given_all_auth_methods_and_only_one_seoul_case__when_verifying__then_require_the_exact_invocations(self):
-        self.assertEqual((1, 4, 1, 1, 1, 1, 3, 4, 1), tuple(count for _, count in profile.AUTH_METHOD_CASES))
-        self.assertEqual(9, len(profile.AUTH_METHOD_CASES))
-        self.assertEqual(17, len(set(profile.AUTH_REPORT_CASES)))
-        self.assertEqual(profile.AUTH_METHOD_CASES[0][0], profile.AUTH_SEOUL_METHOD)
+    def auth_report(self, root, sub='utc'):
+        return root / sub / ('TEST-' + profile.CONTRACT_PACKAGE + '.AuthSessionContractTest.xml')
+
+    def test_given_all_cases_and_only_the_seoul_case__when_verifying__then_require_the_exact_invocations(self):
+        auth = dict(profile.CONTRACT_CASES)['AuthSessionContractTest']
+        self.assertEqual((1, 4, 1, 1, 1, 1, 3, 4, 1, 1), tuple(count for _, count in auth))
+        self.assertEqual(((profile.AUTH_ROTATION, 1),), dict(profile.CONTRACT_SEOUL_CASES)['AuthSessionContractTest'])
+        self.assertEqual(auth[0][0], profile.AUTH_ROTATION)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             self.reports(root)
-            profile.verify_auth_sessions_report(root / 'utc', root / 'seoul')
+            profile.verify_contract_reports(root / 'utc', root / 'seoul')
 
-    def test_given_missing_wrong_nested_disabled_or_unsuccessful_reports__when_verifying__then_refuse_before_claiming_pg_success(self):
+    def test_given_missing_extra_wrong_or_unsuccessful_reports__when_verifying__then_refuse_before_claiming_success(self):
         defects = ('missing', 'extra-file', 'file-name', 'wrong-root', 'wrong-class', 'wrong-count',
                    'wrong-label', 'duplicate-label', 'nested-case', 'failure-attr', 'missing-failure-attr',
                    'error-child', 'skipped-child', 'disabled-attr', 'disabled-child', 'bad-status',
-                   'bad-result', 'malformed', 'file-link', 'directory-link', 'seoul-extra')
-        rewritten_elsewhere = ('missing', 'file-name', 'malformed', 'file-link', 'directory-link', 'seoul-extra')
+                   'bad-result', 'malformed', 'file-link', 'directory-link', 'seoul-extra', 'seoul-missing',
+                   'class-missing')
+        rewritten_elsewhere = ('missing', 'file-name', 'malformed', 'file-link', 'directory-link',
+                               'seoul-extra', 'seoul-missing', 'class-missing')
         for defect in defects:
             with self.subTest(defect=defect), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp).resolve()
-                path, seoul = self.reports(root)
+                self.reports(root)
+                path = self.auth_report(root)
+                seoul = self.auth_report(root, 'seoul')
                 tree = ET.parse(path)
                 suite = tree.getroot()
                 if defect == 'missing':
                     path.unlink()
+                elif defect == 'class-missing':
+                    (root / 'utc' / ('TEST-' + profile.CONTRACT_PACKAGE + '.SchemaSourcePinTest.xml')).unlink()
                 elif defect == 'extra-file':
                     path.with_name('TEST-extra.xml').write_bytes(path.read_bytes())
                 elif defect == 'file-name':
@@ -473,13 +460,16 @@ class AuthSessionReportTest(unittest.TestCase):
                 elif defect == 'seoul-extra':
                     seoul_tree = ET.parse(seoul)
                     seoul_tree.getroot().set('tests', '2')
-                    ET.SubElement(seoul_tree.getroot(), 'testcase', name=profile.AUTH_METHOD_CASES[1][0] + '()',
-                                  classname=profile.AUTH_REPORT_CLASS)
+                    ET.SubElement(seoul_tree.getroot(), 'testcase',
+                                  name=profile._case_names(profile.CONTRACT_CASES[0][1][1][0], 4)[0],
+                                  classname=profile.CONTRACT_PACKAGE + '.AuthSessionContractTest')
                     seoul_tree.write(seoul)
+                elif defect == 'seoul-missing':
+                    seoul.unlink()
                 if defect not in rewritten_elsewhere:
                     tree.write(path)
                 with self.assertRaises(profile.ProfileBlocked):
-                    profile.verify_auth_sessions_report(root / 'utc', root / 'seoul')
+                    profile.verify_contract_reports(root / 'utc', root / 'seoul')
 
 
 if __name__ == '__main__':

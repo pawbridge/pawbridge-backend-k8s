@@ -191,8 +191,8 @@ jobs:
       - name: Check modules, boundaries, unit tests and executable JAR
         run: bash ./gradlew projects check :boot:bootJar --max-workers=4 -Dorg.gradle.parallel=true
 
-      - name: Compile the PostgreSQL compatibility test without running it
-        run: bash ./gradlew :boot:compileCompatibilityTestJava --max-workers=4 -Dorg.gradle.parallel=true
+      - name: Compile the PostgreSQL contract tests without running them
+        run: bash ./gradlew :boot:compileContractTestKotlin --max-workers=4 -Dorg.gradle.parallel=true
 
       - name: Bind the candidate JAR to this checked source
         id: package
@@ -206,7 +206,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[0-9]+_fixture|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/[a-z]+service/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|testcontainers|docker-java|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[0-9]+_fixture|compatibilityTest|contractTest|com/pawbridge/backend/compatibility/|com/pawbridge/backend/contract/|com/pawbridge/[a-z]+service/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/(hibernate-validator-[0-9][^/]*|spring-data-redis-3[.]4[.]11|feign-(core|form)-13[.]5|hibernate-core-6[.]6[.]33[.]Final|hibernate-commons-annotations-7[.]0[.]3[.]Final|spring-data-jpa-3[.]4[.]11)\.jar$'; then
             printf 'Test or compatibility code must not enter the application JAR\n' >&2
             exit 1
@@ -370,8 +370,6 @@ jobs:
             .github/workflows/backend-app-check.yml
             .github/scripts/backend_contract_profile.py
             .github/scripts/ci_branch_policy.py
-            user-service/src/migration/resources/db/postgresql/V4__auth_sessions.sql
-            user-service/src/migration/resources/db/postgresql/V5__drop_refresh_tokens.sql
           sparse-checkout-cone-mode: false
 
       - name: Require the immutable F21 original-source Git object
@@ -690,7 +688,7 @@ jobs:
         run: |
           set -euo pipefail
           jar tf boot/build/libs/pawbridge-backend-app.jar > build/ci/boot-jar-contents.txt
-          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[0-9]+_fixture|compatibilityTest|com/pawbridge/backend/compatibility/|com/pawbridge/[a-z]+service/' build/ci/boot-jar-contents.txt \
+          if grep -E '(^|/)(archunit|gradle-test-kit|junit|junit-platform|testcontainers|docker-java|hibernate|spring-data-jpa|spring-data-redis|spring-cloud|feign)[^/]*\.jar$|f[0-9]+_fixture|compatibilityTest|contractTest|com/pawbridge/backend/compatibility/|com/pawbridge/backend/contract/|com/pawbridge/[a-z]+service/' build/ci/boot-jar-contents.txt \
             | grep -Ev '^BOOT-INF/lib/(hibernate-validator-[0-9][^/]*|spring-data-redis-3[.]4[.]11|feign-(core|form)-13[.]5|hibernate-core-6[.]6[.]33[.]Final|hibernate-commons-annotations-7[.]0[.]3[.]Final|spring-data-jpa-3[.]4[.]11)\.jar$'; then
             printf 'Test or compatibility code must not enter the application JAR\n' >&2
             exit 1
@@ -1610,34 +1608,6 @@ jobs:
         if: ${{ matrix.shard >= 4 }}
         run: python3 scripts/f29_ci.py admin-update-prepare
 
-      - name: Add only refresh logout column rights on the exact administrator fixture
-        id: fixture_auth_sessions
-        if: ${{ matrix.profile == 'full' && matrix.shard >= 4 }}
-        run: python3 scripts/f29_ci.py auth-sessions-prepare
-
-      - name: Compare refresh logout transactions and one Seoul expiry storage boundary
-        id: pg_auth_sessions
-        if: ${{ matrix.profile == 'full' && matrix.shard >= 4 }}
-        run: |
-          set -euo pipefail
-          bash ./gradlew :boot:authSessionCompatibilityTest :boot:authSessionCompatibilitySeoulTest \
-            --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
-          test -s build/ci/auth-sessions-fixture-write.txt
-          python3 - <<'PYTHON'
-          import sys
-          from pathlib import Path
-          sys.path.insert(0, '../.github/scripts')
-          from backend_contract_profile import verify_auth_sessions_report
-          verify_auth_sessions_report(
-              Path('boot/build/test-results/authSessionCompatibilityTest'),
-              Path('boot/build/test-results/authSessionCompatibilitySeoulTest'))
-          PYTHON
-
-      - name: Always restore only auth column rights and verify the prior administrator fixture
-        id: restore_auth_sessions
-        if: ${{ always() && matrix.profile == 'full' && (steps.fixture_auth_sessions.outcome == 'success' || steps.fixture_auth_sessions.outcome == 'failure') }}
-        run: python3 scripts/f29_ci.py auth-sessions-restore
-
       - name: Remove only the owned disposable fixture
         id: owned_cleanup
         if: always()
@@ -1680,9 +1650,92 @@ jobs:
           compression-level: 0
           retention-days: 7
 
+  contract:
+    needs: [selection, proof]
+    if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}
+    name: Java 21 PostgreSQL contract tests with Testcontainers
+    # Dev pushes only, like the packaged contracts. It builds its own copy of the application on its own
+    # runner in parallel with the package job, because the contracts start the application inside the
+    # test JVM rather than from the shared JAR. Docker is the hosted runner's own daemon.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # The schema copies under boot/src/contractTest/resources/schema must match the service migrations,
+      # so a checkout without them has to fail instead of comparing nothing.
+      PAWBRIDGE_CONTRACT_REQUIRE_LEGACY_SOURCES: 'true'
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend-app
+    steps:
+      - name: Check out the candidate and the service migrations the schema copies are pinned to
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          sparse-checkout: |
+            backend-app
+            .github/workflows/backend-app-check.yml
+            .github/scripts/backend_contract_profile.py
+            user-service/src/migration/resources/db/postgresql
+            community-service/src/migration/resources/db/postgresql
+          sparse-checkout-cone-mode: false
+
+      - name: Isolate Gradle state on the hosted runner
+        run: |
+          set -euo pipefail
+          printf 'GRADLE_USER_HOME=%s\n' "$RUNNER_TEMP/pawbridge-backend-app-gradle" >> "$GITHUB_ENV"
+
+      - name: Set up Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: x64
+          check-latest: true
+
+      - name: Set up Gradle Wrapper validation
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          validate-wrappers: true
+          # The package job runs in parallel and owns the dependency cache; this job only reads it.
+          cache-read-only: true
+          dependency-graph: disabled
+          build-scan-publish: false
+          add-job-summary-as-pr-comment: never
+
+      - name: Run the PostgreSQL contract tests in UTC and Asia/Seoul
+        id: contract_tests
+        run: bash ./gradlew :boot:contractTest --continue --max-workers=4 -Dorg.gradle.parallel=true
+
+      - name: Verify that every pinned contract test executed in both time zones
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, '../.github/scripts')
+          from backend_contract_profile import verify_contract_reports
+          verify_contract_reports(
+              Path('boot/build/test-results/contractTestUtc'),
+              Path('boot/build/test-results/contractTestSeoul'))
+          PYTHON
+
+      - name: Preserve the contract test reports even on failure
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend-app-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backend-app/boot/build/test-results/contractTestUtc/TEST-*.xml
+            backend-app/boot/build/test-results/contractTestSeoul/TEST-*.xml
+          if-no-files-found: warn
+          include-hidden-files: false
+          retention-days: 7
+
   ci-result:
     name: Backend app CI result
-    needs: [selection, proof, package, architecture, check]
+    needs: [selection, proof, package, architecture, check, contract]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -1692,6 +1745,7 @@ jobs:
           SELECTION_RESULT: ${{ needs.selection.result }}
           MODULE_SELECTED: ${{ needs.selection.outputs.selected }}
           MODULE_RESULT: ${{ needs.check.result }}
+          CONTRACT_RESULT: ${{ needs.contract.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           PROOF_RESULT: ${{ needs.proof.result }}
@@ -1706,7 +1760,8 @@ jobs:
             executed=skipped
           fi
           # The architecture job succeeds even when a pull request skips its steps for unchanged build logic.
-          case "$MODULE_SELECTED:$PROOF_RESULT:$PROOF_MODE:$PACKAGE_RESULT:$ARCHITECTURE_RESULT:$MODULE_RESULT" in
-            "true:success:execute:success:success:$executed"|true:success:reused-full:skipped:skipped:skipped|false:skipped::skipped:skipped:skipped) ;;
+          # The contract job is like the packaged contracts: it must succeed on a dev push and is skipped on a pull request.
+          case "$MODULE_SELECTED:$PROOF_RESULT:$PROOF_MODE:$PACKAGE_RESULT:$ARCHITECTURE_RESULT:$MODULE_RESULT:$CONTRACT_RESULT" in
+            "true:success:execute:success:success:$executed:$executed"|true:success:reused-full:skipped:skipped:skipped:skipped|false:skipped::skipped:skipped:skipped:skipped) ;;
             *) printf 'Backend app checks failed or were unexpectedly skipped\n' >&2; exit 1 ;;
           esac

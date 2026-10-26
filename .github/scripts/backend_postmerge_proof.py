@@ -39,8 +39,6 @@ ALLOWED_STEP_CONDITIONS = frozenset({
     'always()',
     "${{ matrix.profile == 'full' }}",
     "${{ success() && matrix.profile == 'full' }}",
-    "${{ always() && matrix.profile == 'full' && (steps.fixture_auth_sessions.outcome == 'success' "
-    "|| steps.fixture_auth_sessions.outcome == 'failure') }}",
 })
 
 
@@ -215,7 +213,7 @@ def workflow_contract(raw):
     except UnicodeError:
         raise Unavailable('unknown-workflow') from None
     result = {}
-    for key in ('package', 'check', 'ci-result', 'proof'):
+    for key in ('package', 'check', 'ci-result', 'proof', 'contract'):
         match = re.search(r'^  ' + key + r':\n(.*?)(?=^  [A-Za-z][A-Za-z0-9_-]*:|\Z)',
                           text, re.MULTILINE | re.DOTALL)
         require(match is not None, 'unknown-workflow')
