@@ -22,13 +22,9 @@ def main():
     from app.services.lost_storage import storage_session
     from app.services.gallery_runtime import runtime_owner
     with storage_session() as store, runtime_owner(args.state_dir):
-        if store is None:
-            from app.es.client import es
-        else:
-            es = None
-        result = build_gallery(es, get_encoder, args.manifest, args.photo_root,
+        result = build_gallery(store, get_encoder, args.manifest, args.photo_root,
                                gallery_index(), args.state_dir,
-                               progress=lambda row: print(json.dumps(row), flush=True), store=store)
+                               progress=lambda row: print(json.dumps(row), flush=True))
     print(json.dumps(result), flush=True)
 
 

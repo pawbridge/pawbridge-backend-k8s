@@ -10,8 +10,9 @@ from unittest.mock import Mock
 import httpx
 
 from app.services.gallery_pages import PagedGallerySource, PROTOCOL, INITIAL_CHAIN, advance, PAGE_BYTES
-from app.services.lost_gallery import build_gallery, gallery_mapping
+from app.services.lost_gallery import build_gallery
 from app.services.sam3_focus import FOCUS_VERSION
+from tests.fake_gallery_store import FakeGalleryStore
 
 HOST = 'test.r2.cloudflarestorage.com'
 STOPPED = lambda: False
@@ -164,42 +165,33 @@ class GalleryPagesTest(unittest.TestCase):
         feed = Feed(101)
         with tempfile.TemporaryDirectory() as root:
             source = feed.source(root); source.fetch(None, STOPPED)
-            old = 'animals-lost-dinov3-sam3-build-old'
+            old = 'animals-lost-dinov3-sam3-build-' + 'a' * 24
             alias = 'animals-lost-dinov3-sam3-test'
-            active = [old]
-            es = Mock(); es.options.return_value = es
-            es.indices.exists_alias.return_value = True
-            mappings = {old: gallery_mapping('b' * 64)}
-            es.indices.exists.side_effect = lambda index: index in mappings
-            es.indices.create.side_effect = lambda index, settings, mappings: stored_mapping(index, mappings)
-            def stored_mapping(index, mapping):
-                mappings[index] = mapping
-            es.indices.get_alias.side_effect = lambda **_: {active[0]: {}}
-            es.indices.get_mapping.side_effect = lambda index: {index: {'mappings': mappings[index]}}
             vector = [1.] + [0.] * 1023
-            es.mget.side_effect = lambda index, ids: {'docs': [dict(found=True, _source=dict(item(int(i))['record'],
-                model_version=FOCUS_VERSION, image_vector=vector, focus_status='original_no_confident_animal')) for i in ids]} if index == old else {'docs': []}
+            store = FakeGalleryStore()
+            store.seed(old, [dict(item(i)['record'], model_version=FOCUS_VERSION, image_vector=vector,
+                                  focus_status='original_no_confident_animal') for i in range(1, 102)],
+                       alias=alias)
             calls = []
-            stored = [0]
-            def bulk(operations):
-                calls.append(len(operations)//2)
-                failed = len(calls) == 2
-                if not failed:
-                    stored[0] += len(operations)//2
-                return {'errors': failed}
-            es.bulk.side_effect = bulk
-            es.count.side_effect = lambda index: {'count': stored[0]}
+            write_page = store.write_page
+            def flaky_write(target, documents):
+                calls.append(len(documents))
+                if len(calls) == 2:
+                    raise RuntimeError('bulk write failed')
+                write_page(target, documents)
+            store.write_page = flaky_write
+            store.publish = Mock(wraps=store.publish)
             encoder = Mock(model_version=FOCUS_VERSION)
             with self.assertRaisesRegex(RuntimeError, 'bulk'):
-                build_gallery(es, lambda: encoder, None, source.photo_root, alias, root, stream=source)
+                build_gallery(store, lambda: encoder, None, source.photo_root, alias, root, stream=source)
             self.assertEqual(source.load_checkpoint()['processed'], 100)
-            es.indices.update_aliases.assert_not_called()
+            self.assertEqual(store.heads[alias], old)
+            store.publish.assert_not_called()
             source.close(); source = feed.source(root); source.fetch(None, STOPPED)
-            def publish(actions): active[0] = actions[-1]['add']['index']; return {'acknowledged': True}
-            es.indices.update_aliases.side_effect = publish
-            result = build_gallery(es, lambda: encoder, None, source.photo_root, alias, root, stream=source)
+            result = build_gallery(store, lambda: encoder, None, source.photo_root, alias, root, stream=source)
             self.assertEqual(calls, [100, 1, 1])
-            self.assertEqual(result['records'], 101); self.assertEqual(active[0], result['index'])
+            self.assertEqual(result['records'], 101); self.assertEqual(store.heads[alias], result['index'])
+            self.assertEqual(len(store.builds[result['index']]['documents']), 101)
             encoder.encode_with_metadata.assert_not_called(); source.close()
 
     def test_generated_large_feeds_keep_page_memory_bounded(self):

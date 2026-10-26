@@ -1,4 +1,4 @@
-# Native macOS arm64 / Python 3.12. Does not replace the WSL CUDA requirements.
+# Native macOS arm64 / Python 3.12 runtime for app.lost_main (DINOv3 + SAM 3 + PostgreSQL gallery).
 # SAM3 must be installed separately from the hash-checked patched source.
 -c deploy/macos/runtime.constraints.txt
 torch==2.10.0
@@ -17,7 +17,7 @@ iopath==0.1.10
 psutil==7.2.2
 fastapi==0.115.0
 uvicorn==0.32.0
-elasticsearch==8.15.1
 httpx==0.27.0
 python-multipart==0.0.12
--r requirements-lost-postgresql.txt
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.2

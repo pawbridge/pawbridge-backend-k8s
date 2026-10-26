@@ -1,6 +1,6 @@
 # CPU photo optimization service
 
-This entrypoint imports neither Torch nor Elasticsearch. It has no download,
+This entrypoint does not import Torch. It has no download,
 database, R2, or other network client. It returns a storage candidate; the caller
 must upload and verify it before marking an APMS photo as archived.
 

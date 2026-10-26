@@ -11,6 +11,10 @@ class GalleryUnavailable(RuntimeError):
     pass
 
 
+class ColorGalleryRefreshRequired(RuntimeError):
+    """The published gallery is safe to read but must be rebuilt before color ranking."""
+
+
 class RecommendationGalleryUnavailable(GalleryUnavailable):
     """The published gallery does not match the recommendation contract."""
 
@@ -197,7 +201,6 @@ class PostgresqlGalleryStore:
             if meta.get('contract') != CONTRACT or meta.get('model_version') != model_version or not completed or count != expected:
                 raise RuntimeError('PostgreSQL gallery contract mismatch')
             if color_version and meta.get('coat_color_version') != color_version:
-                from app.lost_main import ColorGalleryRefreshRequired
                 raise ColorGalleryRefreshRequired('Completed color gallery required')
 
     def search(self, alias, embedding, species, statuses, limit=200):

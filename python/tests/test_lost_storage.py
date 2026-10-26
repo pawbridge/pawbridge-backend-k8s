@@ -1,5 +1,6 @@
 import io
 import os
+import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -10,16 +11,32 @@ from app.services.pg_gallery_store import PostgresqlGalleryStore
 
 
 class LostStorageTest(unittest.TestCase):
-    def test_default_storage_does_not_create_a_postgresql_pool(self):
-        with patch.dict(os.environ,{},clear=True), patch.object(lost_storage,'get_postgresql_store') as factory:
-            with lost_storage.storage_session() as store:
-                self.assertIsNone(store)
-            factory.assert_not_called()
+    def test_default_storage_selects_postgresql_without_creating_a_pool(self):
+        driver=Mock()
+        with patch.dict(os.environ,{},clear=True), patch.dict(sys.modules,{'psycopg_pool':driver}):
+            self.assertEqual(lost_storage.backend(),'postgresql')
+            driver.ConnectionPool.assert_not_called()
+        self.assertIsNone(lost_storage._store)
 
-    def test_unknown_backend_fails_closed_instead_of_falling_back(self):
-        with patch.dict(os.environ,{'LOST_STORAGE_BACKEND':'misspelled'}):
-            with self.assertRaises(RuntimeError):
-                with lost_storage.storage_session(): self.fail('Cannot serve an unknown backend')
+    def test_default_storage_session_yields_the_postgresql_store(self):
+        store=Mock()
+        with patch.dict(os.environ,{},clear=True), \
+                patch.object(lost_storage,'get_postgresql_store',return_value=store) as factory, \
+                patch.object(lost_storage,'close_postgresql_store') as close:
+            with lost_storage.storage_session() as session:
+                self.assertIs(session,store)
+            factory.assert_called_once_with()
+            close.assert_called_once_with()
+
+    def test_unknown_or_removed_backend_fails_closed_instead_of_falling_back(self):
+        driver=Mock()
+        for value in ('misspelled','elasticsearch'):
+            with self.subTest(backend=value), patch.dict(os.environ,{'LOST_STORAGE_BACKEND':value}), \
+                    patch.dict(sys.modules,{'psycopg_pool':driver}):
+                with self.assertRaises(RuntimeError):
+                    with lost_storage.storage_session(): self.fail('Cannot serve an unsupported backend')
+                driver.ConnectionPool.assert_not_called()
+                self.assertIsNone(lost_storage._store)
 
     def test_startup_failure_closes_created_pool(self):
         store=Mock()

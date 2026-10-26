@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import unittest
 from datetime import date
@@ -156,114 +157,90 @@ class LostApiTest(unittest.TestCase):
         search.assert_not_called()
 
 
-class RetrievalContractTest(unittest.TestCase):
-    def test_default_query_filters_active_status_before_candidate_pool_with_legacy_fallback(self):
-        import sys
-        import types
-        from unittest.mock import MagicMock, create_autospec
-        from elasticsearch import Elasticsearch
-        from app.services.lost_search import search_photo
-        encoder = types.ModuleType("app.services.dinov3")
-        encoder.get_encoder = MagicMock()
-        encoder.get_encoder.return_value.encode_with_metadata.return_value = types.SimpleNamespace(vector=[.1, .2], model_version="test-model", focus_status="original_multiple_animals", animal_vector=None, coat_color=None)
-        encoder.gallery_index = lambda: "animals-lost-dinov3-large-v1"
-        encoder.MODEL_VERSION = "test-model"
-        module = types.ModuleType("app.es.client")
-        module.INDEX_NAME = "animals"
-        module.es = create_autospec(Elasticsearch, instance=True)
-        module.es.options.return_value = create_autospec(Elasticsearch, instance=True)
-        module.es.options.return_value.search.return_value = {"hits":{"hits":[hit(7,.8,status="ADOPTED")]}}
-        with patch.dict(sys.modules, {"app.services.dinov3":encoder, "app.es.client":module}):
-            result = search_photo(photo(), "DOG", date(2026,9,8), "상주시", "흰색")
-        args = module.es.options.return_value.search.call_args.kwargs
-        self.assertEqual(args["query"]["script_score"]["query"]["bool"]["filter"], [
-            {"term":{"species":"DOG"}}, {"term":{"model_version":"test-model"}},
-            {"bool": {"should": [
-                {"terms": {"status": ("NOTICE", "PROTECT")}},
-                {"bool": {"must_not": {"exists": {"field": "status"}}}}
-            ], "minimum_should_match": 1}},
-            {"exists":{"field":"image_vector"}}, {"exists":{"field":"id"}}])
-        self.assertEqual(result["candidates"][0]["animalId"],7)
-        self.assertEqual(args["size"],200)
-        self.assertEqual(args["index"], "animals-lost-dinov3-large-v1")
-        module.es.options.assert_called_once_with(request_timeout=15, max_retries=0)
-        module.es.update.assert_not_called()
-        module.es.index.assert_not_called()
+def embedding(**changes):
+    from app.services.dinov3 import AnimalEmbedding
+    values = dict(vector=[.1, .2], model_version="test-model", focus_status="original_multiple_animals",
+                  animal_vector=None, coat_color=None)
+    return AnimalEmbedding(**{**values, **changes})
 
-    def test_resolved_option_adds_only_adopted_and_returned_to_es_filter(self):
-        import sys
-        import types
-        from unittest.mock import MagicMock
-        from app.services.lost_search import search_photo
-        encoder = types.ModuleType("app.services.dinov3")
-        encoder.get_encoder = MagicMock()
-        encoder.get_encoder.return_value.encode_with_metadata.return_value = types.SimpleNamespace(
-            vector=[.1, .2], model_version="test-model", focus_status="original_multiple_animals",
-            animal_vector=None, coat_color=None)
-        encoder.gallery_index = lambda: "animals-lost-dinov3-large-v1"
-        module = types.ModuleType("app.es.client"); module.es = MagicMock()
-        module.es.options.return_value.search.return_value = {"hits": {"hits": []}}
-        with patch.dict(sys.modules, {"app.services.dinov3": encoder, "app.es.client": module}):
-            search_photo(photo(), "DOG", include_adopted_or_returned=True)
-        filters = module.es.options.return_value.search.call_args.kwargs["query"]["script_score"]["query"]["bool"]["filter"]
-        self.assertEqual(filters[2]["bool"]["should"][0],
-                         {"terms": {"status": ("NOTICE", "PROTECT", "ADOPTED", "RETURNED")}})
+
+def retrieve(query, hits, **options):
+    """Run search_photo against a PostgreSQL store double; the encoder is never loaded."""
+    from unittest.mock import create_autospec
+    from app.services.lost_search import search_photo
+    from app.services.pg_gallery_store import PostgresqlGalleryStore
+    store = create_autospec(PostgresqlGalleryStore, instance=True)
+    if isinstance(hits, Exception):
+        store.search.side_effect = hits
+    else:
+        store.search.return_value = hits
+    arguments = options.pop("arguments", ("DOG",))
+    with patch("app.services.dinov3.get_encoder") as encoder, \
+            patch("app.services.dinov3.gallery_index", return_value="animals-lost-dinov3-large-v1"), \
+            patch("app.services.lost_storage.get_postgresql_store", return_value=store):
+        encoder.return_value.encode_with_metadata.return_value = query
+        return store, encoder, search_photo(photo(), *arguments, **options)
+
+
+class RetrievalContractTest(unittest.TestCase):
+    def test_default_query_filters_active_status_before_candidate_pool(self):
+        query = embedding()
+        store, _, result = retrieve(query, [hit(7, .8, status="ADOPTED")],
+                                    arguments=("DOG", date(2026, 9, 8), "상주시", "흰색"))
+        # The store applies species, model version and status before its top-200 cut.
+        store.search.assert_called_once_with("animals-lost-dinov3-large-v1", query, "DOG", ("NOTICE", "PROTECT"), 200)
+        self.assertEqual([call[0] for call in store.method_calls], ["search"])
+        self.assertEqual(result["candidates"][0]["animalId"], 7)
+
+    def test_resolved_option_adds_only_adopted_and_returned_to_status_filter(self):
+        store, _, _ = retrieve(embedding(), [], include_adopted_or_returned=True)
+        self.assertEqual(store.search.call_args.args[3], ("NOTICE", "PROTECT", "ADOPTED", "RETURNED"))
+
+    def test_animal_channel_reaches_the_store_with_the_query_species_and_model(self):
+        query = embedding(vector=[1., 0.], animal_vector=[0., 1.], model_version="dual-v2", focus_status="animal_mask")
+        store, encoder, _ = retrieve(query, [])
+        passed = store.search.call_args.args[1]
+        self.assertEqual((passed.vector, passed.animal_vector, passed.model_version), ([1., 0.], [0., 1.], "dual-v2"))
+        self.assertEqual(store.search.call_args.args[2], "DOG")
+        self.assertEqual(encoder.return_value.encode_with_metadata.call_args.args[1], "DOG")
 
     def test_animal_channel_is_only_combined_when_the_gallery_document_has_it(self):
-        import sys
-        import types
         from unittest.mock import MagicMock
-        from app.services.lost_search import search_photo, ANIMAL_REGION_WEIGHT
-        encoder = types.ModuleType("app.services.dinov3")
-        encoder.get_encoder = MagicMock()
-        encoder.get_encoder.return_value.encode_with_metadata.return_value = types.SimpleNamespace(
-            vector=[1., 0.], animal_vector=[0., 1.], model_version="dual-v2", focus_status="animal_mask", coat_color=None)
-        encoder.gallery_index = lambda: "animals-lost-dinov3-focus-eval-v2"
-        module = types.ModuleType("app.es.client")
-        module.es = MagicMock()
-        module.es.options.return_value.search.return_value = {"hits": {"hits": []}}
-        with patch.dict(sys.modules, {"app.services.dinov3": encoder, "app.es.client": module}):
-            search_photo(photo(), "DOG")
-        args = module.es.options.return_value.search.call_args.kwargs
-        script = args["query"]["script_score"]["script"]
-        self.assertEqual(script["params"], {"vector": [1.,0.], "animal": [0.,1.], "weight": ANIMAL_REGION_WEIGHT})
-        self.assertIn("doc['animal_vector'].size() != 0", script["source"])
-        self.assertIn("return 1.0 + original;", script["source"])
-        self.assertIn({"term": {"model_version": "dual-v2"}}, args["query"]["script_score"]["query"]["bool"]["filter"])
-        self.assertEqual(encoder.get_encoder.return_value.encode_with_metadata.call_args.args[1], "DOG")
+        from types import SimpleNamespace
+        from app.services.lost_search import ANIMAL_REGION_WEIGHT
+        from app.services.pg_gallery_store import PostgresqlGalleryStore
+        connection = MagicMock()
+        connection.execute.return_value.fetchone.return_value = ({"model_version": "dual-v2"}, True)
+        connection.execute.return_value.fetchall.return_value = []
+        pool = MagicMock()
+        pool.connection.return_value.__enter__.return_value = connection
+        vector, animal = [1.] + [0.] * 1023, [0.] * 1023 + [1.]
+        store = PostgresqlGalleryStore(pool)
+        for query_animal in (animal, None):
+            connection.execute.reset_mock()
+            with self.subTest(query_animal=query_animal is not None):
+                store.search("animals-lost-dinov3-sam3-test",
+                             SimpleNamespace(vector=vector, animal_vector=query_animal, model_version="dual-v2"),
+                             "DOG", ("NOTICE", "PROTECT"), 200)
+                sql, parameters = connection.execute.call_args.args
+                # Whole-image score is the fallback unless both the query and the document have an animal vector.
+                self.assertIn("q.animal IS NOT NULL AND d.animal_vector IS NOT NULL", sql)
+                self.assertIn("ELSE 2.0-(d.image_vector <=> q.whole)", sql)
+                self.assertEqual(parameters[:4], (json.dumps(vector), json.dumps(query_animal) if query_animal else None, ANIMAL_REGION_WEIGHT, ANIMAL_REGION_WEIGHT))
+                self.assertEqual(parameters[4:], ("animals-lost-dinov3-sam3-test", "dual-v2", "DOG", ["NOTICE", "PROTECT"], 200))
+                # Legacy documents without a status stay searchable during a staged rollout.
+                self.assertIn("(d.status=ANY(%s) OR d.status IS NULL)", sql)
 
-    def test_partial_elasticsearch_response_is_failure(self):
-        import sys
-        import types
-        from unittest.mock import MagicMock
-        from app.services.lost_search import search_photo
-        encoder = types.ModuleType("app.services.dinov3")
-        encoder.get_encoder = MagicMock()
-        encoder.get_encoder.return_value.encode_with_metadata.return_value = types.SimpleNamespace(vector=[.1, .2], model_version="test-model", focus_status="original_multiple_animals", animal_vector=None, coat_color=None)
-        encoder.gallery_index = lambda: "animals-lost-dinov3-large-v1"
-        encoder.MODEL_VERSION = "test-model"
-        module = types.ModuleType("app.es.client")
-        module.INDEX_NAME = "animals"
-        module.es = MagicMock()
-        for response in ({"timed_out":True},{"_shards":{"failed":1}}):
-            module.es.options.return_value.search.return_value=response
-            with patch.dict(sys.modules,{"app.services.dinov3":encoder,"app.es.client":module}):
-                with self.assertRaises(RuntimeError):
-                    search_photo(photo(),"CAT")
+    def test_unavailable_gallery_is_failure_not_empty_candidates(self):
+        from app.services.pg_gallery_store import GalleryUnavailable
+        with self.assertRaises(GalleryUnavailable):
+            retrieve(embedding(), GalleryUnavailable("Matching published PostgreSQL gallery required"),
+                     arguments=("CAT",))
 
     def test_query_and_gallery_color_features_drive_returned_order(self):
-        import sys
-        import types
-        from unittest.mock import MagicMock
-        from app.services.dinov3 import AnimalEmbedding
-        from app.services.lost_search import search_photo
         from tests.test_coat_color import descriptor
         dark, tan = descriptor((45, 40, 35)), descriptor((165, 110, 60))
-        encoder = MagicMock()
-        encoder.encode_with_metadata.return_value = AnimalEmbedding([1., 0.], "test", "animal_mask", [1., 0.], dark)
-        module = types.ModuleType("app.es.client"); module.es = MagicMock()
-        module.es.options.return_value.search.return_value = {"hits": {"hits": [hit(1, .88, coat_color=tan), hit(2, .87, coat_color=dark)]}}
-        with patch("app.services.dinov3.get_encoder", return_value=encoder), patch("app.services.dinov3.gallery_index", return_value="test-gallery"), patch.dict(sys.modules, {"app.es.client": module}), patch.dict(os.environ, {"LOST_SEARCH_COAT_COLOR_WEIGHT": ".12"}):
-            result = search_photo(photo(), "DOG")
+        query = embedding(vector=[1., 0.], model_version="test", focus_status="animal_mask", animal_vector=[1., 0.], coat_color=dark)
+        with patch.dict(os.environ, {"LOST_SEARCH_COAT_COLOR_WEIGHT": ".12"}):
+            _, _, result = retrieve(query, [hit(1, .88, coat_color=tan), hit(2, .87, coat_color=dark)])
         self.assertEqual([c["animalId"] for c in result["candidates"]], [2, 1])
-        self.assertIn("coat_color", module.es.options.return_value.search.call_args.kwargs["source"])

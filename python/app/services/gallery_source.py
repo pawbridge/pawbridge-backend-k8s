@@ -74,7 +74,7 @@ class GallerySource:
         headers = {'X-Internal-Api-Key': self.key}
         if etag:
             headers['If-None-Match'] = etag
-        # Signing the complete inventory is CPU work on the VM; measured 12k photos at ~31s cold.
+        # Signing the complete inventory is CPU work on the feed host; measured 12k photos at ~31s cold.
         with self.client.stream('GET', self.url, headers=headers,
                                 timeout=httpx.Timeout(90, connect=5)) as response:
             if response.status_code == 304:
@@ -110,7 +110,7 @@ class GallerySource:
             inventory[sha] = photo
         if set(inventory) != {row['source_sha256'] for row in records}:
             raise ValueError('Photo inventory differs from snapshot')
-        # Only metadata is fetched here. The builder first checks existing ES vectors.
+        # Only metadata is fetched here. The builder first checks existing gallery vectors.
         self.inventory = inventory
         self.urls_refreshed_at = time.monotonic()
         self.downloaded = 0
