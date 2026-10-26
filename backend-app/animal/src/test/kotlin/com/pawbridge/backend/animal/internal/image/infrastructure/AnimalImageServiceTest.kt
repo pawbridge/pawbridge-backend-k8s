@@ -155,21 +155,30 @@ class AnimalImageServiceTest {
     }
 
     @Test
-    fun `합계가 원래 요청 한도를 넘을 때__여러 파일 업로드를 하면__개수 검증이나 저장 전에 거부한다`() {
+    fun `장당 10MB 이하이고 합계가 10MB를 넘을 때__여러 파일 업로드를 하면__모두 저장한다`() {
         // given
-        val many = arrayOfNulls<MultipartFile>(6)
-        for (i in 0 until 6) {
-            many[i] = sized(2L * 1024 * 1024)
-        }
+        every { images.uploadImage(any()) } returnsMany listOf("u1", "u2", "u3", "u4", "u5")
+        val five = Array<MultipartFile?>(5) { sized(10L * 1024 * 1024) }
 
         // when
-        val tooManyLarge = assertThatThrownBy { subject.uploadImages(many) }
-        val totalTooLarge = assertThatThrownBy {
-            subject.uploadImages(arrayOf<MultipartFile?>(sized(6L * 1024 * 1024), sized(5L * 1024 * 1024)))
-        }
+        val urls = subject.uploadImages(five)
 
         // then
-        tooManyLarge.isInstanceOf(AnimalImageTooLargeException::class.java)
+        assertThat(urls).containsExactly("u1", "u2", "u3", "u4", "u5")
+    }
+
+    @Test
+    fun `한 장이 10MB를 넘거나 합계가 55MB를 넘을 때__여러 파일 업로드를 하면__개수 검증이나 저장 전에 거부한다`() {
+        // given
+        val oneTooLarge = arrayOf<MultipartFile?>(sized(1024), sized(10L * 1024 * 1024 + 1))
+        val sixFull = Array<MultipartFile?>(6) { sized(10L * 1024 * 1024) }
+
+        // when
+        val fileTooLarge = assertThatThrownBy { subject.uploadImages(oneTooLarge) }
+        val totalTooLarge = assertThatThrownBy { subject.uploadImages(sixFull) }
+
+        // then
+        fileTooLarge.isInstanceOf(AnimalImageTooLargeException::class.java)
         totalTooLarge.isInstanceOf(AnimalImageTooLargeException::class.java)
         confirmVerified(images)
     }
