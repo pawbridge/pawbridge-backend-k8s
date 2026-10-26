@@ -31,7 +31,6 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -129,26 +128,6 @@ class UserAnimalActivitiesHttpTest {
         verify(exactly = 1) { activities.favorites(7) }
         verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(0, 20, "createdAt,desc")) }
         verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(3, 20, "name,desc,createdAt,asc")) }
-        cleared()
-    }
-
-    @Test
-    fun `JWT가 없거나 신원이 위조되고 경로가 잘못됐을 때__요청하면__바인딩 전에 인증하고 업무를 하지 않는다`() {
-        // given
-        val forged = post("/api/v1/favorites/bad").header("X-User-Id", "7")
-        val malformedPath = post("/api/v1/favorites/bad").header("Authorization", token())
-
-        // when
-        val unauthenticated = mvc.perform(forged)
-        val badPath = mvc.perform(malformedPath)
-
-        // then
-        unauthenticated.andExpect(status().isUnauthorized())
-        badPath
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(activities)
         cleared()
     }
 

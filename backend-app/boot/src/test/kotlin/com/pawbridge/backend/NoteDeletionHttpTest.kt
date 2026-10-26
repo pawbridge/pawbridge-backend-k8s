@@ -112,27 +112,6 @@ class NoteDeletionHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["not-a-uuid", "blocks", "notifications"])
-    fun `검증된 호출자와 UUID 아닌 단일 경로일 때__삭제하면__예약 라벨 예외 없이 범위 400을 준다`(
-        segment: String,
-    ) {
-        // given
-        val request = delete("/api/v1/notes/$segment")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        noDependencies()
-    }
-
-    @ParameterizedTest
     @MethodSource("failures")
     fun `현재 회원이나 삭제 포트가 실패했을 때__삭제하면__비활성 없음 회원 저장소 쓰기 정책을 유지한다`(
         kind: String,

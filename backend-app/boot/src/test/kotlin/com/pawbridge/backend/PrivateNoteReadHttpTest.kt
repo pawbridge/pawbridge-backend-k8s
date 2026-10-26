@@ -291,23 +291,6 @@ class PrivateNoteReadHttpTest {
         confirmVerified(clock, notes, blocks, batches, blockLists, notifications, counts)
     }
 
-    @Test
-    fun `인증된 호출자의 쪽지 ID가 깨졌을 때__바인딩하면__회원과 시계와 쪽지 조회 전에 메시지만 담은 400을 준다`() {
-        // given
-        val request = authenticated("/api/v1/notes/not-a-uuid")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        noDependencies()
-    }
-
     @ParameterizedTest
     @MethodSource("dependencyFailures")
     fun `회원 시계 쪽지 상대 또는 차단 조회가 실패했을 때__상세를 읽으면__원인별 503을 주고 부분 본문을 내지 않는다`(

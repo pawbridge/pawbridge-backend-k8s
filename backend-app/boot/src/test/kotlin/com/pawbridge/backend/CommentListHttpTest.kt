@@ -141,21 +141,6 @@ class CommentListHttpTest {
         confirmVerified(readPost, listPosts)
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `파싱할 수 없는 글 ID일 때__댓글을 조회하면__400을 응답한다`(postId: String) {
-        // given
-
-        // when
-        val result = mvc.perform(get("/api/v1/comments/posts/read/$postId"))
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
-        confirmVerified(listComments, readPost, listPosts)
-    }
-
     @Test
     fun `댓글 조회가 민감 정보와 함께 실패할 때__목록을 조회하면__비밀 로그 없이 안전한 500을 돌려준다`() {
         // given

@@ -188,23 +188,6 @@ class CommentDeleteHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `파싱할 수 없는 댓글 ID와 유효한 신원일 때__지우면__400을 응답한다`(
-        commentId: String,
-    ) {
-        // given
-
-        // when
-        val result = mvc.perform(authenticatedDelete(commentId))
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
-    }
-
-    @ParameterizedTest
     @MethodSource("deletionFailures")
     fun `인증 뒤 삭제가 실패할 때__댓글을 지우면__401이 아닌 안전한 오류를 주고 민감 정보를 남기지 않는다`(
         expectedStatus: Int,

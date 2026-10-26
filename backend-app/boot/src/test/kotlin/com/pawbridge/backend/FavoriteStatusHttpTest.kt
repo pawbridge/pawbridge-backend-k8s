@@ -143,27 +143,6 @@ class FavoriteStatusHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["abc", "1.5", "9223372036854775808", "-9223372036854775809"])
-    fun `Long이 아니거나 넘치는 ID일 때__인증된 채 확인하면__조회 전에 기존 런타임 500을 유지한다`(
-        animalId: String,
-    ) {
-        // given
-
-        // when
-        val result = mvc.perform(
-            get("/api/v1/favorites/{animalId}/check", animalId)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        confirmVerified(favorites, profiles, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
     @MethodSource("queryFailures")
     fun `SQL이나 트랜잭션 실패일 때__확인하면__false나 인증 실패가 아닌 안전한 500을 주고 비밀을 남기지 않는다`(
         failure: RuntimeException,

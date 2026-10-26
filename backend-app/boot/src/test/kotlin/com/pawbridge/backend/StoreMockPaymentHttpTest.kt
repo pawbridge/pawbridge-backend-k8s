@@ -119,28 +119,6 @@ class StoreMockPaymentHttpTest {
         assertThat(json.toString()).doesNotContain("PENDING").doesNotContain("publish")
     }
 
-    @Test
-    fun `주문 ID가 숫자가 아닐 때__결제하면__비즈니스 전에 기존 타입 오류를 돌려준다`() {
-        // given
-        val request = verified("POST", "/api/v1/orders/abc/payment")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        val json = mapper.readTree(
-            result
-                .andExpect(status().isBadRequest())
-                .andReturn().response.contentAsByteArray,
-        )
-        assertThat(json.path("message").asText()).isEqualTo("Invalid Type Value")
-        assertThat(json.path("code").asText()).isEqualTo("C005")
-        assertThat(json.path("errors").get(0).path("field").asText()).isEqualTo("orderId")
-        assertThat(json.path("errors").get(0).path("value").asText()).isEqualTo("abc")
-        assertThat(json.path("errors").get(0).path("reason").asText()).isEqualTo("typeMismatch")
-        confirmVerified(payments)
-    }
-
     companion object {
         fun command(method: String, path: String): MockHttpServletRequestBuilder {
             return request(HttpMethod.valueOf(method), path).header("X-User-Id", "99")

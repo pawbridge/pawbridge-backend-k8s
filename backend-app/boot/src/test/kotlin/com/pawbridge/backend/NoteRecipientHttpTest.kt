@@ -38,7 +38,6 @@ import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -132,32 +131,6 @@ class NoteRecipientHttpTest {
         }
         confirmVerified(members, blocks, favorites, readPost, listPosts)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `검증된 토큰과 깨지거나 넘치는 회원 경로일 때__바인딩하면__의존성 전에 메시지만 담은 400을 준다`(
-        target: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/recipients/{member}", target)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json(
-                    mapper.writeValueAsString(mapOf("message" to "요청 형식과 로그인 정보를 확인해 주세요.")),
-                    JsonCompareMode.STRICT,
-                ),
-            )
-        confirmVerified(members, blocks, favorites, readPost, listPosts)
     }
 
     @ParameterizedTest

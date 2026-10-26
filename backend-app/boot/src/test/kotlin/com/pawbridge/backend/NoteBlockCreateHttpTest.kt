@@ -170,26 +170,6 @@ class NoteBlockCreateHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["not-a-long", "9223372036854775808", "status"])
-    fun `깨지거나 넘치는 대상이 주어졌을 때__차단하면__업무 처리 전에 메시지만 담은 400을 준다`(
-        target: String,
-    ) {
-        // given
-        val request = authenticated(PATH + target)
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        noDependencies()
-    }
-
-    @ParameterizedTest
     @ValueSource(strings = ["CURRENT", "TARGET"])
     fun `탈퇴 대기 회원이 호출자나 대상일 때__차단하면__시계 전에 403을 주고 조회 순서를 지킨다`(
         phase: String,

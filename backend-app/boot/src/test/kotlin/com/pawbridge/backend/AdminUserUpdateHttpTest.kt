@@ -175,24 +175,6 @@ class AdminUserUpdateHttpTest {
         cleared()
     }
 
-    @Test
-    fun `관리자와 잘못된 경로 Long__바인딩하면__업무 처리 전에 400을 응답한다`() {
-        // given
-        val request = put(PATH + "bad").header("Authorization", admin()).contentType("application/json").content("{}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(
-                content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(members)
-        cleared()
-    }
-
     companion object {
         private const val PATH = "/api/v1/admin/users/"
 

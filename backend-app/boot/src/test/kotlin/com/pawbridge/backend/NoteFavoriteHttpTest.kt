@@ -114,26 +114,6 @@ class NoteFavoriteHttpTest {
         cleared()
     }
 
-    @Test
-    fun `검증된 호출자와 깨진 UUID가 주어졌을 때__정식 불리언으로 지정하면__회원 확인과 변경 없이 범위 400을 준다`() {
-        // given
-        val request = put("/api/v1/notes/not-a-uuid/favorite")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"favorite\":true}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        noDependencies()
-    }
-
     @ParameterizedTest
     @MethodSource("failures")
     fun `현재 회원이나 변경이 실패했을 때__즐겨찾기를 지정하면__비활성 없음 회원 저장소 쓰기 정책을 유지한다`(

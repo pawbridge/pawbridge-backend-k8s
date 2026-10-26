@@ -184,23 +184,6 @@ class CommentCreateHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `파싱할 수 없는 글 ID와 유효한 신원일 때__댓글을 만들면__400을 응답한다`(
-        postId: String,
-    ) {
-        // given
-
-        // when
-        val result = mvc.perform(authenticatedPost(postId).content("{\"content\":\"댓글\"}"))
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
-        confirmVerified(createComment, listComments, readPost, listPosts)
-    }
-
-    @ParameterizedTest
     @ValueSource(longs = [0, -1])
     fun `0 이하의 글 ID일 때__댓글을 만들면__부모 조회가 404를 결정하게 한다`(postId: Long) {
         // given

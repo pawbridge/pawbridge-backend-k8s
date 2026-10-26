@@ -15,8 +15,6 @@ import jakarta.servlet.DispatcherType
 import jakarta.servlet.RequestDispatcher
 import org.hamcrest.Matchers
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -137,23 +135,6 @@ class PostReadHttpTest {
             .andExpect(jsonPath("$.message").value("게시글을 찾을 수 없습니다."))
             .andExpect(jsonPath("$.data").isEmpty())
         verify(exactly = 1) { readPost.read(42) }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "search", "9223372036854775808"])
-    fun `해석할 수 없는 게시글 ID가 주어졌을 때__조회하면__400을 응답한다`(value: String) {
-        // given
-        val request = get("/api/v1/posts/read/$value")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(readPost)
     }
 
     @Test

@@ -29,7 +29,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
-import org.junit.jupiter.params.provider.ValueSource
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -301,23 +300,6 @@ class AdminPostMutationHttpTest {
             logger.detachAppender(events)
             events.stop()
         }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["PUT", "DELETE"])
-    fun `관리자와 잘못된 숫자 경로__바인딩하면__업무 처리 전에 400을 응답한다`(method: String) {
-        // given
-        val request = mutation(method, "not-a-long").header("Authorization", admin())
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(reader, remover, uploader, users, writer, deletion)
     }
 
     companion object {

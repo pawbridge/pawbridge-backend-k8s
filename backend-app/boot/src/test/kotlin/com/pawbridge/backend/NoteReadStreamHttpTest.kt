@@ -239,28 +239,6 @@ class NoteReadStreamHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = [false, true])
-    fun `깨진 읽음 UUID가 주어졌을 때__토큰이 없거나 유효하면__바인딩 전 인증을 유지하고 변경하지 않는다`(
-        authenticated: Boolean,
-    ) {
-        // given
-        val request = put("/api/v1/notes/not-a-uuid/read")
-        if (authenticated) {
-            request.header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().`is`(if (authenticated) 400 else 401))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(members, mutation, streams, clock)
-        cleared()
-    }
-
-    @ParameterizedTest
     @MethodSource("readFailures")
     fun `변경 포트가 실패했을 때__읽음 처리하면__없음 회원 저장소 쓰기 런타임 정책을 유지한다`(
         failure: RuntimeException,

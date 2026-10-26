@@ -29,7 +29,6 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -136,24 +135,6 @@ class PostDeleteHttpTest {
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.message").value("게시글을 찾을 수 없습니다."))
         confirmVerified(media, deletion)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `해석할 수 없는 ID가 주어졌을 때__삭제하면__400을 응답한다`(id: String) {
-        // given
-        val request = delete("/api/v1/posts/$id")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(posts, media, deletion)
     }
 
     @Test

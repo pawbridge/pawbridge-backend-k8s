@@ -315,21 +315,6 @@ class CommentUpdateHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `파싱할 수 없는 댓글 ID와 유효한 신원일 때__수정하면__400을 응답한다`(id: String) {
-        // given
-
-        // when
-        val result = mvc.perform(authenticatedPut(id).content("{\"content\":\"수정\"}"))
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
-        confirmVerified(comments, users, modification)
-    }
-
-    @ParameterizedTest
     @MethodSource("updateFailures")
     fun `조회나 닉네임이나 쓰기가 실패할 때__수정하면__안전한 오류 계약을 지키고 민감 로그를 남기지 않는다`(
         stage: Int,

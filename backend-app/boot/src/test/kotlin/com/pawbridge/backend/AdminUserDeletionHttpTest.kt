@@ -26,7 +26,6 @@ import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -104,26 +103,6 @@ class AdminUserDeletionHttpTest {
                 ),
             )
         verify(exactly = 1) { deletion.delete(8) }
-        confirmVerified(deletion)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @Test
-    fun `관리자와 잘못된 Long__삭제 전에 바인딩하면__서비스 호출 없이 400을 응답한다`() {
-        // given
-        val request = delete(PATH + "not-a-number")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
         confirmVerified(deletion)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }

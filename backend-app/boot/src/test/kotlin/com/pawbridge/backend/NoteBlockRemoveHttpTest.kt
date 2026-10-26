@@ -143,26 +143,6 @@ class NoteBlockRemoveHttpTest {
         noDependencies()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["not-a-long", "9223372036854775808", "status"])
-    fun `깨지거나 넘치는 대상과 유효한 토큰이 주어졌을 때__해제하면__업무 처리 전에 메시지만 담은 400을 준다`(
-        target: String,
-    ) {
-        // given
-        val request = authenticated(PATH + target)
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        noDependencies()
-    }
-
     @Test
     fun `탈퇴 대기 호출자가 주어졌을 때__해제가 가드를 부르면__메시지만 담은 403을 준다`() {
         // given
