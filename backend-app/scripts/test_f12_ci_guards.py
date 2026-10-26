@@ -126,10 +126,10 @@ class F12GuardTest(unittest.TestCase):
     def test_given_workflow_phases__when_declaring_checks__then_run_f12_after_all_ancestor_regressions_before_cleanup(self):
         workflow = (f12.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Extend the owned fixture with exact F12 profile columns and reader permissions')
-        self.assertLess(boundary, workflow.index('python3 scripts/f12_ci.py prepare', boundary))
+        self.assertLess(workflow.index('python3 scripts/f11_ci.py smoke'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f12_ci.py prepare', boundary), workflow.index('python3 scripts/f12_ci.py smoke'))
         self.assertNotIn('python3 scripts/f12_ci.py results', workflow)
-        self.assertNotIn('python3 scripts/f12_ci.py smoke', workflow, 'The packaged F12 smoke moved to the Spring contract tests.')
-        self.assertLess(workflow.index('python3 scripts/f12_ci.py prepare', boundary), workflow.index('- name: Remove only the owned disposable fixture'))
+        self.assertLess(workflow.index('python3 scripts/f12_ci.py smoke'), workflow.index('- name: Remove only the owned disposable fixture'))
         self.assertNotRegex(workflow[boundary:], r'python3 scripts/f(?:[2-9]|10|11)_ci\.py (?:prepare|smoke)')
         for required in ('scripts/test_f12_ci_guards.py', 'f12-helper-refusal.txt',
                          'f[0-9]+_fixture', 'backend-app/**/build/test-results/**/TEST-*.xml'):

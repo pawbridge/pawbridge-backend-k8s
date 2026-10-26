@@ -176,7 +176,7 @@ class F9GuardTest(unittest.TestCase):
         workflow = (f9.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         self.assertLess(workflow.index('- name: Extend the owned fixture with minimal F9 comment INSERT permissions'),
                         workflow.index('- name: Verify production JAR isolation\n'))
-        self.assertNotIn('python3 scripts/f9_ci.py smoke', workflow, 'The packaged F9 smoke moved to the Spring contract tests.')
+        self.assertLess(workflow.index('python3 scripts/f8_ci.py smoke'), workflow.index('python3 scripts/f9_ci.py smoke'))
         for required in ('scripts/test_f9_ci_guards.py', 'build/ci/f9-helper-refusal.txt',
                          'f[0-9]+_fixture', 'com/pawbridge/backend/compatibility/',
                          "grep -Ev '^BOOT-INF/lib/(hibernate-validator-[0-9][^/]*|spring-data-redis-3[.]4[.]11|feign-(core|form)-13[.]5|hibernate-core-6[.]6[.]33[.]Final|hibernate-commons-annotations-7[.]0[.]3[.]Final|spring-data-jpa-3[.]4[.]11)\\.jar$'"):

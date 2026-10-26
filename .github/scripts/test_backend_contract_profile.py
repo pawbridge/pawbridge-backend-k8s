@@ -91,20 +91,19 @@ class ContractProfileTest(unittest.TestCase):
         with self.assertRaises(profile.ProfileBlocked):
             profile.select_profiles(context(), PATHS + [PATHS[0]])
 
-    def test_given_fixed_profiles__when_planning__then_require_the_full_set_or_the_pilot_set_of_smokes(self):
-        # F3-F16 run as Spring contract tests; F17 to F29 and the member cleanup are still packaged smokes.
-        self.assertEqual(tuple('jar_f' + str(n) for n in range(17, 30)) + ('jar_f31',), profile.expected_smokes(profile.FULL))
-        expected = tuple('jar_f' + str(n) for n in range(17, 30) if n not in (17, 19, 21, 22, 23)) + ('jar_f31',)
+    def test_given_fixed_profiles__when_planning__then_require_exact_twenty_eight_or_twenty_two_smokes(self):
+        self.assertEqual(tuple('jar_f' + str(n) for n in range(3, 30)) + ('jar_f31',), profile.expected_smokes(profile.FULL))
+        expected = tuple('jar_f' + str(n) for n in range(3, 30) if n not in (16, 17, 19, 21, 22, 23)) + ('jar_f31',)
         self.assertEqual(expected, profile.expected_smokes(profile.PILOT))
         plan = profile.make_plan(context(), PATHS, profile.PILOT, JAR)
-        self.assertEqual(len(expected), len(plan['required_smokes']))
+        self.assertEqual(22, len(plan['required_smokes']))
         self.assertEqual(list(profile.PILOT_SKIPS), plan['skipped_smokes'])
 
     def test_given_full_default_scope__when_planning__then_accept_nonpilot_changes(self):
         ctx = dict(context(), head_ref='feat/ordinary-api', base_sha='b' * 40)
         plan = profile.make_plan(ctx, ['backend-app/community/src/main/java/Changed.java'], profile.FULL, JAR)
         self.assertEqual([], plan['skipped_smokes'])
-        self.assertEqual(len(profile.ALL_SMOKES), len(plan['required_smokes']))
+        self.assertEqual(28, len(plan['required_smokes']))
 
     def test_given_incomplete_or_invalid_identity_and_jar__when_planning__then_reject(self):
         for key in profile.IDENTITY_KEYS:
@@ -130,7 +129,7 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual('passed', result['status'])
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
-                self.assertEqual(len(profile.ALL_SMOKES) + 1, len(result['step_results']))
+                self.assertEqual(29, len(result['step_results']))
 
     def test_given_fixed_shards__when_splitting__then_cover_every_smoke_once_in_the_original_order(self):
         self.assertEqual([1, 2, 3, 4], sorted(profile.SHARDS))
@@ -174,7 +173,7 @@ class ContractProfileTest(unittest.TestCase):
         mode, shard = profile.FULL, 2
         plan = profile.make_plan(context(), PATHS, mode, JAR, shard)
         defects = {
-            'other-shard-smoke-ran': (profile.SHARDS[1][0], outcome('success')),
+            'other-shard-smoke-ran': ('jar_f3', outcome('success')),
             'own-smoke-skipped': ('jar_f18', outcome('skipped')),
         }
         for defect, (key, state) in defects.items():
@@ -189,15 +188,27 @@ class ContractProfileTest(unittest.TestCase):
             with self.subTest(other=other), self.assertRaises(profile.ProfileBlocked):
                 profile.audit_execution(plan, context(), PATHS, mode, JAR, shard_steps(mode, shard), other)
 
-    def test_given_no_state_leaving_smoke__when_planning_shards__then_plan_no_reproduced_state(self):
-        # The F4 support tables are created by an unconditional workflow step, so no smoke leaves state behind.
-        self.assertEqual({}, profile.STATE_STEPS)
-        for shard in sorted(profile.SHARDS):
+    def test_given_state_leaving_smoke__when_a_later_shard_skips_it__then_require_its_reproduction(self):
+        self.assertEqual({'jar_f4': 'shape_f4'}, profile.STATE_STEPS)
+        self.assertEqual(([], ['shape_f4']), profile.state_steps(1))
+        for shard in (2, 3, 4):
             with self.subTest(shard=shard):
-                self.assertEqual(([], []), profile.state_steps(shard))
+                self.assertEqual((['shape_f4'], []), profile.state_steps(shard))
                 plan = profile.make_plan(context(), PATHS, profile.FULL, JAR, shard)
-                self.assertEqual([], plan['reproduced_state'])
-                self.assertEqual([], plan['skipped_state'])
+                self.assertEqual(['shape_f4'], plan['reproduced_state'])
+                for state in (outcome('skipped'), outcome('failure'), None):
+                    actual = shard_steps(profile.FULL, shard)
+                    if state is None:
+                        del actual['shape_f4']
+                    else:
+                        actual['shape_f4'] = state
+                    with self.subTest(state=state), self.assertRaises(profile.ProfileBlocked):
+                        profile.audit_execution(plan, context(), PATHS, profile.FULL, JAR, actual, shard)
+        plan = profile.make_plan(context(), PATHS, profile.FULL, JAR, 1)
+        actual = shard_steps(profile.FULL, 1)
+        actual['shape_f4'] = outcome('success')
+        with self.assertRaises(profile.ProfileBlocked):
+            profile.audit_execution(plan, context(), PATHS, profile.FULL, JAR, actual, 1)
 
     def test_given_shard_argument__when_cli_plans__then_write_the_shard_plan(self):
         with patch.object(profile, 'runtime_context', return_value=(context(), PATHS)), \
@@ -230,13 +241,13 @@ class ContractProfileTest(unittest.TestCase):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
         for operation in ('missing', 'missing-f27', 'missing-f28', 'missing-f29', 'missing-f31', 'new-f30', 'misnamed'):
             actual = steps(profile.FULL)
-            if operation == 'missing': del actual['jar_f19']
+            if operation == 'missing': del actual['jar_f13']
             elif operation == 'missing-f27': del actual['jar_f27']
             elif operation == 'missing-f28': del actual['jar_f28']
             elif operation == 'missing-f29': del actual['jar_f29']
             elif operation == 'missing-f31': del actual['jar_f31']
             elif operation == 'new-f30': actual['jar_f30'] = {'outcome': 'success', 'conclusion': 'success'}
-            else: actual['jar_f017'] = actual.pop('jar_f17')
+            else: actual['jar_f03'] = actual.pop('jar_f3')
             with self.subTest(operation=operation), self.assertRaises(profile.ProfileBlocked):
                 profile.audit_execution(plan, context(), PATHS, profile.FULL, JAR, actual)
 
@@ -244,7 +255,7 @@ class ContractProfileTest(unittest.TestCase):
         plan = profile.make_plan(context(), PATHS, profile.PILOT, JAR)
         for outcome, conclusion in (('failure', 'failure'), ('failure', 'success'),
                                     ('cancelled', 'cancelled'), ('skipped', 'skipped'), ('success', 'failure')):
-            for key in ('jar_f18', 'jar_f27', 'jar_f28', 'jar_f29', 'jar_f31'):
+            for key in ('jar_f12', 'jar_f27', 'jar_f28', 'jar_f29', 'jar_f31'):
                 actual = steps(profile.PILOT); actual[key] = dict(outcome=outcome, conclusion=conclusion)
                 with self.subTest(step=key, outcome=outcome, conclusion=conclusion), self.assertRaises(profile.ProfileBlocked):
                     profile.audit_execution(plan, context(), PATHS, profile.PILOT, JAR, actual)
@@ -279,8 +290,8 @@ class ContractProfileTest(unittest.TestCase):
 
     def test_given_duplicate_json_keys_or_nonfinite_values__when_loading__then_reject(self):
         for raw in ('{"profile":"full","profile":"full"}',
-                    '{"jar_f17":{"outcome":"failure","outcome":"success"}}',
-                    '{"jar_f17":{},"jar_f17":{}}', '{"a":NaN}', 'not-json'):
+                    '{"jar_f3":{"outcome":"failure","outcome":"success"}}',
+                    '{"jar_f3":{},"jar_f3":{}}', '{"a":NaN}', 'not-json'):
             with self.subTest(raw=raw), self.assertRaises(profile.ProfileBlocked):
                 profile.load_json(raw)
         self.assertEqual({'a': 1}, profile.load_json('{"a":1}'))
@@ -289,7 +300,7 @@ class ContractProfileTest(unittest.TestCase):
         ctx = dict(context(), secret='DO_NOT_PERSIST')
         plan = profile.make_plan(ctx, PATHS, profile.FULL, JAR)
         actual = steps(profile.FULL)
-        actual['jar_f17']['outputs'] = {'secret': 'DO_NOT_PERSIST'}
+        actual['jar_f3']['outputs'] = {'secret': 'DO_NOT_PERSIST'}
         actual['unrelated'] = {'outputs': {'secret': 'DO_NOT_PERSIST'}}
         result = profile.audit_execution(plan, ctx, PATHS, profile.FULL, JAR, actual)
         self.assertNotIn('DO_NOT_PERSIST', json.dumps((plan, result)))

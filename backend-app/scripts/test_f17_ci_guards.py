@@ -288,7 +288,7 @@ class F17GuardTest(unittest.TestCase):
     def test_given_workflow__when_extending_f17__then_preserve_f16_order_and_always_cleanup(self):
         workflow = (f17.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F17 staged ownership')
-        self.assertNotIn('python3 scripts/f16_ci.py smoke', workflow, 'The packaged F16 smoke moved to the Spring contract tests.')
+        self.assertLess(workflow.index('python3 scripts/f16_ci.py smoke'), boundary)
         stage = workflow[boundary:]
         for first, second in (('test_f17_ci_guards.py', 'python3 scripts/f17_ci.py prepare'),
                               ('python3 scripts/f17_ci.py prepare', 'python3 scripts/f17_ci.py smoke')):

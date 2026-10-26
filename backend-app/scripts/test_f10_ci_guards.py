@@ -183,8 +183,9 @@ class F10GuardTest(unittest.TestCase):
     def test_given_workflow_phases__when_declaring_checks__then_finish_original_acl_before_extending(self):
         workflow = (f10.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Extend the owned fixture with exact F10 comment deletion permissions')
-        self.assertIn('python3 scripts/f10_ci.py prepare', workflow[boundary:])
-        self.assertNotIn('python3 scripts/f10_ci.py smoke', workflow, 'The packaged F10 smoke moved to the Spring contract tests.')
+        self.assertLess(workflow.index('python3 scripts/f9_ci.py smoke'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f10_ci.py prepare', boundary),
+                        workflow.index('python3 scripts/f10_ci.py smoke'))
         after = workflow[boundary:]
         self.assertNotRegex(after, r'python3 scripts/f9_ci\.py (?:prepare|smoke)')
         self.assertNotIn('python3 scripts/f10_ci.py results', workflow)

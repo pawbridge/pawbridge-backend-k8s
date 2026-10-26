@@ -237,9 +237,10 @@ class F15GuardTest(unittest.TestCase):
     def test_given_workflow__when_extending_f15__then_preserve_prior_stages_and_always_cleanup(self):
         text = (f15.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = text.index('- name: Extend the owned fixture with pinned F15 board and videos and reader-only columns')
+        self.assertLess(text.index('python3 scripts/f14_ci.py smoke'), boundary)
+        self.assertLess(text.index('python3 scripts/f15_ci.py prepare', boundary), text.index('python3 scripts/f15_ci.py smoke'))
         self.assertNotIn('python3 scripts/f15_ci.py results', text)
-        self.assertNotIn('python3 scripts/f15_ci.py smoke', text, 'The packaged F15 smoke moved to the Spring contract tests.')
-        self.assertLess(text.index('python3 scripts/f15_ci.py prepare', boundary), text.index('run: python3 scripts/f3_ci.py cleanup'))
+        self.assertLess(text.index('python3 scripts/f15_ci.py smoke'), text.index('run: python3 scripts/f3_ci.py cleanup'))
         cleanup = text[text.index('- name: Remove only the owned disposable fixture'):]
         self.assertIn('if: always()', cleanup)
         for required in ('test_f15_ci_guards.py', 'f15-helper-refusal.txt', 'f15-ddl-sha256.txt', 'f[0-9]+_fixture'):

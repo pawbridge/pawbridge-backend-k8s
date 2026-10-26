@@ -19,10 +19,11 @@ class F13GuardTest(unittest.TestCase):
     def test_given_declared_workflow__when_running_f13__then_all_original_regressions_finish_before_extension_and_cleanup_is_always(self):
         workflow = (f13.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Extend the owned fixture with pinned User constraints and exact F13 nickname permissions')
+        self.assertLess(workflow.index('python3 scripts/f12_ci.py smoke'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f13_ci.py prepare', boundary), workflow.index('python3 scripts/f13_ci.py smoke'))
         self.assertNotIn('python3 scripts/f13_ci.py results', workflow)
-        self.assertNotIn('python3 scripts/f13_ci.py smoke', workflow, 'The packaged F13 smoke moved to the Spring contract tests.')
         cleanup = workflow.index('- name: Remove only the owned disposable fixture')
-        self.assertLess(workflow.index('python3 scripts/f13_ci.py prepare', boundary), cleanup)
+        self.assertLess(workflow.index('python3 scripts/f13_ci.py smoke'), cleanup)
         self.assertIn('if: always()', workflow[cleanup:cleanup + 150])
         self.assertIn('python3 scripts/f3_ci.py cleanup', workflow[cleanup:cleanup + 150])
         self.assertNotRegex(workflow[boundary:], r'python3 scripts/f(?:[2-9]|10|11|12)_ci\.py (?:prepare|smoke)')

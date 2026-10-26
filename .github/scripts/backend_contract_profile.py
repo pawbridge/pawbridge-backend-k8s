@@ -22,22 +22,21 @@ PILOT_PATHS = frozenset({
     '.github/scripts/test_backend_app_ci_policy.py',
     'backend-app/README.md',
 })
-# F3-F16 moved to the Spring contract tests (backend-app/boot/src/contractTest); F17 and later still run as packaged smokes.
-ALL_SMOKES = tuple('jar_f' + str(number) for number in range(17, 30)) + ('jar_f31',)
-PILOT_SKIPS = tuple('jar_f' + str(number) for number in (17, 19, 21, 22, 23))
+ALL_SMOKES = tuple('jar_f' + str(number) for number in range(3, 30)) + ('jar_f31',)
+PILOT_SKIPS = tuple('jar_f' + str(number) for number in (16, 17, 19, 21, 22, 23))
 # The packaged smokes run as parallel matrix shards. Each shard is a fresh runner that re-provisions
 # the fixture from F2 up to its own last stage, then runs only its smokes in the original order.
 # Balanced by measured step time: the later shards pay for more fixture preparation.
 SHARDS = {
-    1: tuple('jar_f' + str(number) for number in range(17, 18)),
+    1: tuple('jar_f' + str(number) for number in range(3, 18)),
     2: tuple('jar_f' + str(number) for number in range(18, 23)),
     3: tuple('jar_f' + str(number) for number in range(23, 28)),
     4: ('jar_f28', 'jar_f29', 'jar_f31'),
 }
 # Smokes that leave fixture state a later step reads, mapped to the workflow step that reproduces
-# exactly that state in shards that skip the smoke. No remaining smoke leaves such state: the two F4 support
-# tables that the F4 smoke used to create are now created by an unconditional workflow step in every shard.
-STATE_STEPS = {}
+# exactly that state in shards that skip the smoke. The F4 smoke creates the two support tables
+# that later business snapshots select from; no other smoke leaves state a later step reads.
+STATE_STEPS = {'jar_f4': 'shape_f4'}
 IDENTITY_KEYS = ('event_name', 'repository', 'head_repository', 'head_ref',
                  'base_sha', 'head_sha', 'source_sha', 'tree_sha', 'run_id', 'run_attempt')
 
