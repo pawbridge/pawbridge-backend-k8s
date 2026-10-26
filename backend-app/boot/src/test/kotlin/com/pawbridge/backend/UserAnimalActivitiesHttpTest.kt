@@ -143,7 +143,10 @@ class UserAnimalActivitiesHttpTest {
 
         // then
         unauthenticated.andExpect(status().isUnauthorized())
-        badPath.andExpect(status().isInternalServerError())
+        badPath
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
         confirmVerified(activities)
         cleared()
     }

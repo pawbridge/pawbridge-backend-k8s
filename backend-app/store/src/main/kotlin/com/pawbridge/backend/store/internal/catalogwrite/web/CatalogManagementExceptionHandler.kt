@@ -3,6 +3,7 @@ package com.pawbridge.backend.store.internal.catalogwrite.web
 import com.pawbridge.backend.store.internal.directorder.infrastructure.PostgresqlRollbackCharsetViolation
 import org.springframework.http.ResponseEntity
 import org.springframework.web.HttpRequestMethodNotSupportedException
+import org.springframework.web.bind.MissingPathVariableException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
@@ -41,6 +42,17 @@ class CatalogManagementExceptionHandler {
                         failure.errorCode,
                     ),
                 ),
+            ),
+        )
+
+    @ExceptionHandler(MissingPathVariableException::class)
+    fun missingPathVariable(failure: MissingPathVariableException): ResponseEntity<Error> =
+        ResponseEntity.badRequest().body(
+            Error(
+                "Invalid Type Value",
+                "C005",
+                // A blank segment is converted to null, so the value is empty like the type-mismatch body.
+                listOf(FieldError(failure.variableName, "", "typeMismatch")),
             ),
         )
 

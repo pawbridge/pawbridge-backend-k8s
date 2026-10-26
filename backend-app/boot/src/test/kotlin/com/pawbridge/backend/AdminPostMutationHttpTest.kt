@@ -327,7 +327,7 @@ class AdminPostMutationHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["PUT", "DELETE"])
-    fun `관리자와 잘못된 숫자 경로__바인딩하면__업무 처리 전에 기존 500을 유지한다`(method: String) {
+    fun `관리자와 잘못된 숫자 경로__바인딩하면__업무 처리 전에 400을 응답한다`(method: String) {
         // given
         val request = mutation(method, "not-a-long").header("Authorization", admin())
 
@@ -336,8 +336,9 @@ class AdminPostMutationHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
-            .andExpect(jsonPath("$.message").value("서버 에러!"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
         confirmVerified(reader, remover, uploader, users, writer, deletion)
     }
 

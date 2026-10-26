@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice(assignableTypes = [PostDeleteController::class, AdminPostDeleteController::class])
 class PostDeleteExceptionHandler {
@@ -22,6 +23,11 @@ class PostDeleteExceptionHandler {
     fun postNotOwned(failure: PostNotOwnedException): ResponseEntity<ApiResponse<Void>> =
         ResponseEntity.status(HttpStatus.FORBIDDEN)
             .body(ApiResponse<Void>(403, "게시글에 접근할 권한이 없습니다.", null))
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun invalidPathVariable(failure: MethodArgumentTypeMismatchException): ResponseEntity<ApiResponse<Void>> =
+        ResponseEntity.badRequest()
+            .body(ApiResponse<Void>(400, "요청 경로의 식별자 형식이 올바르지 않습니다.", null))
 
     @ExceptionHandler(RuntimeException::class)
     fun serverError(failure: RuntimeException): ResponseEntity<ApiResponse<Void>> {

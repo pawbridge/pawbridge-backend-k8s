@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice(assignableTypes = [CommentDeleteController::class])
 class CommentDeleteExceptionHandler {
@@ -29,6 +30,11 @@ class CommentDeleteExceptionHandler {
     ): ResponseEntity<CommentDeleteController.Response<Void>> =
         ResponseEntity.badRequest()
             .body(CommentDeleteController.Response<Void>(400, failure.message, null))
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun invalidPathVariable(failure: MethodArgumentTypeMismatchException): ResponseEntity<CommentDeleteController.Response<Void>> =
+        ResponseEntity.badRequest()
+            .body(CommentDeleteController.Response<Void>(400, "요청 경로의 식별자 형식이 올바르지 않습니다.", null))
 
     @ExceptionHandler(RuntimeException::class)
     fun serverError(failure: RuntimeException): ResponseEntity<CommentDeleteController.Response<Void>> {

@@ -175,7 +175,7 @@ class AdminPostReadHttpTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["no-number", "9223372036854775808", "read", "search"])
-    fun `숫자가 아니거나 넘치는 ID__관리자가 바인딩하면__서비스 호출 없이 측정된 원래 500을 유지한다`(
+    fun `숫자가 아니거나 넘치는 ID__관리자가 바인딩하면__서비스 호출 없이 400을 응답한다`(
         id: String,
     ) {
         // given
@@ -186,8 +186,8 @@ class AdminPostReadHttpTest {
 
         // then
         result
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json(ERROR, JsonCompareMode.STRICT))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
         confirmVerified(posts, post)
     }
 
