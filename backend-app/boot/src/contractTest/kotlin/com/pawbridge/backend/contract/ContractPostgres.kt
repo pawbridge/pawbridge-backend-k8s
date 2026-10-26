@@ -41,12 +41,12 @@ object ContractPostgres {
 
     private val log = LoggerFactory.getLogger(ContractPostgres::class.java)
 
-    /** Migration files per schema, in the order they must be applied. Each directory is copied from a service. */
+    /** Migration files per schema, in the order they must be applied, read from `backend-app/db/postgresql`. */
     private val migrations = listOf(
-        USER_SCHEMA to "schema/user-service",
-        COMMUNITY_SCHEMA to "schema/community-service",
-        ANIMAL_SCHEMA to "schema/animal-service",
-        STORE_SCHEMA to "schema/store-service",
+        USER_SCHEMA to "postgresql/user",
+        COMMUNITY_SCHEMA to "postgresql/community",
+        ANIMAL_SCHEMA to "postgresql/animal",
+        STORE_SCHEMA to "postgresql/store",
     )
 
     /** Extensions the database owner provisions in public before the animal migrations (they check for them). */

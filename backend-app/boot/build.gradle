@@ -9,6 +9,8 @@ sourceSets {
     contractTest {
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
+        // The PostgreSQL migrations applied to production by hand; the contracts build their schemas from them.
+        resources.srcDir rootProject.file('db')
     }
 }
 
@@ -103,7 +105,6 @@ def registerContractTest = { String taskName, String zone, String taskDescriptio
         // refuses. 1.44 is the minimum of Engine 29 and is served by every Engine since 25; override with
         // -PdockerApiVersion=... for another daemon.
         systemProperty 'api.version', project.findProperty('dockerApiVersion') ?: '1.44'
-        systemProperty 'pawbridge.contract.legacy-root', rootProject.projectDir.parentFile.absolutePath
         if (project.hasProperty('contractPostgresImage')) {
             systemProperty 'pawbridge.contract.postgres-image', project.property('contractPostgresImage')
         }
