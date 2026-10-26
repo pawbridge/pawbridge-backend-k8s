@@ -270,8 +270,9 @@ class F23GuardTest(unittest.TestCase):
     def test_given_workflow__when_integrating_f23__then_f22_finishes_first_prepare_before_smoke_always_cleanup_and_pinned_source_mask(self):
         workflow = (f23.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F23 unchanged fixture')
-        self.assertLess(workflow.index('python3 scripts/f22_ci.py prepare'), boundary); stage = workflow[boundary:]
-        for first, second in (('test_f23_ci_guards.py', 'python3 scripts/f23_ci.py prepare'),):  # the packaged smoke moved to the Spring contract tests; the guard file still runs before the fixture is prepared
+        self.assertLess(workflow.index('python3 scripts/f22_ci.py smoke'), boundary); stage = workflow[boundary:]
+        for first, second in (('test_f23_ci_guards.py', 'python3 scripts/f23_ci.py prepare'),
+                              ('python3 scripts/f23_ci.py prepare', 'python3 scripts/f23_ci.py smoke')):
             self.assertLess(stage.index(first), stage.index(second))
         self.assertNotIn('privateNoteListCompatibility', workflow)
         self.assertNotIn('python3 scripts/f23_ci.py results', workflow)

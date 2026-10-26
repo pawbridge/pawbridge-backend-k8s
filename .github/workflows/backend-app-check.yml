@@ -340,14 +340,14 @@ jobs:
   check:
     needs: [selection, proof, package]
     if: ${{ github.event_name != 'pull_request' && needs.selection.outputs.selected == 'true' && needs.proof.outputs.mode == 'execute' }}
-    name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || 'F25 six-smoke pilot with the same candidate JAR' }} (shard ${{ matrix.shard }}/2)
+    name: ${{ matrix.profile == 'full' && 'Java 21 build and isolated PostgreSQL/S3 HTTP contracts' || 'F25 six-smoke pilot with the same candidate JAR' }} (shard ${{ matrix.shard }}/4)
     # Each shard is a fresh runner that re-provisions the fixture from F2 up to its own last stage
     # and runs only its packaged smokes; the stage-to-shard map is SHARDS in backend_contract_profile.py.
     strategy:
       fail-fast: false
       matrix:
         profile: ${{ fromJSON(needs.selection.outputs.profiles) }}
-        shard: [1, 4]
+        shard: [1, 2, 3, 4]
     env:
       PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       PULL_REQUEST_BASE_REF: ${{ github.base_ref }}
@@ -1043,6 +1043,33 @@ jobs:
         id: fixture_post_unrelated_f17
         run: python3 scripts/f17_ci.py prepare
 
+      - name: Issue synthetic JWTs for F17
+        if: ${{ matrix.profile == 'full' && matrix.shard == 1 }}
+        run: python3 scripts/ci_tokens.py issue --stage f17
+
+      - name: Verify packaged note recipients, source-specific SQL recovery and unchanged business snapshots
+        id: jar_f17
+        if: ${{ matrix.profile == 'full' && matrix.shard == 1 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f17_ci.py smoke
+          test -s build/ci/f17-ddl-sha256.txt
+          test -s build/ci/f17-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f17-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['recipient_get_checks'] == 16
+          assert result['successful_checks'] == 4
+          assert result['rejected_checks'] == 12
+          assert result['recipient_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['denied_route_checks'] == 2
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Verify F18 unchanged fixture, token, report and recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f18_ci_guards.py
 
@@ -1050,6 +1077,37 @@ jobs:
         id: fixture_post_unrelated_f18
         if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f18_ci.py prepare
+
+      - name: Issue synthetic JWTs for F18
+        if: ${{ matrix.shard == 2 }}
+        run: python3 scripts/ci_tokens.py issue --stage f18
+
+      - name: Verify packaged block status, mixed errors, invalid-before-active and SQL recovery
+        id: jar_f18
+        if: ${{ matrix.shard == 2 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f18_ci.py smoke
+          test -s build/ci/f18-fixture-reuse.txt
+          test -s build/ci/f18-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f18-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['blocked_authors_get_checks'] == 12
+          assert result['successful_checks'] == 4
+          assert result['rejected_checks'] == 8
+          assert result['blocked_authors_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['nonempty_checks'] == result['invalid_parameter_checks'] == 3
+          assert result['empty_checks'] == result['missing_parameter_checks'] == 1
+          assert result['member_unavailable_checks'] == result['storage_unavailable_checks'] == 1
+          assert result['authentication_checks'] == 2
+          assert result['denied_route_checks'] == 1
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
 
       - name: Verify F19 unchanged fixture, tokens and safe recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f19_ci_guards.py
@@ -1059,6 +1117,34 @@ jobs:
         if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f19_ci.py prepare
 
+      - name: Issue synthetic JWTs for F19
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
+        run: python3 scripts/ci_tokens.py issue --stage f19
+
+      - name: Verify packaged exact administrator count, SQL failure and safe recovery
+        id: jar_f19
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f19_ci.py smoke
+          test -s build/ci/f19-fixture-reuse.txt
+          test -s build/ci/f19-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f19-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['total_user_count_get_checks'] == 5
+          assert result['successful_checks'] == 2
+          assert result['rejected_checks'] == 3
+          assert result['total_user_count_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['administrator_denied_checks'] == result['sql_failure_checks'] == 1
+          assert result['authentication_checks'] == result['denied_route_checks'] == 1
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Verify F20 exact extended ACL, owned rows, tokens and recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f20_ci_guards.py
 
@@ -1066,6 +1152,35 @@ jobs:
         id: fixture_post_unrelated_f20
         if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f20_ci.py prepare
+
+      - name: Issue synthetic JWTs for F20
+        if: ${{ matrix.shard == 2 }}
+        run: python3 scripts/ci_tokens.py issue --stage f20
+
+      - name: Verify packaged block pages, display and timestamp with source-specific recovery
+        id: jar_f20
+        if: ${{ matrix.shard == 2 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f20_ci.py smoke
+          test -s build/ci/f20-fixture-reuse.txt
+          test -s build/ci/f20-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('build/ci/f20-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert result['block_list_get_checks'] == 9
+          assert result['successful_checks'] == result['page_checks'] == 5
+          assert result['rejected_checks'] == 4
+          assert result['block_list_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['empty_page_checks'] == result['invalid_page_checks'] == 1
+          assert result['member_unavailable_checks'] == result['storage_unavailable_checks'] == 1
+          assert result['authentication_checks'] == result['denied_route_checks'] == 1
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
 
       - name: Verify F21 exact notes/mailbox DDL, ACL, owned rows and recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f21_ci_guards.py
@@ -1075,6 +1190,34 @@ jobs:
         if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f21_ci.py prepare
 
+      - name: Issue synthetic JWTs for F21
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
+        run: python3 scripts/ci_tokens.py issue --stage f21
+
+      - name: Verify packaged notifications, cursor and unread without writes or lifecycle execution
+        id: jar_f21
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f21_ci.py smoke
+          test -s build/ci/f21-fixture-reuse.txt
+          test -s build/ci/f21-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f21_ci as f21
+          f21.require_measurements('jar')
+          result = json.loads(Path('build/ci/f21-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f21.COUNTERS} == f21.EXPECTED_JAR_COUNTS
+          assert result['notifications_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Verify F22 extended read permissions, ownership and recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f22_ci_guards.py
 
@@ -1082,6 +1225,34 @@ jobs:
         id: fixture_post_unrelated_f22
         if: ${{ matrix.shard >= 2 }}
         run: python3 scripts/f22_ci.py prepare
+
+      - name: Issue synthetic JWTs for F22
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
+        run: python3 scripts/ci_tokens.py issue --stage f22
+
+      - name: Verify packaged owned note detail, unchanged read state, strict body failure recovery and denied stream/write
+        id: jar_f22
+        if: ${{ matrix.profile == 'full' && matrix.shard == 2 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f22_ci.py smoke
+          test -s build/ci/f22-fixture-reuse.txt
+          test -s build/ci/f22-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f22_ci as f22
+          f22.require_measurements('jar')
+          result = json.loads(Path('build/ci/f22-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f22.COUNTERS} == f22.EXPECTED_JAR_COUNTS
+          assert result['detail_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
 
       - name: Verify F23 unchanged fixture, owner, selected original and recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f23_ci_guards.py
@@ -1091,6 +1262,34 @@ jobs:
         if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f23_ci.py prepare
 
+      - name: Issue synthetic JWTs for F23
+        if: ${{ matrix.profile == 'full' && matrix.shard == 3 }}
+        run: python3 scripts/ci_tokens.py issue --stage f23
+
+      - name: Verify packaged mailbox pages, separate count and list recovery and unchanged state
+        id: jar_f23
+        if: ${{ matrix.profile == 'full' && matrix.shard == 3 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f23_ci.py smoke
+          test -s build/ci/f23-fixture-reuse.txt
+          test -s build/ci/f23-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f23_ci as f23
+          f23.require_measurements('jar')
+          result = json.loads(Path('build/ci/f23-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f23.COUNTERS} == f23.EXPECTED_JAR_COUNTS
+          assert result['list_get_checks'] == result['successful_checks'] + result['rejected_checks']
+          assert result['database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Verify F24 owned writer, rollback, recovery and selected original guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f24_ci_guards.py
 
@@ -1099,6 +1298,34 @@ jobs:
         if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f24_ci.py prepare
 
+      - name: Issue synthetic JWTs for F24
+        if: ${{ matrix.shard == 3 }}
+        run: python3 scripts/ci_tokens.py issue --stage f24
+
+      - name: Verify packaged unblock, exact permitted writes and protected state recovery
+        id: jar_f24
+        if: ${{ matrix.shard == 3 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f24_ci.py smoke
+          test -s build/ci/f24-fixture-write.txt
+          test -s build/ci/f24-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f24_ci as f24
+          f24.require_measurements()
+          result = json.loads(Path('build/ci/f24-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f24.COUNTERS} == f24.EXPECTED_JAR_COUNTS
+          assert result['delete_checks'] == result['successful_delete_checks'] + result['rejected_delete_checks']
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Verify F25 block creation ownership, selected original and recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f25_ci_guards.py
 
@@ -1106,6 +1333,46 @@ jobs:
         id: fixture_post_unrelated_f25
         if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f25_ci.py prepare
+
+      - name: Issue synthetic JWTs for F25
+        if: ${{ matrix.shard == 3 }}
+        run: python3 scripts/ci_tokens.py issue --stage f25
+
+      - name: Verify packaged block creation, duplicate timestamps and protected state recovery
+        id: jar_f25
+        if: ${{ matrix.shard == 3 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f25_ci.py smoke
+          test -s build/ci/f25-fixture-write.txt
+          test -s build/ci/f25-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json, math
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f25_ci as f25
+          f25.require_measurements()
+          result = json.loads(Path('build/ci/f25-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert {key: result[key] for key in f25.COUNTERS} == f25.EXPECTED_JAR_COUNTS
+          assert result['put_checks'] == result['successful_put_checks'] + result['rejected_put_checks']
+          assert result['request_checks'] == result['put_checks'] + result['get_checks'] + result['delete_checks']
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          comparisons = result['snapshot_comparisons']
+          assert set(comparisons) == {'before_start', 'after_stop'}
+          for boundary, proof in comparisons.items():
+              assert proof['status'] == 'passed' and proof['boundary'] == boundary and proof['tables'] == 16
+              assert proof['order'] == ['old', 'new', 'new', 'old']
+              samples = proof['samples']
+              assert len(samples) == 4 and [sample['mode'] for sample in samples] == proof['order']
+              assert all(type(sample['wall_seconds']) in (int, float) and math.isfinite(sample['wall_seconds']) and sample['wall_seconds'] >= 0 for sample in samples)
+              assert len({sample['row_count'] for sample in samples}) == len({sample['canonical_json_bytes'] for sample in samples}) == 1
+              assert all(sample['snapshot_calls'] == 1 for sample in samples)
+              assert proof['call_counts_basis'] == 'static source path, not observed subprocess instrumentation'
+          PYTHON
 
       - name: Verify F26 fixed sources, exact writer fixture, ownership, receipts and XML guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f26_ci_guards.py
@@ -1118,6 +1385,43 @@ jobs:
         if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f26_ci.py prepare
 
+      - name: Issue synthetic JWTs for F26
+        if: ${{ matrix.shard == 3 }}
+        run: python3 scripts/ci_tokens.py issue --stage f26
+
+      - name: Verify packaged read commit, own SSE resync, expiry, restoration and owned resource shutdown
+        id: jar_f26
+        if: ${{ matrix.shard == 3 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f26_ci.py smoke
+          test -s build/ci/f26-fixture-write.txt
+          test -s build/ci/f26-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f26_ci as f26
+          import f26_stream_probe as probe
+          f26.require_measurements('jar')
+          result = json.loads(Path('build/ci/f26-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert f26.COUNTERS == probe.COUNTERS
+          assert f26.EXPECTED_JAR_COUNTS == probe.EXPECTED_JAR_COUNTS
+          assert {key: result[key] for key in f26.COUNTERS} == f26.EXPECTED_JAR_COUNTS
+          assert result['request_checks'] == result['put_checks'] + result['get_checks']
+          assert result['put_checks'] == result['successful_put_checks'] + result['rejected_put_checks']
+          assert result['stream_ready_checks'] == result['stream_open_checks']
+          assert result['other_resync_checks'] == 0
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['stream_resources_stopped'] is True
+          assert result['server_closed_open_streams'] == 2
+          assert result['owned_cleanup_restored'] is True
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Verify F27 favorite fixture, original receipts and recovery guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f27_ci_guards.py
 
@@ -1128,6 +1432,43 @@ jobs:
         id: fixture_post_unrelated_f27
         if: ${{ matrix.shard >= 3 }}
         run: python3 scripts/f27_ci.py prepare
+
+      - name: Issue synthetic JWTs for F27
+        if: ${{ matrix.shard == 3 }}
+        run: python3 scripts/ci_tokens.py issue --stage f27
+
+      - name: Verify packaged favorite commit, own resync, read projections and resource shutdown
+        id: jar_f27
+        if: ${{ matrix.shard == 3 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f27_ci.py smoke
+          test -s build/ci/f27-fixture-write.txt
+          test -s build/ci/f27-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f27_ci as f27
+          import f27_stream_probe as probe
+          f27.require_measurements('jar')
+          result = json.loads(Path('build/ci/f27-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert f27.COUNTERS == probe.COUNTERS
+          assert f27.EXPECTED_JAR_COUNTS == probe.EXPECTED_JAR_COUNTS
+          assert {key: result[key] for key in f27.COUNTERS} == f27.EXPECTED_JAR_COUNTS
+          assert result['request_checks'] == result['put_checks'] + result['get_checks']
+          assert result['put_checks'] == result['successful_put_checks'] + result['rejected_put_checks']
+          assert result['stream_ready_checks'] == result['stream_open_checks']
+          assert result['other_resync_checks'] == 0
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['stream_resources_stopped'] is True
+          assert result['server_closed_open_streams'] == 2
+          assert result['owned_cleanup_restored'] is True
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
 
       - name: Verify F28 fixed request DDL, writer deletion, ownership and receipt guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f28_ci_guards.py
@@ -1140,6 +1481,46 @@ jobs:
         if: ${{ matrix.shard >= 4 }}
         run: python3 scripts/f28_ci.py prepare
 
+      - name: Issue synthetic JWTs for F28
+        if: ${{ matrix.shard == 4 }}
+        run: python3 scripts/ci_tokens.py issue --stage f28
+
+      - name: Verify packaged deletion, protected counterpart, owned FK changes, resync and shutdown
+        id: jar_f28
+        if: ${{ matrix.shard == 4 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f28_ci.py smoke
+          test -s build/ci/f28-fixture-write.txt
+          test -s build/ci/f28-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f28_ci as f28
+          import f28_stream_probe as probe
+          f28.require_measurements('jar')
+          result = json.loads(Path('build/ci/f28-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert f28.COUNTERS == probe.COUNTERS
+          assert f28.EXPECTED_JAR_COUNTS == probe.EXPECTED_JAR_COUNTS
+          assert {key: result[key] for key in f28.COUNTERS} == f28.EXPECTED_JAR_COUNTS
+          assert result['request_checks'] == result['delete_checks'] + result['get_checks']
+          assert result['delete_checks'] == result['successful_delete_checks'] + result['rejected_delete_checks']
+          assert result['stream_ready_checks'] == result['stream_open_checks']
+          assert result['other_resync_checks'] == 0
+          assert result['deleted_mailbox_rows'] == 3
+          assert result['deleted_note_rows'] == 2
+          assert result['cleared_request_links'] == result['cleared_reply_links'] == 1
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['stream_resources_stopped'] is True
+          assert result['server_closed_open_streams'] == 2
+          assert result['owned_cleanup_restored'] is True
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
+
       - name: Verify F29 fixed report fragments, send columns, ownership and XML guards without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f29_ci_guards.py
 
@@ -1150,6 +1531,47 @@ jobs:
         id: fixture_post_unrelated_f29
         if: ${{ matrix.shard >= 4 }}
         run: python3 scripts/f29_ci.py prepare
+
+      - name: Issue synthetic JWTs for F29
+        if: ${{ matrix.shard == 4 }}
+        run: python3 scripts/ci_tokens.py issue --stage f29
+
+      - name: Verify packaged send, recipient note, replay, REST recovery and owned shutdown
+        id: jar_f29
+        if: ${{ matrix.shard == 4 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/f29_ci.py smoke
+          test -s build/ci/f29-fixture-write.txt
+          test -s build/ci/f29-helper-refusal.txt
+          python3 - <<'PYTHON'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          import f29_ci as f29
+          import f29_stream_probe as probe
+          f29.require_measurements('jar')
+          result = json.loads(Path('build/ci/f29-packaged-result.txt').read_text())
+          assert result['status'] == 'passed'
+          assert f29.COUNTERS == probe.COUNTERS
+          assert f29.EXPECTED_JAR_COUNTS == probe.EXPECTED_JAR_COUNTS
+          assert {key: result[key] for key in f29.COUNTERS} == f29.EXPECTED_JAR_COUNTS
+          assert result['request_checks'] == result['post_checks'] + result['get_checks']
+          assert result['post_checks'] == result['successful_post_checks'] + result['rejected_post_checks']
+          assert result['request_checks'] == result['nonstreaming_checks'] + result['stream_open_checks']
+          assert result['stream_ready_checks'] == result['stream_open_checks']
+          assert result['sender_note_checks'] == result['resync_checks'] == 0
+          assert result['inserted_mailbox_rows'] == 2 * result['inserted_note_rows']
+          assert result['inserted_request_rows'] == result['inserted_note_rows']
+          assert result['recipient_note_checks'] == result['inserted_note_rows']
+          assert result['protected_database_changes'] == result['s3_requests'] == 0
+          assert result['stream_resources_stopped'] is True
+          assert result['server_closed_open_streams'] == 2
+          assert result['owned_cleanup_restored'] is True
+          assert result['shutdown_pools'] == 1
+          assert result['remaining_application_connections'] == 0
+          PYTHON
 
       - name: Verify late member cleanup runtime controls without resources
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/test_f29_ci_runtime.py

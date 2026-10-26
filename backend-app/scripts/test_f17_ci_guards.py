@@ -290,13 +290,14 @@ class F17GuardTest(unittest.TestCase):
         boundary = workflow.index('- name: Verify F17 staged ownership')
         self.assertLess(workflow.index('python3 scripts/f16_ci.py smoke'), boundary)
         stage = workflow[boundary:]
-        for first, second in (('test_f17_ci_guards.py', 'python3 scripts/f17_ci.py prepare'),):  # the packaged smoke moved to the Spring contract tests; the guard file still runs before the fixture is prepared
+        for first, second in (('test_f17_ci_guards.py', 'python3 scripts/f17_ci.py prepare'),
+                              ('python3 scripts/f17_ci.py prepare', 'python3 scripts/f17_ci.py smoke')):
             self.assertLess(stage.index(first), stage.index(second))
         self.assertNotIn('python3 scripts/f17_ci.py results', workflow)
         cleanup = stage.index('- name: Remove only the owned disposable fixture')
         self.assertIn('if: always()', stage[cleanup:cleanup + 180]); self.assertIn('python3 scripts/f3_ci.py cleanup', stage[cleanup:cleanup + 180])
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-6])_ci\.py (?:prepare|smoke)')
-        for required in ('f17-helper-refusal.txt',):
+        for required in ('f17-ddl-sha256.txt', 'f17-helper-refusal.txt'):
             self.assertIn(required, workflow)
 
     def test_given_f17_test_artifacts__when_applying_jar_filter__then_reject_without_changing_validator_exception(self):

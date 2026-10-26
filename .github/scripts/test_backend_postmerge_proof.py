@@ -229,7 +229,7 @@ class PostmergeProofTest(unittest.TestCase):
         with self.assertRaises(proof.Unavailable) as refused:
             proof.workflow_contract(raw)
         self.assertEqual('unknown-workflow', str(refused.exception))
-        unsharded = raw.replace(b' (shard ${{ matrix.shard }}/2)\n', b'\n', 1)
+        unsharded = raw.replace(b' (shard ${{ matrix.shard }}/4)\n', b'\n', 1)
         self.assertNotEqual(raw, unsharded)
         with self.assertRaises(proof.Unavailable) as refused:
             proof.workflow_contract(unsharded)

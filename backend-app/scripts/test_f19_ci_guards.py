@@ -333,9 +333,10 @@ class F19GuardTest(unittest.TestCase):
     def test_given_workflow__when_adding_f19__then_append_after_f18_and_keep_always_cleanup(self):
         workflow = (f19.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F19 unchanged fixture')
-        self.assertLess(workflow.index('python3 scripts/f18_ci.py prepare'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f18_ci.py smoke'), boundary)
         stage = workflow[boundary:]
-        for first, second in (('test_f19_ci_guards.py', 'python3 scripts/f19_ci.py prepare'),):  # the packaged smoke moved to the Spring contract tests; the guard file still runs before the fixture is prepared
+        for first, second in (('test_f19_ci_guards.py', 'python3 scripts/f19_ci.py prepare'),
+                              ('python3 scripts/f19_ci.py prepare', 'python3 scripts/f19_ci.py smoke')):
             self.assertLess(stage.index(first), stage.index(second))
         self.assertNotIn('totalUserCountCompatibility', workflow)
         self.assertNotIn('python3 scripts/f19_ci.py results', workflow)
@@ -343,7 +344,7 @@ class F19GuardTest(unittest.TestCase):
         self.assertIn('if: always()', stage[cleanup:cleanup + 180]); self.assertIn('python3 scripts/f3_ci.py cleanup', stage[cleanup:cleanup + 180])
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-8])_ci\.py (?:prepare|smoke)')
         self.assertNotIn('f19_fixture', workflow)
-        for required in ('f19-helper-refusal.txt',):
+        for required in ('f19-fixture-reuse.txt', 'f19-helper-refusal.txt'):
             self.assertIn(required, workflow)
 
     def test_given_f19_test_artifacts__when_applying_jar_filter__then_reject_without_widening_validator_exception(self):

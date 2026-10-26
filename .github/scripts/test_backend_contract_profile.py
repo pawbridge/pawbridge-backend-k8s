@@ -91,19 +91,19 @@ class ContractProfileTest(unittest.TestCase):
         with self.assertRaises(profile.ProfileBlocked):
             profile.select_profiles(context(), PATHS + [PATHS[0]])
 
-    def test_given_fixed_profiles__when_planning__then_require_exact_fifteen_or_fourteen_smokes(self):
-        self.assertEqual(tuple('jar_f' + str(n) for n in range(3, 17)) + ('jar_f31',), profile.expected_smokes(profile.FULL))
-        expected = tuple('jar_f' + str(n) for n in range(3, 17) if n not in (16,)) + ('jar_f31',)
+    def test_given_fixed_profiles__when_planning__then_require_exact_twenty_eight_or_twenty_two_smokes(self):
+        self.assertEqual(tuple('jar_f' + str(n) for n in range(3, 30)) + ('jar_f31',), profile.expected_smokes(profile.FULL))
+        expected = tuple('jar_f' + str(n) for n in range(3, 30) if n not in (16, 17, 19, 21, 22, 23)) + ('jar_f31',)
         self.assertEqual(expected, profile.expected_smokes(profile.PILOT))
         plan = profile.make_plan(context(), PATHS, profile.PILOT, JAR)
-        self.assertEqual(14, len(plan['required_smokes']))
+        self.assertEqual(22, len(plan['required_smokes']))
         self.assertEqual(list(profile.PILOT_SKIPS), plan['skipped_smokes'])
 
     def test_given_full_default_scope__when_planning__then_accept_nonpilot_changes(self):
         ctx = dict(context(), head_ref='feat/ordinary-api', base_sha='b' * 40)
         plan = profile.make_plan(ctx, ['backend-app/community/src/main/java/Changed.java'], profile.FULL, JAR)
         self.assertEqual([], plan['skipped_smokes'])
-        self.assertEqual(15, len(plan['required_smokes']))
+        self.assertEqual(28, len(plan['required_smokes']))
 
     def test_given_incomplete_or_invalid_identity_and_jar__when_planning__then_reject(self):
         for key in profile.IDENTITY_KEYS:
@@ -129,10 +129,10 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual('passed', result['status'])
                 self.assertEqual(list(profile.expected_smokes(mode)), result['executed_smokes'])
                 self.assertEqual(context(), result['identity'])
-                self.assertEqual(16, len(result['step_results']))
+                self.assertEqual(29, len(result['step_results']))
 
     def test_given_fixed_shards__when_splitting__then_cover_every_smoke_once_in_the_original_order(self):
-        self.assertEqual([1, 4], sorted(profile.SHARDS))
+        self.assertEqual([1, 2, 3, 4], sorted(profile.SHARDS))
         ordered = tuple(key for shard in sorted(profile.SHARDS) for key in profile.SHARDS[shard])
         # Contiguous ranges keep each shard's fixture stages a prefix of the sequential chain.
         self.assertEqual(profile.ALL_SMOKES, ordered)
@@ -143,7 +143,7 @@ class ContractProfileTest(unittest.TestCase):
                 self.assertEqual(profile.expected_smokes(mode), union)
 
     def test_given_unknown_shard__when_planning__then_reject(self):
-        for shard in (0, 2, 3, 5, '1', 1.0, True):
+        for shard in (0, 5, '1', 1.0, True):
             with self.subTest(shard=shard):
                 with self.assertRaises(profile.ProfileBlocked):
                     profile.expected_smokes(profile.FULL, shard)
@@ -170,11 +170,11 @@ class ContractProfileTest(unittest.TestCase):
                     self.assertEqual(required, result['executed_smokes'])
 
     def test_given_shard_ran_another_shard_or_lost_its_own_work__when_auditing__then_reject(self):
-        mode, shard = profile.FULL, 4
+        mode, shard = profile.FULL, 2
         plan = profile.make_plan(context(), PATHS, mode, JAR, shard)
         defects = {
             'other-shard-smoke-ran': ('jar_f3', outcome('success')),
-            'own-smoke-skipped': ('jar_f31', outcome('skipped')),
+            'own-smoke-skipped': ('jar_f18', outcome('skipped')),
         }
         for defect, (key, state) in defects.items():
             actual = shard_steps(mode, shard)
@@ -184,14 +184,14 @@ class ContractProfileTest(unittest.TestCase):
                 actual[key] = state
             with self.subTest(defect=defect), self.assertRaises(profile.ProfileBlocked):
                 profile.audit_execution(plan, context(), PATHS, mode, JAR, actual, shard)
-        for other in (None, 1):
+        for other in (None, 1, 3):
             with self.subTest(other=other), self.assertRaises(profile.ProfileBlocked):
                 profile.audit_execution(plan, context(), PATHS, mode, JAR, shard_steps(mode, shard), other)
 
     def test_given_state_leaving_smoke__when_a_later_shard_skips_it__then_require_its_reproduction(self):
         self.assertEqual({'jar_f4': 'shape_f4'}, profile.STATE_STEPS)
         self.assertEqual(([], ['shape_f4']), profile.state_steps(1))
-        for shard in (4,):
+        for shard in (2, 3, 4):
             with self.subTest(shard=shard):
                 self.assertEqual((['shape_f4'], []), profile.state_steps(shard))
                 plan = profile.make_plan(context(), PATHS, profile.FULL, JAR, shard)
@@ -215,10 +215,10 @@ class ContractProfileTest(unittest.TestCase):
                 patch.object(profile, '_jar_hash', return_value=JAR), \
                 patch.object(profile, '_write_evidence') as write, \
                 contextlib.redirect_stdout(io.StringIO()):
-            code = profile.main(['--mode', 'plan', '--profile', profile.FULL, '--shard', '4',
+            code = profile.main(['--mode', 'plan', '--profile', profile.FULL, '--shard', '3',
                                  '--jar', '/unused/app.jar', '--plan', '/unused/contract-plan.txt'])
         self.assertEqual(0, code)
-        self.assertEqual(profile.make_plan(context(), PATHS, profile.FULL, JAR, 4), write.call_args.args[2])
+        self.assertEqual(profile.make_plan(context(), PATHS, profile.FULL, JAR, 3), write.call_args.args[2])
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             profile.main(['--mode', 'plan', '--profile', profile.FULL, '--shard', '5',
                           '--jar', '/unused/app.jar', '--plan', '/unused/contract-plan.txt'])
@@ -239,11 +239,12 @@ class ContractProfileTest(unittest.TestCase):
 
     def test_given_missing_new_or_misnamed_packaged_steps__when_auditing__then_require_profile_review(self):
         plan = profile.make_plan(context(), PATHS, profile.FULL, JAR)
-        for operation in ('missing', 'missing-f31', 'revived-f17', 'revived-f29', 'new-f30', 'misnamed'):
+        for operation in ('missing', 'missing-f27', 'missing-f28', 'missing-f29', 'missing-f31', 'new-f30', 'misnamed'):
             actual = steps(profile.FULL)
             if operation == 'missing': del actual['jar_f13']
-            elif operation == 'revived-f17': actual['jar_f17'] = {'outcome': 'success', 'conclusion': 'success'}
-            elif operation == 'revived-f29': actual['jar_f29'] = {'outcome': 'success', 'conclusion': 'success'}
+            elif operation == 'missing-f27': del actual['jar_f27']
+            elif operation == 'missing-f28': del actual['jar_f28']
+            elif operation == 'missing-f29': del actual['jar_f29']
             elif operation == 'missing-f31': del actual['jar_f31']
             elif operation == 'new-f30': actual['jar_f30'] = {'outcome': 'success', 'conclusion': 'success'}
             else: actual['jar_f03'] = actual.pop('jar_f3')
@@ -254,7 +255,7 @@ class ContractProfileTest(unittest.TestCase):
         plan = profile.make_plan(context(), PATHS, profile.PILOT, JAR)
         for outcome, conclusion in (('failure', 'failure'), ('failure', 'success'),
                                     ('cancelled', 'cancelled'), ('skipped', 'skipped'), ('success', 'failure')):
-            for key in ('jar_f12', 'jar_f31'):
+            for key in ('jar_f12', 'jar_f27', 'jar_f28', 'jar_f29', 'jar_f31'):
                 actual = steps(profile.PILOT); actual[key] = dict(outcome=outcome, conclusion=conclusion)
                 with self.subTest(step=key, outcome=outcome, conclusion=conclusion), self.assertRaises(profile.ProfileBlocked):
                     profile.audit_execution(plan, context(), PATHS, profile.PILOT, JAR, actual)

@@ -201,9 +201,10 @@ class F18GuardTest(unittest.TestCase):
     def test_given_workflow__when_connecting_f18__then_keep_prior_stages_and_always_cleanup_without_fixture_extension(self):
         workflow = (f18.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F18 unchanged fixture')
-        self.assertLess(workflow.index('python3 scripts/f17_ci.py prepare'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f17_ci.py smoke'), boundary)
         stage = workflow[boundary:]
-        for first, second in (('test_f18_ci_guards.py', 'python3 scripts/f18_ci.py prepare'),):  # the packaged smoke moved to the Spring contract tests; the guard file still runs before the fixture is prepared
+        for first, second in (('test_f18_ci_guards.py', 'python3 scripts/f18_ci.py prepare'),
+                              ('python3 scripts/f18_ci.py prepare', 'python3 scripts/f18_ci.py smoke')):
             self.assertLess(stage.index(first), stage.index(second))
         self.assertNotIn('blockedAuthorsCompatibility', workflow)
         self.assertNotIn('python3 scripts/f18_ci.py results', workflow)
@@ -211,7 +212,7 @@ class F18GuardTest(unittest.TestCase):
         self.assertIn('if: always()', stage[cleanup:cleanup + 180]); self.assertIn('python3 scripts/f3_ci.py cleanup', stage[cleanup:cleanup + 180])
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-7])_ci\.py (?:prepare|smoke)')
         self.assertNotIn('f18_fixture', workflow)
-        for required in ('f18-helper-refusal.txt',): self.assertIn(required, workflow)
+        for required in ('f18-fixture-reuse.txt', 'f18-helper-refusal.txt'): self.assertIn(required, workflow)
 
     def test_given_f18_test_artifacts__when_applying_jar_filter__then_reject_without_widening_validator_exception(self):
         text = (f18.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()

@@ -380,9 +380,9 @@ class F24GuardTest(unittest.TestCase):
     def test_given_workflow__when_staging_f24__then_f23_finishes_before_grants_smoke_and_always_owned_cleanup(self):
         workflow = (f24.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F24 owned writer, rollback, recovery and selected original guards without resources')
-        self.assertLess(workflow.index('python3 scripts/f23_ci.py prepare'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f23_ci.py smoke'), boundary)
         stage = workflow[boundary:]
-        ordered = ('scripts/test_f24_ci_guards.py', 'python3 scripts/f24_ci.py prepare')
+        ordered = ('scripts/test_f24_ci_guards.py', 'python3 scripts/f24_ci.py prepare', 'python3 scripts/f24_ci.py smoke')
         for first, second in zip(ordered, ordered[1:]):
             self.assertLess(stage.index(first), stage.index(second))
         self.assertNotIn('noteBlockRemoveCompatibility', workflow)
@@ -391,7 +391,8 @@ class F24GuardTest(unittest.TestCase):
         self.assertIn('if: always()', stage[cleanup:cleanup + 180])
         self.assertIn('run: python3 scripts/f3_ci.py cleanup', stage[cleanup:cleanup + 180])
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-9]|2[0-3])_ci\.py (?:prepare|smoke)')
-        self.assertIn('f24-helper-refusal.txt', workflow)
+        for receipt in ('f24-fixture-write.txt', 'f24-helper-refusal.txt'):
+            self.assertIn('test -s build/ci/' + receipt, stage)
         source_start = workflow.index('- name: Require F24 to reuse the immutable F23 original-source Git object')
         source_end = workflow.index('\n      - name:', source_start)
         source_step = workflow[source_start:source_end]

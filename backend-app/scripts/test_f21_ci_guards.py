@@ -348,15 +348,16 @@ class F21GuardTest(unittest.TestCase):
     def test_given_workflow__when_integrating_f21__then_f20_finishes_first_prepare_before_smoke_and_always_cleanup_with_jar_isolation(self):
         workflow = (f21.ROOT.parent / '.github/workflows/backend-app-check.yml').read_text()
         boundary = workflow.index('- name: Verify F21 exact notes/mailbox')
-        self.assertLess(workflow.index('python3 scripts/f20_ci.py prepare'), boundary)
+        self.assertLess(workflow.index('python3 scripts/f20_ci.py smoke'), boundary)
         stage = workflow[boundary:]
-        for first, second in (('test_f21_ci_guards.py', 'python3 scripts/f21_ci.py prepare'),):  # the packaged smoke moved to the Spring contract tests; the guard file still runs before the fixture is prepared
+        for first, second in (('test_f21_ci_guards.py', 'python3 scripts/f21_ci.py prepare'),
+                              ('python3 scripts/f21_ci.py prepare', 'python3 scripts/f21_ci.py smoke')):
             self.assertLess(stage.index(first), stage.index(second))
         self.assertNotIn('noteNotificationsCompatibility', workflow)
         self.assertNotIn('python3 scripts/f21_ci.py results', workflow)
         cleanup = stage.index('- name: Remove only the owned disposable fixture'); self.assertIn('if: always()', stage[cleanup:cleanup + 180])
         self.assertNotRegex(stage[:cleanup], r'python3 scripts/f(?:[2-9]|1[0-9]|20)_ci\.py (?:prepare|smoke)')
-        self.assertIn('f21-helper-refusal.txt', workflow)
+        self.assertIn('f21-fixture-reuse.txt', workflow); self.assertIn('f21-helper-refusal.txt', workflow)
         self.assertIn('sparse-checkout:', workflow); self.assertNotIn('            community-service\n', workflow)
         source_start = workflow.index('- name: Require the immutable F21 original-source Git object')
         source_end = workflow.index('\n      - name:', source_start)
