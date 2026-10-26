@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from app.routers.recommendation import router
 from app.services.recommendation import recommend_animals
-from app.services.pg_gallery_store import GalleryUnavailable
 
 
 class RecommendationTest(unittest.TestCase):
@@ -53,12 +52,11 @@ class RecommendationTest(unittest.TestCase):
         store.recommendation_candidates.return_value = ({'coat_color': source_color}, hits)
         env = {'LOST_STORAGE_BACKEND': 'postgresql', 'LOST_SEARCH_COAT_COLOR_WEIGHT': '0.1',
                'LOST_SEARCH_VISUAL_PROFILE': 'sam3-animal-focus', 'LOST_SEARCH_INDEX': 'animals-lost-dinov3-sam3-test'}
-        with patch.dict(os.environ, env), patch('app.services.recommendation.get_postgresql_store', return_value=store),                 patch('app.services.dinov3.get_encoder', side_effect=AssertionError('No inference permitted')):
+        with patch.dict(os.environ, env), patch('app.services.recommendation.get_postgresql_store', return_value=store), \
+                patch('app.services.dinov3.get_encoder', side_effect=AssertionError('No inference permitted')):
             self.assertEqual(recommend_animals(1, 'DOG'), [2, 3, 4, 5, 6, 7])
             store.recommendation_candidates.assert_called_once()
             self.assertEqual(store.recommendation_candidates.call_args.args[1:3], (1, 'DOG'))
-        with patch.dict(os.environ, {'LOST_STORAGE_BACKEND': 'elasticsearch'}), self.assertRaises(GalleryUnavailable):
-            recommend_animals(1, 'DOG')
 
     def test_visual_floor_is_applied_before_reranking_truncates_candidates(self):
         import numpy as np
@@ -76,11 +74,11 @@ class RecommendationTest(unittest.TestCase):
         with patch.dict(os.environ, env), patch('app.services.recommendation.get_postgresql_store', return_value=store):
             self.assertEqual(recommend_animals(1, 'DOG'), [30])
 
-    def test_postgresql_chatbot_entry_point_does_not_load_or_expose_legacy_embedding(self):
+    def test_chatbot_entry_point_does_not_load_heavy_models_or_expose_legacy_similarity_routes(self):
         script = """import sys
 from app.main import app
-assert 'app.services.embedding' not in sys.modules
-assert 'app.es.client' not in sys.modules
+for name in ('app.services.dinov3', 'app.services.sam3_focus', 'torch', 'transformers'):
+    assert name not in sys.modules, name
 paths = {r.path for r in app.routes}
 assert '/api/v1/animals/similar' not in paths
 assert '/api/v1/animals/batch/embeddings' not in paths

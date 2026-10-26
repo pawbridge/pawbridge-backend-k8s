@@ -7,7 +7,7 @@ import logging
 import threading
 
 from app.services.gallery_source import atomic_json
-from app.services.lost_gallery import build_gallery, GalleryBuildCancelled, gallery_mapping
+from app.services.lost_gallery import build_gallery, GalleryBuildCancelled
 from app.services.gallery_retention import GalleryRetention
 
 
@@ -35,16 +35,16 @@ class BackgroundEncoder:
 
 
 class GalleryRefresh:
-    def __init__(self, es, encoder, source, alias, state_dir, interval=900, ready=True, store=None):
+    def __init__(self, store, encoder, source, alias, state_dir, interval=900, ready=True):
         if not 30 <= interval <= 86400:
             raise ValueError('Gallery interval must be between 30 seconds and one day')
-        self.es, self.encoder, self.source, self.alias = es, BackgroundEncoder(encoder), source, alias
+        self.encoder, self.source, self.alias = BackgroundEncoder(encoder), source, alias
         self.state_dir, self.interval = Path(state_dir), interval
         self.store = store
         self.stop = threading.Event()
         self.ready = ready
         self.status = {'state': 'waiting', 'lastSuccess': None}
-        self.retention = GalleryRetention(es, self.state_dir, alias, store=store, cancelled=self.stop.is_set)
+        self.retention = GalleryRetention(store, self.state_dir, alias, cancelled=self.stop.is_set)
         self.last_result = None
         self.etag = None  # Fetch afresh after every restart; never trust a stale local success flag.
         self.thread = threading.Thread(target=self.run, name='gallery-refresh', daemon=False)
@@ -52,18 +52,8 @@ class GalleryRefresh:
     def published(self):
         if not self.last_result:
             return False
-        if self.store is not None:
-            try:
-                return self.store.published(self.last_result)
-            except Exception:
-                return False
-        client = self.es.options(request_timeout=10, max_retries=0)
         try:
-            index = self.last_result['index']
-            return (set(client.indices.get_alias(name=self.alias)) == {index}
-                    and client.indices.get_mapping(index=index)[index]['mappings'].get('_meta')
-                    == gallery_mapping(self.last_result['snapshot_sha256'])['_meta']
-                    and client.count(index=self.alias)['count'] == self.last_result['records'])
+            return self.store.published(self.last_result)
         except Exception:
             return False
 
@@ -87,10 +77,10 @@ class GalleryRefresh:
         if snapshot is None:
             raise ValueError('Source did not provide a complete snapshot')
         self.save_status(state='building')
-        arguments = {"store": self.store, "incremental": True} if self.store is not None else {}
+        arguments = {"incremental": True}
         if snapshot.get('paged') is True:
             arguments['stream'] = snapshot['stream']
-        result = build_gallery(self.es, lambda: self.encoder, snapshot.get('manifest_path'),
+        result = build_gallery(self.store, lambda: self.encoder, snapshot.get('manifest_path'),
                                self.source.photo_root, self.alias, self.state_dir,
                                progress=lambda row: self.save_status(state='building', progress=row),
                                cancelled=self.stop.is_set,

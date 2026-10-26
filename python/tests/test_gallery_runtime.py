@@ -6,13 +6,15 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, create_autospec, patch
 
 import httpx
 from PIL import Image
 from app.services.inference_gate import InferenceGate
 from app.services.gallery_source import GallerySource
 from app.services.gallery_runtime import GalleryRefresh, runtime_owner
+from app.services.pg_gallery_store import PostgresqlGalleryStore
+from tests.fake_gallery_store import FakeGalleryStore
 
 HOST = 'test.r2.cloudflarestorage.com'
 
@@ -32,17 +34,17 @@ def sample():
 class GalleryRuntimeTest(unittest.TestCase):
     def test_postgresql_runtime_journals_actual_refresh_target_and_enables_incremental(self):
         with tempfile.TemporaryDirectory() as directory:
-            store = Mock()
+            store = create_autospec(PostgresqlGalleryStore, instance=True)
             source = Mock(photo_root=Path(directory), downloaded=0)
-            refresh = GalleryRefresh(None, SimpleNamespace(model_version='test'), source,
-                                     'animals-lost-dinov3-sam3-runtime-test', directory, store=store)
+            refresh = GalleryRefresh(store, SimpleNamespace(model_version='test'), source,
+                                     'animals-lost-dinov3-sam3-runtime-test', directory)
             refresh.retention = Mock()
             source.fetch.return_value = {'manifest_path': 'manifest', 'etag': 'new',
                                          'snapshot_sha256': 'a'*64}
             result = {'index': 'stable-active', 'records': 1, 'snapshot_sha256': 'a'*64}
             with patch('app.services.gallery_runtime.build_gallery', return_value=result) as build:
                 refresh.cycle()
-            self.assertIs(build.call_args.kwargs['store'], store)
+            self.assertIs(build.call_args.args[0], store)
             self.assertIs(build.call_args.kwargs['incremental'], True)
             self.assertEqual(build.call_args.kwargs['prepare'], refresh.retention.prepare_target)
             refresh.retention.prepare.assert_not_called()
@@ -117,8 +119,9 @@ class GalleryRuntimeTest(unittest.TestCase):
 
     def test_failed_build_retries_old_etag_and_unchanged_snapshot_recovers_missing_alias(self):
         with tempfile.TemporaryDirectory() as directory:
-            source = Mock(photo_root=Path(directory), downloaded=1); es = Mock()
-            refresh = GalleryRefresh(es, SimpleNamespace(model_version='test'), source, 'animals-lost-dinov3-sam3-runtime-test', directory)
+            source = Mock(photo_root=Path(directory), downloaded=1)
+            store = create_autospec(PostgresqlGalleryStore, instance=True)
+            refresh = GalleryRefresh(store, SimpleNamespace(model_version='test'), source, 'animals-lost-dinov3-sam3-runtime-test', directory)
             refresh.retention = Mock()
             refresh.etag = 'old'; refresh.status['lastSuccess'] = 'previous-success'
             snapshot = {'manifest_path':'manifest','etag':'new','downloaded':1,'reused_photos':0,'snapshot_sha256':'a'*64}
@@ -129,7 +132,7 @@ class GalleryRuntimeTest(unittest.TestCase):
             self.assertEqual(refresh.status['lastSuccess'],'previous-success')
             self.assertTrue(refresh.ready)
             source.fetch.side_effect = [None, snapshot]
-            es.options.return_value.indices.get_alias.side_effect = RuntimeError('alias unavailable')
+            store.published.side_effect = RuntimeError('gallery head unavailable')
             result = {'index':'new-index','records':1,'snapshot_sha256':'a'*64}
             with patch('app.services.gallery_runtime.build_gallery',return_value=result): refresh.cycle()
             self.assertEqual(source.fetch.call_args_list[-2].args[0],'old')
@@ -139,38 +142,40 @@ class GalleryRuntimeTest(unittest.TestCase):
             with runtime_owner(directory):
                 with self.assertRaises(BlockingIOError), runtime_owner(directory): pass
 
-    def test_retention_only_deletes_recorded_unaliased_owned_builds_and_survives_restart(self):
+    def test_retention_only_deletes_recorded_unpublished_owned_builds_and_survives_restart(self):
         from app.services.gallery_retention import GalleryRetention
         from app.services.lost_gallery import gallery_target, gallery_mapping
         with tempfile.TemporaryDirectory() as directory:
-            es = Mock(); es.options.return_value = es
+            store = FakeGalleryStore()
             alias = 'animals-lost-dinov3-sam3-retention-test'
-            keeper = GalleryRetention(es, directory, alias)
+            keeper = GalleryRetention(store, directory, alias)
             targets = [gallery_target(c * 64) for c in 'abc']
-            es.indices.exists.return_value = True
-            es.indices.get_alias.side_effect = lambda index: {index: {'aliases': {'other-gallery': {}}}}
-            es.indices.get_mapping.side_effect = lambda index: {index: {'mappings': gallery_mapping('a' * 64)}}
+            owned = gallery_mapping('a' * 64)['_meta']
+            # Every build exists in the store and is the head of another gallery's alias.
+            for number, target in enumerate(targets):
+                store.seed(target, [], metadata=owned, alias='animals-lost-dinov3-sam3-other-%d' % number)
             for digest, target in zip('abc', targets):
                 keeper.prepare(digest * 64); keeper.published(target)
-            es.indices.delete.assert_not_called()
-            resumed = GalleryRetention(es, directory, alias)
+            self.assertEqual(set(store.builds), set(targets))
+            resumed = GalleryRetention(store, directory, alias)
             self.assertEqual(resumed.journal['published'], targets[1:])
-            es.indices.get_alias.side_effect = lambda index: {index: {'aliases': {}}}
-            es.indices.get_mapping.side_effect = lambda index: {index: {'mappings': {'_meta': {'contract': 'foreign'}}}}
+            # Unpublished now, but owned by someone else: refuse to delete.
+            store.heads.clear()
+            store.builds[targets[0]]['metadata'] = {'contract': 'foreign'}
             with self.assertRaises(RuntimeError): resumed.prune(set(targets[1:]))
-            es.indices.delete.assert_not_called()
-            es.indices.get_mapping.side_effect = lambda index: {index: {'mappings': gallery_mapping('a' * 64)}}
+            self.assertEqual(set(store.builds), set(targets))
+            store.builds[targets[0]]['metadata'] = owned
             resumed.prune(set(targets[1:]))
-            es.indices.delete.assert_called_once_with(index=targets[0])
+            self.assertEqual(set(store.builds), set(targets[1:]))
             self.assertEqual(resumed.journal['known'], targets[1:])
 
-    def test_pg_retention_stop_preserves_pending_journal_until_retry_completes(self):
+    def test_retention_stop_preserves_pending_journal_until_retry_completes(self):
         from app.services.gallery_retention import GalleryRetention
         from app.services.lost_gallery import gallery_target, GalleryBuildCancelled
         with tempfile.TemporaryDirectory() as directory:
-            store=Mock(); source=Mock(photo_root=Path(directory),downloaded=0)
-            refresh=GalleryRefresh(None,SimpleNamespace(model_version='test'),source,
-                                   'animals-lost-dinov3-sam3-retention-test',directory,store=store)
+            store=create_autospec(PostgresqlGalleryStore,instance=True); source=Mock(photo_root=Path(directory),downloaded=0)
+            refresh=GalleryRefresh(store,SimpleNamespace(model_version='test'),source,
+                                   'animals-lost-dinov3-sam3-retention-test',directory)
             retired,active=[gallery_target(c*64) for c in 'ab']
             refresh.retention.journal={'known':[retired,active],'published':[active]}
             refresh.retention.save()
@@ -180,7 +185,7 @@ class GalleryRuntimeTest(unittest.TestCase):
             store.delete_unpublished.side_effect=interrupted
             with self.assertRaises(GalleryBuildCancelled):
                 refresh.retention.prune({active})
-            pending=GalleryRetention(None,directory,refresh.alias,store=store)
+            pending=GalleryRetention(store,directory,refresh.alias)
             self.assertEqual(pending.journal['known'],[retired,active])
             store.delete_unpublished.side_effect=None
             store.delete_unpublished.return_value=True
@@ -242,16 +247,19 @@ class GalleryRuntimeTest(unittest.TestCase):
         from app.services.lost_gallery import gallery_mapping
         with tempfile.TemporaryDirectory() as directory:
             source = Mock(photo_root=Path(directory), downloaded=0)
-            es = Mock(); es.options.return_value = es
-            refresh = GalleryRefresh(es, SimpleNamespace(model_version="test"), source,
+            store = FakeGalleryStore()
+            refresh = GalleryRefresh(store, SimpleNamespace(model_version="test"), source,
                                      "animals-lost-dinov3-sam3-runtime-test", directory)
             refresh.retention = Mock()
-            result = {"index": "old", "records": 1, "snapshot_sha256": "a"*64}
+            old = "animals-lost-dinov3-sam3-build-" + "a" * 24
+            result = {"alias": refresh.alias, "index": old, "records": 1, "snapshot_sha256": "a"*64}
             refresh.last_result = result; refresh.etag = "unchanged"
-            mapping = gallery_mapping("a"*64); mapping["_meta"].pop("coat_color_version")
-            es.indices.get_alias.return_value = {"old": {}}
-            es.indices.get_mapping.return_value = {"old": {"mappings": mapping}}
-            es.count.return_value = {"count": 1}
+            metadata = gallery_mapping("a"*64)["_meta"]
+            store.seed(old, [{"id": 1}], metadata=metadata, alias=refresh.alias)
+            self.assertTrue(refresh.published())
+            # The published gallery predates the current color contract.
+            del store.builds[old]["metadata"]["coat_color_version"]
+            self.assertFalse(refresh.published())
             snapshot = {"manifest_path": "manifest", "etag": "unchanged", "snapshot_sha256": "a"*64}
             source.fetch.side_effect = [None, snapshot]
             with patch("app.services.gallery_runtime.build_gallery", return_value=dict(result, index="new")) as build:

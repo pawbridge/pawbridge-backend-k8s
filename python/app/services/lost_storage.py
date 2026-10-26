@@ -1,4 +1,4 @@
-"""Explicit backend selection; import does not open a pool or contact a database."""
+"""PostgreSQL gallery storage; import does not open a pool or contact a database."""
 from contextlib import contextmanager
 import os
 import threading
@@ -8,16 +8,16 @@ _store = None
 
 
 def backend():
-    value = os.getenv('LOST_STORAGE_BACKEND', 'elasticsearch')
-    if value not in {'elasticsearch', 'postgresql'}:
-        raise RuntimeError('Unknown lost-search storage backend')
+    # Elasticsearch storage was removed; a leftover setting must fail instead of being ignored.
+    value = os.getenv('LOST_STORAGE_BACKEND', 'postgresql')
+    if value != 'postgresql':
+        raise RuntimeError('Only the PostgreSQL lost-search storage backend is supported')
     return value
 
 
 def get_postgresql_store():
     global _store
-    if backend() != 'postgresql':
-        raise RuntimeError('PostgreSQL backend was not selected')
+    backend()
     with _lock:
         if _store is None:
             from psycopg_pool import ConnectionPool
@@ -48,6 +48,6 @@ def close_postgresql_store():
 @contextmanager
 def storage_session():
     try:
-        yield get_postgresql_store() if backend() == 'postgresql' else None
+        yield get_postgresql_store()
     finally:
         close_postgresql_store()

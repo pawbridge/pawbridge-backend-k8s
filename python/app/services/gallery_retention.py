@@ -1,20 +1,20 @@
-"""Retain active/previous builds; clean only journaled, unaliased owned indices."""
+"""Retain active/previous builds; clean only journaled, unpublished PostgreSQL builds."""
 import json
 import re
 from pathlib import Path
 
 from app.services.gallery_source import atomic_json
-from app.services.lost_gallery import PREFIX, CONTRACT, FOCUS_VERSION, gallery_target, GalleryBuildCancelled
+from app.services.lost_gallery import PREFIX, gallery_target, GalleryBuildCancelled
 
 
 class GalleryRetention:
-    def __init__(self, es, state_dir, alias, store=None, cancelled=None):
+    def __init__(self, store, state_dir, alias, cancelled=None):
         if not re.fullmatch(PREFIX + r'[a-z0-9][a-z0-9-]{0,60}', alias):
             raise ValueError('Invalid retention alias')
         self.store = store
         self.cancelled = cancelled
-        self.es = es.options(request_timeout=30, max_retries=0) if store is None else None
-        self.path = Path(state_dir) / (alias + ('-postgresql' if store is not None else '') + '-retention.json')
+        # The '-postgresql' suffix predates the Elasticsearch removal; keep it so existing journals are reused.
+        self.path = Path(state_dir) / (alias + '-postgresql-retention.json')
         self.journal = {'known': [], 'published': []}
         if self.path.exists():
             if self.path.is_symlink() or self.path.stat().st_size > 16384:
@@ -40,17 +40,8 @@ class GalleryRetention:
             self.check_cancelled()
             if name in keep:
                 continue
-            if self.store is not None:
-                if not self.store.delete_unpublished(name, check_cancelled=self.check_cancelled):
-                    continue
-            elif self.es.indices.exists(index=name):
-                # Never delete an index in use by any alias, including another local gallery.
-                if self.es.indices.get_alias(index=name)[name].get('aliases'):
-                    continue
-                meta = self.es.indices.get_mapping(index=name)[name]['mappings'].get('_meta', {})
-                if meta.get('contract') != CONTRACT or meta.get('model_version') != FOCUS_VERSION:
-                    raise RuntimeError('Refusing to clean an index with a different owner')
-                self.es.indices.delete(index=name)
+            if not self.store.delete_unpublished(name, check_cancelled=self.check_cancelled):
+                continue
             self.journal['known'].remove(name)
             self.save()
 

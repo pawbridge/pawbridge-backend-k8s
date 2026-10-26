@@ -196,7 +196,7 @@ class PagedGallerySource(GallerySource):
     def pages(self, stopped):
         while self.processed < self.total:
             if self.pending is not None:
-                raise RuntimeError('Previous page must be acknowledged after its ES write')
+                raise RuntimeError('Previous page must be acknowledged after its gallery write')
             descriptor = self.checkpoint['descriptor']
             cursor = self.checkpoint['cursor']
             page = self.get_page(cursor, stopped)
@@ -232,7 +232,7 @@ class PagedGallerySource(GallerySource):
                             'chain': chain, 'cursor': page['nextCursor'], 'complete': False}
             yield rows
             if self.pending is not None:
-                raise RuntimeError('Page was not acknowledged after ES write')
+                raise RuntimeError('Page was not acknowledged after the gallery write')
             self.inventory = {}
             self.current_page = self.current_cursor = None
             del page, rows, inventory

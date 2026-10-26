@@ -1,21 +1,8 @@
 import os
-import sys
-import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-
-embedding_module = types.ModuleType("app.services.embedding")
-embedding_module.extract_embedding_from_url = None
-sys.modules["app.services.embedding"] = embedding_module
-
-es_client_module = types.ModuleType("app.es.client")
-es_client_module.get_animal_vector = None
-es_client_module.save_animal_vector = None
-es_client_module.knn_search = None
-es_client_module.get_animals_without_vector = None
-sys.modules["app.es.client"] = es_client_module
 
 from app.main import app
 from app.services.chatbot.gemini_provider import GeminiChatbotProvider
@@ -212,12 +199,6 @@ class ChatbotApiTest(unittest.TestCase):
         response = self.client.get("/health")
 
         self.assertEqual(response.status_code, 200)
-
-    def test_similarity_routes_are_still_registered(self):
-        paths = {route.path for route in app.routes}
-
-        self.assertIn("/api/v1/animals/similar", paths)
-        self.assertIn("/api/v1/animals/batch/embeddings", paths)
 
 
 if __name__ == "__main__":

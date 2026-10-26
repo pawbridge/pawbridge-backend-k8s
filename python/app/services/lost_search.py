@@ -97,43 +97,8 @@ def search_photo(data, species, lost_date=None, region=None, description=None, i
     with decode_photo(data) as image:
         embedding = get_encoder().encode_with_metadata(image, species)
     logging.getLogger(__name__).info("Lost-search image processing: %s", embedding.focus_status)
-    from app.services.lost_storage import backend, get_postgresql_store
-    if backend() == 'postgresql':
-        statuses = ACTIVE_STATUSES + (RESOLVED_STATUSES if include_adopted_or_returned else ())
-        hits = get_postgresql_store().search(gallery_index(), embedding, species, statuses, CANDIDATE_POOL)
-        return {"candidates": rank_candidates(hits, lost_date, region, description,
-                                              coat_color=embedding.coat_color, color_weight=color_weight)}
-    from app.es.client import es
-    script = {"source": "cosineSimilarity(params.vector, 'image_vector') + 1.0",
-              "params": {"vector": embedding.vector}}
-    if embedding.animal_vector is not None:
-        script = {
-            "source": "double original = cosineSimilarity(params.vector, 'image_vector'); "
-                      "if (doc.containsKey('animal_vector') && doc['animal_vector'].size() != 0) { "
-                      "double animal = cosineSimilarity(params.animal, 'animal_vector'); "
-                      "return 1.0 + (1.0 - params.weight) * original + params.weight * animal; } "
-                      "return 1.0 + original;",
-            "params": {"vector": embedding.vector, "animal": embedding.animal_vector,
-                       "weight": ANIMAL_REGION_WEIGHT}}
-    allowed_statuses = ACTIVE_STATUSES + (RESOLVED_STATUSES if include_adopted_or_returned else ())
-    # Missing status keeps a legacy gallery searchable during a staged rollout;
-    # Animal Service always rechecks the current MySQL status before responding.
-    status_filter = {"bool": {"should": [
-        {"terms": {"status": allowed_statuses}},
-        {"bool": {"must_not": {"exists": {"field": "status"}}}}
-    ], "minimum_should_match": 1}}
-    response = es.options(request_timeout=15, max_retries=0).search(
-        index=gallery_index(), size=CANDIDATE_POOL, timeout="10s",
-        query={"script_score": {
-            "query": {"bool": {"filter": [
-                {"term": {"species": species}}, {"term": {"model_version": embedding.model_version}},
-                status_filter,
-                {"exists": {"field": "image_vector"}},
-                {"exists": {"field": "id"}}]}},
-            "script": script}},
-        sort=[{"_score": "desc"}, {"id": "asc"}],
-        source=["id", "happen_date", "happen_place", "color", "special_mark", "description", "coat_color"])
-    if response.get("timed_out") or response.get("_shards", {}).get("failed", 0):
-        raise RuntimeError("Incomplete search response")
-    return {"candidates": rank_candidates(response["hits"]["hits"], lost_date, region, description,
+    from app.services.lost_storage import get_postgresql_store
+    statuses = ACTIVE_STATUSES + (RESOLVED_STATUSES if include_adopted_or_returned else ())
+    hits = get_postgresql_store().search(gallery_index(), embedding, species, statuses, CANDIDATE_POOL)
+    return {"candidates": rank_candidates(hits, lost_date, region, description,
                                           coat_color=embedding.coat_color, color_weight=color_weight)}

@@ -88,17 +88,17 @@ class GalleryBuildCancelled(RuntimeError):
     pass
 
 
-def build_gallery(es, encoder_factory, manifest_path, photo_root, alias, state_dir, progress=None, cancelled=None, photo_provider=None, stream=None, store=None, incremental=False, prepare=None):
+def build_gallery(store, encoder_factory, manifest_path, photo_root, alias, state_dir, progress=None, cancelled=None, photo_provider=None, stream=None, incremental=False, prepare=None):
     # One GPU host is supported. All publishers share this state directory.
     import fcntl
     state = Path(state_dir)
     state.mkdir(parents=True, exist_ok=True)
     with (state / "gallery-publisher.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return _build_gallery(es, encoder_factory(), manifest_path, photo_root, alias, progress, cancelled, photo_provider, stream, store, incremental, prepare)
+        return _build_gallery(store, encoder_factory(), manifest_path, photo_root, alias, progress, cancelled, photo_provider, stream, incremental, prepare)
 
 
-def _build_gallery(es, encoder, manifest_path, photo_root, alias, progress=None, cancelled=None, photo_provider=None, stream=None, store=None, incremental=False, prepare=None):
+def _build_gallery(store, encoder, manifest_path, photo_root, alias, progress=None, cancelled=None, photo_provider=None, stream=None, incremental=False, prepare=None):
     def check_cancelled():
         if cancelled and cancelled():
             raise GalleryBuildCancelled("Gallery build stopped before publication")
@@ -115,14 +115,9 @@ def _build_gallery(es, encoder, manifest_path, photo_root, alias, progress=None,
         snapshot_hash = stream.checkpoint['descriptor']['snapshotSha256']
     root = Path(photo_root).resolve(strict=True)
     target = gallery_target(snapshot_hash)
-    if store is None:
-        if incremental:
-            raise ValueError('Incremental refresh requires PostgreSQL storage')
-        from app.services.es_gallery_store import ElasticsearchGalleryStore
-        store = ElasticsearchGalleryStore(es)
     if incremental:
         store, target = store.refresh_store(alias, target, snapshot_hash, total)
-    elif hasattr(store, 'build_target'):
+    else:
         target = store.build_target(target, snapshot_hash, total)
     if prepare is not None:
         prepare(target)  # Journal the actual delta/full target before any creation.

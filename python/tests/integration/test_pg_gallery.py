@@ -473,7 +473,7 @@ class PostgresqlGalleryTest(unittest.TestCase):
         from unittest.mock import patch
         import numpy as np
         from app.services.coat_color import describe, valid
-        from app.lost_main import ColorGalleryRefreshRequired
+        from app.services.pg_gallery_store import ColorGalleryRefreshRequired
 
         old_version = 'foreground-lab32-joint8-v2'
         snapshot = 'd' * 64
