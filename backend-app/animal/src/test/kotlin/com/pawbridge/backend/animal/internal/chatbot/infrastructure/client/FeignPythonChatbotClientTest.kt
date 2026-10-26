@@ -11,7 +11,6 @@ import feign.Response
 import feign.RetryableException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -96,10 +95,9 @@ class FeignPythonChatbotClientTest {
         val client = FeignPythonChatbotClient("http://python.example.invalid", json, transport, Request.Options())
 
         // when
-        val thrown = assertThrows(RetryableException::class.java) { client.createChatbotMessage("synthetic-key", input) }
+        assertThrows(RetryableException::class.java) { client.createChatbotMessage("synthetic-key", input) }
 
         // then
-        assertNotNull(thrown)
         assertEquals(1, calls.get())
     }
 
@@ -110,10 +108,9 @@ class FeignPythonChatbotClientTest {
         val client = FeignPythonChatbotClient("http://python.example.invalid", json, transport, Request.Options())
 
         // when
-        val thrown = assertThrows(FeignException::class.java) { client.createChatbotMessage("synthetic-key", input) }
+        assertThrows(FeignException::class.java) { client.createChatbotMessage("synthetic-key", input) }
 
         // then
-        assertNotNull(thrown)
     }
 
     @Test
