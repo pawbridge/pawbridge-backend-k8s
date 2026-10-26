@@ -313,12 +313,13 @@ cd backend-app
 ./gradlew projects check :boot:bootJar :boot:architectureTest
 DOCKER_HOST=unix://$HOME/.docker/run/docker.sock \
 TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
-./gradlew :boot:contractTest
+./gradlew :boot:contractTest :boot:jarSmokeTest
 ```
 
 - `check`: 모듈별 단위 시험과 `verifyArchitecture`·`verifyBusinessPackages`.
 - `:boot:architectureTest`: 빌드 규칙(`gradle/architecture.gradle`)을 TestKit fixture로 검증한다. 빌드 규칙을 바꿀 때 반드시 실행한다.
 - `:boot:contractTest`: Testcontainers PostgreSQL 위의 DB 계약 시험(아래 "DB 계약 시험").
+- `:boot:jarSmokeTest`: 실제 `bootJar` 산출물을 자식 프로세스로 띄우는 기동·종료 시험(아래 "패키지 JAR 기동·종료 시험"). `:boot:bootJar`에 의존하므로 항상 새 JAR로 돈다.
 
 Python 패키지 JAR 스모크(`scripts/fN_ci.py`)와 병합 후 shard·증거 검증 스크립트, 옛 MSA 서비스 CI는 삭제했다. 아래 F 단계 절의 CI 스크립트·shard·fixture 언급은 당시 기록이며 현재 검증 방법이 아니다.
 
@@ -503,7 +504,16 @@ refresh는 쿠키만 읽는다(본문 무시). 한 UPDATE로 `token_hash=:old`�
 
 `./gradlew :boot:contractTest`는 JVM 시간대 UTC로 전체(`contractTestUtc`)를, 이어서 `@Tag("timezone-sensitive")` 시험만 Asia/Seoul로(`contractTestSeoul`) 실행한다. `check`에 포함되지 않으며(Docker 필요) 시험이 없거나 건너뛴 시험이 있으면 실패한다. 로컬 Docker Desktop은 `DOCKER_HOST=unix://$HOME/.docker/run/docker.sock`과 `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`이 필요하다. Testcontainers 1.20은 Docker Engine 29가 거부하는 API 1.32를 요청하므로 시험 JVM에 `api.version=1.44`를 주며 `-PdockerApiVersion=...`으로 바꿀 수 있다.
 
+관리자 회원 삭제(`MemberDeleteContractTest`, 옛 F31 스모크)는 대기 표식·세션 폐기 → 쪽지·채팅 정리 → 계정 삭제의 세 커밋을 실제 DB에서 확인한다. 관리자 전용 접근과 인증 거부의 무부작용, 연쇄 정리와 상대 데이터 보존, 채팅 정리 권한 회수(503)·계정 삭제 권한 회수(500) 뒤 부분 커밋 상태와 복구 후 재시도, 스트림 종료·resync, S3 무접촉을 단언한다.
+
 refresh 세션 계약(`AuthSessionContractTest`)은 원문과 비교하지 않는다. 회전·이력 기록·유실 응답 복구·동시 grace 요청·두 세대 전 토큰 재사용·만료·5개 제한·logout·전체 폐기·정리·권한 회수·회원 삭제 연쇄를 실제 DB에서 확인하고, 쿠키 refresh HTTP 요청 한 건으로 Tomcat 경로를 확인한다.
+
+### 패키지 JAR 기동·종료 시험(`jarSmokeTest`)
+
+`PackagedJar*ContractTest`는 `contractTest` 소스 세트에 두되 `@Tag("packaged-jar")`로 구분한다. `contractTestUtc`는 이 태그를 제외하고, `:boot:jarSmokeTest`가 이 태그만 `:boot:bootJar` 산출물로 실행한다. 별도 작업으로 둔 이유는 일반 계약 시험이 JAR(약 120MB)를 만들 필요가 없고, JAR 시험은 `@SpringBootTest` 컨텍스트 없이 `ProcessBuilder`로 `java -jar`를 실행하기 때문이다. 같은 Testcontainers PostgreSQL(앱 역할)과 `ContractFakeS3`를 쓰며 값은 모두 합성이다. 포트는 모두 127.0.0.1의 빈 포트이고 메일은 아무도 듣지 않는 루프백, 스케줄러는 전부 끈다.
+
+- `PackagedJarRunContractTest`: JAR를 클래스당 한 번 띄운다. 관리 포트 health·liveness·readiness 200과 `/actuator/prometheus` 200, 공개 포트의 `/actuator/prometheus` 403·`/actuator/health` 404, 공개 단건 조회, 인증된 글 작성(파일은 가짜 S3로, 검색 투영 `nori-9.12.3-v1` 생성), 조사가 붙은 제목을 어간으로 찾는 검색(JAR 안 Nori 사전), 틀린 토큰의 401과 무부작용, 로그 크기(1MiB 미만)와 비밀 미노출, 마지막으로 SIGTERM 정상 종료(종료 코드 0 또는 143, `Graceful shutdown complete`, Hikari `pawbridge-db` 풀 종료 1회, `pg_stat_activity`의 앱 역할 연결 0). 종료 시험이 프로세스를 끝내므로 `@Order`로 마지막에 실행한다.
+- `PackagedJarRefusalContractTest`: 필수 설정 10개(`PAWBRIDGE_DB_URL/USER/PASSWORD`, `PAWBRIDGE_JWT_SECRET`, `PAWBRIDGE_STORAGE_ENDPOINT/BUCKET/PUBLIC_BASE_URL/ACCESS_KEY_ID/SECRET_ACCESS_KEY/REGION`)을 하나씩 뺀 짧은 시작과 값이 잘못된 시작(자격 증명이 든 DB URL, 풀 크기 51, 허용 안 되는 endpoint, 빈 서명 키)을 네 개씩 동시에 돌려, 종료 코드가 0이 아니고 출력에 설정 이름만 있고 값은 없으며 리스너·DB 연결·저장소 호출이 없음을 확인한다.
 
 ## 관리자 게시글 기간·오늘 통계
 
