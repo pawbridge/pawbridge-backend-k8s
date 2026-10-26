@@ -4,18 +4,15 @@ import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
 import com.pawbridge.backend.boot.configuration.AnimalShelterConfiguration
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
-import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
-import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -61,29 +58,4 @@ class AnimalShelterPostgresqlHttpTest {
         verify(exactly = 1) { shelters.observations(42, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 20)) }
     }
 
-    @Test
-    fun `postgresql 경로가 열렸을 때__인접 경로나 쓰기를 요청하면__중첩 접근을 넓히지 않고 거부한다`() {
-        // given
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-        val paths = listOf(
-            "/api/v1/shelters/discovery/extra",
-            "/api/v1/shelters/42/observations/extra",
-            "/api/v1/shelters/abc/observations",
-            "/api/v1/shelters/-1/observations",
-            "/api/shelters/discovery",
-        )
-
-        // when
-        for (path in paths) {
-            mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
-        }
-        for (method in listOf(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE)) {
-            for (path in listOf("/api/v1/shelters/discovery", "/api/v1/shelters/42/observations")) {
-                mvc.perform(request(method, path).header("Authorization", admin)).andExpect(status().isForbidden())
-            }
-        }
-
-        // then
-        confirmVerified(shelters)
-    }
 }

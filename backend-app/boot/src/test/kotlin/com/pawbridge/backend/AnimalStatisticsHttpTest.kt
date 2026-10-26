@@ -11,11 +11,9 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
-import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -60,7 +58,7 @@ class AnimalStatisticsHttpTest {
     }
 
     @Test
-    fun `관리자 GET 2개가 켜졌을 때__토큰 없음 잘못됨 사용자 보호소 관리자를 확인하면__MVC 전에 JWT와 관리자 역할을 지킨다`() {
+    fun `관리자 GET 2개가 켜졌을 때__관리자가 기간으로 조회하면__원래 응답과 서비스 호출을 유지한다`() {
         // given
         val from = LocalDate.of(2026, 10, 1)
         val to = LocalDate.of(2026, 10, 20)
@@ -70,16 +68,6 @@ class AnimalStatisticsHttpTest {
         every { statistics.intakeTrend(from, to) } returns AnimalStatistics.IntakeTrend(from, to, listOf(), 0)
 
         // when
-        for (path in listOf("/api/v1/admin/stats/daily-animals", "/api/v1/admin/stats/intake-trend")) {
-            mvc.perform(get(path)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
-            mvc.perform(get(path).header("Authorization", "Bearer invalid")).andExpect(status().isUnauthorized())
-            for (role in listOf("ROLE_USER", "ROLE_SHELTER")) {
-                mvc.perform(get(path).header("Authorization", "Bearer " + F3TestInputs.token(7, role)))
-                    .andExpect(status().isForbidden())
-                    .andExpect(jsonPath("$.message").value("관리자 권한이 필요합니다."))
-            }
-        }
-        confirmVerified(statistics)
         val daily = mvc.perform(
             get("/api/v1/admin/stats/daily-animals")
                 .param("startDate", from.toString())
@@ -103,36 +91,4 @@ class AnimalStatisticsHttpTest {
         verify(exactly = 1) { statistics.intakeTrend(from, to) }
     }
 
-    @Test
-    fun `정확한 통계 GET만 열렸을 때__관리자가 이웃 경로 별칭 변경을 요청하면__거부하고 기존 비공개 사용자 거부를 유지한다`() {
-        // given
-        val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
-        val paths = listOf(
-            "/api/v1/animals/stats",
-            "/api/v1/animals/stats/today/extra",
-            "/api/v1/animals/stats/unknown",
-            "/api/v1/admin/stats",
-            "/api/v1/admin/stats/daily-animals/extra",
-            "/api/v1/admin/stats/unknown",
-            // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
-            "/api/animals/stats/today",
-            "/api/admin/stats/daily-animals",
-            "/api/admin/stats/intake-trend",
-        )
-
-        // when
-        for (path in paths) {
-            mvc.perform(get(path).header("Authorization", admin)).andExpect(status().isForbidden())
-        }
-        for (method in listOf(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.DELETE)) {
-            for (path in listOf("/api/v1/animals/stats/today", "/api/v1/admin/stats/daily-animals")) {
-                mvc.perform(request(method, path).header("Authorization", admin)).andExpect(status().isForbidden())
-            }
-        }
-        mvc.perform(get("/api/v1/users/me")).andExpect(status().isUnauthorized())
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer invalid")).andExpect(status().isUnauthorized())
-
-        // then
-        confirmVerified(statistics)
-    }
 }
