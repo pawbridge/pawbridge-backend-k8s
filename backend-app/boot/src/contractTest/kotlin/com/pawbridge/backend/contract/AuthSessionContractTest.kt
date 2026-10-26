@@ -16,6 +16,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.AfterEach
@@ -485,6 +486,68 @@ class AuthSessionContractTest : ContractTestBase() {
                     " AND token_hash=${literal(RefreshTokens.hash(next))}",
             ),
         ).isEqualTo("1")
+    }
+
+    @Test
+    fun `쿠키가 없거나 형식이 틀릴 때__리프레시하면__누락 또는 유효하지 않음으로 거부하고 세션을 건드리지 않는다`() {
+        // given
+        seedUser(BASE + 1)
+        login(BASE + 1)
+        val before = sessionRows(BASE + 1)
+
+        // when
+        val missing = listOf(null, "").map { token -> catchThrowable { sessions.refresh(token) } }
+        val malformed = listOf("short", "!".repeat(43), "a".repeat(44)).map { token -> catchThrowable { sessions.refresh(token) } }
+
+        // then
+        assertThat(missing.map { (it as AuthSessionRejectedException).reason() }).containsOnly(Reason.MISSING)
+        assertThat(malformed.map { (it as AuthSessionRejectedException).reason() }).containsOnly(Reason.INVALID)
+        assertThat(sessionRows(BASE + 1) == before).isTrue()
+    }
+
+    @Test
+    fun `방금 퇴역했지만 세션이 폐기된 토큰일 때__리프레시하면__되살리거나 다시 폐기하지 않고 거부한다`() {
+        // given
+        seedUser(BASE + 1)
+        val first = login(BASE + 1)
+        sessions.refresh(first.value)
+        execute("UPDATE pawbridge_user.auth_sessions SET revoked_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE user_id=${BASE + 1}")
+        val before = sessionRows(BASE + 1)
+
+        // when
+        val failure = catchThrowable { sessions.refresh(first.value) }
+
+        // then
+        assertThat((failure as AuthSessionRejectedException).reason()).isEqualTo(Reason.INVALID)
+        assertThat(sessionRows(BASE + 1) == before).`as`("An inactive session is not touched again").isTrue()
+    }
+
+    @Test
+    fun `회원 행이 다른 연결에 잠겨 있을 때__세션을 만들면__잠금이 풀릴 때까지 기다린 뒤 만든다`() {
+        // given
+        seedUser(BASE + 1)
+        val executor = Executors.newSingleThreadExecutor()
+
+        // when
+        // then
+        try {
+            ContractPostgres.adminConnection { connection ->
+                connection.autoCommit = false
+                // FOR NO KEY UPDATE does not conflict with the FOR KEY SHARE lock of the session's foreign key, only with
+                // the explicit FOR UPDATE of the session creation, so this wait proves that lock and not the insert.
+                connection.createStatement().use {
+                    it.execute("SELECT user_id FROM pawbridge_user.users WHERE user_id = ${BASE + 1} FOR NO KEY UPDATE")
+                }
+                val creation = executor.submit(Callable { login(BASE + 1) })
+                assertThat(catchThrowable { creation.get(700, TimeUnit.MILLISECONDS) }).isInstanceOf(TimeoutException::class.java)
+                assertThat(scalar("SELECT count(*) FROM pawbridge_user.auth_sessions WHERE user_id=${BASE + 1}")).isEqualTo("0")
+                connection.commit()
+                assertThat(creation.get(10, TimeUnit.SECONDS).value).isNotNull()
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+        assertThat(scalar("SELECT count(*) FROM pawbridge_user.auth_sessions WHERE user_id=${BASE + 1}")).isEqualTo("1")
     }
 
     private fun refreshOverHttp(token: String, origin: String) = send(

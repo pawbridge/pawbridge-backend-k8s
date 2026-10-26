@@ -29,6 +29,25 @@ GRANT INSERT (token_hash, session_id, rotated_at) ON pawbridge_user.auth_session
 -- favorites: the status check reads the pair only.
 GRANT SELECT (user_id, animal_id) ON pawbridge_user.favorites TO pawbridge_app;
 
+-- User repositories (signup, local and social login, password, admin update, shelter promotion, directory).
+-- users: login reads the password hash and the social lookup reads provider_id. Signup and social login insert the whole
+-- account; password change, admin update and shelter approval update password, role and care_reg_no.
+GRANT SELECT (password, provider_id) ON pawbridge_user.users TO pawbridge_app;
+GRANT INSERT (email, name, nickname, password, role, care_reg_no, provider, provider_id, created_at, updated_at)
+    ON pawbridge_user.users TO pawbridge_app;
+GRANT UPDATE (password, role, care_reg_no) ON pawbridge_user.users TO pawbridge_app;
+
+-- favorites: the favorite list reads id and time, add inserts and returns the id.
+GRANT SELECT (favorite_id, created_at) ON pawbridge_user.favorites TO pawbridge_app;
+GRANT INSERT (user_id, animal_id, created_at) ON pawbridge_user.favorites TO pawbridge_app;
+
+-- shelter_applications: submit, own list, administrator list and detail, approve and reject.
+GRANT SELECT (id, user_id, shelter_name, status, requested_at, reviewed_by, reviewed_at, review_note, care_reg_no)
+    ON pawbridge_user.shelter_applications TO pawbridge_app;
+GRANT INSERT (user_id, shelter_name, status, requested_at) ON pawbridge_user.shelter_applications TO pawbridge_app;
+GRANT UPDATE (status, reviewed_by, reviewed_at, review_note, care_reg_no)
+    ON pawbridge_user.shelter_applications TO pawbridge_app;
+
 -- posts: list, detail, search, create (with the search projection), update and soft delete.
 -- post_id comes from the identity column, so no sequence privilege is needed.
 GRANT SELECT (post_id, author_id, title, content, board_type, image_urls, deleted_at, created_at, updated_at)
