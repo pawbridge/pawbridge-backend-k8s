@@ -84,6 +84,6 @@
 
 ## 인프라 구축 매뉴얼 (Infrastructure Setup)
 - 애플리케이션이 올라갈 Kubernetes 클러스터 하부 망(Vagrant, DB, Kafka 등) 설치 가이드는 전용 저장소인 [pawbridge-infra-k8s](https://github.com/pawbridge/pawbridge-infra-k8s)에서 확인할 수 있습니다.
-- 동물 및 상품 검색 코어가 의존하는 Elasticsearch 수동 인덱스 매핑 파일 및 파이프라인 스크립트는 현재 백엔드 저장소의 infrastructure/elasticsearch/ 디렉토리에 포함되어 있습니다.
+- 이전 환경의 Elasticsearch 인덱스 매핑·파이프라인 스크립트, Kafka 커넥터, MySQL·모니터링 구성(`infrastructure/`)과 서비스별 MySQL 마이그레이션은 2026-10-27 저장소에서 정리했습니다. 정리 직전 상태는 [이 커밋의 `infrastructure/`](https://github.com/pawbridge/pawbridge-backend-services/tree/8e45a7301a58d96e06f4bc5340a53a551c3934fb/infrastructure)에서 볼 수 있습니다. 현재 운영 PostgreSQL 마이그레이션은 `backend-app/db/postgresql/`에 있습니다.
 
 ---

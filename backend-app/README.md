@@ -463,7 +463,7 @@ refresh는 쿠키만 읽는다(본문 무시). 한 UPDATE로 `token_hash=:old`�
 
 ### DB 계약 시험(`contractTest`)
 
-`boot/src/contractTest/kotlin`의 시험은 앱 전체를 `@SpringBootTest(webEnvironment = RANDOM_PORT)`(실제 Tomcat, `java.net.http.HttpClient`)로 띄우고 Testcontainers PostgreSQL에 비소유 역할 `pawbridge_app`으로 접속한다. JVM마다 컨테이너 하나(이미지는 `-PcontractPostgresImage=...`·`pawbridge.contract.postgres-image`·`PAWBRIDGE_CONTRACT_POSTGRES_IMAGE`로 바꾸고, 기본은 packaged smoke와 같은 digest 고정 `postgres:17.11-bookworm`)와 Spring 컨텍스트 하나를 `ContractTestBase`로 모든 시험이 공유한다. 스키마는 `src/contractTest/resources/schema/`의 서비스 마이그레이션 복사본(user V1~V5, community V1~V11)을 스키마별 `search_path`로 적용하고, 앱 역할의 열 단위 권한은 `app-grants.sql`이 정한다. 복사본은 `SchemaSourcePinTest`가 원본 SHA-256과 대조한다(원본 서비스 디렉터리가 없어지면 복사본이 유일한 원본이 되어 대조를 건너뛴다). 권한 회수 시험은 `ContractPostgres.withRevoked`로 슈퍼유저 연결에서 REVOKE하고 `finally`에서 GRANT한다.
+`boot/src/contractTest/kotlin`의 시험은 앱 전체를 `@SpringBootTest(webEnvironment = RANDOM_PORT)`(실제 Tomcat, `java.net.http.HttpClient`)로 띄우고 Testcontainers PostgreSQL에 비소유 역할 `pawbridge_app`으로 접속한다. JVM마다 컨테이너 하나(이미지는 `-PcontractPostgresImage=...`·`pawbridge.contract.postgres-image`·`PAWBRIDGE_CONTRACT_POSTGRES_IMAGE`로 바꾸고, 기본은 packaged smoke와 같은 digest 고정 `postgres:17.11-bookworm`)와 Spring 컨텍스트 하나를 `ContractTestBase`로 모든 시험이 공유한다. 스키마는 운영 DB에 수동으로 적용하는 마이그레이션 원본 `backend-app/db/postgresql/<모듈>/`(user·community·animal·store)을 그대로 읽어 스키마별 `search_path`로 적용하고, 앱 역할의 열 단위 권한은 `src/contractTest/resources/schema/app-grants.sql`이 정한다. 운영 DDL과 시험 스키마가 같은 파일이라 둘이 어긋날 수 없다. `payment` 스키마는 아직 계약 시험 DB에 적용하지 않는다. 권한 회수 시험은 `ContractPostgres.withRevoked`로 슈퍼유저 연결에서 REVOKE하고 `finally`에서 GRANT한다.
 
 `./gradlew :boot:contractTest`는 JVM 시간대 UTC로 전체(`contractTestUtc`)를, 이어서 `@Tag("timezone-sensitive")` 시험만 Asia/Seoul로(`contractTestSeoul`) 실행한다. `check`에 포함되지 않으며(Docker 필요) 시험이 없거나 건너뛴 시험이 있으면 실패한다. 로컬 Docker Desktop은 `DOCKER_HOST=unix://$HOME/.docker/run/docker.sock`과 `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`이 필요하다. Testcontainers 1.20은 Docker Engine 29가 거부하는 API 1.32를 요청하므로 시험 JVM에 `api.version=1.44`를 주며 `-PdockerApiVersion=...`으로 바꿀 수 있다.
 
@@ -979,7 +979,7 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 - `pawbridge.store-payment-events.enabled=true`가 함께 필요하며 없으면 시작이 실패한다. 이 flag는 랭킹용 Redis(`spring.data.redis.host` 또는 `memberChatRedis`)를 요구한다.
 - 운영은 앱 계정 하나로 `pawbridge_store`와 `pawbridge_payment`를 모두 쓴다. writer 계정에 `pawbridge_payment` 스키마 USAGE, `payments` SELECT·INSERT, `payment_compensation_records` SELECT·INSERT와 `pawbridge_store.orders` 행 잠금·UPDATE, 재고·검색 문서 권한이 필요하다. reader는 `orders.user_id`를 읽는다.
 - 공유 단일 pool(기본 최대 10)을 쓴다. 운영 동시 결제량에 맞춰 `PAWBRIDGE_DB_POOL_MAX_SIZE`를 정한다.
-- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`infrastructure/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 Flyway 위치 밖에 있어 자동으로 실행되지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
+- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`backend-app/db/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 버전 번호가 없는 일회성 DDL이라 계약 시험 스키마에도 자동으로 들어가지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
 - `toss.secret-key`(필수)와 `toss.base-url`.
 
 알려진 한계: 승인 응답이 DONE이 아닌 경우(가상계좌 `WAITING_FOR_DEPOSIT` 등)는 원래처럼 응답만 돌려주며 웹훅 처리는 없다. 서블릿 기본 오류 로그에 Toss 오류 본문이 남을 수 있다(비밀값은 없음).
