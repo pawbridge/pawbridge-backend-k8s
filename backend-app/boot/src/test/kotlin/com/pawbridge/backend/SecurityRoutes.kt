@@ -219,6 +219,7 @@ object SecurityRoutes {
         add("POST", "/api/v1/animals", Access.MEMBER, animalCommands)
         add("PATCH", "/api/v1/animals/{id}/status", Access.MEMBER, animalCommands)
         add("PATCH", "/api/v1/animals/{id}/description", Access.MEMBER, animalCommands)
+        add("PUT", "/api/v1/animals/{id}", Access.MEMBER, animalCommands)
         add("DELETE", "/api/v1/animals/{id}", Access.MEMBER, animalCommands)
         // Flag: orders and carts.
         add("POST", "/api/v1/orders/direct", Access.MEMBER, directOrders)

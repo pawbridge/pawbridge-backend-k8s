@@ -131,6 +131,7 @@ class ReadSecurityConfiguration {
                 AntPathRequestMatcher("/api/v1/animals", "POST"),
                 AntPathRequestMatcher("/api/v1/animals/{id}/status", "PATCH"),
                 AntPathRequestMatcher("/api/v1/animals/{id}/description", "PATCH"),
+                AntPathRequestMatcher("/api/v1/animals/{id}", "PUT"),
                 AntPathRequestMatcher("/api/v1/animals/{id}", "DELETE")))
         val storeDirectOrdersEnabled = RequestMatcher { "true".equals(storeDirectOrdersEnabledFlag, ignoreCase = true) }
         val storeDirectOrderRoutes = AndRequestMatcher(storeDirectOrdersEnabled,

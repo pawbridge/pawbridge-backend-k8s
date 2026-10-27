@@ -4,6 +4,7 @@ import com.pawbridge.backend.animal.api.AnimalCommandActors
 import com.pawbridge.backend.animal.api.AnimalCommandActors.Actor
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.CreateAnimalRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalDescriptionRequest
+import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalStatusRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Animal
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Shelter
@@ -113,6 +114,37 @@ class AnimalCommandServiceTest {
             search, animals, shelters, AnimalMapper(),
             NoticeNumberGenerator(animals), actors, manager,
         )
+    }
+
+    private fun manualAnimal(): Animal {
+        return Animal.builder()
+            .id(42L)
+            .shelter(shelter)
+            .apmsNoticeNo("MAN-261027-000001")
+            .species(Species.DOG)
+            .gender(Gender.MALE)
+            .neuterStatus(NeuterStatus.NO)
+            .breed("믹스견")
+            .weight("5(Kg)")
+            .description("처음 설명")
+            .noticeStartDate(LocalDate.of(2026, 10, 20))
+            .noticeEndDate(LocalDate.of(2026, 10, 30))
+            .status(AnimalStatus.ADOPTED)
+            .apiSource(ApiSource.MANUAL)
+            .build()
+    }
+
+    private fun updateRequest(): UpdateAnimalRequest {
+        val request = UpdateAnimalRequest()
+        request.noticeStartDate = LocalDate.of(2026, 10, 21)
+        request.noticeEndDate = LocalDate.of(2026, 11, 5)
+        request.species = Species.CAT
+        request.gender = Gender.FEMALE
+        request.neuterStatus = NeuterStatus.YES
+        request.color = "삼색"
+        request.happenDate = LocalDate.of(2026, 10, 19)
+        request.description = "고친 설명"
+        return request
     }
 
     private fun request(): CreateAnimalRequest {
@@ -405,6 +437,73 @@ class AnimalCommandServiceTest {
     }
 
     @Test
+    fun `직접 등록한 동물일 때__정보를 수정하면__항목을 통째로 바꾸고 상태와 출처와 공고번호는 그대로 둔 채 검색 문서를 갱신한다`() {
+        // given
+        val manual = manualAnimal()
+
+        every { manager.dataSource } returns writerSource
+        every { search.dataSource() } returns writerSource
+        every { manager.getTransaction(any()) } answers { enterTransaction(firstArg()) }
+        every { manager.commit(any()) } answers { clearMockTransactionMetadata() }
+        every { actors.find(any()) } returns shelterActor
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manual)
+        justRun { animals.flush() }
+        justRun { search.animal(any()) }
+
+        val service = createService()
+
+        // when
+        val response = service.update(11L, 42L, updateRequest())
+
+        // then
+        assertThat(response.species).isEqualTo(Species.CAT)
+        assertThat(response.gender).isEqualTo(Gender.FEMALE)
+        assertThat(response.color).isEqualTo("삼색")
+        assertThat(response.description).isEqualTo("고친 설명")
+        assertThat(response.noticeEndDate).isEqualTo(LocalDate.of(2026, 11, 5))
+        assertThat(response.happenDate).isEqualTo(LocalDate.of(2026, 10, 19))
+        // 요청에 없는 선택 항목은 지운다.
+        assertThat(manual.breed).isNull()
+        assertThat(manual.weight).isNull()
+        assertThat(manual.status).isEqualTo(AnimalStatus.ADOPTED)
+        assertThat(manual.apiSource).isEqualTo(ApiSource.MANUAL)
+        assertThat(manual.apmsNoticeNo).isEqualTo("MAN-261027-000001")
+        assertThat(manual.shelter).isSameAs(shelter)
+        verifyOrder {
+            actors.find(11L)
+            animals.findByIdForUpdate(42L)
+            animals.flush()
+            search.animal(42L)
+            manager.commit(transaction)
+        }
+        verify(exactly = 0) { animals.findById(any()) }
+    }
+
+    @Test
+    fun `APMS 동물일 때__정보를 수정하면__수정 불가로 거부하고 항목과 검색 문서를 건드리지 않고 롤백한다`() {
+        // given
+        every { manager.dataSource } returns writerSource
+        every { search.dataSource() } returns writerSource
+        every { manager.getTransaction(any()) } answers { enterTransaction(firstArg()) }
+        every { manager.rollback(any()) } answers { clearMockTransactionMetadata() }
+        every { actors.find(any()) } returns shelterActor
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(animal)
+
+        val service = createService()
+
+        // when
+        val thrown = assertThatThrownBy { service.update(11L, 42L, updateRequest()) }
+
+        // then
+        thrown.isInstanceOf(AnimalNotEditableException::class.java)
+        assertThat(animal.species).isEqualTo(Species.DOG)
+        assertThat(animal.description).isNull()
+        verify(exactly = 0) { animals.flush() }
+        verify(exactly = 0) { search.animal(any()) }
+        verify(exactly = 1) { manager.rollback(transaction) }
+    }
+
+    @Test
     fun `소유자일 때__삭제하면__현재 소유자를 확인하고 검색 정리 없이 삭제한 뒤 커밋한다`() {
         // given
         every { manager.dataSource } returns writerSource
@@ -471,7 +570,7 @@ class AnimalCommandServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["create", "status", "description", "delete"])
+    @ValueSource(strings = ["create", "status", "description", "update", "delete"])
     fun `다른 보호소의 행위자일 때__어떤 명령이든 실행하면__거부하고 저장·삭제·검색 갱신 없이 상태를 그대로 두고 롤백한다`(command: String) {
         // given
         every { manager.dataSource } returns writerSource
@@ -516,8 +615,8 @@ class AnimalCommandServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["status", "description", "delete"])
-    fun `동물이 없을 때__상태·설명·삭제 명령을 실행하면__원래의 엔티티 없음 실패를 유지하고 롤백한다`(command: String) {
+    @ValueSource(strings = ["status", "description", "update", "delete"])
+    fun `동물이 없을 때__상태·설명·수정·삭제 명령을 실행하면__원래의 엔티티 없음 실패를 유지하고 롤백한다`(command: String) {
         // given
         every { manager.dataSource } returns writerSource
         every { search.dataSource() } returns writerSource
@@ -765,6 +864,7 @@ class AnimalCommandServiceTest {
                 request.description = "수정"
                 service.updateDescription(userId, 42L, request)
             }
+            "update" -> service.update(userId, 42L, updateRequest())
             "delete" -> service.delete(userId, 42L)
             else -> throw AssertionError(command)
         }
