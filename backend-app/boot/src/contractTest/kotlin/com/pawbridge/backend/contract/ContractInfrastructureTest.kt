@@ -11,14 +11,15 @@ import org.junit.jupiter.api.Test
 @Tag("contract")
 class ContractInfrastructureTest {
     @Test
-    fun `마이그레이션을 적용했을 때__테이블을 조회하면__두 스키마의 현재 테이블만 있다`() {
+    fun `마이그레이션을 적용했을 때__테이블을 조회하면__세 스키마의 현재 테이블만 있다`() {
         // given
         // when
         val tables = ContractPostgres.admin.queryForList(
-            "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname IN (?, ?)",
+            "SELECT schemaname || '.' || tablename FROM pg_tables WHERE schemaname IN (?, ?, ?)",
             String::class.java,
             ContractPostgres.USER_SCHEMA,
             ContractPostgres.COMMUNITY_SCHEMA,
+            ContractPostgres.ANIMAL_SCHEMA,
         )
 
         // then
@@ -29,9 +30,19 @@ class ContractInfrastructureTest {
             "pawbridge_community.posts",
             "pawbridge_community.private_notes",
             "pawbridge_community.member_chat_rooms",
+            "pawbridge_animal.animals",
+            "pawbridge_animal.lost_gallery_documents",
+            "pawbridge_animal.batch_job_instance",
         )
-        // user V5 drops it, so the files were applied in version order.
-        assertThat(tables).doesNotContain("pawbridge_user.refresh_tokens")
+        // user V5/V6, community V12 and animal V9 drop them, so the files were applied in version order.
+        assertThat(tables).doesNotContain(
+            "pawbridge_user.refresh_tokens",
+            "pawbridge_user.processed_events",
+            "pawbridge_community.processed_events",
+            "pawbridge_animal.processed_events",
+            "pawbridge_animal.sync_history",
+            "pawbridge_animal.animal_image_embeddings",
+        )
     }
 
     @Test
