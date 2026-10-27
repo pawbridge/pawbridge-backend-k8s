@@ -686,13 +686,15 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 공유 단일 pool(`p
 | PATCH | `/api/v1/animals/{id}/status` | 원문 상태 변경, 200 |
 | PATCH | `/api/v1/animals/{id}/description` | 원문 설명 변경, 200 |
 | PUT | `/api/v1/animals/{id}` | 직접 등록(MANUAL) 동물의 정보 항목 전체 교체, 200. APMS 동물은 409 |
-| DELETE | `/api/v1/animals/{id}` | 원문 삭제, 204 |
+| DELETE | `/api/v1/animals/{id}` | 직접 등록(MANUAL) 동물 삭제, 204. APMS 동물은 관리자도 409 |
 
 서명 검증한 JWT의 회원 ID만 사용한다. User 모듈은 같은 writer 트랜잭션에서 현재 회원 행을 잠그고 삭제 대기를 조회한다. Animal은 현재 DB의 `ROLE_ADMIN` 또는 보호소 등록번호가 일치하는 `ROLE_SHELTER`만 허용한다. JWT의 오래된 역할이나 `X-User-*` 헤더로 이 검사를 대체하지 않는다. 기존 조회·ADMIN 경로의 인가는 바꾸지 않는다.
 
 선택한 원문 JPA 모델·저장소·mapper·업무 로직을 infrastructure 안에서 재사용한다. 명시 writer EMF는 Animal/Shelter/BaseTimeEntity만 관리하고 전역 스캔·DDL·새 pool을 만들지 않는다. 원문 감사 listener와 서비스의 REQUIRED 경계를 유지하고 writer 격리는 READ_COMMITTED로 명시한다. JpaTM의 기본 제한은 15초다. 조회용 reader와 구분하고, User 조회와 검색 SQL도 같은 writer DataSource에 참여해야 한다. Nori 분석기는 조회·추천·명령 사이에서 하나를 공유하고 context와 함께 닫는다.
 
-생성과 설명 변경은 원문 동물·검색 투영을 함께 커밋한다. 비MANUAL 출처의 공고번호가 null/빈 값이면 쓰기 전에 고정 400으로 거부하며, MANUAL의 기본값·번호 생성과 정상 외부 번호는 유지한다. 상태 변경은 flush한 감사 시각으로 응답을 만든다. 정보 수정(PUT)은 MANUAL 동물만 받는다. APMS 동물은 다음 동기화가 덮어쓰기 때문이다. 축종·성별·중성화·공고 기간·품종·나이·체중·색·특징·발견 일자·장소·이미지·설명을 요청 값으로 통째로 바꾸고(null이면 지움), 상태·출처·공고번호·보호소는 바꾸지 않으며 검색 투영을 함께 커밋한다. 삭제의 FK 동작도 유지한다. 이 명령들은 더 이상 Animal outbox(`animal.created`·`animal.status.changed`·`animal.updated`)를 쓰지 않는다. 이 토픽의 소비자가 없었고 Debezium·Kafka·outbox는 모놀리스에서 제거하기로 결정했기 때문이며, 이벤트 큐는 나중에 필요할 때 다시 도입한다. APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
+생성과 설명 변경은 원문 동물·검색 투영을 함께 커밋한다. 비MANUAL 출처의 공고번호가 null/빈 값이면 쓰기 전에 고정 400으로 거부하며, MANUAL의 기본값·번호 생성과 정상 외부 번호는 유지한다. 상태 변경은 flush한 감사 시각으로 응답을 만든다. 정보 수정(PUT)은 MANUAL 동물만 받는다. APMS 동물은 다음 동기화가 덮어쓰기 때문이다. 축종·성별·중성화·공고 기간·품종·나이·체중·색·특징·발견 일자·장소·이미지·설명을 요청 값으로 통째로 바꾸고(null이면 지움), 상태·출처·공고번호·보호소는 바꾸지 않으며 검색 투영을 함께 커밋한다. 삭제는 MANUAL 동물만 받는다. APMS 동물은 다음 동기화가 다시 만들고 챗봇 기록이 외래키로 묶여 있어 관리자도 409를 받는다. MANUAL 삭제의 FK 동작은 유지한다. 이 명령들은 더 이상 Animal outbox(`animal.created`·`animal.status.changed`·`animal.updated`)를 쓰지 않는다. 이 토픽의 소비자가 없었고 Debezium·Kafka·outbox는 모놀리스에서 제거하기로 결정했기 때문이며, 이벤트 큐는 나중에 필요할 때 다시 도입한다. APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
+
+사진 칸(`imageUrl`, `imageUrl2`) 규칙은 생성과 정보 수정에 같다. 칸마다 null, 그 동물의 지금 값, 또는 아래 업로드 경로가 만든 사진 중 저장소에 지금 있고 어느 동물도 쓰지 않는 주소만 받고, 그 밖에는 400 `등록할 수 없는 사진 주소입니다. 사진을 다시 올려 주세요.`를 준다. 저장소 확인(HeadObject)은 쓰기 트랜잭션 전에 하며, 수정에서는 잠금 없이 읽은 지금 값과 다른 주소만 확인하므로 사진을 그대로 둔 수정은 저장소에 의존하지 않는다. 수정으로 빠진 사진과 삭제된 동물의 사진은 커밋 뒤에 어느 동물도 쓰지 않을 때만 지우며, 정리 실패는 주소 없이 경고 로그만 남기고 응답을 바꾸지 않는다. `pawbridge.animal-images.enabled`가 꺼져 있으면 새 사진을 받지 않고 정리도 하지 않는다. 알려진 한계: 오래된 폼이 방금 교체된 사진을 되돌려 보내면서 그 교체의 정리보다 먼저 저장소 확인을 통과하면, 다시 붙은 사진이 정리로 지워질 수 있다(같은 동물의 동시 수정, 수 ms 창). 업로드만 하고 등록·수정하지 않은 사진은 지우는 경로가 없어 남는다(후속: 버킷 수명주기나 청소 작업).
 
 초기 보완에서는 소유 합성 PostgreSQL 17.11의 실제 보안→MVC→JPA 16계약과 당시 코어 단위 48사례를 확인했다. 이후 동시성 보완의 현재 검증은 아래에서 구분한다. PG는 최초 실행의 15성공과 UTC Calendar로 비교를 교정한 상태 응답 1사례의 수정 전 RED·수정 후 GREEN으로 검증했으며, 비교 방식 교정 뒤 성공한 나머지를 반복하지 않았다. 서버의 시간대·값·허용 오차는 변경하지 않았고 응답/DB 감사 시각 차이는 1µs 미만이어야 한다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK 실패의 rollback, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
 
@@ -780,7 +782,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 원문 PostgreSQL의 여행 카탈로그 7개 테이블과 응답·가용 상태·이미지 이용 조건을 사용하며, 응답 중 TourAPI·R2·AI 호출을 하지 않습니다. 수집·스케줄러·갱신 API는 이 구성에 포함하지 않습니다. 새 합성 DB 검증은 SELECT 전용 reader와 `P14_PG_SETTINGS`를 사용하는 `OwnedPostgresqlAnimalTravelTest`로 분리합니다. 기존 수집기의 실행 소유권 인계와 실제 운영 활성화는 별도 미완료 항목입니다.
 
-### Animal 이미지 업로드·삭제
+### Animal 이미지 업로드
 
 `pawbridge.animal-images.enabled=true`에서만 원문 `ImageController`의 업로드 두 경로를 조립한다. 기본 off이며 `on` 등 true 이외 별칭은 비활성이다. 저장소 client·bucket·공개 URL은 Post 소유 설정을 빌려 쓰고 닫지 않는다. 새 pool·DDL·의존성은 없다.
 
@@ -789,13 +791,13 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 | POST | `/api/v1/animals/images` (`file`) | `{"imageUrl"}`, 200 |
 | POST | `/api/v1/animals/images/multiple` (`files`, 최대5) | `{"imageUrls","count"}`, 200 |
 
-허용 대상은 이전 Gateway 규칙을 따르되 판정 근거는 기존 Animal 쓰기와 같은 현재 DB 역할이다. 단건 업로드와 삭제는 non-USER 경로였으므로 서명 검증한 회원 ID로 기존 writer 트랜잭션에서 현재 회원을 조회해 ADMIN·SHELTER만 허용하고(403 `권한이 부족합니다.`), 조회를 커밋한 뒤 저장소를 호출한다. 원문 Gateway는 JWT 역할 claim으로 판정했으므로 토큰 발급 뒤 역할이 바뀐 회원, 회원 행이 없거나 삭제 대기인 회원(403), writer DB 장애(500)에서 결과가 다르다. 역할 검사는 인자 바인딩 뒤에 실행되므로 USER의 형식 오류 요청은 원문 403 대신 400/500을 받을 수 있고, 비-multipart 요청은 공통 Post multipart advice의 500 `서버 에러!`를 받는다(원문 500 `서버 내부 오류가 발생했습니다.`). 다중 업로드는 Gateway 역할 규칙에 걸리지 않던 2단 경로라 인증만 요구한다. `/api/animals/...` alias는 Gateway 책임으로 남긴다.
+허용 대상은 이전 Gateway 규칙을 따르되 판정 근거는 기존 Animal 쓰기와 같은 현재 DB 역할이다. 단건·다중 업로드 모두 서명 검증한 회원 ID로 기존 writer 트랜잭션에서 현재 회원을 조회해 ADMIN·SHELTER만 허용하고(403 `권한이 부족합니다.`), 조회를 커밋한 뒤 저장소를 호출한다. 원문 Gateway는 JWT 역할 claim으로 판정했으므로 토큰 발급 뒤 역할이 바뀐 회원, 회원 행이 없거나 삭제 대기인 회원(403), writer DB 장애(500)에서 결과가 다르다. 역할 검사는 인자 바인딩 뒤에 실행되므로 USER의 형식 오류 요청은 원문 403 대신 400/500을 받을 수 있고, 비-multipart 요청은 공통 Post multipart advice의 500 `서버 에러!`를 받는다(원문 500 `서버 내부 오류가 발생했습니다.`). 원문 Gateway에서 다중 업로드는 역할 규칙에 걸리지 않던 2단 경로라 인증만 요구했지만, 지금은 단건과 같은 역할 검사를 거친다. `/api/animals/...` alias는 Gateway 책임으로 남긴다.
 
-원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 부분 업로드 실패 시 앞 객체 유지를 유지한다. 키는 `animals/{uuid v4}.{jpg|png|gif|webp}`이고 확장자는 원본 파일명이 아니라 검사한 MIME에서 정한다.
+원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 부분 업로드 실패 시 앞 객체 유지를 유지한다. 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다. 키는 `animals/{uuid v4}.{jpg|png|gif|webp}`이고 확장자는 원본 파일명이 아니라 검사한 MIME에서 정한다.
 
-원문의 공개 삭제 `DELETE /api/v1/animals/images?imageUrl=`는 없앴다. 버킷을 게시글·제보·상품 미디어와 함께 쓰는데 이 경로는 역할만 보고 키 모양이나 소유를 확인하지 않아, 보호소·관리자 계정이 버킷의 아무 객체나 지울 수 있었다. 프론트는 이 경로를 쓰지 않았다. 대신 동물 명령이 사진을 정리한다(아래 동물 명령 절). 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다.
+원문의 공개 삭제 `DELETE /api/v1/animals/images?imageUrl=`는 없앴다. 버킷을 게시글·제보·상품 미디어와 함께 쓰는데 이 경로는 역할만 보고 키 모양이나 소유를 확인하지 않아, 보호소·관리자 계정이 버킷의 아무 객체나 지울 수 있었다. 프론트는 이 경로를 쓰지 않았다. 대신 동물 명령이 사진을 정리한다(위 "Animal JSON 명령과 현재 회원 권한" 절의 사진 칸 규칙).
 
-원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있고, 원문의 삭제 실패 error 로그는 남기지 않는다. 이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 역할 조회는 기존 Animal 쓰기와 같은 `JdbcAnimalCommandActors`이므로 선택한 writer에 `pawbridge_user` USAGE, `users`·`contact_deletions` SELECT, `FOR UPDATE`용 `users` UPDATE(user_id)가 필요하다(`animal-command-owned-schema.sql`과 같음). 선택한 writer에 이 권한이 없으면 단건 업로드·삭제가 권한 오류 500으로 실패한다. 활성화 전 권한을 별도로 부여·검증한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
+이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 역할 조회는 기존 Animal 쓰기와 같은 `JdbcAnimalCommandActors`이므로 선택한 writer에 `pawbridge_user` USAGE, `users`·`contact_deletions` SELECT, `FOR UPDATE`용 `users` UPDATE(user_id)가 필요하다(`animal-command-owned-schema.sql`과 같음). 선택한 writer에 이 권한이 없으면 업로드가 권한 오류 500으로 실패한다. 활성화 전 권한을 별도로 부여·검증한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
 
 ### 보호소 관리 쓰기와 회원 승인 직렬화
 

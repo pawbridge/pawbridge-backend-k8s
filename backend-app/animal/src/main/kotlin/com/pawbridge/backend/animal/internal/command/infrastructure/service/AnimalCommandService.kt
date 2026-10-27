@@ -42,12 +42,13 @@ class AnimalCommandService(
     }
 
     fun create(verifiedUserId: Long?, request: CreateAnimalRequest): AnimalDetailResponse {
+        val requestedPhotos = listOf(request.imageUrl, request.imageUrl2)
         // Storage lookups run before the write transaction so no row lock is held during the network call.
-        val missing = missingUploadedPhotos(request.imageUrl, request.imageUrl2)
+        val storedPhotos = storedUploadedPhotos(requestedPhotos)
         return writes.execute { _ ->
             val actor = currentActor(verifiedUserId)
             requireShelter(actor, request.careRegNo)
-            requireAttachablePhotos(listOf(request.imageUrl, request.imageUrl2), emptySet(), missing)
+            requireAttachablePhotos(requestedPhotos, emptySet(), storedPhotos)
             create(request)
         }!!
     }
@@ -61,8 +62,12 @@ class AnimalCommandService(
     }
 
     fun update(verifiedUserId: Long?, id: Long?, request: UpdateAnimalRequest): AnimalDetailResponse {
-        val missing = missingUploadedPhotos(request.imageUrl, request.imageUrl2)
-        val updated = writes.execute { _ -> update(ownedAnimal(verifiedUserId, id), request, missing) }!!
+        val requestedPhotos = listOf(request.imageUrl, request.imageUrl2)
+        // Only addresses the animal does not show yet are looked up in storage, so an edit that keeps its photos
+        // never depends on storage being reachable.
+        val newPhotos = requestedPhotos - currentPhotosWithoutLock(id, requestedPhotos)
+        val storedPhotos = storedUploadedPhotos(newPhotos)
+        val updated = writes.execute { _ -> update(ownedAnimal(verifiedUserId, id), request, storedPhotos) }!!
         cleanUpPhotos(updated.replacedPhotos)
         return updated.response
     }
@@ -158,13 +163,13 @@ class AnimalCommandService(
         return mapper.toDetailResponse(animal)
     }
 
-    private fun update(animal: Animal, request: UpdateAnimalRequest, missing: Set<String>): Updated {
+    private fun update(animal: Animal, request: UpdateAnimalRequest, storedPhotos: Set<String>): Updated {
         // APMS 동물은 다음 동기화가 덮어쓰므로, 권한을 확인한 뒤 출처로 한 번 더 거른다.
         if (animal.apiSource != ApiSource.MANUAL) {
             throw AnimalNotEditableException()
         }
         val currentPhotos = setOfNotNull(animal.imageUrl, animal.imageUrl2)
-        requireAttachablePhotos(listOf(request.imageUrl, request.imageUrl2), currentPhotos, missing)
+        requireAttachablePhotos(listOf(request.imageUrl, request.imageUrl2), currentPhotos, storedPhotos)
         animal.updateManualDetails(
             noticeStartDate = request.noticeStartDate,
             noticeEndDate = request.noticeEndDate,
@@ -188,20 +193,38 @@ class AnimalCommandService(
         return Updated(mapper.toDetailResponse(animal), replacedPhotos)
     }
 
-    /** Uploaded photo addresses among these that no longer exist in storage. */
-    private fun missingUploadedPhotos(vararg urls: String?): Set<String> {
+    /** The animal's current photo addresses, read only when the request names an uploaded photo at all. */
+    private fun currentPhotosWithoutLock(id: Long?, requestedPhotos: List<String?>): Set<String> {
+        val store = photos ?: return emptySet()
+        val namesUploadedPhoto = requestedPhotos.any { url -> url != null && store.isUploadedPhoto(url) }
+        if (!namesUploadedPhoto) {
+            return emptySet()
+        }
+        val slots = writes.execute { _ -> animalRepository.findPhotoSlots(id) } ?: return emptySet()
+        return setOfNotNull(slots.imageUrl, slots.imageUrl2)
+    }
+
+    /** Uploaded photo addresses among these that exist in storage right now. */
+    private fun storedUploadedPhotos(urls: Collection<String?>): Set<String> {
         val store = photos ?: return emptySet()
         return urls.filterNotNull()
-            .filter { url -> store.isUploadedPhoto(url) && !store.exists(url) }
+            .distinct()
+            .filter { url -> store.isUploadedPhoto(url) && store.exists(url) }
             .toSet()
     }
 
     /**
-     * A photo slot may keep its current address or take a photo this service uploaded that still exists and that
-     * no animal shows yet. Anything else (another animal's photo, an outside address, a photo already cleaned up
-     * because a stale form sends it back) is refused, so cleanup never removes a photo someone else shows.
+     * A photo slot may keep its current address or take a photo this service uploaded that exists in storage and
+     * that no animal shows yet. Anything else (another animal's photo, an outside address, a photo already cleaned
+     * up because a stale form sends it back) is refused, so cleanup never removes a photo someone else shows.
+     * A new address that was not looked up in storage (the animal showed it when read without a lock, but no longer
+     * does under the lock) is refused too.
+     *
+     * Known limit: the storage lookup runs before the lock. If a stale form sends back photo A while another edit of
+     * the same animal has just replaced A and its cleanup has not deleted A yet, the stale form can reattach A and the
+     * cleanup then deletes it. The window is the few milliseconds between that commit and its cleanup.
      */
-    private fun requireAttachablePhotos(urls: List<String?>, currentPhotos: Set<String>, missing: Set<String>) {
+    private fun requireAttachablePhotos(urls: List<String?>, currentPhotos: Set<String>, storedPhotos: Set<String>) {
         for (url in urls) {
             if (url == null || url in currentPhotos) {
                 continue
@@ -209,7 +232,7 @@ class AnimalCommandService(
             val store = photos
             val attachable = store != null &&
                 store.isUploadedPhoto(url) &&
-                url !in missing &&
+                url in storedPhotos &&
                 animalRepository.countPhotoReferences(url) == 0L
             if (!attachable) {
                 throw IllegalArgumentException("등록할 수 없는 사진 주소입니다. 사진을 다시 올려 주세요.")

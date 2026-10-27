@@ -14,6 +14,7 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.enums.Gender
 import com.pawbridge.backend.animal.internal.command.infrastructure.enums.NeuterStatus
 import com.pawbridge.backend.animal.internal.command.infrastructure.enums.Species
 import com.pawbridge.backend.animal.internal.command.infrastructure.mapper.AnimalMapper
+import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalPhotoSlots
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter
@@ -136,10 +137,12 @@ class AnimalCommandServiceTest {
         justRun { search.animal(any()) }
     }
 
+    /** A MANUAL animal showing these photos, both under the write lock and in the lock-free photo read. */
     private fun manualAnimalShowing(imageUrl: String?, imageUrl2: String?): Animal {
         val manual = manualAnimal()
         ReflectionTestUtils.setField(manual, "imageUrl", imageUrl)
         ReflectionTestUtils.setField(manual, "imageUrl2", imageUrl2)
+        every { animals.findPhotoSlots(any()) } returns AnimalPhotoSlots(imageUrl, imageUrl2)
         return manual
     }
 
@@ -758,7 +761,8 @@ class AnimalCommandServiceTest {
         every { manager.getTransaction(any()) } answers { enterTransaction(firstArg()) }
         every { manager.commit(any()) } answers { clearMockTransactionMetadata() }
         every { actors.find(any()) } returns shelterActor
-        every { animals.findByIdForUpdate(any()) } returns Optional.of(if (command == "delete") manualAnimal() else animal)
+        val owned = if (command == "delete") manualAnimal() else animal
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(owned)
         justRun { animals.flush() }
         justRun { search.animal(any()) }
         justRun { animals.deleteById(any()) }
@@ -1003,8 +1007,79 @@ class AnimalCommandServiceTest {
         // then
         assertThat(response.imageUrl).isEqualTo(PHOTO_B)
         assertThat(response.imageUrl2).isEqualTo(PHOTO_A)
+        verify(exactly = 0) { photos.exists(any()) }
         verify(exactly = 0) { animals.countPhotoReferences(any()) }
         verify(exactly = 0) { photos.delete(any()) }
+    }
+
+    @Test
+    fun `사진 기능이 꺼져 있을 때__정보를 수정하면__지금 사진은 그대로 받고 새 사진은 400으로 거부한다`() {
+        // given
+        stubCommittingWrites()
+        val outside = "https://apms.invalid/photo.jpg"
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimalShowing(outside, null))
+        val keeping = updateRequest()
+        keeping.imageUrl = outside
+        val attaching = updateRequest()
+        attaching.imageUrl = PHOTO_A
+
+        val service = createService(photos = null)
+
+        // when
+        val kept = service.update(11L, 42L, keeping)
+        val refused = assertThatThrownBy { service.update(11L, 42L, attaching) }
+
+        // then
+        assertThat(kept.imageUrl).isEqualTo(outside)
+        refused.isInstanceOf(IllegalArgumentException::class.java)
+        verify(exactly = 0) { animals.findPhotoSlots(any()) }
+        verify(exactly = 0) { animals.countPhotoReferences(any()) }
+    }
+
+    @Test
+    fun `저장소가 응답하지 않을 때__사진을 그대로 두고 정보를 수정하면__저장소를 부르지 않고 성공한다`() {
+        // given
+        stubCommittingWrites()
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimalShowing(PHOTO_A, null))
+        val photos = photoStore(PHOTO_A)
+        every { photos.exists(any()) } throws IllegalStateException("synthetic storage outage")
+        val request = updateRequest()
+        request.imageUrl = PHOTO_A
+
+        val service = createService(photos)
+
+        // when
+        val response = service.update(11L, 42L, request)
+
+        // then
+        assertThat(response.imageUrl).isEqualTo(PHOTO_A)
+        verify(exactly = 0) { photos.exists(any()) }
+        verify(exactly = 0) { photos.delete(any()) }
+    }
+
+    @Test
+    fun `잠금 없이 읽은 뒤 사진이 바뀌었을 때__그 주소를 보내면__저장소 확인을 거치지 않은 새 주소라 거부한다`() {
+        // given
+        stubCommittingWrites()
+        every { animals.findPhotoSlots(any()) } returns AnimalPhotoSlots(PHOTO_A, null)
+        val locked = manualAnimal()
+        ReflectionTestUtils.setField(locked, "imageUrl", PHOTO_B)
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(locked)
+        every { animals.countPhotoReferences(any()) } returns 0L
+        val photos = photoStore(PHOTO_A, PHOTO_B)
+        val request = updateRequest()
+        request.imageUrl = PHOTO_A
+
+        val service = createService(photos)
+
+        // when
+        val thrown = assertThatThrownBy { service.update(11L, 42L, request) }
+
+        // then
+        thrown.isInstanceOf(IllegalArgumentException::class.java)
+        verify(exactly = 0) { photos.exists(any()) }
+        assertThat(locked.imageUrl).isEqualTo(PHOTO_B)
+        verify(exactly = 1) { manager.rollback(transaction) }
     }
 
     @Test

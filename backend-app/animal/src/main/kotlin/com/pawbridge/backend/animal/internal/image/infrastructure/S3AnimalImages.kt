@@ -29,7 +29,8 @@ class S3AnimalImages(
 
         // The extension follows the checked content type, not the client's file name, so every key keeps the
         // uploaded-photo shape that cleanup recognizes.
-        val extension = EXTENSIONS.getValue(file!!.contentType!!.lowercase(Locale.getDefault()))
+        val contentType = file!!.contentType!!.lowercase(Locale.getDefault())
+        val extension = EXTENSIONS.getValue(contentType)
         val key = ANIMALS_FOLDER + UUID.randomUUID() + extension
 
         try {
