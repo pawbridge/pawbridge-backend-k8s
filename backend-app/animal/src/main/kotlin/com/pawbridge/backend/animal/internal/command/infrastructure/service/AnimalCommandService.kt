@@ -222,7 +222,8 @@ class AnimalCommandService(
      *
      * Known limit: the storage lookup runs before the lock. If a stale form sends back photo A while another edit of
      * the same animal has just replaced A and its cleanup has not deleted A yet, the stale form can reattach A and the
-     * cleanup then deletes it. The window is the few milliseconds between that commit and its cleanup.
+     * cleanup then deletes it. The window runs from that commit until its cleanup finishes (a reference count and one
+     * storage delete, tens to hundreds of milliseconds).
      */
     private fun requireAttachablePhotos(urls: List<String?>, currentPhotos: Set<String>, storedPhotos: Set<String>) {
         for (url in urls) {
