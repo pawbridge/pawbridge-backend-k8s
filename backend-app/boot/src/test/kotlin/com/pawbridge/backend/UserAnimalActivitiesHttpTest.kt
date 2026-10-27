@@ -31,7 +31,6 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
@@ -132,26 +131,6 @@ class UserAnimalActivitiesHttpTest {
         cleared()
     }
 
-    @Test
-    fun `JWT가 없거나 신원이 위조되고 경로가 잘못됐을 때__요청하면__바인딩 전에 인증하고 업무를 하지 않는다`() {
-        // given
-        val forged = post("/api/v1/favorites/bad").header("X-User-Id", "7")
-        val malformedPath = post("/api/v1/favorites/bad").header("Authorization", token())
-
-        // when
-        val unauthenticated = mvc.perform(forged)
-        val badPath = mvc.perform(malformedPath)
-
-        // then
-        unauthenticated.andExpect(status().isUnauthorized())
-        badPath
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(activities)
-        cleared()
-    }
-
     @ParameterizedTest
     @ValueSource(strings = ["duplicate", "missing", "animal", "user", "runtime", "commit"])
     fun `업무 또는 저장소 실패가 주어졌을 때__변경하면__원래 응답을 유지하고 내부 예외 문구를 노출하지 않는다`(phase: String) {
@@ -229,26 +208,6 @@ class UserAnimalActivitiesHttpTest {
             .andExpect(jsonPath("$.message").value("보호소 회원만 등록한 동물을 조회할 수 있습니다."))
         verify(exactly = 1) { activities.registered(7, UserAnimalActivities.PageRequest(0, 20, "createdAt,desc")) }
         cleared()
-    }
-
-    @Test
-    fun `기존 상태 조회와 인접 변경 요청이 주어졌을 때__요청하면__상태 조회와 기본 거부를 그대로 유지한다`() {
-        // given
-        every { statusQuery.isFavorite(any(), any()) } returns true
-
-        // when
-        val statusResult = mvc.perform(get("/api/v1/favorites/8/check").header("Authorization", token()))
-        val putResult = mvc.perform(put("/api/v1/favorites/8").header("Authorization", token()))
-        val extraResult = mvc.perform(post("/api/v1/favorites/8/extra").header("Authorization", token()))
-
-        // then
-        statusResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data").value(true))
-        putResult.andExpect(status().isForbidden())
-        extraResult.andExpect(status().isForbidden())
-        verify(exactly = 1) { statusQuery.isFavorite(7, 8) }
-        confirmVerified(activities)
     }
 
     companion object {

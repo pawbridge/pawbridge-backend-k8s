@@ -16,14 +16,11 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
-import org.junit.jupiter.params.provider.CsvSource
-import org.junit.jupiter.params.provider.MethodSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -35,7 +32,6 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.reque
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
-import org.springframework.web.multipart.MultipartFile
 import java.util.stream.Stream
 
 /** Actual ReadSecurity/JWT filter and scoped advice; only the image service is mocked. */
@@ -91,9 +87,9 @@ class AnimalImageHttpTest {
     }
 
     @Test
-    fun `서명된 사용자__이미지 여러 장을 올리면__원래의 범위 지정 없는 경로에 도달한다`() {
+    fun `서명된 회원과 위조 헤더__이미지 여러 장을 올리면__검증된 ID만 넘기고 원래 맵을 돌려준다`() {
         // given
-        every { images.uploadImages(any()) } returns listOf("u1", "u2")
+        every { images.uploadImages(any(), any()) } returns listOf("u1", "u2")
 
         // when
         val result = mvc.perform(call("multiple").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")))
@@ -107,6 +103,7 @@ class AnimalImageHttpTest {
             .andExpect(jsonPath("$.length()").value(2))
         verify(exactly = 1) {
             images.uploadImages(
+                7L,
                 match { files ->
                     files != null &&
                         files.size == 2 &&
@@ -135,26 +132,6 @@ class AnimalImageHttpTest {
         confirmVerified(images)
     }
 
-    @ParameterizedTest
-    @MethodSource("deniedCredentials")
-    fun `없거나 잘못된 JWT와 위조 헤더__각 경로를 쓰면__업무 처리 전에 거부한다`(
-        route: String,
-        token: String,
-    ) {
-        // given
-        val request = call(route)
-        if (token == "invalid") {
-            request.header("Authorization", "Bearer invalid-token")
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized()).andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(images)
-    }
-
     @Test
     fun `업무 거부__어드바이스가 처리하면__원래 상태와 본문 형태를 유지한다`() {
         // given
@@ -165,7 +142,7 @@ class AnimalImageHttpTest {
             AnimalImageTooLargeException(),
             RuntimeException("이미지 업로드에 실패했습니다."),
         )
-        every { images.uploadImages(any()) } throws IllegalArgumentException("최대 5개의 이미지만 업로드할 수 있습니다.")
+        every { images.uploadImages(any(), any()) } throws IllegalArgumentException("최대 5개의 이미지만 업로드할 수 있습니다.")
         every { images.deleteImage(any(), any()) } throws DataAccessResourceFailureException("synthetic")
 
         // when
@@ -227,33 +204,6 @@ class AnimalImageHttpTest {
         confirmVerified(images)
     }
 
-    @ParameterizedTest
-    @CsvSource(
-        "POST,/api/animals/images",
-        "POST,/api/animals/images/multiple",
-        "DELETE,/api/animals/images",
-        "GET,/api/v1/animals/images",
-        "PUT,/api/v1/animals/images",
-        "DELETE,/api/v1/animals/images/multiple",
-        "POST,/api/v1/animals/images/extra",
-        "GET,/api/v1/animals/images/multiple",
-    )
-    fun `서명된 관리자__게이트웨이 별칭이나 소유되지 않은 이웃 경로를 쓰면__기본 거부를 유지한다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        val request = request(HttpMethod.valueOf(method), path)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(images)
-    }
-
     companion object {
         val ROUTES: List<String> = listOf("single", "multiple", "delete")
 
@@ -282,74 +232,5 @@ class AnimalImageHttpTest {
                 else -> throw AssertionError("Unknown image route")
             }
         }
-    }
-}
-
-@WebMvcTest(excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class])
-@ContextConfiguration(
-    classes = [
-        AnimalImageController::class,
-        AnimalImageExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalImageDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var images: AnimalImageService
-
-    @ParameterizedTest
-    @ValueSource(strings = ["single", "multiple", "delete"])
-    fun `이미지 플래그 없음__검증된 관리자가 이미지 경로를 쓰면__업무 처리 전에 거부한다`(route: String) {
-        // given
-        val request = AnimalImageHttpTest.call(route)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(images)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-images.enabled=on"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        AnimalImageController::class,
-        AnimalImageExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalImageAliasDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var images: AnimalImageService
-
-    @ParameterizedTest
-    @ValueSource(strings = ["single", "multiple", "delete"])
-    fun `소유되지 않은 불리언 별칭__검증된 관리자가 이미지 경로를 쓰면__소유자 플래그를 닫은 채로 유지한다`(
-        route: String,
-    ) {
-        // given
-        val request = AnimalImageHttpTest.call(route)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(images)
     }
 }

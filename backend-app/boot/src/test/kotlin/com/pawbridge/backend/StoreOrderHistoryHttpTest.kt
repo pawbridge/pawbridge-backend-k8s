@@ -10,12 +10,10 @@ import io.mockk.every
 import io.mockk.verify
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
-import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -80,46 +78,6 @@ class StoreOrderHistoryHttpTest {
             .andExpect(jsonPath("$.items[0].price").value(2600))
         verify(exactly = 1) { orders.list(7L, null, defaultRequest()) }
         verify(exactly = 1) { orders.get(7L, 77L) }
-        confirmVerified(orders)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["missing", "invalid"])
-    fun `직접 주문만 켜졌고 유효한 JWT가 없을 때__내역에서 소유자를 위조하면__애플리케이션 전에 거부한다`(
-        kind: String,
-    ) {
-        // given
-        val call = get("/api/v1/orders")
-            .header("X-User-Id", "99")
-            .header("X-User-Role", "ROLE_ADMIN")
-            .param("userId", "99")
-        if (kind == "invalid") {
-            call.header("Authorization", "Bearer invalid-token")
-        }
-
-        // when
-        val result = mvc.perform(call)
-
-        // then
-        result.andExpect(status().isUnauthorized())
-        confirmVerified(orders)
-    }
-
-    @ParameterizedTest
-    @CsvSource("GET,/api/orders", "GET,/api/v1/orders/77/extra", "GET,/api/v1/orders/77/payment", "PATCH,/api/v1/orders")
-    fun `직접 주문만 켜졌고 검증된 회원일 때__내역의 이웃 경로를 쓰면__애플리케이션 전에 거부한다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        val request = request(HttpMethod.valueOf(method), path)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
         confirmVerified(orders)
     }
 

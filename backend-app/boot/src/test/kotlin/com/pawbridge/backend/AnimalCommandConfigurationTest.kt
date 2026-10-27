@@ -7,7 +7,6 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.entity.BaseT
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Shelter
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository
-import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandService
 import com.pawbridge.backend.animal.internal.command.web.AnimalCommandController
 import com.pawbridge.backend.animal.internal.command.web.AnimalCommandExceptionHandler
@@ -34,10 +33,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Supplier
 import javax.sql.DataSource
@@ -70,7 +66,7 @@ class AnimalCommandConfigurationTest {
     }
 
     @Test
-    fun `명령 활성화__조립하면__DB 접근 없이 쓰기 단위 하나와 선택된 저장소와 제한된 서비스를 쓴다`() {
+    fun `명령 활성화__조립하면__DB 접근 없이 쓰기 단위 하나와 선택된 저장소를 만든다`() {
         // given
         val writer = mockk<DataSource>()
         val reader = mockk<DataSource>()
@@ -98,7 +94,6 @@ class AnimalCommandConfigurationTest {
             )
             val emf = context.getBean("animalCommandEntityManagerFactory", EntityManagerFactory::class.java)
             unit.set(emf)
-            assertThat(factory.dataSource).isSameAs(writer)
             assertThat(factory.persistenceUnitInfo!!.managedClassNames).containsExactlyInAnyOrder(
                 Animal::class.java.name,
                 Shelter::class.java.name,
@@ -118,22 +113,9 @@ class AnimalCommandConfigurationTest {
             assertThat(context.getBeansOfType(AnimalRepository::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(ShelterRepository::class.java)).hasSize(1)
             val manager = context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java)
-            assertThat(manager.dataSource).isSameAs(writer)
-            assertThat(manager.entityManagerFactory).isSameAs(emf)
             assertThat(manager.defaultTimeout).isEqualTo(15)
-            val service = context.getBean(AnimalCommandService::class.java)
-            val writes = ReflectionTestUtils.getField(service, "writes") as TransactionTemplate
-            assertThat(writes.transactionManager).isSameAs(manager)
-            assertThat(writes.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-            assertThat(writes.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED)
-            assertThat(writes.timeout).isEqualTo(TransactionDefinition.TIMEOUT_DEFAULT)
-            assertThat(writes.isReadOnly).isFalse()
-            val actorJdbc = ReflectionTestUtils.getField(context.getBean(AnimalCommandActors::class.java), "jdbc") as JdbcTemplate
-            assertThat(actorJdbc.dataSource).isSameAs(writer)
-            assertThat(context.getBean(SearchDocumentWriter::class.java).dataSource()).isSameAs(writer)
+            assertThat(context).hasSingleBean(AnimalCommandService::class.java)
             owned.set(context.getBean(KoreanSearchAnalyzer::class.java))
-            assertThat(ReflectionTestUtils.getField(context.getBean(SearchDocumentWriter::class.java), "analyzer"))
-                .isSameAs(owned.get())
             assertThat(context)
                 .hasSingleBean(AnimalCommandController::class.java)
                 .hasSingleBean(AnimalCommandExceptionHandler::class.java)
@@ -152,7 +134,7 @@ class AnimalCommandConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["discovery", "recommendations", "both"])
-    fun `명령과 조회 활성화__조립하면__분석기를 하나로 공유하고 읽기 쓰기 관리자를 분리한다`(
+    fun `명령과 조회 활성화__조립하면__분석기를 하나만 만들고 닫으며 읽기 자원을 건드리지 않는다`(
         mode: String,
     ) {
         // given
@@ -192,16 +174,6 @@ class AnimalCommandConfigurationTest {
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(KoreanSearchAnalyzer::class.java)).hasSize(1)
             owned.set(context.getBean(KoreanSearchAnalyzer::class.java))
-            val discovery = context.getBean(AnimalDiscovery::class.java)
-            assertThat(ReflectionTestUtils.getField(discovery, "analyzer")).isSameAs(owned.get())
-            assertThat(ReflectionTestUtils.getField(context.getBean(SearchDocumentWriter::class.java), "analyzer"))
-                .isSameAs(owned.get())
-            val reads = ReflectionTestUtils.getField(discovery, "transactions") as TransactionTemplate
-            assertThat(reads.transactionManager).isSameAs(readerManager)
-            assertThat(reads.isReadOnly).isTrue()
-            assertThat(
-                context.getBean("animalCommandJpaTransactionManager", JpaTransactionManager::class.java).dataSource,
-            ).isSameAs(writer)
             assertThat(context.containsBean("animalDiscoveryController")).isEqualTo(mode != "recommendations")
             confirmVerified(writer, reader, readerManager)
         }

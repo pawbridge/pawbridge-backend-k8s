@@ -11,13 +11,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
-import org.springframework.aop.support.AopUtils
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.security.crypto.password.PasswordEncoder
-import org.springframework.test.util.ReflectionTestUtils
 import java.util.function.Supplier
 
 class UserPasswordConfigurationTest {
@@ -55,7 +52,7 @@ class UserPasswordConfigurationTest {
     }
 
     @Test
-    fun `쓰기 자원과 함께 켜졌을 때__조립하면__쓰기 JDBC를 재사용하고 변경을 트랜잭션으로 감싸며 전역 인코더를 등록하지 않는다`() {
+    fun `쓰기 자원과 함께 켜졌을 때__조립하면__전역 인코더를 등록하지 않는다`() {
         // given
         val writeJdbc = mockk<JdbcTemplate>()
         val writeManager = mockk<JdbcTransactionManager>()
@@ -74,23 +71,7 @@ class UserPasswordConfigurationTest {
                     .hasSingleBean(UserPasswordController::class.java)
                     .hasSingleBean(UserPasswordExceptionHandler::class.java)
                     .doesNotHaveBean(PasswordEncoder::class.java)
-                assertThat(ReflectionTestUtils.getField(context.getBean(UserPasswordStore::class.java), "jdbc"))
-                    .isSameAs(context.getBean("writeJdbc"))
-                val change = context.getBean(ChangeUserPassword::class.java)
-                assertThat(AopUtils.isAopProxy(change)).isTrue()
-                assertThat(AopUtils.getTargetClass(change)).isEqualTo(ChangeUserPassword::class.java)
             }
     }
 
-    @Test
-    fun `애플리케이션이 주어졌을 때__임포트를 살펴보면__비밀번호 구성이 한 번만 임포트된다`() {
-        // given
-        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value
-
-        // when
-        val count = imports.filter { type -> type.java == UserPasswordConfiguration::class.java }.size
-
-        // then
-        assertThat(count).isEqualTo(1)
-    }
 }

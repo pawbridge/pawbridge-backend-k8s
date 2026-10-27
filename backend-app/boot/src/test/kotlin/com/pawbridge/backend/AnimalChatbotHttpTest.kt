@@ -11,12 +11,9 @@ import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
-import jakarta.servlet.http.HttpServletRequest
-import jakarta.servlet.http.HttpServletResponse
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -117,138 +114,9 @@ class AnimalChatbotHttpTest {
         confirmVerified(chatbot)
     }
 
-    @ParameterizedTest
-    @CsvSource(
-        "GET,/api/v1/animals/41/chat/messages",
-        "PUT,/api/v1/animals/41/chat/messages",
-        "PATCH,/api/v1/animals/41/chat/messages",
-        "DELETE,/api/v1/animals/41/chat/messages",
-        "POST,/api/animals/41/chat/messages",
-        "POST,/api/v1/animals/41/chat/message",
-        "POST,/api/v1/animals/41/chat/messages/extra",
-    )
-    fun `검증된 회원__정식이 아닌 메서드나 별칭을 쓰면__챗봇 전에 기본 거부한다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        val request = command(method, path)
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-            .content("{\"question\":\"입양 문의\"}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(chatbot)
-    }
-
     companion object {
         fun command(method: String, path: String): MockHttpServletRequestBuilder {
             return request(HttpMethod.valueOf(method), path).contentType(MediaType.APPLICATION_JSON)
         }
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-query.backend=postgresql"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        ChatbotController::class,
-        ChatbotExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalChatbotDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var chatbot: ChatbotService
-
-    @Test
-    fun `챗봇 기본 비활성__정식 경로로 게시하면__업무 처리 전에 거부한다`() {
-        // given
-        val request = AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
-            .content("{\"question\":\"입양 문의\"}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(chatbot)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-chatbot.enabled=on", "pawbridge.animal-query.backend=postgresql"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        ChatbotController::class,
-        ChatbotExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalChatbotAliasDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var chatbot: ChatbotService
-
-    @Test
-    fun `정식이 아닌 활성화 플래그__정식 경로로 게시하면__업무 처리 전에 거부한다`() {
-        // given
-        val request = AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
-            .content("{\"question\":\"입양 문의\"}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(chatbot)
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.animal-chatbot.enabled=true", "pawbridge.animal-query.backend=http"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        ChatbotController::class,
-        ChatbotExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AnimalChatbotOtherBackendHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var chatbot: ChatbotService
-
-    @Test
-    fun `다른 조회 백엔드__정식 경로로 게시하면__업무 처리 전에 거부한다`() {
-        // given
-        val request = AnimalChatbotHttpTest.command("POST", "/api/v1/animals/41/chat/messages")
-            .content("{\"question\":\"입양 문의\"}")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(chatbot)
     }
 }

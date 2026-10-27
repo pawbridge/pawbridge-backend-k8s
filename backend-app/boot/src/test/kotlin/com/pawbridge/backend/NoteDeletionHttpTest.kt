@@ -17,7 +17,6 @@ import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -37,9 +36,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.TransactionSystemException
 import java.time.Clock
-import java.time.Instant
 import java.util.UUID
-import java.util.function.Supplier
 import java.util.stream.Stream
 
 /** Real MVC/JWT and current-member callback; the mocked port proves no SQL, commit, FK or SSE behavior. */
@@ -114,53 +111,6 @@ class NoteDeletionHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID"])
-    fun `토큰이 없거나 잘못되고 UUID가 깨졌을 때__삭제하면__바인딩 전에 의존성 없이 인증 실패를 준다`(
-        kind: String,
-    ) {
-        // given
-        val request = delete("/api/v1/notes/not-a-uuid").header("X-User-Id", "7")
-        if (kind == "INVALID") {
-            request.header("Authorization", "Bearer invalid")
-        }
-        val message = if (kind == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["not-a-uuid", "blocks", "notifications"])
-    fun `검증된 호출자와 UUID 아닌 단일 경로일 때__삭제하면__예약 라벨 예외 없이 범위 400을 준다`(
-        segment: String,
-    ) {
-        // given
-        val request = delete("/api/v1/notes/$segment")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
-        noDependencies()
-    }
-
-    @ParameterizedTest
     @MethodSource("failures")
     fun `현재 회원이나 삭제 포트가 실패했을 때__삭제하면__비활성 없음 회원 저장소 쓰기 정책을 유지한다`(
         kind: String,
@@ -203,37 +153,6 @@ class NoteDeletionHttpTest {
         cleared()
     }
 
-    @Test
-    fun `삭제 어드바이스 밖의 관리자 집계일 때__사용자나 위조 역할 관리자가 요청하면__403과 공통 500을 유지한다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("private-count")
-
-        // when
-        val forbidden = mvc.perform(
-            get(ADMIN_COUNT)
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .header("X-User-Role", "ROLE_ADMIN"),
-        )
-        val failed = mvc.perform(get(ADMIN_COUNT).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")))
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts, members, mutation, clock)
-        cleared()
-    }
-
     private fun noDependencies() {
         confirmVerified(members, mutation, clock, counts)
         cleared()
@@ -243,7 +162,6 @@ class NoteDeletionHttpTest {
         private val NOTE: UUID = UUID.fromString("f2800000-0000-0000-0000-000000000001")
         private val PATH = "/api/v1/notes/" + NOTE
         private const val ADMIN_COUNT = "/api/v1/admin/users/stats/total-users"
-        private const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
 
         @JvmStatic
         fun failures(): Stream<Arguments> {

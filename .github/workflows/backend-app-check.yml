@@ -1,8 +1,9 @@
 name: Backend app check
 
 # Minimal GitHub check: the backend must compile (main and every test source set) and package
-# the executable JAR. Unit, architecture and Testcontainers contract tests run locally before
-# merge (see backend-app/README.md "검증"), so this workflow does not run them.
+# the executable JAR, and the Python services under python/ must compile. Unit, architecture,
+# Testcontainers contract and Python tests run locally before merge (see backend-app/README.md
+# "검증" and python/README.md), so this workflow does not run them.
 
 on:
   push:
@@ -49,18 +50,37 @@ jobs:
           bash ./gradlew --max-workers=2 -Dorg.gradle.parallel=true
           projects testClasses :boot:architectureTestClasses :boot:contractTestClasses :boot:bootJar
 
+  python:
+    name: Compile the Python services
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Byte-compile every Python file
+        run: python -m compileall -q python
+
   ci-result:
     name: Backend app CI result
-    needs: [build]
+    needs: [build, python]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Require a successful build
+      - name: Require a successful build and Python compile
         env:
           BUILD_RESULT: ${{ needs.build.result }}
+          PYTHON_RESULT: ${{ needs.python.result }}
         run: |
-          if [ "$BUILD_RESULT" != success ]; then
-            printf 'Backend build failed: %s\n' "$BUILD_RESULT" >&2
+          if [ "$BUILD_RESULT" != success ] || [ "$PYTHON_RESULT" != success ]; then
+            printf 'Backend build: %s, Python compile: %s\n' "$BUILD_RESULT" "$PYTHON_RESULT" >&2
             exit 1
           fi

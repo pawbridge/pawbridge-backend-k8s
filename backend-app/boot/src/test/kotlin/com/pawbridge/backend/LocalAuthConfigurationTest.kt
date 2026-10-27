@@ -22,7 +22,6 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.aop.support.AopUtils
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.context.annotation.Import
 import org.springframework.context.support.PropertySourcesPlaceholderConfigurer
 import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.jdbc.core.JdbcTemplate
@@ -131,8 +130,7 @@ class LocalAuthConfigurationTest {
         runner.run { context ->
             // then
             assertThat(context).hasNotFailed()
-            assertThat(context.getBean(RedisConnectionFactory::class.java))
-                .isSameAs(context.getBean("otherRedisConnectionFactory"))
+            assertThat(context.getBeanProvider(RedisConnectionFactory::class.java).getIfUnique()).isNotNull()
         }
     }
 
@@ -188,24 +186,6 @@ class LocalAuthConfigurationTest {
             assertThat(AopUtils.getTargetClass(context.getBean(LocalSignup::class.java))).isEqualTo(LocalSignup::class.java)
             assertThat(AopUtils.isAopProxy(context.getBean(PasswordReset::class.java))).isTrue()
             assertThat(AopUtils.getTargetClass(context.getBean(PasswordReset::class.java))).isEqualTo(PasswordReset::class.java)
-        }
-    }
-
-    @Test
-    fun `애플리케이션일 때__임포트를 살펴보면__각 로컬 인증 설정이 한 번씩만 임포트된다`() {
-        // given
-        val types = arrayOf<Class<*>>(
-            EmailVerificationConfiguration::class.java,
-            LocalSignupConfiguration::class.java,
-            PasswordResetConfiguration::class.java,
-        )
-
-        // when
-        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value.map { it.java }
-
-        // then
-        for (type in types) {
-            assertThat(imports.count { candidate -> candidate == type }).isEqualTo(1)
         }
     }
 

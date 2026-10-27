@@ -297,6 +297,25 @@ User 내부 `UserProfileQuery.require(id)`가 같은 reader의 3초 read-only �
 - 모듈 `build.gradle`에는 Kotlin plugin을 쓰지 않는다. 구조 TestKit fixture가 실제 모듈 스크립트를 Kotlin plugin 없는 루트에 복사해 적용하기 때문이다.
 - `.kt`는 `src/main/kotlin` 또는 `src/main/java`에 둘 수 있다. Kotlin이 먼저 컴파일되고 Java가 그 class를 본다. 같은 모듈의 Java Lombok 생성 멤버는 Kotlin에서 보이지 않으므로 Lombok class는 함께 Kotlin으로 옮기거나 일반 Java 접근자로 바꾼다.
 
+## 운영 배포
+
+운영 백엔드는 Mac mini의 Docker Compose 프로젝트 `pawbridge-prod`에서 `monolith` 컨테이너 하나로 돈다. GitHub Actions는 이미지를 만들거나 올리지 않으므로 배포는 Mac mini에서 수동으로 한다. 운영 이미지는 레지스트리에 올리지 않고 로컬에만 둔다.
+
+1. **main 커밋에서만 빌드한다.** dev 병합 → 병합 전 로컬 검증(아래 "검증") → main 병합 순서를 지킨 뒤, 배포할 main 커밋을 깨끗한 작업 폴더로 꺼낸다.
+2. **JAR과 이미지를 만든다.**
+   ```bash
+   cd backend-app
+   ./gradlew projects check :boot:bootJar
+   docker build --pull=false --build-arg GIT_SHA=$(git rev-parse HEAD) -t pawbridge-monolith:prod-$(git rev-parse --short=12 HEAD) .
+   ```
+   `Dockerfile`과 `.dockerignore`가 이 폴더에 있다. 빌드 맥락에는 `boot/build/libs/pawbridge-backend-app.jar`만 들어간다.
+3. **이미지를 교체한다.** 운영 compose 폴더(비밀 저장소 아래, 저장소에 두지 않음)에서 `compose.env`를 날짜 붙은 이름으로 백업하고 `MONOLITH_IMAGE` 한 줄만 새 태그로 바꾼 뒤 monolith만 다시 만든다.
+   ```bash
+   docker compose -p pawbridge-prod -f compose.json --env-file compose.env up -d --no-deps monolith
+   ```
+4. **확인한다.** 컨테이너가 `healthy`가 되고, 공개 API(예: `GET /api/v1/posts/read`, `GET /api/v1/animals`)가 정상 응답하며, 10분 동안 ERROR 로그와 운영 경고가 없는지 본다.
+5. **롤백한다.** 문제가 있으면 백업한 `compose.env`를 되돌리고 3의 명령을 다시 실행한다. 이전 이미지는 로컬에 남아 있다. DB 마이그레이션을 함께 적용했다면 이전 이미지와 호환되는지 먼저 확인한다.
+
 ## 검증
 
 GitHub Actions(`Backend app check`)는 최소 검사만 한다. 모든 source set(main, test, architectureTest, contractTest)을 컴파일하고 실행 JAR을 만든다. 단위·구조·DB 계약 시험은 GitHub에서 돌리지 않고, 병합 전에 PR head에서 로컬로 실행한다.
@@ -313,6 +332,7 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
 - `:boot:architectureTest`: 빌드 규칙(`gradle/architecture.gradle`)을 TestKit fixture로 검증한다. 빌드 규칙을 바꿀 때 반드시 실행한다.
 - `:boot:contractTest`: Testcontainers PostgreSQL 위의 DB 계약 시험(아래 "DB 계약 시험").
 - `:boot:jarSmokeTest`: 실제 `bootJar` 산출물을 자식 프로세스로 띄우는 기동·종료 시험(아래 "패키지 JAR 기동·종료 시험"). `:boot:bootJar`에 의존하므로 항상 새 JAR로 돈다.
+- `python/`을 바꾼 PR은 위 대신(또는 함께) `python/README.md`의 "로컬 시험" 명령을 저장소 루트에서 실행한다.
 
 ## F22 본인 쪽지 단건 조회
 
@@ -443,7 +463,7 @@ refresh는 쿠키만 읽는다(본문 무시). 한 UPDATE로 `token_hash=:old`�
 
 ### DB 계약 시험(`contractTest`)
 
-`boot/src/contractTest/kotlin`의 시험은 앱 전체를 `@SpringBootTest(webEnvironment = RANDOM_PORT)`(실제 Tomcat, `java.net.http.HttpClient`)로 띄우고 Testcontainers PostgreSQL에 비소유 역할 `pawbridge_app`으로 접속한다. JVM마다 컨테이너 하나(이미지는 `-PcontractPostgresImage=...`·`pawbridge.contract.postgres-image`·`PAWBRIDGE_CONTRACT_POSTGRES_IMAGE`로 바꾸고, 기본은 packaged smoke와 같은 digest 고정 `postgres:17.11-bookworm`)와 Spring 컨텍스트 하나를 `ContractTestBase`로 모든 시험이 공유한다. 스키마는 `src/contractTest/resources/schema/`의 서비스 마이그레이션 복사본(user V1~V5, community V1~V11)을 스키마별 `search_path`로 적용하고, 앱 역할의 열 단위 권한은 `app-grants.sql`이 정한다. 복사본은 `SchemaSourcePinTest`가 원본 SHA-256과 대조한다(원본 서비스 디렉터리가 없어지면 복사본이 유일한 원본이 되어 대조를 건너뛴다). 권한 회수 시험은 `ContractPostgres.withRevoked`로 슈퍼유저 연결에서 REVOKE하고 `finally`에서 GRANT한다.
+`boot/src/contractTest/kotlin`의 시험은 앱 전체를 `@SpringBootTest(webEnvironment = RANDOM_PORT)`(실제 Tomcat, `java.net.http.HttpClient`)로 띄우고 Testcontainers PostgreSQL에 비소유 역할 `pawbridge_app`으로 접속한다. JVM마다 컨테이너 하나(이미지는 `-PcontractPostgresImage=...`·`pawbridge.contract.postgres-image`·`PAWBRIDGE_CONTRACT_POSTGRES_IMAGE`로 바꾸고, 기본은 packaged smoke와 같은 digest 고정 `postgres:17.11-bookworm`)와 Spring 컨텍스트 하나를 `ContractTestBase`로 모든 시험이 공유한다. 스키마는 운영 DB에 수동으로 적용하는 마이그레이션 원본 `backend-app/db/postgresql/<모듈>/`(user·community·animal·store)을 그대로 읽어 스키마별 `search_path`로 적용하고, 앱 역할의 열 단위 권한은 `src/contractTest/resources/schema/app-grants.sql`이 정한다. 운영 DDL과 시험 스키마가 같은 파일이라 둘이 어긋날 수 없다. `payment` 스키마는 아직 계약 시험 DB에 적용하지 않는다. 권한 회수 시험은 `ContractPostgres.withRevoked`로 슈퍼유저 연결에서 REVOKE하고 `finally`에서 GRANT한다.
 
 `./gradlew :boot:contractTest`는 JVM 시간대 UTC로 전체(`contractTestUtc`)를, 이어서 `@Tag("timezone-sensitive")` 시험만 Asia/Seoul로(`contractTestSeoul`) 실행한다. `check`에 포함되지 않으며(Docker 필요) 시험이 없거나 건너뛴 시험이 있으면 실패한다. 로컬 Docker Desktop은 `DOCKER_HOST=unix://$HOME/.docker/run/docker.sock`과 `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`이 필요하다. Testcontainers 1.20은 Docker Engine 29가 거부하는 API 1.32를 요청하므로 시험 JVM에 `api.version=1.44`를 주며 `-PdockerApiVersion=...`으로 바꿀 수 있다.
 
@@ -644,9 +664,9 @@ Animal API는 기존 전체 ShelterReads를 그대로 위임하고 같은 named 
 
 활성화 전 조건: 선택한 User writer에 `pawbridge_animal` 스키마 USAGE와 `pawbridge_animal.animals`의 `SELECT(id, favorite_count, updated_at)`·`UPDATE(favorite_count, updated_at)`가 필요하다(WHERE·SET·CASE가 세 열을 읽는다). `pawbridge_user.outbox_events` INSERT는 더 이상 필요 없다. owned PostgreSQL 증분 SQL과 시험은 추가하지 않았으므로 운영 역할에 직접 부여하고 확인한다. 이 단일 트랜잭션 SQL·권한·락은 단위·조립 시험(mock JDBC)으로만 확인했고 실제 PostgreSQL 시험은 하지 않았다. 이전 전달기·Debezium 소비자(구 user/animal-service)를 먼저 멈추고 미전달 `Favorite` Outbox 행이 없는 것을 확인한 뒤 켠다. User Outbox·Processed 보존 작업(`UserMaintenanceConfiguration`, `pawbridge.user-maintenance.*`)은 outbox 제거와 함께 삭제했다. 컷오버 때 community/user Debezium 커넥터와 `outbox_events`/`processed_events` 테이블 정리는 이 변경의 범위 밖이다.
 
-P6 이후 파일 기반 합성 PG 시험은 실행할 클래스의 환경변수 이름을 `PAWBRIDGE_OWNED_SETTINGS_ENV=P13_PG_SETTINGS`처럼 하나 명시하고, 해당 `P13_PG_SETTINGS`에는 소유 설정 파일의 절대경로를 지정한다. 이름은 `P[1-9][0-9]*_PG_SETTINGS`만 허용하며 이름·대응 값이 없거나 경로가 절대·정규·비심볼릭 일반 파일이 아니면 고정 오류로 실패한다. 실제 경로나 파일 내용은 출력하지 않는다. 이 task는 설정을 다른 변수나 클래스에 주입하지 않는다. 선택한 각 클래스는 계속 자기 Pn 환경변수와 파일0600·DB·역할·marker를 독립 검증한다. 환경이 다르면 실패하며 0건·skip은 성공이 아니다. 예: `PAWBRIDGE_OWNED_SETTINGS_ENV=P13_PG_SETTINGS`를 지정한 상태에서 기존 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreOrderAdministrationTest`를 선택한다. 이 이름 지정 규칙은 이후 P7~P14 설명의 파일 기반 호출에도 공통 적용된다. 기존 직접 환경변수형 Animal 회원 조회 시험의 예외는 `PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED=owned-fixture-only`와 CLI `--tests com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest`의 정확한 단일 선택에만 적용한다(같은 FQN의 정확한 메서드 하나도 허용). configured include/exclude는 비어 있어야 한다. 단순 이름·와일드카드·전체·여러 선택·legacy flag 단독은 예외가 아니며 기존 Pn 설정 선택 검증을 통과해야 한다. 클래스 자체 소유권 검증은 유지한다.
+파일 기반 합성 PG 시험(P6~P19)은 모두 저장소 계약 시험으로 옮기거나 삭제했다. `:boot:ownedPostgresqlTest`와 `owned-postgresql` 태그, 그 시험용 설정 규약(`PAWBRIDGE_OWNED_SETTINGS_ENV`, `Pn_PG_SETTINGS`)은 제거했다. 실제 PostgreSQL 검증은 `:boot:contractTest`(Testcontainers, `boot/src/contractTest`)의 저장소 계약 시험이 맡는다. 이후 설명에 나오는 P7~P19 합성 PG 시험 호출 방법은 더 이상 쓰지 않는다.
 
-합성 PG 시험은 `owned-postgresql` 태그로 일반 `test`에서 제외한다. 전용 `:boot:ownedPostgresqlTest --tests ...`는 새 전용 환경만 사용하며 0건 또는 skip이 있으면 실패한다. 동물 조회는 `PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED=owned-fixture-only`와 시험이 검증하는 전용 환경값 및 정확한 `--tests com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest` 선택, 이벤트는 엄격한 권한의 `P6_PG_SETTINGS` 파일이 필요하다. 두 클래스는 각각 별도로 선택해야 하며 실제 계정·접속값은 예시나 Git에 넣지 않는다. SQL resource는 새 시험 DB 준비용으로만 보관한다. 시험 자체는 DDL/권한 변경을 하지 않고 생성한 행만 정리한다.
+합성 PG 시험의 `owned-postgresql` 태그와 전용 태스크는 제거했다. 동물 회원 조회는 `AnimalMemberReadRepositoryContractTest`, 이벤트·그 밖의 저장소 SQL은 `boot/src/contractTest`의 해당 계약 시험이 확인한다. 실제 계정·접속값은 예시나 Git에 넣지 않는다.
 
 ## Store 회원 목록의 원문 JPA 재사용
 
@@ -675,7 +695,7 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 공유 단일 pool(`p
 
 초기 보완에서는 소유 합성 PostgreSQL 17.11의 실제 보안→MVC→JPA 16계약과 당시 코어 단위 48사례를 확인했다. 이후 동시성 보완의 현재 검증은 아래에서 구분한다. PG는 최초 실행의 15성공과 UTC Calendar로 비교를 교정한 상태 응답 1사례의 수정 전 RED·수정 후 GREEN으로 검증했으며, 비교 방식 교정 뒤 성공한 나머지를 반복하지 않았다. 서버의 시간대·값·허용 오차는 변경하지 않았고 응답/DB 감사 시각 차이는 1µs 미만이어야 한다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK 실패의 rollback, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
 
-전용 시험은 `P8_PG_SETTINGS`의 제한된 소유 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalCommandTest`로만 실행한다. SQL resource는 새 DB/marker 확인 후 소유 관리자가 한 번 준비하는 자료다. 실제 계정·키·접속값은 Git에 넣지 않는다. 일반 `test`는 owned 태그를 제외하며 이 PG 시험을 실행했다고 표시하지 않는다. 기존 운영의 DML·행 잠금·감사 및 단일 실행기 소유권을 인계하기 전 flag와 공개 라우팅을 활성화하지 않는다.
+실제 PostgreSQL 검증은 `AnimalCommandJpaContractTest`와 `AnimalJpaConcurrencyContractTest`(`:boot:contractTest`)가 한다. 이전의 합성 PG 시험(`OwnedPostgresqlAnimalCommandTest`)과 `:boot:ownedPostgresqlTest`는 제거했다. 기존 운영의 DML·행 잠금·감사 및 단일 실행기 소유권을 인계하기 전 flag와 공개 라우팅을 활성화하지 않는다.
 
 ### 동시 Animal 명령과 자동 공고번호
 
@@ -693,7 +713,7 @@ READ_COMMITTED 명시 변경 뒤 기존 Boot 구성 검증의 기본 격리 수�
 
 기존 주문 응답과 구매 당시 상품명·가격·수량 스냅샷을 보존한다. 수량/금액 overflow는400, 기존 재고/상품 상태 오류는500이며 rollback charset CHECK에 한정한 원문400/C007도 유지한다. overflow·검색·주문 저장 실패 시 재고까지 함께 롤백한다(SKU_UPDATED outbox는 쓰지 않는다). 재요청은 새 주문이며 멱등키나 PENDING 자동 만료를 추가하지 않았다. 장바구니·Payment 및 외부 결제는 이 편입에 포함하지 않는다.
 
-로컬 합성 PG 시험은 소유 marker와 제한 writer를 검증한 전용 `P9_PG_SETTINGS` 파일로 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlDirectOrderTest`만 선택한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다. ordinary test에서 owned PG 태그는 제외된다. 동일 상품 동시 구매·실제 행 잠금·전체 롤백·감사 시각/스냅샷·정확한 cleanup은 합성 환경의 근거이며 운영 검증이 아니다.
+실제 PostgreSQL 검증(동일 상품 동시 구매·실제 행 잠금·전체 롤백·구매 스냅샷)은 `StoreOrderJpaContractTest`와 `StoreJpaConcurrencyContractTest`가 한다. 이전의 합성 PG 시험(`OwnedPostgresqlDirectOrderTest`)과 `:boot:ownedPostgresqlTest`는 제거했다. 이 근거는 합성 환경의 것이며 운영 검증이 아니다.
 
 운영 활성화에는 새 실행기의 DB 권한·라우팅·이벤트 소비자 및 기존 Store 실행기와의 소유권 인계가 별도로 필요하다. 현재 운영·Kafka/CDC·장바구니·결제·복구 자료는 이 변경으로 제어하지 않는다.
 
@@ -705,7 +725,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 공개 활성화 전에는 기존 Gateway admission 계약(실제 요청 전체6MiB, 동시2, 인스턴스당 분당30회, 전체50초, 외부 인증·내부 키 헤더 제거)을 별도로 인계해야 한다. 서비스의5MiB 검사와 permit1은 multipart 파싱 전 메모리·전송 제한의 대체물이 아니다. 이 구성의 로컬 합성 성공만으로 공개 운영 준비 완료라고 판단하지 않는다.
 
-`P10_PG_SETTINGS`의 소유 marker·SELECT 전용 계정을 검증한 경우에만 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalLostSearchTest`를 선택한다. 이 시험은 새 합성 동물과 임시127.0.0.1 Python 응답 대역을 사용하고 Animal/Shelter 전체 행 불변을 확인한다. 실제 AI 품질·R2·운영 검증은 포함하지 않는다. 비밀설정·데이터·로그·실행 JAR는 Git에 넣지 않는다.
+실제 PostgreSQL 검증은 `LostSearchCurrentStateJpaContractTest`가 한다(원격 Python 응답만 로컬 대역이며 현재 동물·상태·보호소 정보는 실제 표에서 읽는다). 이전의 합성 PG 시험(`OwnedPostgresqlAnimalLostSearchTest`)과 `:boot:ownedPostgresqlTest`는 제거했다. 실제 AI 품질·R2·운영 검증은 포함하지 않는다.
 
 ## 장바구니 관리와 주문 생성 편입
 
@@ -727,7 +747,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 누락 SKU만 남은 Cart는 400과 함께 보존한다. 유효·누락 SKU가 섞이면 기존처럼 유효 품목을 주문하고 전체 Cart를 비운다. 중복 SKU 저장 상태는 임의 보정 없이 실패하며, 금액·수량 overflow는 400이다. 새 멱등키나 PENDING 만료, 결제·환불 정책을 만들지 않는다. 동시에 같은 Cart를 주문하면 한 번 소비하지만, 두 주문 사이에 새 추가가 있으면 별도 주문이 생길 수 있다.
 
-소유 PG 검증은 `P12_PG_SETTINGS`와 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlStoreCartOrderTest`를 사용한다. 별도 새 DB·제한 writer·표식을 확인한 fixture에만 적용한다. 기존 `P11_PG_SETTINGS` Cart 전용 최소권한은 유지한다. 실제 비밀설정·생성 데이터·시험 로그·JAR는 Git에 넣지 않는다.
+실제 PostgreSQL 검증은 `StoreCartJpaContractTest`와 `StoreJpaConcurrencyContractTest`가 한다. 이전의 합성 PG 시험(`OwnedPostgresqlStoreCartOrderTest`)과 `:boot:ownedPostgresqlTest`는 제거했다. 기존 `P11_PG_SETTINGS` Cart 전용 최소권한 기록은 이력으로만 남는다.
 
 공개 활성화 전에는 기존 Redis 미동기화 Cart 인계, 기존 Cart API·동기화 실행기와 새 실행기의 배타적 소유권, DB 권한과 라우팅을 별도로 확인해야 한다. 이 소스 편입은 기존 운영·Kafka/CDC·외부 결제나 데이터·복구 자료를 제어하지 않는다.
 
@@ -783,13 +803,7 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 회원 승인과 삭제는 User→Shelter 순서 및 실제 PostgreSQL KEY SHARE/FOR UPDATE로 직렬화한다. 보호소 쓰기는 REQUIRED/READ_COMMITTED이며 기존 RR·RO에 참여하려 하면 거부한다. 신규 보호소 쓰기와 회원 승인이 함께 활성화되면 회원 Animal backend는 module이어야 한다. 쓰기 기능이 꺼진 기존 module 승인은 원래 delegate를 사용하여 추가 잠금·권한 요구를 만들지 않는다.
 
-새 P15 합성 시험만 아래처럼 정확한 클래스를 선택한다. 설정 파일은 별도0700 디렉터리의 소유0600 파일이며 Git에 넣지 않는다. 일반 test에서는 이 태그가 제외된다.
-
-```sh
-PAWBRIDGE_OWNED_SETTINGS_ENV=P15_PG_SETTINGS \
-P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
-./gradlew :boot:ownedPostgresqlTest --tests '*OwnedPostgresqlShelterCommandTest'
-```
+실제 PostgreSQL 검증은 `AnimalShelterCommandJpaContractTest`가 한다(User→Shelter 잠금 순서, 보호소 행 `FOR UPDATE`와 `KEY SHARE`의 배타). 이전의 합성 PG 시험(`OwnedPostgresqlShelterCommandTest`)과 `:boot:ownedPostgresqlTest`는 제거했다.
 
 시험 전용 fixture는 축소 User 모델과 원문 Animal 8표로 구성되며 실제 운영 migration·권한 변경 근거가 아니다. 실제 API 활성화·기존 수집기/회원 승인 경로의 배타 인계는 별도 미완료 항목이다.
 
@@ -811,7 +825,7 @@ P15_PG_SETTINGS=/absolute/private/shelter-command.properties \
 
 APMS 번호는 원문 번호 그대로 검색하며 기존 Shelter JOIN과 NON_NULL 상세 28필드를 사용한다. 미존재는 기존 404다. 종료 임박은 JVM 오늘부터 3일 뒤까지 양끝을 포함한 PROTECT 동물이며 noticeEndDate·id 오름차순이다. 단일 사용자 정렬은 기존 동작대로 고정 순서로 처리하고 기존 페이지 상한·응답 7필드를 유지한다. 새 풀·스키마·수집·외부 호출·운영 활성화를 추가하지 않는다.
 
-보안과 실제 컨트롤러를 연결한 영향 HTTP 10메서드 및 기존 P10 전용 DB를 재사용한 실제 PostgreSQL 2메서드를 검증했다. P10 시험은 기존 reader5 설정과 같은 폴더의 fixture7 설정을 확인하고 최대 6개 소유 행만 등록·정리한다. 기존 seed·8표·marker·허용 sequence를 유지하며 새 권한·스키마를 추가하지 않는다. 정확한 `PAWBRIDGE_OWNED_SETTINGS_ENV=P10_PG_SETTINGS`, `P10_PG_SETTINGS` 파일과 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlAnimalExtraDiscoveryTest` 선택이 필요하다. 대상·역할·기존 fixture가 다르면 거부하며 fallback하지 않는다. 공개 운영 활성화는 별도 단계다.
+보안과 실제 컨트롤러를 연결한 영향 HTTP 10메서드 및 기존 P10 전용 DB를 재사용한 실제 PostgreSQL 2메서드를 검증했다. P10 시험은 기존 reader5 설정과 같은 폴더의 fixture7 설정을 확인하고 최대 6개 소유 행만 등록·정리한다. 기존 seed·8표·marker·허용 sequence를 유지하며 새 권한·스키마를 추가하지 않는다. 해당 합성 시험과 `:boot:ownedPostgresqlTest`는 제거했다. 공개 운영 활성화는 별도 단계다.
 
 ## 여행 수집에서 기존 여행 조회까지
 
@@ -825,7 +839,7 @@ APMS 번호는 원문 번호 그대로 검색하며 기존 Shelter JOIN과 NON_N
 
 선택 구성 시험은 13사례(.854초), 새 전용 PostgreSQL fixture의 수집·Batch·기존 조회·session lock·정상 scheduler 종료·실패·quota/orphan 계약은 5사례(.954초)로 각각 성공했다. 두 실행과 기존 business 단위38은 분리된 근거다. provider는 대역이며 실제 외부 HTTP/API 키·운영 수집·배포는 검증하지 않았다. 첫 PG 실행의 provider 관측은 빈 Spring ConnectionHolder binding까지 금지해 실패했다. 원시 active borrow1/TX0와 cached 동작을 확인해 이 과잉 조건만 고쳤으며 실제 TX0·추가 borrow0·동일 lock PID/autocommit/pg_locks·최종 자원 반환 관측은 유지했다. Catalog 11메서드 TT 추가안은 적용하지 않았다. 첫 실패 DB·RUNNING 가능 기록·claim과 원시 근거는 보존하고 재사용하지 않았다.
 
-owned 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P17_PG_SETTINGS`와 정확한 `P17_PG_SETTINGS=/private/tmp/pawbridge-owned-pg-night-20261020/travel-collection-recovery-1/travel-collection.properties`를 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlTravelCollectionTest`로 한 클래스를 명시 선택한다. 설정이 없거나 대상·역할·marker·권한·초기 상태가 다르면 skip하지 않고 거부한다. 준비 helper/실행 결과/설정 자격파일은 게시하지 않는다. 이 시험은 새 이력과 마지막 RUNNING 행을 남기므로 동일 DB를 자동 재실행하거나 reset하지 않는다.
+이전의 합성 PG 시험(`OwnedPostgresqlTravelCollectionTest`)과 `:boot:ownedPostgresqlTest`는 제거했다. 같은 저장소 동작은 `TravelCollectionCatalogRepositoryContractTest`가 Testcontainers PostgreSQL로 확인한다.
 
 ## APMS 예약 수집에서 동물·보호소 검색 반영까지
 
@@ -837,7 +851,7 @@ worker 기본값1/범위1~4와 writer 용량 `workers+2` 이상을 명시 검사
 
 HTTP transport는 명시한 HTTPS 제공자만 사용하고 redirect를 따르지 않는다. 연결2초·요청5초·응답 대기6초와 본문2MiB 상한을 적용하며 실패에 URL·서비스키·응답 본문을 노출하지 않는다. 예약 정상 정지는 실행 중 흐름을 기다린 뒤 자신이 소유한 worker·HTTP client를 종료한다. 프로세스 강제 종료·lock 연결 상실 이후 모든 쓰기의 fencing이나 외부 API 정상 동작을 보장하지 않는다.
 
-새 전용 합성 PostgreSQL 시험은 `PAWBRIDGE_OWNED_SETTINGS_ENV=P18_PG_SETTINGS`와 소유한 0600 `P18_PG_SETTINGS` 파일을 지정하고 `:boot:ownedPostgresqlTest --tests com.pawbridge.backend.boot.configuration.OwnedPostgresqlApmsCollectionTest`로 정확히 선택한다. 원문 업무·검색5표와 Batch6표·6sequence, 별도 marker 및 최소권한을 확인하고 정상 upsert/search·checkpoint 재조회·실패 rollback·실제2PID slot·stale 회복·정상 종료를 다룬다. 이력과 실패 자료를 보존하며 같은 fixture를 자동 초기화·재실행하지 않는다. 준비 helper·자격파일·실행 로그는 Git에 게시하지 않는다. 실제 실행 성공과 남은 검증은 해당 PR의 근거로 구분하며 운영 활성화는 별도다.
+이전의 합성 PG 시험(`OwnedPostgresqlApmsCollectionTest`)과 `:boot:ownedPostgresqlTest`는 제거했다. 같은 저장소 동작(chunk 쓰기의 insert·직접 update·검색 문서와 롤백, `pawbridge_animal.BATCH_` 메타데이터 표, stale 회복, 세션 잠금)은 `ApmsCollectionJpaContractTest`가 확인한다. 실제 APMS 호출과 운영 활성화는 별도다.
 
 APMS 선택 단위100사례, 최초 Boot18사례와 필수 수정 뒤 선택2사례, 최종 새 합성 PG5사례(1.392초)는 서로 다른 실행 근거다. 최종 PG는 실제 source/search/Batch metadata DML 후 강제 rollback·physical commit 증가0, 원문 부분 복구·기존 행 보존, 두 실제 PID의 slot, stale10분, 정상 예약 종료를 확인했다. 제공자는 대역이며 실 APMS/운영 검증은 하지 않았다. 최초 SQL 개행 관측 오류와 원문 부분 commit을 전체 실패 원자성으로 오해한 두 시험 실패는 보존하고, 새 fixture에서 최소 정정 후 검증했다. 기존 DB를 reset하지 않았다.
 
@@ -965,7 +979,7 @@ The same flag also assembles the original category POST `/api/v1/categories`, PU
 - `pawbridge.store-payment-events.enabled=true`가 함께 필요하며 없으면 시작이 실패한다. 이 flag는 랭킹용 Redis(`spring.data.redis.host` 또는 `memberChatRedis`)를 요구한다.
 - 운영은 앱 계정 하나로 `pawbridge_store`와 `pawbridge_payment`를 모두 쓴다. writer 계정에 `pawbridge_payment` 스키마 USAGE, `payments` SELECT·INSERT, `payment_compensation_records` SELECT·INSERT와 `pawbridge_store.orders` 행 잠금·UPDATE, 재고·검색 문서 권한이 필요하다. reader는 `orders.user_id`를 읽는다.
 - 공유 단일 pool(기본 최대 10)을 쓴다. 운영 동시 결제량에 맞춰 `PAWBRIDGE_DB_POOL_MAX_SIZE`를 정한다.
-- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`infrastructure/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 Flyway 위치 밖에 있어 자동으로 실행되지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
+- 새 테이블과 `payments(order_id) WHERE status='DONE'` 부분 유니크 인덱스 DDL(`backend-app/db/cutover/payment-compensation-and-done-unique.sql`)을 전환 때 승인 후 수동 적용한다. 이 파일은 버전 번호가 없는 일회성 DDL이라 계약 시험 스키마에도 자동으로 들어가지 않는다. 기존 DONE 중복이 있으면 인덱스 생성이 실패하니 먼저 확인한다.
 - `toss.secret-key`(필수)와 `toss.base-url`.
 
 알려진 한계: 승인 응답이 DONE이 아닌 경우(가상계좌 `WAITING_FOR_DEPOSIT` 등)는 원래처럼 응답만 돌려주며 웹훅 처리는 없다. 서블릿 기본 오류 로그에 Toss 오류 본문이 남을 수 있다(비밀값은 없음).

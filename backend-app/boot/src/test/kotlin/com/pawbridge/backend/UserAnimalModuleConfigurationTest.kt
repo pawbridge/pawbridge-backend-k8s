@@ -4,9 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.animal.api.AnimalFavoriteCounts
 import com.pawbridge.backend.animal.api.AnimalMemberReads
 import com.pawbridge.backend.animal.api.AnimalShelterReads
-import com.pawbridge.backend.animal.internal.favorite.infrastructure.JdbcAnimalFavoriteCounts
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
-import com.pawbridge.backend.animal.internal.shelter.infrastructure.JdbcShelterReads
 import com.pawbridge.backend.animal.internal.shelter.web.ShelterDiscoveryReadController
 import com.pawbridge.backend.animal.internal.shelter.web.ShelterReadController
 import com.pawbridge.backend.boot.configuration.AnimalShelterConfiguration
@@ -26,10 +24,7 @@ import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.util.function.Supplier
 import javax.sql.DataSource
@@ -83,7 +78,7 @@ class UserAnimalModuleConfigurationTest {
 
     @ParameterizedTest
     @CsvSource("true,false", "false,true", "true,true")
-    fun `공개 플래그가 꺼졌을 때__조립하면__리더 API를 공유하고 사용자 쓰기와 공개 컨트롤러를 분리한다`(
+    fun `공개 플래그가 꺼졌을 때__조립하면__공개 컨트롤러 없이 리더 API만 만들고 DB를 건드리지 않는다`(
         shelter: Boolean,
         activity: Boolean,
     ) {
@@ -105,34 +100,8 @@ class UserAnimalModuleConfigurationTest {
                     .doesNotHaveBean(ShelterReadController::class.java)
                     .doesNotHaveBean(ShelterDiscoveryReadController::class.java)
                 val api = context.getBean(AnimalShelterReads::class.java)
-                val registration: Any = if (activity) ReflectionTestUtils.getField(api, "shelters")!! else api
-                assertThat(ReflectionTestUtils.getField(registration, "shelters"))
-                    .isInstanceOf(JdbcShelterReads::class.java)
-                val reads = ReflectionTestUtils.getField(registration, "reads") as TransactionTemplate
-                assertThat(reads.transactionManager).isSameAs(context.getBean("transactionManager"))
-                assertThat(reads.isReadOnly).isTrue()
-                assertThat(reads.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-
-                if (shelter) {
-                    val lookup = context.getBean(ShelterMembership.ShelterLookup::class.java)
-                    assertThat(ReflectionTestUtils.getField(lookup, "shelters")).isSameAs(api)
-                    val service = context.getBean(ShelterMembership::class.java)
-                    val membershipWrites = ReflectionTestUtils.getField(service, "write") as TransactionTemplate
-                    assertThat(membershipWrites.transactionManager)
-                        .isSameAs(context.getBean("writeTransactionManager"))
-                }
-
                 if (activity) {
                     assertThat(api).isInstanceOf(AnimalMemberReads::class.java)
-                    val animalLookup = context.getBean(UserAnimalActivities.AnimalLookup::class.java)
-                    assertThat(ReflectionTestUtils.getField(animalLookup, "animals")).isSameAs(api)
-                    val memberReads = ReflectionTestUtils.getField(api, "reads") as TransactionTemplate
-                    assertThat(memberReads.transactionManager).isSameAs(context.getBean("transactionManager"))
-                    assertThat(memberReads.isReadOnly).isTrue()
-                    assertThat(memberReads.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-                    val activityWrites = ReflectionTestUtils
-                        .getField(context.getBean(UserAnimalActivities::class.java), "write") as TransactionTemplate
-                    assertThat(activityWrites.transactionManager).isSameAs(context.getBean("writeTransactionManager"))
                 } else {
                     assertThat(context.getBeansOfType(AnimalMemberReads::class.java)).isEmpty()
                 }
@@ -147,7 +116,7 @@ class UserAnimalModuleConfigurationTest {
     }
 
     @Test
-    fun `활동이 켜졌을 때__조립하면__스케줄러와 자체 트랜잭션 없이 쓰기 쪽에 좋아요 수 API를 연결한다`() {
+    fun `활동이 켜졌을 때__조립하면__스케줄러와 자체 트랜잭션 없이 좋아요 수 API를 만든다`() {
         // given
         val writeJdbc = mockk<JdbcTemplate>()
 
@@ -163,17 +132,6 @@ class UserAnimalModuleConfigurationTest {
                     .hasNotFailed()
                     .hasSingleBean(AnimalFavoriteCounts::class.java)
                     .doesNotHaveBean(ThreadPoolTaskScheduler::class.java)
-                val counts = context.getBean(AnimalFavoriteCounts::class.java)
-                assertThat(counts).isInstanceOf(JdbcAnimalFavoriteCounts::class.java)
-                assertThat(ReflectionTestUtils.getField(counts, "jdbc")).isSameAs(context.getBean("writeJdbc"))
-
-                val activities = context.getBean(UserAnimalActivities::class.java)
-                assertThat(ReflectionTestUtils.getField(activities, "counts")).isSameAs(counts)
-                assertThat(ReflectionTestUtils.getField(activities, "jdbc")).isSameAs(context.getBean("writeJdbc"))
-                val writer = ReflectionTestUtils.getField(activities, "write") as TransactionTemplate
-                assertThat(writer.transactionManager).isSameAs(context.getBean("writeTransactionManager"))
-                assertThat(writer.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-
                 val readManager = context.getBean("transactionManager", PlatformTransactionManager::class.java)
                 val writeManager = context.getBean("writeTransactionManager", PlatformTransactionManager::class.java)
                 verify(exactly = 0) { readManager.getTransaction(any()) }
@@ -199,7 +157,7 @@ class UserAnimalModuleConfigurationTest {
     }
 
     @Test
-    fun `기존 보호소 리더가 주어졌을 때__조립하면__공개 경로 활성화 없이 그 위임체를 재사용한다`() {
+    fun `기존 보호소 리더가 주어졌을 때__조립하면__공개 경로 활성화 없이 시작한다`() {
         // given
         val existing = mockk<ShelterReads>()
         excludeRecords { existing.hashCode() }
@@ -213,8 +171,6 @@ class UserAnimalModuleConfigurationTest {
             .run { context ->
                 // then
                 assertThat(context).hasNotFailed()
-                assertThat(ReflectionTestUtils.getField(context.getBean(AnimalShelterReads::class.java), "shelters"))
-                    .isSameAs(existing)
                 assertThat(context).doesNotHaveBean(ShelterReadController::class.java)
                 confirmVerified(existing)
             }

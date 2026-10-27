@@ -6,8 +6,9 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.multipart.MultipartFile
 
 /**
- * Original image routes behind the former Gateway checks. Single upload and delete matched its non-USER
- * path rule; the two-segment multiple upload matched no role rule and stays open to any signed member.
+ * Animal photo storage for the shelter registration screens. Every write needs a current admin or shelter
+ * account. The former Gateway left the two-segment multiple upload open to any signed member only because
+ * its role rule matched one path segment; that gap let ordinary members store unattached files.
  */
 class AnimalImageService(
     private val images: S3AnimalImages,
@@ -17,18 +18,21 @@ class AnimalImageService(
 
     fun uploadImage(verifiedUserId: Long?, file: MultipartFile?): String {
         requireNonUser(verifiedUserId)
-        requireOriginalRequestLimit(file?.size ?: 0L)
+        requireWithin(file?.size ?: 0L, FILE_LIMIT_BYTES)
         return images.uploadImage(file)
     }
 
-    fun uploadImages(files: Array<MultipartFile?>?): List<String> {
+    fun uploadImages(verifiedUserId: Long?, files: Array<MultipartFile?>?): List<String> {
+        requireNonUser(verifiedUserId)
         var total = 0L
         if (files != null) {
             for (file in files) {
-                total += file?.size ?: 0L
+                val size = file?.size ?: 0L
+                requireWithin(size, FILE_LIMIT_BYTES)
+                total += size
             }
         }
-        requireOriginalRequestLimit(total)
+        requireWithin(total, MULTIPLE_REQUEST_LIMIT_BYTES)
 
         if (files == null || files.isEmpty()) {
             throw IllegalArgumentException("업로드할 파일이 없습니다.")
@@ -67,11 +71,14 @@ class AnimalImageService(
     }
 
     private companion object {
-        // The original service rejected multipart requests above 10MB before any controller code ran.
-        private const val ORIGINAL_REQUEST_LIMIT_BYTES = 10L * 1024 * 1024
+        // Each photo may be up to 10MB. The original service also capped the whole multiple-upload request
+        // at 10MB, so a few ordinary photos together were rejected; the request now fits five full-size
+        // photos plus multipart overhead.
+        private const val FILE_LIMIT_BYTES = 10L * 1024 * 1024
+        private const val MULTIPLE_REQUEST_LIMIT_BYTES = 55L * 1024 * 1024
 
-        private fun requireOriginalRequestLimit(bytes: Long) {
-            if (bytes > ORIGINAL_REQUEST_LIMIT_BYTES) {
+        private fun requireWithin(bytes: Long, limit: Long) {
+            if (bytes > limit) {
                 throw AnimalImageTooLargeException()
             }
         }

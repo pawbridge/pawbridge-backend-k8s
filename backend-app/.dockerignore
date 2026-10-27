@@ -1,0 +1,3 @@
+# Only the executable JAR goes into the image build context.
+*
+!boot/build/libs/pawbridge-backend-app.jar

@@ -4,13 +4,16 @@ import com.pawbridge.backend.boot.configuration.GatewayFeaturesConfiguration
 import com.pawbridge.backend.boot.security.GatewayCors
 import com.pawbridge.backend.boot.security.LegacyApiPathFilter
 import com.pawbridge.backend.boot.security.LostSearchLimitsFilter
+import jakarta.servlet.FilterChain
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.springframework.boot.test.context.assertj.AssertableApplicationContext
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.boot.web.servlet.FilterRegistrationBean
-import org.springframework.test.util.ReflectionTestUtils
+import org.springframework.mock.web.MockFilterChain
+import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
 import java.util.Properties
-import java.util.concurrent.Semaphore
 
 class GatewayFeaturesConfigurationTest {
     private val runner = ApplicationContextRunner().withUserConfiguration(GatewayFeaturesConfiguration::class.java)
@@ -44,7 +47,7 @@ class GatewayFeaturesConfigurationTest {
     }
 
     @Test
-    fun `분실 검색을 켰을 때__기동하면__한도 필터가 보안 뒤에서 게이트웨이 기본값으로 동작한다`() {
+    fun `분실 검색을 켰을 때__기동하면__한도 필터가 보안 뒤에 등록된다`() {
         // given
         val enabled = runner.withPropertyValues("pawbridge.animal-lost-search.enabled=true")
 
@@ -55,15 +58,38 @@ class GatewayFeaturesConfigurationTest {
             assertThat(registration.filter).isInstanceOf(LostSearchLimitsFilter::class.java)
             assertThat(registration.order).isGreaterThan(-100)
             assertThat(registration.urlPatterns).contains(LostSearchLimitsFilter.PATH)
-            val filter = registration.filter
-            assertThat(ReflectionTestUtils.getField(filter, "maxBytes")).isEqualTo(6_291_456)
-            assertThat(ReflectionTestUtils.getField(filter, "requestsPerMinute")).isEqualTo(30)
-            assertThat((ReflectionTestUtils.getField(filter, "active") as Semaphore).availablePermits()).isEqualTo(2)
         }
     }
 
     @Test
-    fun `분실 검색 속성을 줬을 때__기동하면__기본값을 덮어쓴다`() {
+    fun `속성이 없을 때__분실 검색을 요청하면__기본 크기와 분당 횟수 한도가 적용된다`() {
+        // given
+        val enabled = runner.withPropertyValues("pawbridge.animal-lost-search.enabled=true")
+
+        enabled.run { context ->
+            val filter = limitsFilter(context)
+
+            // when, then
+            assertThat(search(filter, 6_291_456).status).isEqualTo(200)
+            assertThat(search(filter, 6_291_457).status).isEqualTo(413)
+            repeat(29) { assertThat(search(filter, 1).status).isEqualTo(200) }
+            assertThat(search(filter, 1).status).isEqualTo(429)
+        }
+    }
+
+    @Test
+    fun `속성이 없을 때__분실 검색이 겹치면__기본 동시 처리 두 건까지만 받는다`() {
+        // given
+        val enabled = runner.withPropertyValues("pawbridge.animal-lost-search.enabled=true")
+
+        enabled.run { context ->
+            // when, then
+            assertThat(nestedStatuses(limitsFilter(context), depth = 3)).containsExactly(200, 200, 503)
+        }
+    }
+
+    @Test
+    fun `분실 검색 속성을 줬을 때__분실 검색을 요청하면__기본값 대신 준 한도가 적용된다`() {
         // given
         val overridden = runner.withPropertyValues(
             "pawbridge.animal-lost-search.enabled=true",
@@ -73,13 +99,13 @@ class GatewayFeaturesConfigurationTest {
             "lost-search.timeout-seconds=9",
         )
 
-        // when
         overridden.run { context ->
-            // then
-            val filter = (context.getBean("lostSearchLimitsFilter") as FilterRegistrationBean<*>).filter
-            assertThat(ReflectionTestUtils.getField(filter, "maxBytes")).isEqualTo(100)
-            assertThat(ReflectionTestUtils.getField(filter, "requestsPerMinute")).isEqualTo(7)
-            assertThat((ReflectionTestUtils.getField(filter, "active") as Semaphore).availablePermits()).isEqualTo(5)
+            val filter = limitsFilter(context)
+
+            // when, then
+            assertThat(search(filter, 100).status).isEqualTo(200)
+            assertThat(search(filter, 101).status).isEqualTo(413)
+            assertThat(nestedStatuses(filter, depth = 6).takeLast(2)).containsExactly(200, 503)
         }
     }
 
@@ -121,5 +147,36 @@ class GatewayFeaturesConfigurationTest {
             "https://www.pawbridge.kr",
             "https://*.pawbridge.kr",
         )
+    }
+
+    private fun limitsFilter(context: AssertableApplicationContext): LostSearchLimitsFilter {
+        val registration = context.getBean("lostSearchLimitsFilter") as FilterRegistrationBean<*>
+        return registration.filter as LostSearchLimitsFilter
+    }
+
+    private fun search(filter: LostSearchLimitsFilter, bytes: Int): MockHttpServletResponse {
+        return search(filter, bytes, MockFilterChain())
+    }
+
+    private fun search(filter: LostSearchLimitsFilter, bytes: Int, chain: FilterChain): MockHttpServletResponse {
+        val request = MockHttpServletRequest("POST", LostSearchLimitsFilter.PATH)
+        request.contentType = "multipart/form-data; boundary=x"
+        request.setContent(ByteArray(bytes))
+        val response = MockHttpServletResponse()
+        filter.doFilter(request, response, chain)
+        return response
+    }
+
+    /** Statuses of [depth] searches that are all still running when the next one starts, outermost first. */
+    private fun nestedStatuses(filter: LostSearchLimitsFilter, depth: Int): List<Int> {
+        val statuses = arrayOfNulls<Int>(depth)
+
+        fun start(level: Int) {
+            val inner = FilterChain { _, _ -> if (level + 1 < depth) start(level + 1) }
+            statuses[level] = search(filter, 1, inner).status
+        }
+
+        start(0)
+        return statuses.map { it!! }
     }
 }

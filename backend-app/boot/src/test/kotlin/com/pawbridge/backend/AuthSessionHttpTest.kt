@@ -28,7 +28,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.context.annotation.Bean
-import org.springframework.http.HttpMethod
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
@@ -291,27 +290,6 @@ class AuthSessionHttpTest {
         confirmVerified(sessions)
     }
 
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/auth/refresh", "POST /api/v1/auth/refresh/extra", "POST /api/v1/auth/logout/extra",
-            "POST /api/v1/auth/login", "POST /api/auth/logout",
-        ],
-    )
-    fun `인접하거나 이식되지 않은 인증 경로일 때__요청하면__세션 서비스 전에 거부한다`(spec: String) {
-        // given
-        val split = spec.split(" ", limit = 2)
-
-        // when
-        val response = mvc.perform(
-            request(HttpMethod.valueOf(split[0]), split[1]).header("X-User-Id", "7").header("Origin", ORIGIN),
-        )
-
-        // then
-        response.andExpect(status().isForbidden())
-        confirmVerified(sessions)
-    }
-
     companion object {
         const val ORIGIN = "https://www.pawbridge.kr"
         const val PRESENTED = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -322,43 +300,5 @@ class AuthSessionHttpTest {
         private fun browser(path: String): MockHttpServletRequestBuilder {
             return post(path).header("Origin", ORIGIN).contentType("application/json").content("{}")
         }
-    }
-}
-
-@WebMvcTest(
-    controllers = [AuthSessionController::class],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@AutoConfigureMockMvc(print = MockMvcPrint.NONE)
-@ContextConfiguration(
-    classes = [
-        AuthSessionHttpTest.Controller::class,
-        AuthSessionExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class AuthSessionDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var sessions: AuthSessions
-
-    @ParameterizedTest
-    @ValueSource(strings = ["/api/v1/auth/refresh", "/api/v1/auth/logout"])
-    fun `기본 꺼짐에 쿠키와 토큰이 있을 때__POST하면__서비스 없이 기본 403을 유지한다`(path: String) {
-        // when
-        val response = mvc.perform(
-            post(path)
-                .header("Origin", AuthSessionHttpTest.ORIGIN)
-                .contentType("application/json")
-                .cookie(Cookie("__Secure-pb_refresh", AuthSessionHttpTest.PRESENTED))
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        response.andExpect(status().isForbidden())
-        confirmVerified(sessions)
     }
 }

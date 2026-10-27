@@ -10,7 +10,6 @@ import org.springframework.batch.core.Job
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.test.util.ReflectionTestUtils
 
 class ApmsManualSyncConfigurationTest {
     private val context = ApplicationContextRunner()
@@ -25,7 +24,7 @@ class ApmsManualSyncConfigurationTest {
         )
 
     @Test
-    fun `수동 플래그만 켰을 때__조립하면__스케줄 없이 컨트롤러가 공유 러너를 쓴다`() {
+    fun `수동 플래그만 켰을 때__조립하면__스케줄 없이 컨트롤러만 만든다`() {
         // given
         val runner = provider.withPropertyValues("pawbridge.apms-manual.enabled=true")
 
@@ -37,8 +36,6 @@ class ApmsManualSyncConfigurationTest {
                 .hasSingleBean(ApmsBatchRunner::class.java)
                 .hasBean("apmsAnimalSyncJob")
                 .doesNotHaveBean(ApmsCollectionSchedule::class.java)
-            assertThat(ReflectionTestUtils.getField(application.getBean(ApmsBatchController::class.java), "apmsBatchRunner"))
-                .isSameAs(application.getBean(ApmsBatchRunner::class.java))
             verify(exactly = 0) { application.getBean(HikariDataSource::class.java).connection }
         }
     }

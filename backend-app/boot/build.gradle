@@ -9,6 +9,8 @@ sourceSets {
     contractTest {
         compileClasspath += sourceSets.main.output
         runtimeClasspath += sourceSets.main.output
+        // The PostgreSQL migrations applied to production by hand; the contracts build their schemas from them.
+        resources.srcDir rootProject.file('db')
     }
 }
 
@@ -103,7 +105,6 @@ def registerContractTest = { String taskName, String zone, String taskDescriptio
         // refuses. 1.44 is the minimum of Engine 29 and is served by every Engine since 25; override with
         // -PdockerApiVersion=... for another daemon.
         systemProperty 'api.version', project.findProperty('dockerApiVersion') ?: '1.44'
-        systemProperty 'pawbridge.contract.legacy-root', rootProject.projectDir.parentFile.absolutePath
         if (project.hasProperty('contractPostgresImage')) {
             systemProperty 'pawbridge.contract.postgres-image', project.property('contractPostgresImage')
         }
@@ -142,52 +143,4 @@ tasks.register('contractTest') {
     group = 'verification'
     description = 'Runs the database contracts in UTC and the time-zone sensitive ones in Asia/Seoul.'
     dependsOn tasks.named('contractTestUtc'), tasks.named('contractTestSeoul')
-}
-
-// Actual database contracts use an explicit disposable fixture, never the ordinary unit-test task.
-tasks.named('test') {
-    useJUnitPlatform { excludeTags 'owned-postgresql' }
-}
-tasks.register('ownedPostgresqlTest', Test) {
-    group = 'verification'
-    description = 'Runs selected contracts only against an explicitly owned synthetic PostgreSQL fixture.'
-    testClassesDirs = sourceSets.test.output.classesDirs
-    classpath = sourceSets.test.runtimeClasspath
-    useJUnitPlatform { includeTags 'owned-postgresql' }
-    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
-    filter { failOnNoMatchingTests = true }
-    doFirst {
-        // Gradle 8.14.3 stores --tests separately from configured includes; both filters intersect.
-        def legacyClass = 'com.pawbridge.backend.OwnedPostgresqlAnimalMemberReadTest'
-        def commandLineIncludes = filter.getCommandLineIncludePatterns()
-        def legacySelection = commandLineIncludes.size() == 1 && filter.includePatterns.isEmpty() &&
-                filter.excludePatterns.isEmpty() && commandLineIncludes.every { name ->
-                    name == legacyClass || (name.startsWith(legacyClass + '.') &&
-                            name.substring(legacyClass.length() + 1) ==~ /[A-Za-z_$][A-Za-z0-9_$]*/)
-                }
-        def legacyFixture = System.getenv('PAWBRIDGE_ANIMAL_MEMBER_PG_ENABLED') == 'owned-fixture-only' && legacySelection
-        if (!legacyFixture) {
-            def settingsEnvironment = System.getenv('PAWBRIDGE_OWNED_SETTINGS_ENV')
-            def settingsPath = settingsEnvironment ==~ /P[1-9][0-9]*_PG_SETTINGS/ ? System.getenv(settingsEnvironment) : null
-            def validPath = false
-            if (settingsPath != null && !settingsPath.isBlank()) {
-                try {
-                    def selected = java.nio.file.Path.of(settingsPath)
-                    validPath = selected.isAbsolute() && selected.normalize() == selected &&
-                            java.nio.file.Files.isRegularFile(selected, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                } catch (Exception ignored) {
-                    // Do not include a private path or cause in Gradle diagnostics.
-                }
-            }
-            if (!validPath) {
-                throw new GradleException('An explicit owned PostgreSQL settings file is required')
-            }
-        }
-    }
-    afterSuite { descriptor, result ->
-        if (descriptor.parent == null && (result.testCount == 0 || result.skippedTestCount > 0)) {
-            throw new GradleException('Owned PostgreSQL contracts must execute without skipped tests')
-        }
-    }
-    outputs.upToDateWhen { false }
 }

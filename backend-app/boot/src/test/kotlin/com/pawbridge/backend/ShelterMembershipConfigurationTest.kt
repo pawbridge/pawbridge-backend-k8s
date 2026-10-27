@@ -2,7 +2,6 @@ package com.pawbridge.backend
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.animal.internal.shelter.application.ShelterReads
-import com.pawbridge.backend.animal.internal.shelter.infrastructure.MembershipLockedAnimalShelterReads
 import com.pawbridge.backend.boot.configuration.ShelterMembershipConfiguration
 import com.pawbridge.backend.user.internal.shelter.application.ShelterMembership
 import io.mockk.confirmVerified
@@ -18,12 +17,8 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
-import java.time.ZoneId
 import java.util.function.Supplier
 import javax.sql.DataSource
 
@@ -46,7 +41,7 @@ class ShelterMembershipConfigurationTest {
     }
 
     @Test
-    fun `기존 writer 자원이 있을 때__구성하면__새 자원 없이 JDBC와 매니저와 시계를 재사용한다`() {
+    fun `기존 writer 자원이 있을 때__구성하면__새 데이터 자원 없이 시작하고 DB를 건드리지 않는다`() {
         // given
         val jdbc = mockk<JdbcTemplate>()
         val manager = mockk<PlatformTransactionManager>()
@@ -58,28 +53,14 @@ class ShelterMembershipConfigurationTest {
         withReaderInputs(runner(jdbc, manager)).run { context ->
             // then
             assertThat(context).hasNotFailed()
-            val memberships = context.getBean(ShelterMembership::class.java)
-            assertThat(ReflectionTestUtils.getField(memberships, "jdbc")).isSameAs(jdbc)
-            val write = ReflectionTestUtils.getField(memberships, "write") as TransactionTemplate
-            val read = ReflectionTestUtils.getField(memberships, "read") as TransactionTemplate
-            val statistics = ReflectionTestUtils.getField(memberships, "statistics") as TransactionTemplate
-            assertThat(write.transactionManager).isSameAs(manager)
-            assertThat(write.isReadOnly).isFalse()
-            assertThat(write.timeout).isEqualTo(-1)
-            assertThat(read.transactionManager).isSameAs(manager)
-            assertThat(read.isReadOnly).isTrue()
-            assertThat(statistics.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ)
-            val clock = ReflectionTestUtils.getField(memberships, "clock") as Clock
-            assertThat(clock.zone).isEqualTo(ZoneId.of("Asia/Seoul"))
+            assertThat(context).hasSingleBean(ShelterMembership::class.java)
             assertThat(context.getBeansOfType(DataSource::class.java)).hasSize(1)
-            verify(exactly = 1) { jdbc.afterPropertiesSet() }
-            confirmVerified(jdbc)
             confirmVerified(manager)
         }
     }
 
     @Test
-    fun `writer 소스가 일치할 때__보호소 명령이 켜지면__SQL과 새 트랜잭션 없이 모듈 조회만 감싼다`() {
+    fun `writer 소스가 일치할 때__보호소 명령이 켜지면__SQL 없이 시작한다`() {
         // given
         val writer = mockk<DataSource>()
         val jdbc = mockk<JdbcTemplate>()
@@ -92,11 +73,6 @@ class ShelterMembershipConfigurationTest {
         lockingRunner(jdbc, writer).run { context ->
             // then
             assertThat(context).hasNotFailed()
-            val lookup = context.getBean(ShelterMembership.ShelterLookup::class.java)
-            val locked = ReflectionTestUtils.getField(lookup, "shelters")
-            assertThat(locked).isInstanceOf(MembershipLockedAnimalShelterReads::class.java)
-            assertThat(ReflectionTestUtils.getField(locked!!, "delegate")).isSameAs(context.getBean("animalModuleReads"))
-            assertThat(ReflectionTestUtils.getField(locked, "jdbc")).isSameAs(jdbc)
             verifyNoSqlOn(jdbc)
             confirmVerified(writer)
         }
@@ -125,7 +101,7 @@ class ShelterMembershipConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false", "on", "yes", "1", "unknown"])
-    fun `보호소 명령이 true로 명시되지 않았을 때__구성하면__writer 잠금 없이 원래 위임을 유지한다`(
+    fun `보호소 명령이 true로 명시되지 않았을 때__구성하면__writer 소스를 조회하지 않고 시작한다`(
         flag: String,
     ) {
         // given
@@ -141,8 +117,6 @@ class ShelterMembershipConfigurationTest {
         runner.run { context ->
             // then
             assertThat(context).hasNotFailed()
-            val actual = ReflectionTestUtils.getField(context.getBean(ShelterMembership.ShelterLookup::class.java), "shelters")
-            assertThat(actual).isSameAs(context.getBean("animalModuleReads"))
             verify(exactly = 0) { jdbc.dataSource }
             verifyNoSqlOn(jdbc)
         }

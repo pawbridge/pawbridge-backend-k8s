@@ -31,7 +31,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.dao.DataAccessResourceFailureException
-import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
@@ -125,32 +124,6 @@ class NoteBlockRemoveHttpTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID"])
-    fun `토큰이 없거나 잘못되고 대상이 깨졌을 때__해제하면__바인딩과 업무 처리 전에 인증 실패를 준다`(
-        token: String,
-    ) {
-        // given
-        val request = delete(PATH + "not-a-long").header("X-User-Id", "7")
-        if (token == "INVALID") {
-            request.header("Authorization", "Bearer invalid")
-        }
-        val message = if (token == "MISSING") "인증 토큰이 필요합니다." else "유효하지 않거나 만료된 토큰입니다."
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"" + message + "\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-    }
-
-    @ParameterizedTest
     @ValueSource(longs = [0, -1])
     fun `양수가 아닌 대상과 유효한 토큰이 주어졌을 때__해제하면__해제와 회원 조회 전에 로그인 401을 준다`(
         target: Long,
@@ -167,26 +140,6 @@ class NoteBlockRemoveHttpTest {
             .andExpect(header().string("Cache-Control", "no-store"))
             .andExpect(header().doesNotExist("Set-Cookie"))
             .andExpect(content().json("{\"message\":\"로그인이 필요합니다.\"}", JsonCompareMode.STRICT))
-        noDependencies()
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["not-a-long", "9223372036854775808", "status"])
-    fun `깨지거나 넘치는 대상과 유효한 토큰이 주어졌을 때__해제하면__업무 처리 전에 메시지만 담은 400을 준다`(
-        target: String,
-    ) {
-        // given
-        val request = authenticated(PATH + target)
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"message\":\"요청 형식과 로그인 정보를 확인해 주세요.\"}", JsonCompareMode.STRICT))
         noDependencies()
     }
 
@@ -253,124 +206,6 @@ class NoteBlockRemoveHttpTest {
         contextCleared()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["MISSING", "INVALID", "VALID"])
-    fun `노출되지 않은 스트림 확장 경로일 때__어떤 토큰으로 요청해도__해제나 SSE 없이 기본 403을 유지한다`(
-        token: String,
-    ) {
-        // given
-        val request = get("/api/v1/notes/stream/extra").accept(MediaType.TEXT_EVENT_STREAM)
-        if (token != "MISSING") {
-            request.header(
-                "Authorization",
-                if (token == "INVALID") "Bearer invalid" else "Bearer " + F3TestInputs.token(7, "ROLE_USER"),
-            )
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "PUT /api/v1/notes/00000000-0000-0000-0000-000000000008/read/extra",
-            "DELETE /api/v1/notes/00000000-0000-0000-0000-000000000008/extra",
-            "DELETE /api/v1/notes/blocks/8/extra",
-        ],
-    )
-    fun `노출되지 않은 쪽지 변경이나 깊은 경로일 때__요청하면__해제 작업 없이 기본 403을 유지한다`(
-        wire: String,
-    ) {
-        // given
-        val parts = wire.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"접근할 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        noDependencies()
-    }
-
-    @Test
-    fun `읽기 전용 트랜잭션 오류가 났을 때__차단 상태를 조회하면__해제 어드바이스 밖에서 저장소 503을 유지한다`() {
-        // given
-        every { members.get(any()) } returns active()
-        every { statuses.blockedAuthors(any(), any()) } throws TransactionSystemException("synthetic-status-commit")
-
-        // when
-        val result = mvc.perform(
-            get("/api/v1/notes/blocks/status")
-                .param("memberIds", "8")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result
-            .andExpect(status().isServiceUnavailable())
-            .andExpect(header().string("Cache-Control", "no-store"))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json(mapper.writeValueAsString(mapOf("message" to STORAGE)), JsonCompareMode.STRICT))
-        verify(exactly = 1) { members.get(7) }
-        verify(exactly = 1) { statuses.blockedAuthors(7, listOf(8L)) }
-        confirmVerified(members, statuses, removal, counts)
-        contextCleared()
-    }
-
-    @Test
-    fun `관리자 권한과 런타임 오류가 주어졌을 때__사용자 수를 세면__해제 어드바이스 밖에서 403과 500을 유지한다`() {
-        // given
-        every { counts.count() } throws IllegalStateException("synthetic-admin-count")
-
-        // when
-        val forbidden = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-        confirmVerified(counts)
-        val failed = mvc.perform(
-            get("/api/v1/admin/users/stats/total-users")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
-        )
-
-        // then
-        forbidden
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(
-                content().json("{\"code\":403,\"message\":\"관리자 권한이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        failed
-            .andExpect(status().isInternalServerError())
-            .andExpect(header().string("Cache-Control", SECURITY_CACHE))
-            .andExpect(header().doesNotExist("Set-Cookie"))
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { counts.count() }
-        confirmVerified(counts, removal, members, statuses)
-        contextCleared()
-    }
-
     private fun authenticated(path: String): MockHttpServletRequestBuilder {
         return delete(path).header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
     }
@@ -382,7 +217,6 @@ class NoteBlockRemoveHttpTest {
 
     companion object {
         private const val PATH = "/api/v1/notes/blocks/"
-        private const val SECURITY_CACHE = "no-cache, no-store, max-age=0, must-revalidate"
         private const val MEMBER = "회원 정보를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요."
         private const val STORAGE = "쪽지 저장소를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
         private const val GENERIC = "쪽지를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."

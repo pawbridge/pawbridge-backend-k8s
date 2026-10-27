@@ -13,14 +13,15 @@ import io.mockk.justRun
 import io.mockk.mockk
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
+import io.jsonwebtoken.Jwts
 import org.junit.jupiter.api.Test
+import org.springframework.mock.web.MockHttpServletRequest
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.annotation.Scheduled
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.SimpleTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
@@ -68,7 +69,7 @@ class AuthSessionConfigurationTest {
     }
 
     @Test
-    fun `켜지고 원래 TTL이 있을 때__조립하면__기존 키 쓰기 도구 관리자를 그대로 재사용한다`() {
+    fun `켜지고 원래 TTL이 있을 때__조립하면__기존 키로 서명한 설정 만료의 접근 토큰을 발급한다`() {
         // given
         val settings = F3TestInputs.settings()
         val runner = inputs(settings).withPropertyValues(
@@ -83,15 +84,11 @@ class AuthSessionConfigurationTest {
             assertThat(context).hasNotFailed()
             assertThat(context.getBeansOfType(AuthSessions::class.java)).hasSize(1)
             assertThat(context.getBeansOfType(JwtSessionTokens::class.java)).hasSize(1)
-            val tokens = context.getBean(JwtSessionTokens::class.java)
-            assertThat(ReflectionTestUtils.getField(tokens, "key")).isSameAs(settings.jwtKey())
-            assertThat(ReflectionTestUtils.getField(tokens, "accessExpiration")).isEqualTo(600000L)
-            val sessions = context.getBean(AuthSessions::class.java)
-            assertThat(ReflectionTestUtils.getField(sessions, "jdbc")).isSameAs(context.getBean("writeJdbc"))
-            val tx = ReflectionTestUtils.getField(sessions, "transactions") as TransactionTemplate
-            assertThat(tx.transactionManager).isSameAs(context.getBean("writeTransactionManager"))
-            assertThat(tx.timeout).isEqualTo(15)
-            assertThat(tx.isReadOnly).isFalse()
+            val token = context.getBean(JwtSessionTokens::class.java)
+                .access(JwtSessionTokens.UserClaims(1L, "user@example.invalid", "user", "ROLE_USER", null))
+            val claims = Jwts.parser().verifyWith(settings.jwtKey()).build().parseSignedClaims(token).payload
+            assertThat(claims.expiration.time - claims.issuedAt.time).isEqualTo(600_000L)
+            assertThat(context.getBean(AuthSessionPolicy::class.java).idleLifetime).isEqualTo(Duration.ofMillis(1234))
             assertThat(context.getBeansOfType(DataSource::class.java)).isEmpty()
             confirmVerified(context.getBean("writeJdbc"), context.getBean("writeTransactionManager"))
         }
@@ -115,8 +112,6 @@ class AuthSessionConfigurationTest {
             assertThat(policy.absoluteLifetime).isEqualTo(Duration.ofDays(30))
             assertThat(policy.maxActiveSessions).isEqualTo(5)
             assertThat(policy.reuseGrace).isEqualTo(Duration.ofSeconds(60))
-            val store = context.getBean(JdbcAuthSessionStore::class.java)
-            assertThat(ReflectionTestUtils.getField(store, "jdbc")).isSameAs(context.getBean("writeJdbc"))
             assertThat(context.getBeansOfType(AuthSessionConfiguration.AuthSessionCleanupJob::class.java)).isEmpty()
         }
     }
@@ -152,9 +147,10 @@ class AuthSessionConfigurationTest {
         runner.run { context ->
             // then
             val controller = context.getBean(AuthSessionController::class.java)
-            @Suppress("UNCHECKED_CAST")
-            val allowedOrigins = ReflectionTestUtils.getField(controller, "allowedOrigins") as Set<Any>
-            assertThat(allowedOrigins).containsExactlyInAnyOrder("https://www.pawbridge.kr", "https://pawbridge.kr")
+            assertThat(logoutStatus(controller, "https://www.pawbridge.kr")).isEqualTo(200)
+            assertThat(logoutStatus(controller, "https://pawbridge.kr")).isEqualTo(200)
+            assertThat(logoutStatus(controller, "https://app.pawbridge.kr")).isEqualTo(403)
+            assertThat(logoutStatus(controller, "https://*.pawbridge.kr")).isEqualTo(403)
         }
     }
 
@@ -175,8 +171,7 @@ class AuthSessionConfigurationTest {
         runner.run { context ->
             // then
             assertThat(context).hasNotFailed()
-            val job = context.getBean(AuthSessionConfiguration.AuthSessionCleanupJob::class.java)
-            assertThat(ReflectionTestUtils.getField(job, "store")).isSameAs(context.getBean(JdbcAuthSessionStore::class.java))
+            assertThat(context).hasSingleBean(AuthSessionConfiguration.AuthSessionCleanupJob::class.java)
             val scheduled = AuthSessionConfiguration.AuthSessionCleanupJob::class.java
                 .getMethod("deleteFinishedSessions")
                 .getAnnotation(Scheduled::class.java)
@@ -201,6 +196,13 @@ class AuthSessionConfigurationTest {
         // then
         verify(exactly = 2) { store.deleteFinished(1000) }
         verify(exactly = 2) { manager.commit(any()) }
+    }
+
+    private fun logoutStatus(controller: AuthSessionController, origin: String): Int {
+        val request = MockHttpServletRequest("POST", "/api/v1/auth/logout")
+        request.addHeader("Origin", origin)
+        request.contentType = "application/json"
+        return controller.logout(request).statusCode.value()
     }
 
     private fun inputs(): ApplicationContextRunner = inputs(F3TestInputs.settings())

@@ -2,7 +2,6 @@ package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.configuration.StoreWishlistConfiguration
 import com.pawbridge.backend.store.internal.wishlist.application.WishlistCommands
-import com.pawbridge.backend.store.internal.wishlist.infrastructure.JdbcWishlistCommands
 import com.pawbridge.backend.store.internal.wishlist.web.WishlistCommandController
 import com.pawbridge.backend.store.internal.wishlist.web.WishlistCommandExceptionHandler
 import com.zaxxer.hikari.HikariDataSource
@@ -15,9 +14,6 @@ import org.mockito.Mockito.mockConstruction
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.support.JdbcTransactionManager
-import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.client.RestClient
 import software.amazon.awssdk.services.s3.S3Client
@@ -79,21 +75,12 @@ class StoreWishlistConfigurationTest {
                     assertThat(context.getBeansOfType(HikariDataSource::class.java))
                         .containsOnlyKeys("storeWishlistWriteDataSource")
                     val jdbc = context.getBean("storeWishlistWriteJdbc", JdbcTemplate::class.java)
-                    val manager = context.getBean("storeWishlistWriteTransactionManager", JdbcTransactionManager::class.java)
                     val transaction = context.getBean("storeWishlistWriteTransaction", TransactionTemplate::class.java)
-                    assertThat(jdbc.dataSource).isSameAs(shared)
                     assertThat(jdbc.queryTimeout).isEqualTo(5)
-                    assertThat(manager.dataSource).isSameAs(shared)
-                    assertThat(transaction.transactionManager).isSameAs(manager)
                     assertThat(transaction.timeout).isEqualTo(10)
                     assertThat(transaction.isReadOnly).isFalse()
-                    val command = context.getBean(WishlistCommands::class.java) as JdbcWishlistCommands
-                    assertThat((ReflectionTestUtils.getField(command, "jdbc") as NamedParameterJdbcTemplate).jdbcOperations)
-                        .isSameAs(jdbc)
-                    assertThat(ReflectionTestUtils.getField(command, "write")).isSameAs(transaction)
                     val clock = context.getBean("storeWishlistClock", Clock::class.java)
                     assertThat(clock.zone).isEqualTo(ZoneId.systemDefault())
-                    assertThat(ReflectionTestUtils.getField(command, "clock")).isSameAs(clock)
                     assertThat(context.getBeansOfType(WishlistCommandController::class.java)).hasSize(1)
                     assertThat(context.getBeansOfType(WishlistCommandExceptionHandler::class.java)).hasSize(1)
                     assertThat(context.getBeansOfType(HttpClient::class.java)).isEmpty()

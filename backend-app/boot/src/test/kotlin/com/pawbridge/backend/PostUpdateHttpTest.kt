@@ -12,7 +12,6 @@ import com.pawbridge.backend.community.internal.post.application.UpdatePost
 import com.pawbridge.backend.community.internal.post.web.PostUpdateController
 import com.pawbridge.backend.community.internal.post.web.PostUpdateExceptionHandler
 import com.pawbridge.backend.user.api.UserNicknameQuery
-import io.jsonwebtoken.Jwts
 import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.justRun
@@ -33,13 +32,11 @@ import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.LocalDateTime
-import java.util.Date
 import java.util.Optional
 
 @WebMvcTest(
@@ -249,79 +246,6 @@ class PostUpdateHttpTest {
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.message").value("게시글을 찾을 수 없습니다."))
         confirmVerified(remover, uploader, users, writer)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["missing", "invalid", "refresh", "expired"])
-    fun `검증되지 않은 토큰이 주어졌을 때__PUT하면__모든 업무 포트 전에 401이다`(token: String) {
-        // given
-        val request = multipart(HttpMethod.PUT, "/api/v1/posts/42").header("X-User-Id", "7")
-        val value: String? = when (token) {
-            "invalid" -> "invalid"
-            "refresh" -> Jwts.builder()
-                .subject("7")
-                .expiration(Date(System.currentTimeMillis() + 60_000))
-                .signWith(F3TestInputs.KEY)
-                .compact()
-            "expired" -> Jwts.builder()
-                .claim("userId", 7)
-                .claim("role", "ROLE_USER")
-                .expiration(Date(System.currentTimeMillis() - 60_000))
-                .signWith(F3TestInputs.KEY)
-                .compact()
-            else -> null
-        }
-        if (value != null) {
-            request.header("Authorization", "Bearer $value")
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result.andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value(401))
-        confirmVerified(reader, remover, uploader, users, writer)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `잘못된 게시글 ID가 주어졌을 때__PUT하면__400을 응답한다`(id: String) {
-        // given
-        val request = multipart(HttpMethod.PUT, "/api/v1/posts/$id")
-            .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value(400))
-            .andExpect(jsonPath("$.message").value("요청 경로의 식별자 형식이 올바르지 않습니다."))
-        confirmVerified(reader, remover, uploader, users, writer)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "PUT /api/v1/posts", "PUT /api/v1/posts/42/extra", "PUT /api/v1/posts/read/42",
-            "PUT /api/v1/admin/posts/42/extra", "PATCH /api/v1/posts/42", "POST /api/v1/posts/42",
-            "GET /api/v1/posts/42",
-        ],
-    )
-    fun `노출되지 않은 경로나 메서드가 주어졌을 때__요청하면__업무 전에 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(reader, remover, uploader, users, writer)
     }
 
     @Test

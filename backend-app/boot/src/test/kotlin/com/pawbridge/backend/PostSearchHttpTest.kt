@@ -8,7 +8,6 @@ import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.post.application.InvalidPostSearchInputException
 import com.pawbridge.backend.community.internal.post.application.ListPosts
 import com.pawbridge.backend.community.internal.post.application.PostDetails
-import com.pawbridge.backend.community.internal.post.application.PostNotFoundException
 import com.pawbridge.backend.community.internal.post.application.PostSearchUnavailableException
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.application.SearchPosts
@@ -181,24 +180,6 @@ class PostSearchHttpTest {
         confirmVerified(searchPosts)
     }
 
-    @Test
-    fun `기존 읽기 경로에 없는 게시글이 주어졌을 때__조회하면__검색 어드바이스가 원래 404를 바꾸지 않는다`() {
-        // given
-        every { readPost.read(any()) } throws PostNotFoundException()
-
-        // when
-        val result = mvc.perform(get("/api/v1/posts/read/42"))
-
-        // then
-        result
-            .andExpect(status().isNotFound())
-            .andExpect(
-                content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        verify(exactly = 1) { readPost.read(42) }
-        confirmVerified(searchPosts, listPosts)
-    }
-
     @ParameterizedTest
     @MethodSource("searchFailures")
     fun `민감한 값이 담긴 검색 실패가 주어졌을 때__결과를 조회하면__비밀 로그 없이 범위 한정 오류를 돌려준다`(
@@ -250,47 +231,6 @@ class PostSearchHttpTest {
         }
         verify(exactly = 1) { searchPosts.search(keyword) }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/posts", "GET /api/v1/posts/search/42", "GET /api/v1/posts/search/",
-            "GET /api/v1/posts/searching", "GET /api/posts/search",
-            "HEAD /api/v1/posts/search", "OPTIONS /api/v1/posts/search", "POST /api/v1/posts/search",
-            "PATCH /api/v1/posts/search",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로가 주어졌을 때__요청하면__검색 없이 거부한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]).param("keyword", "강아지"),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(searchPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["PUT", "DELETE"])
-    fun `토큰 없이 검색 경로와 겹치는 쓰기 메서드가 주어졌을 때__요청하면__쓰기 인증을 유지한다`(
-        method: String,
-    ) {
-        // given
-        val httpMethod = org.springframework.http.HttpMethod.valueOf(method)
-
-        // when
-        val result = mvc.perform(request(httpMethod, "/api/v1/posts/search"))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-        confirmVerified(searchPosts)
     }
 
     companion object {

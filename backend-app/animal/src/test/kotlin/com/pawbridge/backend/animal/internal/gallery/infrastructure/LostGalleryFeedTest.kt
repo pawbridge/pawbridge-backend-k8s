@@ -11,7 +11,6 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -227,17 +226,16 @@ class LostGalleryFeedTest {
         )
 
         // when
-        val legacyFailure = assertThrows(IllegalStateException::class.java) { feed.content() }
+        assertThrows(IllegalStateException::class.java) { feed.content() }
 
         // then
-        assertNotNull(legacyFailure)
         assertEquals(501, row.get())
         verify(exactly = 1) { result.close() }
         clearMocks(result, statement, answers = false)
         row.set(0)
 
         // when
-        val streamFailure = assertThrows(IllegalStateException::class.java) {
+        assertThrows(IllegalStateException::class.java) {
             feed.streamEntries(
                 Consumer { entry ->
                     assertTrue(streamActive.get(), "source rows must be consumed inside the explicit stream transaction")
@@ -249,7 +247,6 @@ class LostGalleryFeedTest {
         }
 
         // then
-        assertNotNull(streamFailure)
         assertEquals(1, row.get())
         verify(exactly = 1) { statement.fetchSize = 200 }
         verify(exactly = 0) { connection.metaData }

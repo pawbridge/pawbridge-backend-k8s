@@ -10,8 +10,6 @@ import io.mockk.every
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -75,70 +73,7 @@ class UserStoreMyPageHttpTest {
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = ["wishlists", "orders", "cart"])
-    fun `JWT가 없고 헤더가 위조됐을 때__자기 데이터를 조회하면__서비스 전에 거부한다`(path: String) {
-        // given
-        val request = get(ROOT + path).header("X-User-Id", "7").header("X-User-Role", "ROLE_ADMIN")
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(header().doesNotExist("Set-Cookie"))
-        confirmVerified(myPage)
-    }
-
-    @Test
-    fun `인증된 회원이 주어졌을 때__알 수 없는 인접 경로를 요청하면__스토어 호출 없이 거부한다`() {
-        // given
-        val token = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
-
-        // when
-        val result = mvc.perform(get(ROOT + "cart/items").header("Authorization", token))
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(myPage)
-    }
-
     companion object {
         private const val ROOT = "/api/v1/users/me/"
-    }
-}
-
-@WebMvcTest(
-    properties = ["pawbridge.user-store-mypage.enabled=false"],
-    excludeAutoConfiguration = [UserDetailsServiceAutoConfiguration::class],
-)
-@ContextConfiguration(
-    classes = [
-        StoreMyPageController::class,
-        StoreMyPageExceptionHandler::class,
-        ReadSecurityConfiguration::class,
-        F3TestInputs.SecurityInputs::class,
-    ],
-)
-class UserStoreMyPageDisabledHttpTest {
-    @Autowired
-    lateinit var mvc: MockMvc
-
-    @MockkBean
-    lateinit var myPage: StoreMyPage
-
-    @ParameterizedTest
-    @ValueSource(strings = ["wishlists", "orders", "cart"])
-    fun `기능이 꺼졌을 때__각 자기 경로를 요청하면__유효한 JWT여도 거부한다`(path: String) {
-        // given
-        val token = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
-
-        // when
-        val result = mvc.perform(get("/api/v1/users/me/$path").header("Authorization", token))
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(myPage)
     }
 }

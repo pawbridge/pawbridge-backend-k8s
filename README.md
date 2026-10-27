@@ -2,9 +2,11 @@
 
 ## 현재 운영과 개발
 
-2026-10-19 기준 운영 환경은 Mac의 Docker Compose이며, PostgreSQL 17과 pgvector를 사용합니다. 기존 Java 17 마이크로서비스를 운영하고, 동물 사진 검색·추천용 Python AI는 별도 Mac 네이티브 프로세스로 실행합니다. 현재 Mac 운영에서도 Kafka·Debezium CDC·Redis를 계속 사용합니다.
+2026-10-27 기준 운영은 Mac mini의 Docker Compose이며, 백엔드는 Java 21 [모듈형 모놀리스 backend-app](https://github.com/pawbridge/pawbridge-backend-services/tree/dev/backend-app) 하나로 실행합니다(main 커밋으로 만든 이미지). 데이터는 PostgreSQL 17과 pgvector에 두고, Redis는 회원 채팅·이메일 인증·상품 랭킹·챗봇 요청 제한에 씁니다. 동물 추천 AI와 사진 압축은 Python 컨테이너로, 실종동물 사진 검색은 Mac 네이티브 프로세스로 실행합니다. 외부 접속은 Cloudflare Tunnel로 받습니다. 이전 환경의 Java 17 마이크로서비스, Kafka·Debezium CDC, Elasticsearch, MySQL은 운영에서 쓰지 않습니다.
 
-`dev`에서는 Java 21 기반 [모듈형 모놀리스 backend-app](https://github.com/pawbridge/pawbridge-backend-k8s/tree/dev/backend-app)을 개발·통합합니다.
+`dev`에서 backend-app을 개발·통합하고, 운영 배포는 dev를 main에 올린 뒤 main 커밋으로 합니다([운영 배포 절차](backend-app/README.md#운영-배포)).
+
+`python/`에는 동물 사진 검색·추천 AI와 사진 압축 서비스가 있습니다. 2026-10-26 기존 `pawbridge/pawbridge-python` 저장소의 dev(`844facb6`)를 Git 이력째 가져왔고, 원본 저장소는 보관용으로 남깁니다. 저장소 이름은 같은 날 `pawbridge-backend-k8s`에서 `pawbridge-backend-services`로 바뀌었으며 옛 주소는 GitHub이 새 주소로 넘겨줍니다.
 
 | 브랜치 | 역할 |
 | --- | --- |
@@ -82,6 +84,6 @@
 
 ## 인프라 구축 매뉴얼 (Infrastructure Setup)
 - 애플리케이션이 올라갈 Kubernetes 클러스터 하부 망(Vagrant, DB, Kafka 등) 설치 가이드는 전용 저장소인 [pawbridge-infra-k8s](https://github.com/pawbridge/pawbridge-infra-k8s)에서 확인할 수 있습니다.
-- 동물 및 상품 검색 코어가 의존하는 Elasticsearch 수동 인덱스 매핑 파일 및 파이프라인 스크립트는 현재 백엔드 저장소의 infrastructure/elasticsearch/ 디렉토리에 포함되어 있습니다.
+- 이전 환경의 Elasticsearch 인덱스 매핑·파이프라인 스크립트, Kafka 커넥터, MySQL·모니터링 구성(`infrastructure/`)과 서비스별 MySQL 마이그레이션은 2026-10-27 저장소에서 정리했습니다. 정리 직전 상태는 [이 커밋의 `infrastructure/`](https://github.com/pawbridge/pawbridge-backend-services/tree/8e45a7301a58d96e06f4bc5340a53a551c3934fb/infrastructure)에서 볼 수 있습니다. 현재 운영 PostgreSQL 마이그레이션은 `backend-app/db/postgresql/`에 있습니다.
 
 ---

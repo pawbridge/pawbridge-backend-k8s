@@ -14,6 +14,10 @@ import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
+import java.util.stream.Stream
 import org.springframework.batch.core.JobExecution
 import org.springframework.batch.support.transaction.ResourcelessTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -288,102 +292,35 @@ class ApmsAnimalSnapshotTest {
             .doesNotContain("private-service-key-placeholder")
     }
 
-    @Test
-    fun `제공자가 오류를 돌려줄 때__수집하면__불완전으로 기록한다`() {
-        // given
-        val response = page("0", listOf(), 1)
-        response.response!!.header!!.resultCode = "30"
-        val snapshot = snapshot()
-
-        every {
-            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
-        } answers { page("0", listOf(), arg<Int>(1)) }
-        every {
-            api.getAbandonmentAnimals("test-key", any(), 1000, any(), any(), null, null, "json", null, null)
-        } returns response
-
-        // when
-        snapshot.animals()
-
-        // then
-        assertIncomplete("UNSUCCESSFUL_RESPONSE")
-    }
-
-    @Test
-    fun `응답이 없을 때__수집하면__불완전으로 기록한다`() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("incompletePages")
+    fun `건수가 맞지 않거나 응답이 비정상일 때__수집하면__불완전으로 기록한다`(
+        name: String,
+        firstPage: () -> ApmsRootResponse<ApmsAnimal>?,
+        reason: String,
+        everyWindow: Boolean,
+    ) {
         // given
         val snapshot = snapshot()
 
         every {
             api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
         } answers { page("0", listOf(), arg<Int>(1)) }
-        every {
-            api.getAbandonmentAnimals("test-key", any(), 1000, any(), any(), null, null, "json", null, null)
-        } returns null
+        if (everyWindow) {
+            every {
+                api.getAbandonmentAnimals("test-key", any(), 1000, any(), any(), null, null, "json", null, null)
+            } returns firstPage()
+        } else {
+            every {
+                api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
+            } returns firstPage()
+        }
 
         // when
         snapshot.animals()
 
         // then
-        assertIncomplete("UNSUCCESSFUL_RESPONSE")
-    }
-
-    @Test
-    fun `건수는 양수인데 항목이 없을 때__수집하면__불완전으로 기록한다`() {
-        // given
-        val snapshot = snapshot()
-
-        every {
-            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
-        } answers { page("0", listOf(), arg<Int>(1)) }
-        every {
-            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
-        } returns page("3", null, 1)
-
-        // when
-        snapshot.animals()
-
-        // then
-        assertIncomplete("COUNT_MISMATCH")
-    }
-
-    @Test
-    fun `건수는 양수인데 항목이 비어 있을 때__수집하면__불완전으로 기록한다`() {
-        // given
-        val snapshot = snapshot()
-
-        every {
-            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
-        } answers { page("0", listOf(), arg<Int>(1)) }
-        every {
-            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
-        } returns page("3", listOf(), 1)
-
-        // when
-        snapshot.animals()
-
-        // then
-        assertIncomplete("COUNT_MISMATCH")
-    }
-
-    @Test
-    fun `쪽이 잘렸을 때__수집하면__불완전으로 기록한다`() {
-        // given
-        val one = animal("one", "20260908", null, "보호중")
-        val snapshot = snapshot()
-
-        every {
-            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
-        } answers { page("0", listOf(), arg<Int>(1)) }
-        every {
-            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
-        } returns page("2", listOf(one), 1)
-
-        // when
-        snapshot.animals()
-
-        // then
-        assertIncomplete("COUNT_MISMATCH")
+        assertIncomplete(reason)
     }
 
     @Test
@@ -470,10 +407,14 @@ class ApmsAnimalSnapshotTest {
         thrown.hasMessageContaining("update window")
     }
 
-    @Test
-    fun `번호가 없을 때__수집하면__실패한다`() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidAnimals")
+    fun `동물 번호나 갱신 시각이 올바르지 않을 때__수집하면__보정하거나 임의의 중복을 고르지 않고 실패한다`(
+        name: String,
+        invalid: ApmsAnimal,
+        message: String,
+    ) {
         // given
-        val withoutNumber = animal(null, "20260908", null, "보호중")
         val snapshot = snapshot()
 
         every {
@@ -481,53 +422,13 @@ class ApmsAnimalSnapshotTest {
         } answers { page("0", listOf(), arg<Int>(1)) }
         every {
             api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
-        } returns page("1", listOf(withoutNumber), 1)
+        } returns page("1", listOf(invalid), 1)
 
         // when
         val thrown = assertThatThrownBy { snapshot.animals() }
 
         // then
-        thrown.hasMessageContaining("number is missing")
-    }
-
-    @Test
-    fun `갱신 시각 형식이 잘못됐을 때__수집하면__임의의 중복을 고르는 대신 실패한다`() {
-        // given
-        val malformed = animal("one", "20260908", "bad-date", "보호중")
-        val snapshot = snapshot()
-
-        every {
-            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
-        } answers { page("0", listOf(), arg<Int>(1)) }
-        every {
-            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
-        } returns page("1", listOf(malformed), 1)
-
-        // when
-        val thrown = assertThatThrownBy { snapshot.animals() }
-
-        // then
-        thrown.hasMessageContaining("timestamp is invalid")
-    }
-
-    @Test
-    fun `존재하지 않는 달력 날짜일 때__수집하면__보정하지 않고 실패한다`() {
-        // given
-        val impossible = animal("one", "20260908", "2026-02-30 10:00:00", "보호중")
-        val snapshot = snapshot()
-
-        every {
-            api.getAbandonmentAnimals(any(), any(), 1000, any(), any(), null, null, "json", any(), any())
-        } answers { page("0", listOf(), arg<Int>(1)) }
-        every {
-            api.getAbandonmentAnimals("test-key", 1, 1000, "20260811", "20260910", null, null, "json", null, null)
-        } returns page("1", listOf(impossible), 1)
-
-        // when
-        val thrown = assertThatThrownBy { snapshot.animals() }
-
-        // then
-        thrown.hasMessageContaining("timestamp is invalid")
+        thrown.hasMessageContaining(message)
     }
 
     private fun assertIncomplete(reason: String) {
@@ -544,16 +445,43 @@ class ApmsAnimalSnapshotTest {
         return ApmsAnimalSnapshot(api, "test-key", execution, requests, animals)
     }
 
-    private fun animal(number: String?, intake: String, updated: String?, state: String): ApmsAnimal {
-        return ApmsAnimal.builder().desertionNo(number).happenDt(intake).updTm(updated).processState(state).build()
-    }
+    companion object {
+        @JvmStatic
+        fun incompletePages(): Stream<Arguments> {
+            val providerError = page("0", listOf(), 1)
+            providerError.response!!.header!!.resultCode = "30"
+            val one = animal("one", "20260908", null, "보호중")
+            return Stream.of(
+                Arguments.of("제공자 오류", { providerError }, "UNSUCCESSFUL_RESPONSE", true),
+                Arguments.of("응답 없음", { null }, "UNSUCCESSFUL_RESPONSE", true),
+                Arguments.of("항목 없음", { page("3", null, 1) }, "COUNT_MISMATCH", false),
+                Arguments.of("빈 항목", { page("3", listOf(), 1) }, "COUNT_MISMATCH", false),
+                Arguments.of("잘린 쪽", { page("2", listOf(one), 1) }, "COUNT_MISMATCH", false),
+            )
+        }
 
-    private fun page(total: String, animals: List<ApmsAnimal>?, number: Int): ApmsRootResponse<ApmsAnimal> {
-        return ApmsRootResponse(
-            ApmsResponse(
-                ApmsHeader.builder().resultCode("00").build(),
-                ApmsBody(ApmsItems(animals), "1000", number.toString(), total),
+        @JvmStatic
+        fun invalidAnimals(): Stream<Arguments> = Stream.of(
+            Arguments.of("번호 없음", animal(null, "20260908", null, "보호중"), "number is missing"),
+            Arguments.of("잘못된 갱신 시각", animal("one", "20260908", "bad-date", "보호중"), "timestamp is invalid"),
+            Arguments.of(
+                "없는 달력 날짜",
+                animal("one", "20260908", "2026-02-30 10:00:00", "보호중"),
+                "timestamp is invalid",
             ),
         )
+
+        private fun animal(number: String?, intake: String, updated: String?, state: String): ApmsAnimal {
+            return ApmsAnimal.builder().desertionNo(number).happenDt(intake).updTm(updated).processState(state).build()
+        }
+
+        private fun page(total: String, animals: List<ApmsAnimal>?, number: Int): ApmsRootResponse<ApmsAnimal> {
+            return ApmsRootResponse(
+                ApmsResponse(
+                    ApmsHeader.builder().resultCode("00").build(),
+                    ApmsBody(ApmsItems(animals), "1000", number.toString(), total),
+                ),
+            )
+        }
     }
 }

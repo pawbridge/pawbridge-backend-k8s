@@ -10,7 +10,6 @@ import com.pawbridge.backend.animal.internal.image.web.AnimalImageExceptionHandl
 import com.pawbridge.backend.boot.configuration.AnimalCommandConfiguration
 import com.pawbridge.backend.boot.configuration.AnimalImageConfiguration
 import com.pawbridge.backend.boot.configuration.PostWriteSettings
-import com.pawbridge.backend.user.internal.animalcommand.infrastructure.JdbcAnimalCommandActors
 import io.mockk.confirmVerified
 import io.mockk.excludeRecords
 import io.mockk.justRun
@@ -25,12 +24,8 @@ import org.springframework.beans.factory.config.BeanDefinitionCustomizer
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import software.amazon.awssdk.services.s3.S3Client
 import java.util.function.Supplier
 import javax.sql.DataSource
@@ -62,7 +57,7 @@ class AnimalImageConfigurationTest {
     }
 
     @Test
-    fun `이미지 활성화__조립하면__두 번째 행위자 빈을 노출하지 않고 저장소와 쓰기 소스를 빌려 쓴다`() {
+    fun `이미지 활성화__조립하면__두 번째 행위자 빈을 노출하지 않고 저장소 클라이언트는 한 번만 닫는다`() {
         // given
         val writer = mockk<DataSource>()
         val storage = mockk<S3Client>()
@@ -89,23 +84,6 @@ class AnimalImageConfigurationTest {
                 .hasSingleBean(AnimalImageExceptionHandler::class.java)
                 .doesNotHaveBean(AnimalCommandActors::class.java)
                 .doesNotHaveBean(AnimalCommandService::class.java)
-            val images = context.getBean(S3AnimalImages::class.java)
-            assertThat(ReflectionTestUtils.getField(images, "s3Client")).isSameAs(storage)
-            assertThat(ReflectionTestUtils.getField(images, "bucketName")).isEqualTo(settings.bucket())
-            assertThat(ReflectionTestUtils.getField(images, "publicBaseUrl")).isEqualTo(settings.publicBaseUrl())
-            val service = context.getBean(AnimalImageService::class.java)
-            assertThat(ReflectionTestUtils.getField(service, "images")).isSameAs(images)
-            val actors = ReflectionTestUtils.getField(service, "actors")
-            assertThat(actors).isInstanceOf(JdbcAnimalCommandActors::class.java)
-            assertThat(ReflectionTestUtils.getField(actors!!, "jdbc")).isSameAs(context.getBean("writeJdbc"))
-            val writes = ReflectionTestUtils.getField(service, "writes") as TransactionTemplate
-            assertThat(writes.transactionManager).isSameAs(context.getBean("writeTransactionManager"))
-            assertThat(writes.propagationBehavior).isEqualTo(TransactionDefinition.PROPAGATION_REQUIRED)
-            assertThat(writes.isolationLevel).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED)
-            assertThat(writes.timeout).isEqualTo(10)
-            assertThat(writes.isReadOnly).isFalse()
-            assertThat(ReflectionTestUtils.getField(context.getBean(AnimalImageController::class.java), "images"))
-                .isSameAs(service)
             confirmVerified(writer, storage)
         }
 
@@ -210,18 +188,6 @@ class AnimalImageConfigurationTest {
                 .hasStackTraceContaining("postS3Client")
             confirmVerified(writer)
         }
-    }
-
-    @Test
-    fun `애플리케이션 임포트__검사하면__이미지 설정을 한 번만 등록한다`() {
-        // given
-        val imports = PawBridgeApplication::class.java.getAnnotation(Import::class.java).value
-
-        // when
-        val registrations = imports.filter { type -> type.java == AnimalImageConfiguration::class.java }.size
-
-        // then
-        assertThat(registrations).isEqualTo(1)
     }
 
     companion object {

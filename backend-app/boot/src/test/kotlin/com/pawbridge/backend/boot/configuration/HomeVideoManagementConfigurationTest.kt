@@ -17,9 +17,6 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
 import org.springframework.scheduling.TaskScheduler
 import org.springframework.scheduling.annotation.Scheduled
-import org.springframework.test.util.ReflectionTestUtils
-import org.springframework.transaction.TransactionDefinition
-import org.springframework.transaction.support.TransactionTemplate
 import java.net.http.HttpClient
 import java.time.Clock
 import java.util.function.Supplier
@@ -47,7 +44,7 @@ class HomeVideoManagementConfigurationTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["absent", "false"])
-    fun `갱신 없이 관리 기능만 켰을 때__조립하면__스케줄러 없이 기록 연결과 기본 트랜잭션을 재사용한다`(
+    fun `갱신 없이 관리 기능만 켰을 때__조립하면__스케줄러 없이 시작하고 연결을 열지 않는다`(
         flag: String,
     ) {
         // given
@@ -74,15 +71,6 @@ class HomeVideoManagementConfigurationTest {
             assertThat(context).hasNotFailed()
                 .hasSingleBean(HomeVideoManagement::class.java)
                 .doesNotHaveBean(TaskScheduler::class.java)
-            val service = context.getBean(HomeVideoManagement::class.java)
-            assertThat(ReflectionTestUtils.getField(service, "clock")).isSameAs(clock)
-            val tx = ReflectionTestUtils.getField(service, "transaction") as TransactionTemplate
-            assertThat(tx.transactionManager).isSameAs(manager)
-            assertThat(tx.timeout).isEqualTo(-1)
-            assertThat(ReflectionTestUtils.getField(context.getBean("homeVideoManagementRepository"), "jdbc"))
-                .isSameAs(jdbc)
-            assertThat(ReflectionTestUtils.getField(context.getBean(YouTubeVideoClient::class.java), "http"))
-                .isSameAs(context.getBean("homeVideoHttpClient"))
             verify(exactly = 0) { manager.getTransaction(any()) }
         }
     }

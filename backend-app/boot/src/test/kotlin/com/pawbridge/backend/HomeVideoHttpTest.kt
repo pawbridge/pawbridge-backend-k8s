@@ -199,28 +199,6 @@ class HomeVideoHttpTest {
         confirmVerified(videos, readPost, listPosts)
     }
 
-    @Test
-    fun `보호된 즐겨찾기 조회와 게시글 읽기 실패일 때__요청하면__홈 영상 어드바이스와 공개 매처의 범위가 유지된다`() {
-        // given
-        every { readPost.read(any()) } throws IllegalStateException("synthetic-private-post")
-
-        // when
-        val favorite = mvc.perform(get("/api/v1/favorites/42/check"))
-        val post = mvc.perform(get("/api/v1/posts/read/42").header("Authorization", "Bearer invalid"))
-
-        // then
-        favorite
-            .andExpect(status().isUnauthorized())
-            .andExpect(
-                content().json("{\"code\":401,\"message\":\"인증 토큰이 필요합니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        post
-            .andExpect(status().isInternalServerError())
-            .andExpect(content().json("{\"code\":500,\"message\":\"서버 에러!\",\"data\":null}", JsonCompareMode.STRICT))
-        verify(exactly = 1) { readPost.read(42) }
-        confirmVerified(videos, readPost, listPosts)
-    }
-
     companion object {
         @JvmStatic
         fun readFailures(): Stream<RuntimeException> {

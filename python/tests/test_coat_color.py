@@ -1,0 +1,123 @@
+import copy
+import os
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+from PIL import Image, ImageEnhance
+from app.services.vision.coat_color import describe, mismatch, ranking_weight, valid, VERSION
+from app.services.search.lost_search import rank_candidates
+
+
+def swatch(color, background="blue"):
+    image = Image.new("RGB", (120, 120), background)
+    image.paste(color, (20, 20, 100, 100))
+    mask = np.zeros((120, 120), dtype=bool)
+    mask[20:100, 20:100] = True
+    return image, mask
+
+
+def descriptor(color):
+    image, mask = swatch(color)
+    with image:
+        return describe(image, mask)
+
+
+def synthetic_descriptor(points):
+    from app.services.vision.coat_color import JOINT_BINS, MARGINAL_BINS
+    joint = np.zeros((JOINT_BINS, JOINT_BINS, JOINT_BINS))
+    for point in points:
+        joint[point] += 1 / len(points)
+    marginal = []
+    # Put the same discrete joint mass into the nearest 32-bin positions. This
+    # fixture can create equal marginals with deliberately different color
+    # combinations, the information v1 could not retain.
+    for axis in range(3):
+        values = np.zeros(MARGINAL_BINS)
+        for point in points:
+            values[round(point[axis] * (MARGINAL_BINS - 1) / (JOINT_BINS - 1))] += 1 / len(points)
+        marginal.extend(values.tolist())
+    return {"version": VERSION, "source": "single_mask", "pixels": 1000,
+            "marginal": marginal, "joint": joint.ravel().tolist()}
+
+
+class CoatColorTest(unittest.TestCase):
+    def test_nearly_identical_neutral_colors_do_not_receive_maximum_penalty(self):
+        gray = descriptor((128, 128, 128))
+        for neighbor in ((128, 129, 128), (128, 128, 129), (129, 128, 128)):
+            with self.subTest(neighbor=neighbor):
+                self.assertLess(mismatch(gray, descriptor(neighbor)), .01)
+
+    def test_wrapped_chroma_v2_descriptor_is_not_compared_with_corrected_colors(self):
+        corrected = descriptor("gray")
+        previous = dict(corrected, version="foreground-lab32-joint8-v2")
+        self.assertFalse(valid(previous))
+        self.assertIsNone(mismatch(corrected, previous))
+        self.assertIsNone(mismatch(previous, corrected))
+
+    def test_background_and_small_boundary_changes_do_not_change_foreground(self):
+        first, mask = swatch((110, 70, 35), "blue")
+        second, _ = swatch((110, 70, 35), "green")
+        with first, second:
+            second.paste("red", (20, 20, 100, 21))
+            a, b = describe(first, mask), describe(second, mask)
+        self.assertTrue(valid(a))
+        self.assertEqual(a, b)
+        self.assertEqual(mismatch(a, b), 0)
+
+    def test_dark_vs_tan_and_black_vs_white_differ_more_than_exposure_change(self):
+        dark, mask = swatch((45, 40, 35))
+        with dark, ImageEnhance.Brightness(dark).enhance(1.3) as brighter:
+            a, b = describe(dark, mask), describe(brighter, mask)
+        same = mismatch(a, b)
+        self.assertLess(same, .08)
+        self.assertGreater(mismatch(a, descriptor((165, 110, 60))), same + .25)
+        self.assertGreater(mismatch(descriptor("black"), descriptor("white")), .5)
+
+    def test_mixed_coat_is_not_collapsed_to_average_gray_and_small_mark_has_limited_effect(self):
+        gray, mask = swatch((128, 128, 128))
+        mixed, _ = swatch("white")
+        mixed.paste("black", (20, 20, 60, 100))
+        marked, _ = swatch((128, 128, 128))
+        marked.paste("red", (50, 50, 60, 60))
+        with gray, mixed, marked:
+            a, b, c = [describe(image, mask) for image in (gray, mixed, marked)]
+        self.assertGreater(mismatch(a, b), .15)
+        self.assertLess(mismatch(a, c), .05)
+
+    def test_joint_distribution_distinguishes_color_combinations_with_equal_marginals(self):
+        correlated = synthetic_descriptor([(1, 1, 1), (6, 6, 6)])
+        crossed = synthetic_descriptor([(1, 6, 1), (6, 1, 6)])
+        self.assertTrue(valid(correlated))
+        self.assertTrue(valid(crossed))
+        self.assertGreater(mismatch(correlated, crossed), .6)
+
+    def test_unavailable_wrong_version_or_invalid_features_are_not_a_mismatch(self):
+        good = descriptor("black")
+        corrupt = copy.deepcopy(good); corrupt["joint"][0] = float("nan")
+        for bad in (None, {}, dict(good, version="old"), corrupt):
+            self.assertIsNone(mismatch(good, bad))
+        image, mask = swatch("black")
+        with image:
+            mask[:] = False
+            self.assertIsNone(describe(image, mask))
+
+    def test_color_reorders_close_candidates_without_hiding_them_or_changing_raw_image_score(self):
+        black = descriptor((45, 40, 35)); tan = descriptor((165, 110, 60))
+        hits = [{"_score": 1.88, "_source": {"id": 1, "coat_color": tan}},
+                {"_score": 1.87, "_source": {"id": 2, "coat_color": black}}]
+        base = rank_candidates(hits, coat_color=black)
+        enabled = rank_candidates(hits, coat_color=black, color_weight=.12)
+        self.assertEqual([r["animalId"] for r in base], [1, 2])
+        self.assertEqual([r["animalId"] for r in enabled], [2, 1])
+        self.assertAlmostEqual(enabled[1]["imageScore"], .88)
+        self.assertEqual(rank_candidates(hits, color_weight=.12), base)
+        hits[0]["_source"].pop("coat_color")
+        self.assertEqual([r["animalId"] for r in rank_candidates(hits, coat_color=black, color_weight=.12)], [1, 2])
+
+    def test_ranking_is_opt_in_and_invalid_weight_is_not_silently_enabled(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(ranking_weight(), 0)
+        for value in ("nan", "inf", "-0.1", "0.3", "typo"):
+            with self.subTest(value=value), patch.dict(os.environ, {"LOST_SEARCH_COAT_COLOR_WEIGHT": value}):
+                with self.assertRaises(RuntimeError): ranking_weight()

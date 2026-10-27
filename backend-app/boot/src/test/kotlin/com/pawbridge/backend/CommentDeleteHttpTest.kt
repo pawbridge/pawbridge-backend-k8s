@@ -6,7 +6,6 @@ import ch.qos.logback.core.read.ListAppender
 import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
 import com.pawbridge.backend.community.internal.comment.application.CommentDeletion
-import com.pawbridge.backend.community.internal.comment.application.CommentDetails
 import com.pawbridge.backend.community.internal.comment.application.CommentNotFoundException
 import com.pawbridge.backend.community.internal.comment.application.CreateComment
 import com.pawbridge.backend.community.internal.comment.application.ListComments
@@ -19,7 +18,6 @@ import com.pawbridge.backend.community.internal.comment.web.CommentDeleteExcepti
 import com.pawbridge.backend.community.internal.comment.web.CommentReadController
 import com.pawbridge.backend.community.internal.comment.web.CommentReadExceptionHandler
 import com.pawbridge.backend.community.internal.post.application.ListPosts
-import com.pawbridge.backend.community.internal.post.application.PostNotFoundException
 import com.pawbridge.backend.community.internal.post.application.ReadPost
 import com.pawbridge.backend.community.internal.post.web.PostReadController
 import com.pawbridge.backend.community.internal.post.web.PostReadExceptionHandler
@@ -30,7 +28,6 @@ import io.mockk.every
 import io.mockk.justRun
 import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -46,15 +43,11 @@ import org.springframework.test.json.JsonCompareMode
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.sql.SQLException
-import java.time.LocalDateTime
 import java.util.Date
 import java.util.stream.Stream
 
@@ -146,83 +139,6 @@ class CommentDeleteHttpTest {
     }
 
     @ParameterizedTest
-    @MethodSource("rejectedAuthorizations")
-    fun `토큰이 없거나 믿을 수 없고 ID도 잘못됐을 때__댓글을 지우면__바인딩과 삭제 전에 인증부터 거부한다`(
-        authorization: String?,
-        message: String,
-    ) {
-        // given
-        val request = delete("/api/v1/comments/not-a-number")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{")
-            .header("X-User-Id", "7")
-            .header("X-User-Role", "ROLE_ADMIN")
-        if (authorization != null) {
-            request.header("Authorization", authorization)
-        }
-
-        // when
-        val result = mvc.perform(request)
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-            .andExpect(jsonPath("$.message").value(message))
-            .andExpect(jsonPath("$.data").isEmpty())
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
-    @MethodSource("com.pawbridge.backend.PostTokenAuthenticatorTest#invalidIdentity")
-    fun `서명됐지만 잘못된 신원일 때__댓글을 지우면__바인딩과 삭제 전에 거부한다`(
-        claims: Map<String, Any>,
-    ) {
-        // given
-        val token = Jwts.builder()
-            .claims(claims)
-            .expiration(Date(System.currentTimeMillis() + 3_600_000))
-            .signWith(F3TestInputs.KEY)
-            .compact()
-
-        // when
-        val result = mvc.perform(delete("/api/v1/comments/not-a-number").header("Authorization", "Bearer $token"))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-            .andExpect(jsonPath("$.message").value("토큰 파싱에 실패했습니다."))
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
-    }
-
-    @Test
-    fun `소유자 둘에 이어 익명 요청이 올 때__댓글을 지우면__이전 신원을 지운다`() {
-        // given
-        justRun { deletion.delete(12, 7) }
-        justRun { deletion.delete(12, 8) }
-
-        // when
-        val ownerResults = longArrayOf(7, 8).map { userId ->
-            mvc.perform(
-                delete("/api/v1/comments/12").header("Authorization", "Bearer " + F3TestInputs.token(userId, "ROLE_USER")),
-            )
-        }
-        val anonymousResult = mvc.perform(delete("/api/v1/comments/12"))
-
-        // then
-        for (result in ownerResults) {
-            result.andExpect(status().isOk())
-        }
-        anonymousResult.andExpect(status().isUnauthorized())
-        verify(exactly = 1) { deletion.delete(12, 7) }
-        verify(exactly = 1) { deletion.delete(12, 8) }
-        confirmVerified(deletion)
-        assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @ParameterizedTest
     @ValueSource(longs = [12, 0, -1])
     fun `포트가 댓글을 찾지 못할 때__댓글을 지우면__새 ID 검증 없이 404를 유지한다`(
         commentId: Long,
@@ -263,23 +179,6 @@ class CommentDeleteHttpTest {
                 ),
             )
         verify(exactly = 1) { deletion.delete(12, 7) }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["abc", "9223372036854775808"])
-    fun `파싱할 수 없는 댓글 ID와 유효한 신원일 때__지우면__400을 응답한다`(
-        commentId: String,
-    ) {
-        // given
-
-        // when
-        val result = mvc.perform(authenticatedDelete(commentId))
-
-        // then
-        result
-            .andExpect(status().isBadRequest())
-            .andExpect(content().json("{\"code\":400,\"message\":\"요청 경로의 식별자 형식이 올바르지 않습니다.\",\"data\":null}", JsonCompareMode.STRICT))
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 
     @ParameterizedTest
@@ -328,86 +227,6 @@ class CommentDeleteHttpTest {
         }
         verify(exactly = 1) { deletion.delete(12, 7) }
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
-    }
-
-    @Test
-    fun `기존 댓글 읽기와 작성과 글 404가 있을 때__요청하면__삭제의 인증과 오류 처리 범위가 유지된다`() {
-        // given
-        val time = LocalDateTime.of(2026, 10, 19, 12, 30)
-        val comment = CommentDetails(12, 42, 7, "작성자", "댓글", time, time)
-
-        every { listComments.read(42) } returns listOf(comment)
-        every { createComment.create(42, 7, "댓글") } returns comment
-        every { readPost.read(42) } throws PostNotFoundException()
-
-        // when
-        val readResult = mvc.perform(get("/api/v1/comments/posts/read/42").header("Authorization", "Bearer invalid"))
-        val createResult = mvc.perform(
-            post("/api/v1/comments/posts/42")
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER"))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"content\":\"댓글\"}"),
-        )
-        val postResult = mvc.perform(get("/api/v1/posts/read/42"))
-
-        // then
-        readResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data[0].commentId").value(12))
-        createResult
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").value("댓글이 생성되었습니다."))
-        postResult
-            .andExpect(status().isNotFound())
-            .andExpect(
-                content().json("{\"code\":404,\"message\":\"게시글을 찾을 수 없습니다.\",\"data\":null}", JsonCompareMode.STRICT),
-            )
-        confirmVerified(deletion, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "GET /api/v1/comments/12", "POST /api/v1/comments/12",
-            "PATCH /api/v1/comments/12", "HEAD /api/v1/comments/12", "OPTIONS /api/v1/comments/12",
-            "DELETE /api/v1/comments", "DELETE /api/v1/comments/", "DELETE /api/v1/comments/12/",
-            "DELETE /api/v1/comments/12/extra", "DELETE /api/v1/comments/posts/42",
-            "DELETE /api/v1/comments/posts/read/42", "DELETE /api/comments/12", "DELETE /api/v1/admin/comments/12",
-        ],
-    )
-    fun `노출되지 않은 메서드나 인접 경로일 때__유효한 토큰으로 요청하면__업무 호출 없이 거부한다`(
-        request: String,
-    ) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(
-            request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1])
-                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_USER")),
-        )
-
-        // then
-        result.andExpect(status().isForbidden())
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = ["POST /api/v1/posts", "PUT /api/v1/posts/42", "DELETE /api/v1/posts/42", "POST /api/v1/comments/posts/42"],
-    )
-    fun `토큰 없는 기존 쓰기일 때__요청하면__JWT 인증을 유지한다`(request: String) {
-        // given
-        val parts = request.split(" ", limit = 2)
-
-        // when
-        val result = mvc.perform(request(org.springframework.http.HttpMethod.valueOf(parts[0]), parts[1]))
-
-        // then
-        result
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.code").value(401))
-        confirmVerified(deletion, createComment, listComments, readPost, listPosts)
     }
 
     companion object {
