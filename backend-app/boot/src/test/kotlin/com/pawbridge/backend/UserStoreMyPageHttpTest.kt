@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.time.LocalDateTime
 
 @WebMvcTest(
     properties = ["pawbridge.user-store-mypage.enabled=true"],
@@ -71,6 +72,30 @@ class UserStoreMyPageHttpTest {
         verify(exactly = 1) { myPage.cart(7) }
         confirmVerified(myPage)
         assertThat(SecurityContextHolder.getContext().authentication).isNull()
+    }
+
+    @Test
+    fun `찜한 SKU가 있을 때__찜 목록을 조회하면__화면이 쓰는 SKU 가격 옵션을 함께 준다`() {
+        // given
+        val time = LocalDateTime.of(2026, 10, 27, 20, 30)
+        val wishlist = StoreMyPage.Wishlist(
+            1L, 10L, "PADDING-RED-L", 5L, "패딩", null, null, "ACTIVE", 35000L, mapOf("Color" to "Red"), 2L, "의류", time,
+        )
+        every { myPage.wishlists(any(), any()) } returns StoreMyPage.Page(listOf(wishlist), 0, 20, 1, listOf())
+        val token = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
+
+        // when
+        val page = mvc.perform(get(ROOT + "wishlists").header("Authorization", token))
+
+        // then
+        page
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].wishlistId").value(1))
+            .andExpect(jsonPath("$.data.content[0].skuId").value(10))
+            .andExpect(jsonPath("$.data.content[0].skuCode").value("PADDING-RED-L"))
+            .andExpect(jsonPath("$.data.content[0].price").value(35000))
+            .andExpect(jsonPath("$.data.content[0].options.Color").value("Red"))
+            .andExpect(jsonPath("$.data.totalPages").value(1))
     }
 
     companion object {

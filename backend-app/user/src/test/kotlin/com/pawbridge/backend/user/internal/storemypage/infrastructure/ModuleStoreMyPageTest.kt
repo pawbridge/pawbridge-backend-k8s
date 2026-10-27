@@ -173,13 +173,13 @@ class ModuleStoreMyPageTest {
     }
 
     @Test
-    fun `스토어 투영이 모든 필드를 가질 때__매핑하면__기존 사용자 필드와 null과 정밀도와 긴 값만 유지한다`() {
+    fun `스토어 투영이 모든 필드를 가질 때__매핑하면__찜의 SKU 가격 옵션과 null과 정밀도와 긴 값을 유지한다`() {
         // given
         val profiles = mockk<UserProfileQuery>()
         val store = mockk<StoreMemberReads>()
         val time = LocalDateTime.of(2026, 10, 20, 1, 2, 3, 123456000)
         val wish = StoreMemberReads.Wishlist(
-            1L, 99L, "not-in-user-subset", 2L, "상품", null, null, "DELETED", Long.MAX_VALUE, mutableMapOf<String?, String?>("색" to "보라"), null, null, time,
+            1L, 99L, "PADDING-PURPLE-L", 2L, "상품", null, null, "DELETED", Long.MAX_VALUE, mutableMapOf<String?, String?>("색" to "보라"), null, null, time,
         )
         val item = StoreMemberReads.OrderItem(3L, 4L, null, "snapshot", Long.MAX_VALUE, null)
         val cartItem = StoreMemberReads.CartItem(6L, 4L, null, null, 0L, 2, 0L)
@@ -202,7 +202,12 @@ class ModuleStoreMyPageTest {
         val cart = pages.cart(7L)
 
         // then
-        assertEquals(StoreMyPage.Wishlist(1L, 2L, "상품", null, null, "DELETED", null, null, time), wishlist)
+        assertEquals(
+            StoreMyPage.Wishlist(
+                1L, 99L, "PADDING-PURPLE-L", 2L, "상품", null, null, "DELETED", Long.MAX_VALUE, mapOf("색" to "보라"), null, null, time,
+            ),
+            wishlist,
+        )
         assertEquals(
             StoreMyPage.Purchase(
                 5L, "order", Long.MAX_VALUE, "CANCELLED", null, null,
