@@ -119,6 +119,12 @@ class CreateAnimalRequest {
     var specialMark: String? = null
 
     /**
+     * 발견 일자
+     * - 예: 2026-10-20
+     */
+    var happenDate: LocalDate? = null
+
+    /**
      * 발견 장소
      * - 예: "진해구 남문동 남문시티 1차"
      */
@@ -193,6 +199,9 @@ class CreateAnimalRequest {
         if (specialMark != other.specialMark) {
             return false
         }
+        if (happenDate != other.happenDate) {
+            return false
+        }
         if (happenPlace != other.happenPlace) {
             return false
         }
@@ -224,6 +233,7 @@ class CreateAnimalRequest {
             weight,
             color,
             specialMark,
+            happenDate,
             happenPlace,
             imageUrl,
             imageUrl2,
@@ -247,6 +257,7 @@ class CreateAnimalRequest {
             "weight=$weight, " +
             "color=$color, " +
             "specialMark=$specialMark, " +
+            "happenDate=$happenDate, " +
             "happenPlace=$happenPlace, " +
             "imageUrl=$imageUrl, " +
             "imageUrl2=$imageUrl2, " +
@@ -269,6 +280,7 @@ class CreateAnimalRequest {
         private var weight: String? = null
         private var color: String? = null
         private var specialMark: String? = null
+        private var happenDate: LocalDate? = null
         private var happenPlace: String? = null
         private var imageUrl: String? = null
         private var imageUrl2: String? = null
@@ -330,6 +342,10 @@ class CreateAnimalRequest {
             this.specialMark = specialMark
         }
 
+        fun happenDate(happenDate: LocalDate?): CreateAnimalRequestBuilder = apply {
+            this.happenDate = happenDate
+        }
+
         fun happenPlace(happenPlace: String?): CreateAnimalRequestBuilder = apply {
             this.happenPlace = happenPlace
         }
@@ -362,6 +378,7 @@ class CreateAnimalRequest {
             request.weight = weight
             request.color = color
             request.specialMark = specialMark
+            request.happenDate = happenDate
             request.happenPlace = happenPlace
             request.imageUrl = imageUrl
             request.imageUrl2 = imageUrl2
