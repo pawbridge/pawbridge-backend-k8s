@@ -2,6 +2,7 @@ package com.pawbridge.backend.animal.internal.command.web
 
 import com.pawbridge.backend.animal.internal.command.infrastructure.persistence.PostgresqlRollbackCharsetViolation
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandForbiddenException
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotEditableException
 import org.springframework.dao.DataAccessException
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
@@ -14,6 +15,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 class AnimalCommandExceptionHandler {
     @ExceptionHandler(AnimalCommandForbiddenException::class)
     fun forbidden(failure: AnimalCommandForbiddenException): ResponseEntity<Failure> = error(403, failure.message)
+
+    @ExceptionHandler(AnimalNotEditableException::class)
+    fun notEditable(failure: AnimalNotEditableException): ResponseEntity<Failure> = error(409, failure.message)
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun invalid(failure: IllegalArgumentException): ResponseEntity<Failure> = error(400, failure.message)

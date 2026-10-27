@@ -32,11 +32,15 @@ class ModuleStoreMyPage(
             return page(Objects.requireNonNull(store.wishlists(currentUserId, request(request)))) { item ->
                 Wishlist(
                     item.wishlistId,
+                    item.skuId,
+                    item.skuCode,
                     item.productId,
                     item.productName,
                     item.productDescription,
                     item.productImageUrl,
                     item.productStatus,
+                    item.price,
+                    item.options,
                     item.categoryId,
                     item.categoryName,
                     item.createdAt,

@@ -327,6 +327,45 @@ class Animal private constructor(
     }
 
     /**
+     * 보호소가 직접 등록한 동물의 정보 수정
+     * - 요청 값으로 통째로 바꾼다 (null이면 지움)
+     * - 상태, 출처, 공고번호, 보호소, 찜 횟수, APMS 필드는 유지한다
+     */
+    fun updateManualDetails(
+        noticeStartDate: LocalDate?,
+        noticeEndDate: LocalDate?,
+        species: Species?,
+        gender: Gender?,
+        neuterStatus: NeuterStatus?,
+        breed: String?,
+        birthYear: Int?,
+        weight: String?,
+        color: String?,
+        specialMark: String?,
+        happenDate: LocalDate?,
+        happenPlace: String?,
+        imageUrl: String?,
+        imageUrl2: String?,
+        description: String?,
+    ) {
+        this.noticeStartDate = noticeStartDate
+        this.noticeEndDate = noticeEndDate
+        this.species = species
+        this.gender = gender
+        this.neuterStatus = neuterStatus
+        this.breed = breed
+        this.birthYear = birthYear
+        this.weight = weight
+        this.color = color
+        this.specialMark = specialMark
+        this.happenDate = happenDate
+        this.happenPlace = happenPlace
+        this.imageUrl = imageUrl
+        this.imageUrl2 = imageUrl2
+        this.description = description
+    }
+
+    /**
      * 찜 횟수 증가
      */
     fun incrementFavoriteCount() {

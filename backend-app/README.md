@@ -685,13 +685,14 @@ Store EMF는 entity9와 mapped superclass1만 명시하고 공유 단일 pool(`p
 | POST | `/api/v1/animals` | 원문 동물 생성, 201 |
 | PATCH | `/api/v1/animals/{id}/status` | 원문 상태 변경, 200 |
 | PATCH | `/api/v1/animals/{id}/description` | 원문 설명 변경, 200 |
+| PUT | `/api/v1/animals/{id}` | 직접 등록(MANUAL) 동물의 정보 항목 전체 교체, 200. APMS 동물은 409 |
 | DELETE | `/api/v1/animals/{id}` | 원문 삭제, 204 |
 
 서명 검증한 JWT의 회원 ID만 사용한다. User 모듈은 같은 writer 트랜잭션에서 현재 회원 행을 잠그고 삭제 대기를 조회한다. Animal은 현재 DB의 `ROLE_ADMIN` 또는 보호소 등록번호가 일치하는 `ROLE_SHELTER`만 허용한다. JWT의 오래된 역할이나 `X-User-*` 헤더로 이 검사를 대체하지 않는다. 기존 조회·ADMIN 경로의 인가는 바꾸지 않는다.
 
 선택한 원문 JPA 모델·저장소·mapper·업무 로직을 infrastructure 안에서 재사용한다. 명시 writer EMF는 Animal/Shelter/BaseTimeEntity만 관리하고 전역 스캔·DDL·새 pool을 만들지 않는다. 원문 감사 listener와 서비스의 REQUIRED 경계를 유지하고 writer 격리는 READ_COMMITTED로 명시한다. JpaTM의 기본 제한은 15초다. 조회용 reader와 구분하고, User 조회와 검색 SQL도 같은 writer DataSource에 참여해야 한다. Nori 분석기는 조회·추천·명령 사이에서 하나를 공유하고 context와 함께 닫는다.
 
-생성과 설명 변경은 원문 동물·검색 투영을 함께 커밋한다. 비MANUAL 출처의 공고번호가 null/빈 값이면 쓰기 전에 고정 400으로 거부하며, MANUAL의 기본값·번호 생성과 정상 외부 번호는 유지한다. 상태 변경은 flush한 감사 시각으로 응답을 만든다. 삭제의 FK 동작도 유지한다. 이 명령들은 더 이상 Animal outbox(`animal.created`·`animal.status.changed`·`animal.updated`)를 쓰지 않는다. 이 토픽의 소비자가 없었고 Debezium·Kafka·outbox는 모놀리스에서 제거하기로 결정했기 때문이며, 이벤트 큐는 나중에 필요할 때 다시 도입한다. APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
+생성과 설명 변경은 원문 동물·검색 투영을 함께 커밋한다. 비MANUAL 출처의 공고번호가 null/빈 값이면 쓰기 전에 고정 400으로 거부하며, MANUAL의 기본값·번호 생성과 정상 외부 번호는 유지한다. 상태 변경은 flush한 감사 시각으로 응답을 만든다. 정보 수정(PUT)은 MANUAL 동물만 받는다. APMS 동물은 다음 동기화가 덮어쓰기 때문이다. 축종·성별·중성화·공고 기간·품종·나이·체중·색·특징·발견 일자·장소·이미지·설명을 요청 값으로 통째로 바꾸고(null이면 지움), 상태·출처·공고번호·보호소는 바꾸지 않으며 검색 투영을 함께 커밋한다. 삭제의 FK 동작도 유지한다. 이 명령들은 더 이상 Animal outbox(`animal.created`·`animal.status.changed`·`animal.updated`)를 쓰지 않는다. 이 토픽의 소비자가 없었고 Debezium·Kafka·outbox는 모놀리스에서 제거하기로 결정했기 때문이며, 이벤트 큐는 나중에 필요할 때 다시 도입한다. APMS/Tour/사진 보관 작업, R2·AI 실행과 운영 활성화는 이번 명령 편입에 포함하지 않는다.
 
 초기 보완에서는 소유 합성 PostgreSQL 17.11의 실제 보안→MVC→JPA 16계약과 당시 코어 단위 48사례를 확인했다. 이후 동시성 보완의 현재 검증은 아래에서 구분한다. PG는 최초 실행의 15성공과 UTC Calendar로 비교를 교정한 상태 응답 1사례의 수정 전 RED·수정 후 GREEN으로 검증했으며, 비교 방식 교정 뒤 성공한 나머지를 반복하지 않았다. 서버의 시간대·값·허용 오차는 변경하지 않았고 응답/DB 감사 시각 차이는 1µs 미만이어야 한다. 현재 DB 역할·보호소 소유권·삭제 대기, 네 명령·감사 시각·검색 revision, V7 charset 거부와 FK 실패의 rollback, READ COMMITTED·쓰기 트랜잭션·단일 pool/현재 회원 행 잠금, 응답 검증 실패 후 정확한 요청 표식으로 정리하는 경로를 포함한다. User 표는 actor용 열만 갖는 축소 fixture이며 전체 User/Animal migration이나 운영 권한의 검증을 뜻하지 않는다. 기본 off와 비소유 flag alias의 HTTP8은 별도 통과했다.
 
