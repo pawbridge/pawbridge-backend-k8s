@@ -157,12 +157,13 @@ class AnimalCommandServiceTest {
             .noticeStartDate(LocalDate.of(2026, 10, 20))
             .noticeEndDate(LocalDate.of(2026, 10, 30))
             .breed("믹스견")
+            .happenDate(LocalDate.of(2026, 10, 18))
             .description("보호 중")
             .build()
     }
 
     @Test
-    fun `수동 등록 요청일 때__동물을 등록하면__MANUAL 출처와 생성된 공고번호로 저장하고 검색 문서를 갱신한 뒤 커밋한다`() {
+    fun `수동 등록 요청일 때__동물을 등록하면__MANUAL 출처와 생성된 공고번호와 발견 일자로 저장하고 검색 문서를 갱신한 뒤 커밋한다`() {
         // given
         val request = request()
 
@@ -187,6 +188,7 @@ class AnimalCommandServiceTest {
         assertThat(response.id).isEqualTo(43L)
         assertThat(response.apiSource).isEqualTo(ApiSource.MANUAL)
         assertThat(response.apmsNoticeNo).matches("MAN-\\d{6}-000001")
+        assertThat(response.happenDate).isEqualTo(LocalDate.of(2026, 10, 18))
         verifyOrder {
             actors.find(11L)
             animals.save(any<Animal>())

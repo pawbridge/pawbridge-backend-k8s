@@ -21,6 +21,7 @@ class AnimalMapper {
             .weight(request.weight)
             .color(request.color)
             .specialMark(request.specialMark)
+            .happenDate(request.happenDate)
             .happenPlace(request.happenPlace)
             .imageUrl(request.imageUrl)
             .imageUrl2(request.imageUrl2)

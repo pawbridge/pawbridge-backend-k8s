@@ -40,7 +40,7 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
                 mapOf(
                     "careRegNo" to care, "apmsNoticeNo" to notice, "apiSource" to source, "species" to "DOG", "gender" to "MALE",
                     "neuterStatus" to "UNKNOWN", "status" to "PROTECT", "noticeStartDate" to "2026-03-01", "noticeEndDate" to "2026-03-20",
-                    "breed" to "믹스견", "color" to "갈색", "happenPlace" to "합성 장소", "description" to description,
+                    "breed" to "믹스견", "color" to "갈색", "happenDate" to "2026-02-27", "happenPlace" to "합성 장소", "description" to description,
                 ),
             ),
             CreateAnimalRequest::class.java,
@@ -63,7 +63,7 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
     private fun animalRows() = count("SELECT count(*) FROM pawbridge_animal.animals")
 
     @Test
-    fun `보호소 담당자일 때__수동으로 등록하면__오늘 날짜의 순번 공고번호와 수동 출처로 저장하고 검색 문서를 만든다`() {
+    fun `보호소 담당자일 때__수동으로 등록하면__오늘 날짜의 순번 공고번호와 수동 출처와 발견 일자로 저장하고 검색 문서를 만든다`() {
         // given
         // when
         val first = animals.create(KEEPER, registration())
@@ -74,6 +74,7 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
         assertThat(numbers[0]).matches("MAN-[0-9]{6}-000001")
         assertThat(numbers[1]).isEqualTo(numbers[0].dropLast(1) + "2")
         assertThat(scalar("SELECT api_source FROM pawbridge_animal.animals WHERE id = ?", first.id!!)).isEqualTo("MANUAL")
+        assertThat(scalar("SELECT happen_date::text FROM pawbridge_animal.animals WHERE id = ?", first.id!!)).isEqualTo("2026-02-27")
         assertThat(count("SELECT count(*) FROM pawbridge_animal.animal_search_documents WHERE animal_id = ?", first.id!!)).isEqualTo(1)
     }
 
