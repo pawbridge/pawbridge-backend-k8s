@@ -176,7 +176,6 @@ object SecurityRoutes {
         // Flag: animal images.
         add("POST", "/api/v1/animals/images", Access.MEMBER, animalImages)
         add("POST", "/api/v1/animals/images/multiple", Access.MEMBER, animalImages)
-        add("DELETE", "/api/v1/animals/images", Access.MEMBER, animalImages)
         // Flag: store catalog management.
         add("POST", "/api/v1/products", Access.ADMIN_GENERIC, catalogManagement)
         add("PATCH", "/api/v1/products/{productId}", Access.ADMIN_GENERIC, catalogManagement)

@@ -26,6 +26,7 @@ import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoCon
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.support.JdbcTransactionManager
+import org.springframework.test.util.ReflectionTestUtils
 import software.amazon.awssdk.services.s3.S3Client
 import java.util.function.Supplier
 import javax.sql.DataSource
@@ -121,6 +122,9 @@ class AnimalImageConfigurationTest {
                 .hasSingleBean(AnimalCommandActors::class.java)
                 .hasSingleBean(AnimalCommandService::class.java)
                 .hasSingleBean(AnimalImageService::class.java)
+            // Animal commands validate and clean up photos through the same storage adapter as the upload route.
+            val commands = context.getBean(AnimalCommandService::class.java)
+            assertThat(ReflectionTestUtils.getField(commands, "photos")).isSameAs(context.getBean(S3AnimalImages::class.java))
             confirmVerified(writer, storage)
         }
     }
