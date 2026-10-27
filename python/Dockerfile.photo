@@ -1,9 +1,15 @@
-FROM python:3.11-slim
-WORKDIR /service
+# Production photo-service (APMS photo compression, no Torch).
+# Same recipe as the running image (formerly pawbridge-infra environments/mac/images/Dockerfile.photo).
+FROM docker.io/library/python@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+ARG GIT_SHA=unknown
+WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY requirements-photo.txt .
-RUN pip install --no-cache-dir -r requirements-photo.txt
-COPY app/photo_optimizer.py app/photo_main.py ./app/
+LABEL org.opencontainers.image.source="https://github.com/pawbridge/pawbridge-backend-services" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      com.pawbridge.purpose="photo-service"
+COPY requirements-photo.txt /app/requirements-photo.txt
+RUN pip install --no-cache-dir -r requirements-photo.txt && pip check
+COPY app /app/app
 USER 65532:65532
 EXPOSE 8000
-CMD ["uvicorn", "app.photo_main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "4", "--backlog", "8"]
+CMD ["uvicorn", "app.photo_main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "4", "--backlog", "8", "--no-access-log"]

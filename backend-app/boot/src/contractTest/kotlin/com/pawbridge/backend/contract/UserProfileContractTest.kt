@@ -165,7 +165,7 @@ class UserProfileContractTest : ApiContractTestBase() {
     }
 
     @Test
-    fun `게이트웨이에서 옮겨온 경로일 때__요청하면__옛 별칭은 같은 프로필이고 내부 사용자 경로는 404다`() {
+    fun `옛 별칭이나 내부 사용자 경로일 때__요청하면__프로필 없이 거부한다`() {
         // given
         val token = accessToken(ME)
 
@@ -174,9 +174,8 @@ class UserProfileContractTest : ApiContractTestBase() {
         val internal = assertNoSideEffects { get("/api/v1/users/internal/$ME/nickname", token) }
 
         // then
-        assertThat(alias.status).isEqualTo(200)
-        assertThat(alias.text).isEqualTo(profile(token).text)
-        assertThat(internal.status).isEqualTo(404)
+        assertThat(alias.status).isEqualTo(403)
+        assertThat(internal.status).isEqualTo(403)
     }
 
     private fun profile(token: String?, path: String = "/api/v1/users/me", body: ByteArray? = null): Reply =

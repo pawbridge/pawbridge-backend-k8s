@@ -97,10 +97,10 @@ docker run --rm --network none --read-only --tmpfs /tmp -e PYTHONDONTWRITEBYTECO
 1. **main 커밋에서만 빌드한다.** dev 병합과 로컬 시험을 거쳐 main에 들어간 커밋을 깨끗한 작업 폴더로 꺼낸다.
 2. **이미지를 만든다.** 저장소 루트에서:
    ```bash
-   docker build -f python/Dockerfile -t pawbridge-mac-python:$(git rev-parse --short=7 HEAD) python
-   docker build -f python/Dockerfile.photo -t pawbridge-mac-photo:$(git rev-parse --short=7 HEAD) python
+   docker build --pull=false --build-arg GIT_SHA=$(git rev-parse HEAD) -f python/Dockerfile -t pawbridge-mac-python:$(git rev-parse --short=7 HEAD) python
+   docker build --pull=false --build-arg GIT_SHA=$(git rev-parse HEAD) -f python/Dockerfile.photo -t pawbridge-mac-photo:$(git rev-parse --short=7 HEAD) python
    ```
-   바뀐 서비스만 빌드한다. 빌드는 기반 이미지와 Python 패키지를 내려받는다.
+   두 Dockerfile은 운영 중인 이미지와 같은 레시피다(기반 Python 이미지 digest 고정, `pip check`, 컨테이너 사용자 고정). 2026-10-27까지는 인프라 저장소의 `environments/mac/images/`에 있었다. 바뀐 서비스만 빌드한다. 빌드는 Python 패키지를 내려받는다. Docker Desktop 자격 증명 도우미를 못 찾으면 `PATH`에 `$HOME/.docker/bin`을 더한다.
 3. **새 이미지로 시험한다.** 위 "로컬 시험" 명령의 이미지 자리에 새 `pawbridge-mac-python` 태그를 넣어 실행한다.
 4. **교체한다.** 운영 compose 폴더(비밀 저장소 아래, 저장소에 두지 않음)에서 `compose.json`을 날짜 붙은 이름으로 백업하고, 해당 서비스의 `image` 값만 새 이미지 ID(`docker image inspect <태그> --format '{{.Id}}'`)로 바꾼 뒤 그 서비스만 다시 만든다.
    ```bash

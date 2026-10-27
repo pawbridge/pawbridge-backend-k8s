@@ -262,7 +262,6 @@ class LocalLoginHttpTest {
         confirmVerified(login)
     }
 
-    // Security chain only: LegacyApiPathFilter (the temporary /api -> /api/v1 rewrite) is a servlet filter outside it, so the old alias stays denied here; the rewrite is covered by GatewayFeaturesHttpTest.
     @ParameterizedTest
     @ValueSource(strings = ["/api/v1/auth/login/extra", "/api/v1/auth/login/", "/api/auth/login"])
     fun `인접 경로일 때__요청하면__로그인이나 정책 확장 없이 거절한다`(path: String) {

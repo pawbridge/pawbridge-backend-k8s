@@ -249,19 +249,17 @@ class PostCreateContractTest : ApiContractTestBase() {
     }
 
     @Test
-    fun `게이트웨이에서 옮겨온 경로일 때__요청하면__내부 사용자 경로는 404이고 옛 별칭은 v1과 같다`() {
+    fun `내부 사용자 경로나 옛 별칭일 때__요청하면__거부한다`() {
         // given
         seedPost(AUTHOR, AUTHOR)
 
         // when
         // then
         assertNoSideEffects {
-            for (internal in listOf("/api/v1/users/internal/42/nickname", "/api/users/internal/42/nickname")) {
-                assertThat(get(internal).status).`as`(internal).isEqualTo(404)
+            for (path in listOf("/api/v1/users/internal/42/nickname", "/api/users/internal/42/nickname", "/api/posts/read/$AUTHOR")) {
+                assertThat(get(path).status).`as`(path).isEqualTo(403)
             }
-            val alias = get("/api/posts/read/$AUTHOR")
-            assertThat(alias.status).isEqualTo(200)
-            assertThat(alias.text).isEqualTo(get("/api/v1/posts/read/$AUTHOR").text)
+            assertThat(get("/api/v1/posts/read/$AUTHOR").status).isEqualTo(200)
         }
     }
 
