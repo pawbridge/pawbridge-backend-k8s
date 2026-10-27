@@ -9,6 +9,8 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.service.Anim
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.NoticeNumberGenerator
 import com.pawbridge.backend.animal.internal.command.web.AnimalCommandController
 import com.pawbridge.backend.animal.internal.command.web.AnimalCommandExceptionHandler
+import com.pawbridge.backend.animal.internal.image.infrastructure.S3AnimalImages
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
@@ -40,8 +42,10 @@ class AnimalCommandConfiguration {
         numbers: NoticeNumberGenerator,
         actors: AnimalCommandActors,
         @Qualifier("animalCommandJpaTransactionManager") manager: JpaTransactionManager,
+        photos: ObjectProvider<S3AnimalImages>,
     ): AnimalCommandService {
-        return AnimalCommandService(search, animals, shelters, mapper, numbers, actors, manager)
+        // Photo storage exists only with pawbridge.animal-images.enabled; without it commands accept no new photo.
+        return AnimalCommandService(search, animals, shelters, mapper, numbers, actors, manager, photos.ifAvailable)
     }
 
     @Bean

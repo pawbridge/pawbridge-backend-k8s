@@ -14,6 +14,7 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.repository.A
 import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository
 import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter
 import jakarta.persistence.EntityNotFoundException
+import org.slf4j.LoggerFactory
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
@@ -27,6 +28,8 @@ class AnimalCommandService(
     private val noticeNumberGenerator: NoticeNumberGenerator,
     private val actors: AnimalCommandActors,
     writerTransactions: JpaTransactionManager,
+    /** Uploaded photo storage; null while photo uploads are disabled. */
+    private val photos: AnimalPhotoStore? = null,
 ) {
     private val writes: TransactionTemplate
 
@@ -39,9 +42,12 @@ class AnimalCommandService(
     }
 
     fun create(verifiedUserId: Long?, request: CreateAnimalRequest): AnimalDetailResponse {
+        // Storage lookups run before the write transaction so no row lock is held during the network call.
+        val missing = missingUploadedPhotos(request.imageUrl, request.imageUrl2)
         return writes.execute { _ ->
             val actor = currentActor(verifiedUserId)
             requireShelter(actor, request.careRegNo)
+            requireAttachablePhotos(listOf(request.imageUrl, request.imageUrl2), emptySet(), missing)
             create(request)
         }!!
     }
@@ -55,14 +61,23 @@ class AnimalCommandService(
     }
 
     fun update(verifiedUserId: Long?, id: Long?, request: UpdateAnimalRequest): AnimalDetailResponse {
-        return writes.execute { _ -> update(ownedAnimal(verifiedUserId, id), request) }!!
+        val missing = missingUploadedPhotos(request.imageUrl, request.imageUrl2)
+        val updated = writes.execute { _ -> update(ownedAnimal(verifiedUserId, id), request, missing) }!!
+        cleanUpPhotos(updated.replacedPhotos)
+        return updated.response
     }
 
     fun delete(verifiedUserId: Long?, id: Long?) {
-        writes.executeWithoutResult { _ ->
-            ownedAnimal(verifiedUserId, id)
+        val removedPhotos = writes.execute { _ ->
+            val animal = ownedAnimal(verifiedUserId, id)
+            if (animal.apiSource != ApiSource.MANUAL) {
+                throw AnimalNotDeletableException()
+            }
+            val animalPhotos = listOfNotNull(animal.imageUrl, animal.imageUrl2)
             animalRepository.deleteById(id ?: throw IllegalArgumentException("The given id must not be null"))
-        }
+            animalPhotos
+        }!!
+        cleanUpPhotos(removedPhotos)
     }
 
     private fun currentActor(verifiedUserId: Long?): Actor {
@@ -143,11 +158,13 @@ class AnimalCommandService(
         return mapper.toDetailResponse(animal)
     }
 
-    private fun update(animal: Animal, request: UpdateAnimalRequest): AnimalDetailResponse {
+    private fun update(animal: Animal, request: UpdateAnimalRequest, missing: Set<String>): Updated {
         // APMS 동물은 다음 동기화가 덮어쓰므로, 권한을 확인한 뒤 출처로 한 번 더 거른다.
         if (animal.apiSource != ApiSource.MANUAL) {
             throw AnimalNotEditableException()
         }
+        val currentPhotos = setOfNotNull(animal.imageUrl, animal.imageUrl2)
+        requireAttachablePhotos(listOf(request.imageUrl, request.imageUrl2), currentPhotos, missing)
         animal.updateManualDetails(
             noticeStartDate = request.noticeStartDate,
             noticeEndDate = request.noticeEndDate,
@@ -167,7 +184,58 @@ class AnimalCommandService(
         )
         refreshSearch(animal.id)
 
-        return mapper.toDetailResponse(animal)
+        val replacedPhotos = currentPhotos - setOfNotNull(request.imageUrl, request.imageUrl2)
+        return Updated(mapper.toDetailResponse(animal), replacedPhotos)
+    }
+
+    /** Uploaded photo addresses among these that no longer exist in storage. */
+    private fun missingUploadedPhotos(vararg urls: String?): Set<String> {
+        val store = photos ?: return emptySet()
+        return urls.filterNotNull()
+            .filter { url -> store.isUploadedPhoto(url) && !store.exists(url) }
+            .toSet()
+    }
+
+    /**
+     * A photo slot may keep its current address or take a photo this service uploaded that still exists and that
+     * no animal shows yet. Anything else (another animal's photo, an outside address, a photo already cleaned up
+     * because a stale form sends it back) is refused, so cleanup never removes a photo someone else shows.
+     */
+    private fun requireAttachablePhotos(urls: List<String?>, currentPhotos: Set<String>, missing: Set<String>) {
+        for (url in urls) {
+            if (url == null || url in currentPhotos) {
+                continue
+            }
+            val store = photos
+            val attachable = store != null &&
+                store.isUploadedPhoto(url) &&
+                url !in missing &&
+                animalRepository.countPhotoReferences(url) == 0L
+            if (!attachable) {
+                throw IllegalArgumentException("등록할 수 없는 사진 주소입니다. 사진을 다시 올려 주세요.")
+            }
+        }
+    }
+
+    /**
+     * Runs after the write committed. Deletes uploaded photos that no animal shows any more. A failure here is
+     * logged without the address and never turns the committed request into an error.
+     */
+    private fun cleanUpPhotos(urls: Collection<String>) {
+        val store = photos ?: return
+        for (url in urls.distinct()) {
+            try {
+                if (!store.isUploadedPhoto(url)) {
+                    continue
+                }
+                val references = writes.execute { _ -> animalRepository.countPhotoReferences(url) }!!
+                if (references == 0L) {
+                    store.delete(url)
+                }
+            } catch (failure: Exception) {
+                log.warn("Animal photo cleanup after commit failed: {}", failure.javaClass.simpleName)
+            }
+        }
     }
 
     private fun refreshSearch(id: Long?) {
@@ -181,7 +249,14 @@ class AnimalCommandService(
         return noticeNumber == null || isBlank(noticeNumber)
     }
 
+    private class Updated(
+        val response: AnimalDetailResponse,
+        val replacedPhotos: Set<String>,
+    )
+
     private companion object {
+        private val log = LoggerFactory.getLogger(AnimalCommandService::class.java)
+
         // Java String.isBlank() uses Character.isWhitespace; Kotlin isBlank() also accepts NBSP.
         private fun isBlank(value: String): Boolean = value.all { Character.isWhitespace(it) }
     }

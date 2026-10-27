@@ -2,6 +2,7 @@ package com.pawbridge.backend.animal.internal.command.web
 
 import com.pawbridge.backend.animal.internal.command.infrastructure.persistence.PostgresqlRollbackCharsetViolation
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandForbiddenException
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotDeletableException
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotEditableException
 import org.springframework.dao.DataAccessException
 import org.springframework.http.ResponseEntity
@@ -18,6 +19,9 @@ class AnimalCommandExceptionHandler {
 
     @ExceptionHandler(AnimalNotEditableException::class)
     fun notEditable(failure: AnimalNotEditableException): ResponseEntity<Failure> = error(409, failure.message)
+
+    @ExceptionHandler(AnimalNotDeletableException::class)
+    fun notDeletable(failure: AnimalNotDeletableException): ResponseEntity<Failure> = error(409, failure.message)
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun invalid(failure: IllegalArgumentException): ResponseEntity<Failure> = error(400, failure.message)

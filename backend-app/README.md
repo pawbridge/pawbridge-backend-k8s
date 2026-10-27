@@ -782,17 +782,18 @@ Python 응답을 기다리는 동안 DB 트랜잭션과 연결을 열지 않는�
 
 ### Animal 이미지 업로드·삭제
 
-`pawbridge.animal-images.enabled=true`에서만 원문 `ImageController`의 세 경로를 조립한다. 기본 off이며 `on` 등 true 이외 별칭은 비활성이다. 저장소 client·bucket·공개 URL은 Post 소유 설정을 빌려 쓰고 닫지 않는다. 새 pool·DDL·의존성은 없다.
+`pawbridge.animal-images.enabled=true`에서만 원문 `ImageController`의 업로드 두 경로를 조립한다. 기본 off이며 `on` 등 true 이외 별칭은 비활성이다. 저장소 client·bucket·공개 URL은 Post 소유 설정을 빌려 쓰고 닫지 않는다. 새 pool·DDL·의존성은 없다.
 
 | 메서드 | 경로 | 결과 |
 | --- | --- | --- |
 | POST | `/api/v1/animals/images` (`file`) | `{"imageUrl"}`, 200 |
 | POST | `/api/v1/animals/images/multiple` (`files`, 최대5) | `{"imageUrls","count"}`, 200 |
-| DELETE | `/api/v1/animals/images?imageUrl=` | `{"message":"이미지가 삭제되었습니다."}`, 200 |
 
 허용 대상은 이전 Gateway 규칙을 따르되 판정 근거는 기존 Animal 쓰기와 같은 현재 DB 역할이다. 단건 업로드와 삭제는 non-USER 경로였으므로 서명 검증한 회원 ID로 기존 writer 트랜잭션에서 현재 회원을 조회해 ADMIN·SHELTER만 허용하고(403 `권한이 부족합니다.`), 조회를 커밋한 뒤 저장소를 호출한다. 원문 Gateway는 JWT 역할 claim으로 판정했으므로 토큰 발급 뒤 역할이 바뀐 회원, 회원 행이 없거나 삭제 대기인 회원(403), writer DB 장애(500)에서 결과가 다르다. 역할 검사는 인자 바인딩 뒤에 실행되므로 USER의 형식 오류 요청은 원문 403 대신 400/500을 받을 수 있고, 비-multipart 요청은 공통 Post multipart advice의 500 `서버 에러!`를 받는다(원문 500 `서버 내부 오류가 발생했습니다.`). 다중 업로드는 Gateway 역할 규칙에 걸리지 않던 2단 경로라 인증만 요구한다. `/api/animals/...` alias는 Gateway 책임으로 남긴다.
 
-원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 `animals/{uuid}{확장자}` 키, 부분 업로드 실패 시 앞 객체 유지, 삭제 실패·외부 URL 무시와 200 응답을 유지한다. 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다.
+원문 검증·메시지(빈 파일, 5종 MIME, 파일10MB, 0개·6개 이상)와 부분 업로드 실패 시 앞 객체 유지를 유지한다. 키는 `animals/{uuid v4}.{jpg|png|gif|webp}`이고 확장자는 원본 파일명이 아니라 검사한 MIME에서 정한다.
+
+원문의 공개 삭제 `DELETE /api/v1/animals/images?imageUrl=`는 없앴다. 버킷을 게시글·제보·상품 미디어와 함께 쓰는데 이 경로는 역할만 보고 키 모양이나 소유를 확인하지 않아, 보호소·관리자 계정이 버킷의 아무 객체나 지울 수 있었다. 프론트는 이 경로를 쓰지 않았다. 대신 동물 명령이 사진을 정리한다(아래 동물 명령 절). 원문의 요청10MB 한도는 파일 합계10MB 초과를 413 `사진 크기 제한을 초과했습니다`로 재현한다. 단건은 역할 검사 뒤에 적용한다. 앱 전체 multipart 한도(100MB/200MB)를 넘는 파싱 실패는 기존 공통 advice의 500이며, 실제 전송·메모리 제한의 대체물이 아니다.
 
 원문 결함은 고치지 않고 활성화 전 확인 항목으로 남긴다. 다중 업로드는 USER도 가능하다. 삭제는 소유권·폴더 검사 없이 공개 URL 아래 모든 키(`products/`, `posts/` 포함)를 지울 수 있고, 원문의 삭제 실패 error 로그는 남기지 않는다. 이제 Post 저장소 자격증명을 쓰므로 활성화 전 원문 Animal bucket·공개 URL·자격증명 범위와 같은지 확인한다. 역할 조회는 기존 Animal 쓰기와 같은 `JdbcAnimalCommandActors`이므로 선택한 writer에 `pawbridge_user` USAGE, `users`·`contact_deletions` SELECT, `FOR UPDATE`용 `users` UPDATE(user_id)가 필요하다(`animal-command-owned-schema.sql`과 같음). 선택한 writer에 이 권한이 없으면 단건 업로드·삭제가 권한 오류 500으로 실패한다. 활성화 전 권한을 별도로 부여·검증한다. 단위·구성·실제 Security/JWT MVC 시험은 mock 저장소 기준이며 실제 R2·운영 활성화 검증이 아니다.
 

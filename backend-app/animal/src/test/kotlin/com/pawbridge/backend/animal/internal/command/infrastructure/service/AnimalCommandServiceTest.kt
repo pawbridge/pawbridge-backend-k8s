@@ -109,11 +109,38 @@ class AnimalCommandServiceTest {
         return template
     }
 
-    private fun createService(): AnimalCommandService {
+    private fun createService(photos: AnimalPhotoStore? = null): AnimalCommandService {
         return AnimalCommandService(
             search, animals, shelters, AnimalMapper(),
-            NoticeNumberGenerator(animals), actors, manager,
+            NoticeNumberGenerator(animals), actors, manager, photos,
         )
+    }
+
+    /** A photo store that knows the given uploaded photos; anything else is an outside address. */
+    private fun photoStore(vararg existing: String): AnimalPhotoStore {
+        val store = mockk<AnimalPhotoStore>()
+        every { store.isUploadedPhoto(any()) } answers { firstArg<String>().startsWith(UPLOADED) }
+        every { store.exists(any()) } answers { firstArg<String>() in existing }
+        justRun { store.delete(any()) }
+        return store
+    }
+
+    private fun stubCommittingWrites() {
+        every { manager.dataSource } returns writerSource
+        every { search.dataSource() } returns writerSource
+        every { manager.getTransaction(any()) } answers { enterTransaction(firstArg()) }
+        every { manager.commit(any()) } answers { clearMockTransactionMetadata() }
+        every { manager.rollback(any()) } answers { clearMockTransactionMetadata() }
+        every { actors.find(any()) } returns shelterActor
+        justRun { animals.flush() }
+        justRun { search.animal(any()) }
+    }
+
+    private fun manualAnimalShowing(imageUrl: String?, imageUrl2: String?): Animal {
+        val manual = manualAnimal()
+        ReflectionTestUtils.setField(manual, "imageUrl", imageUrl)
+        ReflectionTestUtils.setField(manual, "imageUrl2", imageUrl2)
+        return manual
     }
 
     private fun manualAnimal(): Animal {
@@ -506,14 +533,14 @@ class AnimalCommandServiceTest {
     }
 
     @Test
-    fun `소유자일 때__삭제하면__현재 소유자를 확인하고 검색 정리 없이 삭제한 뒤 커밋한다`() {
+    fun `직접 등록한 동물의 소유자일 때__삭제하면__현재 소유자를 확인하고 검색 정리 없이 삭제한 뒤 커밋한다`() {
         // given
         every { manager.dataSource } returns writerSource
         every { search.dataSource() } returns writerSource
         every { manager.getTransaction(any()) } answers { enterTransaction(firstArg()) }
         every { manager.commit(any()) } answers { clearMockTransactionMetadata() }
         every { actors.find(any()) } returns shelterActor
-        every { animals.findByIdForUpdate(any()) } returns Optional.of(animal)
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimal())
         justRun { animals.deleteById(any()) }
 
         val service = createService()
@@ -693,10 +720,11 @@ class AnimalCommandServiceTest {
         every { manager.getTransaction(any()) } answers { enterTransaction(firstArg()) }
         every { manager.rollback(any()) } answers { clearMockTransactionMetadata() }
         every { actors.find(any()) } returns shelterActor
-        every { animals.findByIdForUpdate(any()) } returns Optional.of(animal)
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimalShowing(PHOTO_A, null))
         every { animals.deleteById(any()) } throws DataIntegrityViolationException("referenced")
+        val photos = photoStore(PHOTO_A)
 
-        val service = createService()
+        val service = createService(photos)
 
         // when
         val thrown = assertThatThrownBy { service.delete(11L, 42L) }
@@ -705,6 +733,7 @@ class AnimalCommandServiceTest {
         thrown.isInstanceOf(DataIntegrityViolationException::class.java)
         verify(exactly = 1) { animals.deleteById(42L) }
         verify(exactly = 1) { manager.rollback(transaction) }
+        verify(exactly = 0) { photos.delete(any()) }
     }
 
     @Test
@@ -729,7 +758,7 @@ class AnimalCommandServiceTest {
         every { manager.getTransaction(any()) } answers { enterTransaction(firstArg()) }
         every { manager.commit(any()) } answers { clearMockTransactionMetadata() }
         every { actors.find(any()) } returns shelterActor
-        every { animals.findByIdForUpdate(any()) } returns Optional.of(animal)
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(if (command == "delete") manualAnimal() else animal)
         justRun { animals.flush() }
         justRun { search.animal(any()) }
         justRun { animals.deleteById(any()) }
@@ -853,6 +882,206 @@ class AnimalCommandServiceTest {
         verify(exactly = 0) { manager.commit(any()) }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["ROLE_SHELTER", "ROLE_ADMIN"])
+    fun `APMS 동물일 때__보호소나 관리자가 삭제하면__삭제 불가로 거부하고 롤백한다`(role: String) {
+        // given
+        stubCommittingWrites()
+        every { actors.find(any()) } returns Actor(11L, role, "care-7", true, false)
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(animal)
+
+        val service = createService(photoStore())
+
+        // when
+        val thrown = assertThatThrownBy { service.delete(11L, 42L) }
+
+        // then
+        thrown.isInstanceOf(AnimalNotDeletableException::class.java)
+            .hasMessage("보호소가 직접 등록한 동물만 삭제할 수 있습니다.")
+        verify(exactly = 0) { animals.deleteById(any()) }
+        verify(exactly = 1) { manager.rollback(transaction) }
+    }
+
+    @Test
+    fun `방금 올린 사진일 때__등록하면__트랜잭션 전에 저장소에서 사진을 확인하고 받아들인다`() {
+        // given
+        stubCommittingWrites()
+        every { shelters.findByCareRegNo(any()) } returns Optional.of(shelter)
+        every { animals.lockManualNoticePrefix(any(), any()) } returns 1
+        every { animals.findMaxManualNoticeSuffix(any(), any()) } returns 0
+        every { animals.save(any<Animal>()) } answers { withGeneratedId(firstArg()) }
+        every { animals.countPhotoReferences(any()) } returns 0L
+        val photos = photoStore(PHOTO_A)
+        val request = request()
+        request.imageUrl = PHOTO_A
+
+        val service = createService(photos)
+
+        // when
+        val response = service.create(11L, request)
+
+        // then
+        assertThat(response.imageUrl).isEqualTo(PHOTO_A)
+        verifyOrder {
+            photos.exists(PHOTO_A)
+            manager.getTransaction(any())
+            animals.countPhotoReferences(PHOTO_A)
+            animals.save(any<Animal>())
+            manager.commit(transaction)
+        }
+        verify(exactly = 0) { photos.delete(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["outside", "gone", "shown", "disabled"])
+    fun `붙일 수 없는 사진 주소일 때__등록하면__저장 전에 400 사유로 거부하고 롤백한다`(case: String) {
+        // given
+        stubCommittingWrites()
+        every { animals.countPhotoReferences(any()) } returns if (case == "shown") 1L else 0L
+        val photos = when (case) {
+            "gone" -> photoStore()
+            "disabled" -> null
+            else -> photoStore(PHOTO_A)
+        }
+        val request = request()
+        request.imageUrl = if (case == "outside") "https://elsewhere.invalid/a.png" else PHOTO_A
+
+        val service = createService(photos)
+
+        // when
+        val thrown = assertThatThrownBy { service.create(11L, request) }
+
+        // then
+        thrown.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("등록할 수 없는 사진 주소입니다. 사진을 다시 올려 주세요.")
+        verify(exactly = 0) { animals.save(any<Animal>()) }
+        verify(exactly = 1) { manager.rollback(transaction) }
+    }
+
+    @Test
+    fun `사진을 바꿀 때__정보를 수정하면__커밋한 뒤 아무도 안 쓰는 옛 사진만 지운다`() {
+        // given
+        stubCommittingWrites()
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimalShowing(PHOTO_A, PHOTO_B))
+        every { animals.countPhotoReferences(any()) } returns 0L
+        val photos = photoStore(PHOTO_A, PHOTO_B, PHOTO_C)
+        val request = updateRequest()
+        request.imageUrl = PHOTO_C
+        request.imageUrl2 = PHOTO_B
+
+        val service = createService(photos)
+
+        // when
+        val response = service.update(11L, 42L, request)
+
+        // then
+        assertThat(response.imageUrl).isEqualTo(PHOTO_C)
+        verifyOrder {
+            manager.commit(transaction)
+            manager.getTransaction(any())
+            animals.countPhotoReferences(PHOTO_A)
+            photos.delete(PHOTO_A)
+        }
+        verify(exactly = 1) { photos.delete(any()) }
+    }
+
+    @Test
+    fun `두 사진의 자리를 바꿀 때__정보를 수정하면__저장소 확인 없이 받아들이고 아무것도 지우지 않는다`() {
+        // given
+        stubCommittingWrites()
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimalShowing(PHOTO_A, PHOTO_B))
+        val photos = photoStore(PHOTO_A, PHOTO_B)
+        val request = updateRequest()
+        request.imageUrl = PHOTO_B
+        request.imageUrl2 = PHOTO_A
+
+        val service = createService(photos)
+
+        // when
+        val response = service.update(11L, 42L, request)
+
+        // then
+        assertThat(response.imageUrl).isEqualTo(PHOTO_B)
+        assertThat(response.imageUrl2).isEqualTo(PHOTO_A)
+        verify(exactly = 0) { animals.countPhotoReferences(any()) }
+        verify(exactly = 0) { photos.delete(any()) }
+    }
+
+    @Test
+    fun `오래된 폼이 이미 지운 사진을 보낼 때__정보를 수정하면__400으로 거부하고 지금 사진을 지키며 롤백한다`() {
+        // given
+        stubCommittingWrites()
+        val manual = manualAnimalShowing(PHOTO_B, null)
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manual)
+        every { animals.countPhotoReferences(any()) } returns 0L
+        val photos = photoStore(PHOTO_B)
+        val request = updateRequest()
+        request.imageUrl = PHOTO_A
+
+        val service = createService(photos)
+
+        // when
+        val thrown = assertThatThrownBy { service.update(11L, 42L, request) }
+
+        // then
+        thrown.isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(manual.imageUrl).isEqualTo(PHOTO_B)
+        verify(exactly = 0) { photos.delete(any()) }
+        verify(exactly = 1) { manager.rollback(transaction) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["shown", "lookup", "storage"])
+    fun `옛 사진을 다른 동물이 쓰거나 정리가 실패할 때__정보를 수정하면__커밋된 결과를 그대로 돌려준다`(case: String) {
+        // given
+        stubCommittingWrites()
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimalShowing(PHOTO_A, null))
+        every { animals.countPhotoReferences(PHOTO_C) } returns 0L
+        when (case) {
+            "shown" -> every { animals.countPhotoReferences(PHOTO_A) } returns 1L
+            "lookup" -> every { animals.countPhotoReferences(PHOTO_A) } throws IllegalStateException("synthetic lookup failure")
+            else -> every { animals.countPhotoReferences(PHOTO_A) } returns 0L
+        }
+        val photos = photoStore(PHOTO_A, PHOTO_C)
+        if (case == "storage") {
+            every { photos.delete(any()) } throws IllegalStateException("synthetic storage failure")
+        }
+        val request = updateRequest()
+        request.imageUrl = PHOTO_C
+
+        val service = createService(photos)
+
+        // when
+        val response = service.update(11L, 42L, request)
+
+        // then
+        assertThat(response.imageUrl).isEqualTo(PHOTO_C)
+        verify(exactly = if (case == "storage") 1 else 0) { photos.delete(PHOTO_A) }
+    }
+
+    @Test
+    fun `사진이 있는 직접 등록 동물일 때__삭제하면__커밋한 뒤 두 사진을 지운다`() {
+        // given
+        stubCommittingWrites()
+        every { animals.findByIdForUpdate(any()) } returns Optional.of(manualAnimalShowing(PHOTO_A, PHOTO_B))
+        every { animals.countPhotoReferences(any()) } returns 0L
+        justRun { animals.deleteById(any()) }
+        val photos = photoStore(PHOTO_A, PHOTO_B)
+
+        val service = createService(photos)
+
+        // when
+        service.delete(11L, 42L)
+
+        // then
+        verifyOrder {
+            animals.deleteById(42L)
+            manager.commit(transaction)
+            photos.delete(PHOTO_A)
+        }
+        verify(exactly = 1) { photos.delete(PHOTO_B) }
+    }
+
     private fun invoke(service: AnimalCommandService, command: String, userId: Long?) {
         when (command) {
             "create" -> service.create(userId, request())
@@ -873,6 +1102,11 @@ class AnimalCommandServiceTest {
     }
 
     companion object {
+        private const val UPLOADED = "https://assets.invalid/animals/"
+        private const val PHOTO_A = UPLOADED + "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png"
+        private const val PHOTO_B = UPLOADED + "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.png"
+        private const val PHOTO_C = UPLOADED + "cccccccc-cccc-4ccc-8ccc-cccccccccccc.png"
+
         @JvmStatic
         fun nonManualSourcesAndMissingNotices(): Stream<Arguments> {
             return ApiSource.values().filter { source -> source != ApiSource.MANUAL }

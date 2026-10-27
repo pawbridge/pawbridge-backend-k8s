@@ -116,19 +116,27 @@ class AnimalImageHttpTest {
     }
 
     @Test
-    fun `서명된 회원__이미지 URL을 삭제하면__원래 메시지를 돌려준다`() {
+    fun `공개 삭제 경로를 없앴을 때__익명이나 서명된 보호소·관리자가 삭제를 보내면__403이고 서비스를 부르지 않는다`() {
         // given
-        justRun { images.deleteImage(any(), any()) }
+        val anyObject = "https://assets.invalid/products/a.png"
 
         // when
-        val result = mvc.perform(call("delete").header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_SHELTER")))
+        val anonymous = mvc.perform(delete("/api/v1/animals/images").param("imageUrl", anyObject))
+        val shelter = mvc.perform(
+            delete("/api/v1/animals/images")
+                .param("imageUrl", anyObject)
+                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_SHELTER")),
+        )
+        val admin = mvc.perform(
+            delete("/api/v1/animals/images")
+                .param("imageUrl", anyObject)
+                .header("Authorization", "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")),
+        )
 
         // then
-        result
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.message").value("이미지가 삭제되었습니다."))
-            .andExpect(jsonPath("$.length()").value(1))
-        verify(exactly = 1) { images.deleteImage(7L, "https://assets.invalid/products/a.png") }
+        anonymous.andExpect(status().isForbidden())
+        shelter.andExpect(status().isForbidden())
+        admin.andExpect(status().isForbidden())
         confirmVerified(images)
     }
 
@@ -142,15 +150,17 @@ class AnimalImageHttpTest {
             AnimalImageTooLargeException(),
             RuntimeException("이미지 업로드에 실패했습니다."),
         )
-        every { images.uploadImages(any(), any()) } throws IllegalArgumentException("최대 5개의 이미지만 업로드할 수 있습니다.")
-        every { images.deleteImage(any(), any()) } throws DataAccessResourceFailureException("synthetic")
+        every { images.uploadImages(any(), any()) } throwsMany listOf(
+            IllegalArgumentException("최대 5개의 이미지만 업로드할 수 있습니다."),
+            DataAccessResourceFailureException("synthetic"),
+        )
 
         // when
         val forbidden = mvc.perform(call("single").header("Authorization", admin))
         val tooLarge = mvc.perform(call("single").header("Authorization", admin))
         val badRequest = mvc.perform(call("multiple").header("Authorization", admin))
         val runtimeFailure = mvc.perform(call("single").header("Authorization", admin))
-        val databaseFailure = mvc.perform(call("delete").header("Authorization", admin))
+        val databaseFailure = mvc.perform(call("multiple").header("Authorization", admin))
 
         // then
         forbidden
@@ -176,12 +186,11 @@ class AnimalImageHttpTest {
     }
 
     @Test
-    fun `빠진 요청 값__경로를 호출하면__원래 누락 파라미터와 파트 결과를 유지한다`() {
+    fun `빠진 파트__업로드 경로를 호출하면__원래 파트 누락 결과를 유지한다`() {
         // given
         val admin = "Bearer " + F3TestInputs.token(7, "ROLE_ADMIN")
 
         // when
-        val missingParameter = mvc.perform(delete("/api/v1/animals/images").header("Authorization", admin))
         val missingSinglePart = mvc.perform(
             multipart("/api/v1/animals/images")
                 .file(MockMultipartFile("other", "a.png", "image/png", byteArrayOf(1)))
@@ -194,9 +203,6 @@ class AnimalImageHttpTest {
         )
 
         // then
-        missingParameter
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("필수 요청 파라미터 'imageUrl'(이)가 누락되었습니다."))
         missingSinglePart
             .andExpect(status().isInternalServerError())
             .andExpect(jsonPath("$.message").value("서버 내부 오류가 발생했습니다."))
@@ -205,7 +211,7 @@ class AnimalImageHttpTest {
     }
 
     companion object {
-        val ROUTES: List<String> = listOf("single", "multiple", "delete")
+        val ROUTES: List<String> = listOf("single", "multiple")
 
         @JvmStatic
         fun deniedCredentials(): Stream<Arguments> {
@@ -223,10 +229,6 @@ class AnimalImageHttpTest {
                 "multiple" -> multipart("/api/v1/animals/images/multiple")
                     .file(MockMultipartFile("files", "a.png", "image/png", byteArrayOf(1)))
                     .file(MockMultipartFile("files", "b.png", "image/png", byteArrayOf(2)))
-                    .header("X-User-Id", "99")
-                    .header("X-User-Role", "ROLE_ADMIN")
-                "delete" -> delete("/api/v1/animals/images")
-                    .param("imageUrl", "https://assets.invalid/products/a.png")
                     .header("X-User-Id", "99")
                     .header("X-User-Role", "ROLE_ADMIN")
                 else -> throw AssertionError("Unknown image route")

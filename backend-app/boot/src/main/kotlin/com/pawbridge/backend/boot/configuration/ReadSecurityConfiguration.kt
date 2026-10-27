@@ -73,8 +73,7 @@ class ReadSecurityConfiguration {
         val animalImagesEnabled = RequestMatcher { "true".equals(animalImagesFlag, ignoreCase = true) }
         val animalImageWriting = AndRequestMatcher(animalImagesEnabled, OrRequestMatcher(
                 AntPathRequestMatcher("/api/v1/animals/images", "POST"),
-                AntPathRequestMatcher("/api/v1/animals/images/multiple", "POST"),
-                AntPathRequestMatcher("/api/v1/animals/images", "DELETE")))
+                AntPathRequestMatcher("/api/v1/animals/images/multiple", "POST")))
         val catalogManagementEnabled = RequestMatcher { "true".equals(catalogManagementFlag, ignoreCase = true) }
         val catalogManagementWriting = AndRequestMatcher(catalogManagementEnabled, OrRequestMatcher(
                 AntPathRequestMatcher("/api/v1/products", "POST"),

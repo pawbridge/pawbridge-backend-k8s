@@ -1,29 +1,35 @@
 package com.pawbridge.backend.animal.internal.image.infrastructure
 
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalPhotoStore
 import org.springframework.web.multipart.MultipartFile
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.S3Exception
 import java.io.IOException
 import java.util.Locale
 import java.util.UUID
 
-/** Original animal-service S3Service upload/delete; Root supplies the existing storage client and settings. */
+/**
+ * Animal photo uploads and their cleanup; Root supplies the existing storage client and settings.
+ * The bucket is shared with post, report and product media, so lookups and deletes only ever touch keys
+ * shaped like the ones this class writes: `animals/<uuid v4>.<jpg|png|gif|webp>`.
+ */
 class S3AnimalImages(
     private val s3Client: S3Client,
     private val bucketName: String?,
     publicBaseUrl: String,
-) {
+) : AnimalPhotoStore {
     private val publicBaseUrl: String = removeTrailingSlashes(publicBaseUrl)
 
     fun uploadImage(file: MultipartFile?): String {
         validateImageFile(file)
 
-        val originalFilename = file!!.originalFilename
-        val extension = extractExtension(originalFilename)
-
-        // S3 키: animals/{uuid}.{extension}
+        // The extension follows the checked content type, not the client's file name, so every key keeps the
+        // uploaded-photo shape that cleanup recognizes.
+        val extension = EXTENSIONS.getValue(file!!.contentType!!.lowercase(Locale.getDefault()))
         val key = ANIMALS_FOLDER + UUID.randomUUID() + extension
 
         try {
@@ -46,22 +52,34 @@ class S3AnimalImages(
         }
     }
 
-    fun deleteImage(imageUrl: String?) {
-        if (imageUrl == null || isBlank(imageUrl)) {
-            return
-        }
+    override fun isUploadedPhoto(url: String): Boolean {
+        return objectKey(url) != null
+    }
 
+    override fun exists(url: String): Boolean {
+        val key = objectKey(url) ?: return false
+        val headRequest = HeadObjectRequest.builder()
+            .bucket(bucketName)
+            .key(key)
+            .build()
         try {
-            val key = extractObjectKey(imageUrl)
-            val deleteRequest = DeleteObjectRequest.builder()
-                .bucket(bucketName)
-                .key(key)
-                .build()
-
-            s3Client.deleteObject(deleteRequest)
-        } catch (e: Exception) {
-            // 삭제 실패는 예외를 던지지 않음 (비즈니스 로직에 영향 없음)
+            s3Client.headObject(headRequest)
+            return true
+        } catch (failure: S3Exception) {
+            if (failure.statusCode() == 404) {
+                return false
+            }
+            throw failure
         }
+    }
+
+    override fun delete(url: String) {
+        val key = objectKey(url) ?: return
+        val deleteRequest = DeleteObjectRequest.builder()
+            .bucket(bucketName)
+            .key(key)
+            .build()
+        s3Client.deleteObject(deleteRequest)
     }
 
     private fun validateImageFile(file: MultipartFile?) {
@@ -71,8 +89,8 @@ class S3AnimalImages(
 
         val contentType = file.contentType
         // Java String.toLowerCase() uses the default locale; Kotlin lowercase() would use Locale.ROOT.
-        if (contentType == null || !ALLOWED_IMAGE_TYPES.contains(contentType.lowercase(Locale.getDefault()))) {
-            throw IllegalArgumentException("허용되지 않는 파일 형식입니다. 허용: $ALLOWED_IMAGE_TYPES")
+        if (contentType == null || !EXTENSIONS.containsKey(contentType.lowercase(Locale.getDefault()))) {
+            throw IllegalArgumentException("허용되지 않는 파일 형식입니다. 허용: ${EXTENSIONS.keys.toList()}")
         }
 
         // 파일 크기 제한 (10MB)
@@ -82,22 +100,15 @@ class S3AnimalImages(
         }
     }
 
-    private fun extractExtension(filename: String?): String {
-        if (filename != null && filename.contains(".")) {
-            return filename.substring(filename.lastIndexOf("."))
-        }
-        return ""
-    }
-
-    private fun extractObjectKey(imageUrl: String): String {
+    /** The storage key of an uploaded animal photo address, or null for any other address. */
+    private fun objectKey(url: String): String? {
         val publicUrlPrefix = "$publicBaseUrl/"
-        if (!imageUrl.startsWith(publicUrlPrefix)) {
-            throw IllegalArgumentException("등록된 공개 저장소 URL이 아닙니다.")
+        if (!url.startsWith(publicUrlPrefix)) {
+            return null
         }
-
-        val key = imageUrl.substring(publicUrlPrefix.length)
-        if (isBlank(key)) {
-            throw IllegalArgumentException("삭제할 객체 키가 없습니다.")
+        val key = url.substring(publicUrlPrefix.length)
+        if (!UPLOADED_KEY.matches(key)) {
+            return null
         }
         return key
     }
@@ -105,16 +116,18 @@ class S3AnimalImages(
     private companion object {
         private const val ANIMALS_FOLDER = "animals/"
 
-        private val ALLOWED_IMAGE_TYPES = listOf(
-            "image/jpeg",
-            "image/jpg",
-            "image/png",
-            "image/gif",
-            "image/webp",
+        private val UPLOADED_KEY = Regex(
+            "animals/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.(jpg|png|gif|webp)",
         )
 
-        // Java String.isBlank() uses Character.isWhitespace; Kotlin isBlank() also accepts NBSP.
-        private fun isBlank(value: String): Boolean = value.all { Character.isWhitespace(it) }
+        // Allowed content types, in the order the original service listed them, with the stored extension.
+        private val EXTENSIONS = linkedMapOf(
+            "image/jpeg" to ".jpg",
+            "image/jpg" to ".jpg",
+            "image/png" to ".png",
+            "image/gif" to ".gif",
+            "image/webp" to ".webp",
+        )
 
         private fun removeTrailingSlashes(url: String): String {
             var end = url.length

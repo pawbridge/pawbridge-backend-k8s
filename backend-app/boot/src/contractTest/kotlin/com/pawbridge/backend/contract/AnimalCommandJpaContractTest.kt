@@ -5,20 +5,52 @@ import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalDescriptionRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalStatusRequest
+import com.pawbridge.backend.animal.api.AnimalCommandActors
+import com.pawbridge.backend.animal.internal.command.infrastructure.mapper.AnimalMapper
+import com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalRepository
+import com.pawbridge.backend.animal.internal.command.infrastructure.repository.ShelterRepository
+import com.pawbridge.backend.animal.internal.command.infrastructure.search.SearchDocumentWriter
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandService
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandForbiddenException
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotDeletableException
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotEditableException
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalPhotoStore
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.NoticeNumberGenerator
 import jakarta.persistence.EntityNotFoundException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.orm.jpa.JpaTransactionManager
 
 /** The animal register, status, description, update and delete adapter (JPA) with manual notice numbers, on the real tables. */
 class AnimalCommandJpaContractTest : JpaContractBase() {
     @Autowired
     lateinit var animals: AnimalCommandService
+
+    @Autowired
+    lateinit var searchDocuments: SearchDocumentWriter
+
+    @Autowired
+    lateinit var animalRepository: AnimalRepository
+
+    @Autowired
+    lateinit var shelterRepository: ShelterRepository
+
+    @Autowired
+    lateinit var mapper: AnimalMapper
+
+    @Autowired
+    lateinit var noticeNumbers: NoticeNumberGenerator
+
+    @Autowired
+    lateinit var actors: AnimalCommandActors
+
+    @Autowired
+    @Qualifier("animalCommandJpaTransactionManager")
+    lateinit var writerTransactions: JpaTransactionManager
 
     private val json = ObjectMapper().findAndRegisterModules()
 
@@ -59,6 +91,27 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
         ),
         UpdateAnimalRequest::class.java,
     )
+
+    /** Photo storage kept in memory; the shared context has no storage, so this wires the production beans to it. */
+    private class PhotoShelf(vararg uploaded: String) : AnimalPhotoStore {
+        val stored = uploaded.toMutableSet()
+
+        override fun isUploadedPhoto(url: String) = url.startsWith(UPLOADED)
+
+        override fun exists(url: String) = url in stored
+
+        override fun delete(url: String) {
+            stored.remove(url)
+        }
+    }
+
+    private fun commandsWith(photos: AnimalPhotoStore) = AnimalCommandService(
+        searchDocuments, animalRepository, shelterRepository, mapper, noticeNumbers, actors, writerTransactions, photos,
+    )
+
+    private fun registrationShowing(photo: String) = registration().also { it.imageUrl = photo }
+
+    private fun detailsShowing(photo: String) = detailsChange().also { it.imageUrl = photo }
 
     private fun animalRows() = count("SELECT count(*) FROM pawbridge_animal.animals")
 
@@ -185,8 +238,8 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
     @Test
     fun `챗봇 대화가 달린 동물과 달리지 않은 동물이 있을 때__삭제하면__달린 동물은 외래키로 실패하고 나머지는 지운다`() {
         // given
-        seedAnimal(ANIMAL_A, SHELTER_A)
-        seedAnimal(ANIMAL_B, SHELTER_A)
+        seedAnimal(ANIMAL_A, SHELTER_A, apiSource = "MANUAL")
+        seedAnimal(ANIMAL_B, SHELTER_A, apiSource = "MANUAL")
         execute(
             "INSERT INTO pawbridge_animal.chatbot_sessions(id, anonymous_session_id, animal_id, created_at) VALUES ('s-1', 'a-1', ?, '2026-03-01 00:00:00')",
             ANIMAL_A,
@@ -204,7 +257,60 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
         assertThat(animalRows()).isEqualTo(1)
     }
 
+    @Test
+    fun `APMS 동물일 때__보호소나 관리자가 삭제하면__삭제 불가로 거부하고 행을 남긴다`() {
+        // given
+        seedAnimal(ANIMAL_A, SHELTER_A)
+        val before = ContractPostgres.snapshot()
+
+        // when
+        // then
+        assertThatThrownBy { animals.delete(KEEPER, ANIMAL_A) }.isInstanceOf(AnimalNotDeletableException::class.java)
+        assertThatThrownBy { animals.delete(ADMIN, ANIMAL_A) }.isInstanceOf(AnimalNotDeletableException::class.java)
+        assertThat(ContractPostgres.snapshot()).isEqualTo(before)
+    }
+
+    @Test
+    fun `올린 사진으로 등록하고 바꾸고 삭제할 때__명령을 실행하면__아무도 안 쓰게 된 사진만 저장소에서 지운다`() {
+        // given
+        val shelf = PhotoShelf(PHOTO_A, PHOTO_B)
+        val commands = commandsWith(shelf)
+        val registered = commands.create(KEEPER, registrationShowing(PHOTO_A))
+
+        // when
+        val takenByAnother = runCatching { commands.create(KEEPER, registrationShowing(PHOTO_A)) }.exceptionOrNull()
+        commands.update(KEEPER, registered.id, detailsShowing(PHOTO_B))
+        val staleForm = runCatching { commands.update(KEEPER, registered.id, detailsShowing(PHOTO_A)) }.exceptionOrNull()
+        val afterReplace = shelf.stored.toSet()
+        commands.delete(KEEPER, registered.id)
+
+        // then
+        assertThat(takenByAnother).isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(staleForm).isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(afterReplace).containsExactly(PHOTO_B)
+        assertThat(shelf.stored).isEmpty()
+        assertThat(animalRows()).isZero()
+    }
+
+    @Test
+    fun `두 동물이 같은 사진을 보일 때__한 동물의 사진을 바꾸면__다른 동물이 쓰는 사진은 남긴다`() {
+        // given
+        seedAnimal(ANIMAL_A, SHELTER_A, apiSource = "MANUAL", imageUrl = PHOTO_A)
+        seedAnimal(ANIMAL_B, SHELTER_A, apiSource = "MANUAL", imageUrl = PHOTO_A)
+        val shelf = PhotoShelf(PHOTO_A, PHOTO_B)
+
+        // when
+        commandsWith(shelf).update(KEEPER, ANIMAL_A, detailsShowing(PHOTO_B))
+
+        // then
+        assertThat(shelf.stored).containsExactlyInAnyOrder(PHOTO_A, PHOTO_B)
+        assertThat(scalar("SELECT image_url FROM pawbridge_animal.animals WHERE id = ?", ANIMAL_A)).isEqualTo(PHOTO_B)
+    }
+
     private companion object {
+        const val UPLOADED = "https://assets.contract.invalid/animals/"
+        const val PHOTO_A = UPLOADED + "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png"
+        const val PHOTO_B = UPLOADED + "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.png"
         const val ADMIN = 8_200_001L
         const val KEEPER = 8_200_002L
         const val RIVAL = 8_200_003L

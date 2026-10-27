@@ -30,17 +30,15 @@ class AnimalImageServiceTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["ROLE_ADMIN", "ROLE_SHELTER"])
-    fun `현재 관리자나 보호소 계정일 때__업로드와 삭제를 하면__조회를 커밋한 뒤에야 저장소를 호출한다`(role: String) {
+    fun `현재 관리자나 보호소 계정일 때__업로드하면__조회를 커밋한 뒤에야 저장소를 호출한다`(role: String) {
         // given
         every { manager.getTransaction(any()) } returns SimpleTransactionStatus()
         justRun { manager.commit(any()) }
         every { actors.find(any()) } returns Actor(7L, role, null, true, false)
         every { images.uploadImage(any()) } returns "https://assets.invalid/animals/x.png"
-        justRun { images.deleteImage(any()) }
 
         // when
         val url = subject.uploadImage(7L, photo)
-        subject.deleteImage(7L, "https://assets.invalid/products/y.png")
 
         // then
         assertThat(url).isEqualTo("https://assets.invalid/animals/x.png")
@@ -49,17 +47,13 @@ class AnimalImageServiceTest {
             actors.find(7L)
             manager.commit(any())
             images.uploadImage(photo)
-            manager.getTransaction(any())
-            actors.find(7L)
-            manager.commit(any())
-            images.deleteImage("https://assets.invalid/products/y.png")
         }
         confirmVerified(images, actors)
     }
 
     @ParameterizedTest
     @MethodSource("refused")
-    fun `사용자·삭제됨·대기·불일치·알 수 없는 행위자일 때__업로드와 삭제를 하면__저장소 호출 전에 거부한다`(actor: Actor?) {
+    fun `사용자·삭제됨·대기·불일치·알 수 없는 행위자일 때__업로드하면__저장소 호출 전에 거부한다`(actor: Actor?) {
         // given
         every { manager.getTransaction(any()) } returns SimpleTransactionStatus()
         justRun { manager.commit(any()) }
@@ -68,29 +62,25 @@ class AnimalImageServiceTest {
         // when
         val upload = assertThatThrownBy { subject.uploadImage(7L, photo) }
         val multiple = assertThatThrownBy { subject.uploadImages(7L, arrayOf<MultipartFile?>(photo)) }
-        val delete = assertThatThrownBy { subject.deleteImage(7L, "https://assets.invalid/animals/x.png") }
 
         // then
         upload.isInstanceOf(AnimalImageForbiddenException::class.java)
             .hasMessage("권한이 부족합니다.")
         multiple.isInstanceOf(AnimalImageForbiddenException::class.java)
-        delete.isInstanceOf(AnimalImageForbiddenException::class.java)
         confirmVerified(images)
     }
 
     @Test
-    fun `검증된 주체가 없을 때__업로드와 삭제를 하면__조회나 저장소 호출 없이 거부한다`() {
+    fun `검증된 주체가 없을 때__업로드하면__조회나 저장소 호출 없이 거부한다`() {
         // given
 
         // when
         val upload = assertThatThrownBy { subject.uploadImage(null, photo) }
         val multiple = assertThatThrownBy { subject.uploadImages(null, arrayOf<MultipartFile?>(photo)) }
-        val delete = assertThatThrownBy { subject.deleteImage(null, "x") }
 
         // then
         upload.isInstanceOf(AnimalImageForbiddenException::class.java)
         multiple.isInstanceOf(AnimalImageForbiddenException::class.java)
-        delete.isInstanceOf(AnimalImageForbiddenException::class.java)
         confirmVerified(actors, images, manager)
     }
 

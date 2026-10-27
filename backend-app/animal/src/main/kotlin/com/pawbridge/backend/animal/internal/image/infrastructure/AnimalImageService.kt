@@ -49,11 +49,6 @@ class AnimalImageService(
         return imageUrls
     }
 
-    fun deleteImage(verifiedUserId: Long?, imageUrl: String?) {
-        requireNonUser(verifiedUserId)
-        images.deleteImage(imageUrl)
-    }
-
     private fun requireNonUser(verifiedUserId: Long?) {
         if (verifiedUserId == null) {
             throw AnimalImageForbiddenException()
