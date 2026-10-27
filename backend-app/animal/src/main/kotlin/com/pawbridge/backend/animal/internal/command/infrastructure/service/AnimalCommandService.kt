@@ -4,6 +4,7 @@ import com.pawbridge.backend.animal.api.AnimalCommandActors
 import com.pawbridge.backend.animal.api.AnimalCommandActors.Actor
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.CreateAnimalRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalDescriptionRequest
+import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalStatusRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.response.AnimalDetailResponse
 import com.pawbridge.backend.animal.internal.command.infrastructure.entity.Animal
@@ -51,6 +52,10 @@ class AnimalCommandService(
 
     fun updateDescription(verifiedUserId: Long?, id: Long?, request: UpdateAnimalDescriptionRequest): AnimalDetailResponse {
         return writes.execute { _ -> updateDescription(ownedAnimal(verifiedUserId, id), request) }!!
+    }
+
+    fun update(verifiedUserId: Long?, id: Long?, request: UpdateAnimalRequest): AnimalDetailResponse {
+        return writes.execute { _ -> update(ownedAnimal(verifiedUserId, id), request) }!!
     }
 
     fun delete(verifiedUserId: Long?, id: Long?) {
@@ -133,6 +138,33 @@ class AnimalCommandService(
 
     private fun updateDescription(animal: Animal, request: UpdateAnimalDescriptionRequest): AnimalDetailResponse {
         animal.updateDescription(request.description)
+        refreshSearch(animal.id)
+
+        return mapper.toDetailResponse(animal)
+    }
+
+    private fun update(animal: Animal, request: UpdateAnimalRequest): AnimalDetailResponse {
+        // APMS 동물은 다음 동기화가 덮어쓰므로, 권한을 확인한 뒤 출처로 한 번 더 거른다.
+        if (animal.apiSource != ApiSource.MANUAL) {
+            throw AnimalNotEditableException()
+        }
+        animal.updateManualDetails(
+            noticeStartDate = request.noticeStartDate,
+            noticeEndDate = request.noticeEndDate,
+            species = request.species,
+            gender = request.gender,
+            neuterStatus = request.neuterStatus,
+            breed = request.breed,
+            birthYear = request.birthYear,
+            weight = request.weight,
+            color = request.color,
+            specialMark = request.specialMark,
+            happenDate = request.happenDate,
+            happenPlace = request.happenPlace,
+            imageUrl = request.imageUrl,
+            imageUrl2 = request.imageUrl2,
+            description = request.description,
+        )
         refreshSearch(animal.id)
 
         return mapper.toDetailResponse(animal)

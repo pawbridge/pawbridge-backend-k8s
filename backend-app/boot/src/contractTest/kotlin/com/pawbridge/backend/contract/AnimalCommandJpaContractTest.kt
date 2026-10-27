@@ -3,9 +3,11 @@ package com.pawbridge.backend.contract
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.CreateAnimalRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalDescriptionRequest
+import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.request.UpdateAnimalStatusRequest
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandService
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandForbiddenException
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotEditableException
 import jakarta.persistence.EntityNotFoundException
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -13,7 +15,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 
-/** The animal register, status, description and delete adapter (JPA) with manual notice numbers, on the real tables. */
+/** The animal register, status, description, update and delete adapter (JPA) with manual notice numbers, on the real tables. */
 class AnimalCommandJpaContractTest : JpaContractBase() {
     @Autowired
     lateinit var animals: AnimalCommandService
@@ -47,6 +49,16 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
     private fun statusChange(status: String) = json.readValue("""{"newStatus":"$status"}""", UpdateAnimalStatusRequest::class.java)
 
     private fun descriptionChange(text: String) = json.readValue("""{"description":"$text"}""", UpdateAnimalDescriptionRequest::class.java)
+
+    private fun detailsChange() = json.readValue(
+        json.writeValueAsString(
+            mapOf(
+                "species" to "CAT", "gender" to "FEMALE", "neuterStatus" to "YES", "noticeStartDate" to "2026-03-02",
+                "noticeEndDate" to "2026-03-25", "color" to "삼색", "happenDate" to "2026-02-28", "description" to "고친 설명",
+            ),
+        ),
+        UpdateAnimalRequest::class.java,
+    )
 
     private fun animalRows() = count("SELECT count(*) FROM pawbridge_animal.animals")
 
@@ -132,6 +144,41 @@ class AnimalCommandJpaContractTest : JpaContractBase() {
         assertThatThrownBy { animals.updateDescription(RIVAL, ANIMAL_A, descriptionChange("x")) }.isInstanceOf(AnimalCommandForbiddenException::class.java)
         assertThatThrownBy { animals.updateStatus(ADMIN, 99_999_999L, statusChange("ADOPTED")) }.isInstanceOf(EntityNotFoundException::class.java)
         assertThat(scalar("SELECT status FROM pawbridge_animal.animals WHERE id = ?", ANIMAL_B)).isEqualTo("PROTECT")
+    }
+
+    @Test
+    fun `직접 등록한 동물과 APMS 동물이 있을 때__정보를 수정하면__직접 등록한 동물만 소속 담당자가 통째로 바꾼다`() {
+        // given
+        val manual = animals.create(KEEPER, registration())
+        animals.updateStatus(KEEPER, manual.id, statusChange("ADOPTED"))
+        seedAnimal(ANIMAL_A, SHELTER_A, description = "처음")
+        val untouched = ContractPostgres.snapshot()
+
+        // when
+        assertThatThrownBy { animals.update(KEEPER, ANIMAL_A, detailsChange()) }.isInstanceOf(AnimalNotEditableException::class.java)
+        assertThatThrownBy { animals.update(RIVAL, manual.id, detailsChange()) }.isInstanceOf(AnimalCommandForbiddenException::class.java)
+        assertThat(ContractPostgres.snapshot()).isEqualTo(untouched)
+        val updated = animals.update(KEEPER, manual.id, detailsChange())
+
+        // then
+        val saved = row("pawbridge_animal.animals", "id", manual.id!!)
+        assertThat(listOf("species", "gender", "neuter_status", "color", "description", "status", "api_source").map { saved.get(it).asText() })
+            .containsExactly("CAT", "FEMALE", "YES", "삼색", "고친 설명", "ADOPTED", "MANUAL")
+        // 요청에 없는 품종과 발견 장소는 지운다.
+        assertThat(saved.get("breed").isNull).isTrue()
+        assertThat(saved.get("happen_place").isNull).isTrue()
+        assertThat(saved.get("apms_notice_no").asText()).matches("MAN-[0-9]{6}-000001")
+        assertThat(saved.get("happen_date").asText()).startsWith("2026-02-28")
+        assertThat(updated.updatedAt).isNotNull()
+        assertThat(scalar("SELECT description FROM pawbridge_animal.animals WHERE id = ?", ANIMAL_A)).isEqualTo("처음")
+        // 검색 문서가 수정된 행의 최신 판으로 다시 만들어졌다.
+        assertThat(
+            count(
+                "SELECT count(*) FROM pawbridge_animal.animal_search_documents d JOIN pawbridge_animal.animals a ON a.id = d.animal_id " +
+                    "WHERE a.id = ? AND d.source_revision = a.search_revision",
+                manual.id!!,
+            ),
+        ).isEqualTo(1)
     }
 
     @Test
