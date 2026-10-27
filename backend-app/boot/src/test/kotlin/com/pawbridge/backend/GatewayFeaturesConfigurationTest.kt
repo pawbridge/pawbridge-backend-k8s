@@ -2,7 +2,6 @@ package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.configuration.GatewayFeaturesConfiguration
 import com.pawbridge.backend.boot.security.GatewayCors
-import com.pawbridge.backend.boot.security.LegacyApiPathFilter
 import com.pawbridge.backend.boot.security.LostSearchLimitsFilter
 import jakarta.servlet.FilterChain
 import org.assertj.core.api.Assertions.assertThat
@@ -19,30 +18,14 @@ class GatewayFeaturesConfigurationTest {
     private val runner = ApplicationContextRunner().withUserConfiguration(GatewayFeaturesConfiguration::class.java)
 
     @Test
-    fun `기본 설정일 때__기동하면__임시 재작성 필터만 보안보다 앞에 등록된다`() {
+    fun `기본 설정일 때__기동하면__분실 검색 한도 필터가 없다`() {
         // given
         // 클래스의 runner는 설정 클래스만 올린 기본 상태다
 
         // when
         runner.run { context ->
             // then
-            assertThat(context).hasBean("legacyApiPathFilter")
-            val registration = context.getBean("legacyApiPathFilter") as FilterRegistrationBean<*>
-            assertThat(registration.filter).isInstanceOf(LegacyApiPathFilter::class.java)
-            assertThat(registration.order).isLessThan(-100)
             assertThat(context).doesNotHaveBean("lostSearchLimitsFilter")
-        }
-    }
-
-    @Test
-    fun `재작성을 껐을 때__기동하면__재작성 필터가 없다`() {
-        // given
-        val disabled = runner.withPropertyValues("pawbridge.legacy-api-paths.enabled=false")
-
-        // when
-        disabled.run { context ->
-            // then
-            assertThat(context).doesNotHaveBean("legacyApiPathFilter")
         }
     }
 
@@ -110,7 +93,7 @@ class GatewayFeaturesConfigurationTest {
     }
 
     @Test
-    fun `런타임 속성일 때__읽으면__health info prometheus만 루프백 별도 포트로 노출하고 재작성을 켜 둔다`() {
+    fun `런타임 속성일 때__읽으면__health info prometheus만 루프백 별도 포트로 노출한다`() {
         // given
         val properties = Properties()
 
@@ -125,7 +108,7 @@ class GatewayFeaturesConfigurationTest {
         assertThat(properties.getProperty("management.endpoint.health.probes.enabled")).isEqualTo("true")
         assertThat(properties.getProperty("management.endpoint.health.show-details")).isEqualTo("never")
         assertThat(properties.getProperty("management.health.mail.enabled")).isEqualTo("false")
-        assertThat(properties.getProperty("pawbridge.legacy-api-paths.enabled")).isEqualTo("true")
+        assertThat(properties.getProperty("pawbridge.legacy-api-paths.enabled")).isNull()
         assertThat(properties.getProperty("server.address")).isEqualTo("127.0.0.1")
     }
 
