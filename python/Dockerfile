@@ -1,13 +1,15 @@
-FROM python:3.11-slim
-
+# Production python-ai-service (chatbot). Lost-search inference runs in the Mac native service, not here.
+# Same recipe as the running image (formerly pawbridge-infra environments/mac/images/Dockerfile.python).
+FROM docker.io/library/python@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
+ARG GIT_SHA=unknown
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir torch==2.2.2+cpu torchvision==0.17.2+cpu --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+LABEL org.opencontainers.image.source="https://github.com/pawbridge/pawbridge-backend-services" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      com.pawbridge.purpose="python-ai-service"
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && pip check
+COPY app /app/app
+USER 10001:10001
 EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "4", "--backlog", "8", "--no-access-log"]
