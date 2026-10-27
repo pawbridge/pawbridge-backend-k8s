@@ -1,7 +1,6 @@
 package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.configuration.ReadSecurityConfiguration
-import com.pawbridge.backend.boot.security.LegacyApiPathFilter
 import com.pawbridge.backend.boot.security.LostSearchLimitsFilter
 import jakarta.servlet.Filter
 import org.assertj.core.api.Assertions.assertThat
@@ -9,7 +8,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
-import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
@@ -35,7 +33,7 @@ import org.springframework.web.context.WebApplicationContext
 
 /**
  * Real Security chain with the Gateway replacement filters in their production order:
- * legacy rewrite, then Spring Security (CORS first), then the lost-search limits.
+ * Spring Security (CORS first), then the lost-search limits.
  */
 @WebMvcTest(
     properties = [
@@ -84,7 +82,6 @@ class GatewayFeaturesHttpTest {
     fun chain() {
         mvc = MockMvcBuilders.webAppContextSetup(context)
             .addFilters<DefaultMockMvcBuilder>(
-                LegacyApiPathFilter(),
                 security,
                 LostSearchLimitsFilter(1024, 2, 30, 50),
             )
@@ -94,7 +91,7 @@ class GatewayFeaturesHttpTest {
     // ---- CORS ----
 
     @ParameterizedTest
-    @CsvSource("/api/v1/posts", "/api/posts", "/api/v1/products/3", "/api/v1/animals/lost-candidates")
+    @CsvSource("/api/v1/posts", "/api/v1/products/3", "/api/v1/animals/lost-candidates")
     fun `브라우저 사전 요청일 때__토큰 없이 보내면__CORS 헤더와 함께 보안을 통과한다`(path: String) {
         // given
         val preflight = options(path)
@@ -158,44 +155,10 @@ class GatewayFeaturesHttpTest {
             .andExpect(header().doesNotExist("Access-Control-Allow-Origin"))
     }
 
-    // ---- legacy paths evaluated by Security and MVC as /api/v1 ----
-
     @Test
-    fun `옛 공개 경로일 때__요청하면__보안과 MVC가 v1 경로를 쓴다`() {
+    fun `결제 확인일 때__요청하면__인증이 필요하다`() {
         // given
-        // 옛 경로와 v1 경로를 모두 요청한다
-
-        // when
-        val old = mvc.perform(get("/api/animals"))
-        val v1 = mvc.perform(get("/api/v1/animals"))
-
-        // then
-        old.andExpect(status().isOk()).andExpect(content().string("animals"))
-        v1.andExpect(status().isOk()).andExpect(content().string("animals"))
-    }
-
-    @Test
-    fun `옛 보호 경로일 때__요청하면__v1 인증 규칙이 적용된다`() {
-        // given
-        val token = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
-
-        // when
-        val oldWithoutToken = mvc.perform(get("/api/users/me/cart"))
-        val v1WithoutToken = mvc.perform(get("/api/v1/users/me/cart"))
-        val oldWithToken = mvc.perform(get("/api/users/me/cart").header("Authorization", token))
-
-        // then
-        oldWithoutToken.andExpect(status().isUnauthorized())
-        v1WithoutToken.andExpect(status().isUnauthorized())
-        oldWithToken
-            .andExpect(status().isOk())
-            .andExpect(content().string("cart"))
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["/api/payments/confirm", "/api/v1/payments/confirm"])
-    fun `결제 확인일 때__요청하면__두 표기 모두 인증이 필요하다`(path: String) {
-        // given
+        val path = "/api/v1/payments/confirm"
         val token = "Bearer " + F3TestInputs.token(7, "ROLE_USER")
 
         // when
@@ -218,8 +181,12 @@ class GatewayFeaturesHttpTest {
         "GET,/internal/animals/lost-gallery",
         "GET,/api/payments/unknown",
         "GET,/api/unknown",
+        // old frontend aliases are no longer rewritten to /api/v1
+        "GET,/api/animals",
+        "GET,/api/users/me/cart",
+        "POST,/api/payments/confirm",
     )
-    fun `게이트웨이가 라우팅하지 않던 경로일 때__요청하면__계속 거부된다`(method: String, path: String) {
+    fun `옛 경로나 게이트웨이가 라우팅하지 않던 경로일 때__요청하면__거부된다`(method: String, path: String) {
         // given
         val request = request(HttpMethod.valueOf(method), path)
 
@@ -232,7 +199,7 @@ class GatewayFeaturesHttpTest {
 
     @ParameterizedTest
     @CsvSource("/api/users/internal/5/nickname", "/api/v1/users/internal/5/nickname")
-    fun `내부 사용자 경로일 때__요청하면__보안 전에 404를 돌려준다`(path: String) {
+    fun `내부 사용자 경로일 때__요청하면__보안이 거부한다`(path: String) {
         // given
         val request = get(path)
 
@@ -240,9 +207,7 @@ class GatewayFeaturesHttpTest {
         val result = mvc.perform(request)
 
         // then
-        result
-            .andExpect(status().isNotFound())
-            .andExpect(content().json("{\"code\":404,\"message\":\"유효하지 않은 엔드포인트입니다.\",\"data\":null}"))
+        result.andExpect(status().isForbidden())
     }
 
     // ---- health ----

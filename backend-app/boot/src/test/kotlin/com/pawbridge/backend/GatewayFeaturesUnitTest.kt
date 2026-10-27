@@ -1,7 +1,6 @@
 package com.pawbridge.backend
 
 import com.pawbridge.backend.boot.security.GatewayCors
-import com.pawbridge.backend.boot.security.LegacyApiPathFilter
 import com.pawbridge.backend.boot.security.LostSearchLimitsFilter
 import jakarta.servlet.FilterChain
 import jakarta.servlet.ServletException
@@ -113,158 +112,6 @@ class GatewayFeaturesUnitTest {
         // then
         assertThat(allowedStatus).isEqualTo(200)
         assertThat(deniedStatus).isEqualTo(403)
-    }
-
-    // ---- legacy path rewrite ----
-
-    @ParameterizedTest
-    @CsvSource(
-        "POST,/api/payments/confirm,/api/v1/payments/confirm", "GET,/api/payments/unknown,/api/v1/payments/unknown",
-        "GET,/api/users/me,/api/v1/users/me", "PUT,/api/users/me/nickname,/api/v1/users/me/nickname",
-        "POST,/api/auth/login,/api/v1/auth/login", "GET,/api/favorites/5/check,/api/v1/favorites/5/check",
-        "GET,/api/animals,/api/v1/animals", "GET,/api/animals/7,/api/v1/animals/7", "POST,/api/animals,/api/v1/animals",
-        "DELETE,/api/animals/7,/api/v1/animals/7", "PATCH,/api/shelters/3,/api/v1/shelters/3",
-        "GET,/api/shelters/count,/api/v1/shelters/count",
-        "POST,/api/animals/9/chat/messages,/api/v1/animals/9/chat/messages",
-        "GET,/api/places,/api/v1/places", "GET,/api/places/regions,/api/v1/places/regions",
-        "GET,/api/places/123,/api/v1/places/123",
-        "GET,/api/chats/socket,/api/v1/chats/socket", "GET,/api/chats/abc/messages,/api/v1/chats/abc/messages",
-        "POST,/api/chats/connection-ticket,/api/v1/chats/connection-ticket",
-        "PUT,/api/notes/3/read,/api/v1/notes/3/read", "GET,/api/notes/stream,/api/v1/notes/stream",
-        "GET,/api/notes,/api/v1/notes",
-        "POST,/api/visits/identity,/api/v1/visits/identity", "GET,/api/visits/today,/api/v1/visits/today",
-        "POST,/api/visits/today,/api/v1/visits/today",
-        "GET,/api/admin/visits/stats/period,/api/v1/admin/visits/stats/period", "GET,/api/home/videos,/api/v1/home/videos",
-        "GET,/api/admin/videos,/api/v1/admin/videos", "PUT,/api/admin/videos/3/publication,/api/v1/admin/videos/3/publication",
-        "GET,/api/posts/read/3,/api/v1/posts/read/3", "POST,/api/posts,/api/v1/posts",
-        "GET,/api/comments/posts/read/3,/api/v1/comments/posts/read/3",
-        "DELETE,/api/reports/4,/api/v1/reports/4", "GET,/api/reports,/api/v1/reports",
-        "GET,/api/products/5,/api/v1/products/5", "POST,/api/products,/api/v1/products",
-        "DELETE,/api/categories/1,/api/v1/categories/1",
-        "POST,/api/images,/api/v1/images", "GET,/api/option-groups/3,/api/v1/option-groups/3",
-        "POST,/api/option-groups/3/values,/api/v1/option-groups/3/values",
-        "PUT,/api/option-groups/values/9,/api/v1/option-groups/values/9",
-        "GET,/api/admin/orders,/api/v1/admin/orders", "PATCH,/api/admin/orders/1/status,/api/v1/admin/orders/1/status",
-        "GET,/api/carts,/api/v1/carts", "DELETE,/api/carts,/api/v1/carts", "POST,/api/carts/items,/api/v1/carts/items",
-        "PATCH,/api/carts/items/9,/api/v1/carts/items/9",
-        "DELETE,/api/carts/items/9,/api/v1/carts/items/9", "GET,/api/orders,/api/v1/orders",
-        "POST,/api/orders/direct,/api/v1/orders/direct",
-        "GET,/api/admin/users/stats/total-users,/api/v1/admin/users/stats/total-users",
-        "GET,/api/admin/stats/daily-signups,/api/v1/admin/stats/daily-signups",
-        "GET,/api/admin/posts/stats/today,/api/v1/admin/posts/stats/today",
-        "GET,/api/admin/stats/intake-trend,/api/v1/admin/stats/intake-trend",
-        "GET,/api/admin/stats/daily-animals,/api/v1/admin/stats/daily-animals",
-    )
-    fun `게이트웨이가 다시 쓰던 옛 경로일 때__필터링하면__v1 경로로 보여 준다`(
-        method: String,
-        path: String,
-        expected: String,
-    ) {
-        // given
-        // 파라미터로 주어진 method와 path를 그대로 쓴다
-
-        // when
-        val seen = legacy(method, path)
-
-        // then
-        assertThat(seen.uri).isEqualTo(expected)
-        assertThat(seen.servletPath).isEqualTo(expected)
-        assertThat(seen.pathInfo).isNull()
-        assertThat(seen.query).isEqualTo("a=1")
-        assertThat(seen.original).isEqualTo(path)
-    }
-
-    @ParameterizedTest
-    @CsvSource(
-        // never routed by the Gateway, or routed only for other methods
-        "POST,/api/carts/reset", "DELETE,/api/carts/reset", "GET,/api/carts/items/9", "POST,/api/carts", "PUT,/api/carts",
-        "POST,/api/places", "GET,/api/places/1/extra", "GET,/api/visits/identity", "PUT,/api/visits/today",
-        "POST,/api/admin/visits/stats/period",
-        "POST,/api/home/videos", "GET,/api/images", "GET,/api/option-groups/3/values", "POST,/api/admin/orders",
-        "GET,/api/admin/stats/other",
-        "HEAD,/api/animals", "TRACE,/api/products/1", "GET,/api/unknown", "GET,/api/batch/apms/sync",
-        "POST,/api/batch/apms/sync",
-        // the public upload must not become reachable through the old protected alias
-        "POST,/api/animals/lost-candidates",
-        // already served unchanged, or outside /api
-        "POST,/api/v1/payments/confirm", "GET,/api/v1/animals", "POST,/api/v1/animals/lost-candidates",
-        "GET,/internal/animals/lost-gallery",
-        "GET,/oauth2/authorization/google", "GET,/login/oauth2/code/google", "GET,/actuator/health", "GET,/api/v1",
-        "GET,/apix/animals",
-    )
-    fun `게이트웨이가 다시 쓰지 않던 경로나 메서드일 때__필터링하면__그대로 둔다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        // 파라미터로 주어진 method와 path를 그대로 쓴다
-
-        // when
-        val seen = legacy(method, path)
-
-        // then
-        assertThat(seen.uri).isEqualTo(path)
-        assertThat(seen.original).isNull()
-        assertThat(seen.status).isEqualTo(200)
-    }
-
-    @ParameterizedTest
-    @CsvSource("GET,/api/users/internal/5/nickname", "PUT,/api/v1/users/internal/5/state", "DELETE,/api/users/internal/x")
-    fun `서비스 간 사용자 경로일 때__필터링하면__게이트웨이 404로 거절한다`(
-        method: String,
-        path: String,
-    ) {
-        // given
-        val request = MockHttpServletRequest(method, path)
-        val response = MockHttpServletResponse()
-        val chain = MockFilterChain()
-
-        // when
-        LegacyApiPathFilter().doFilter(request, response, chain)
-
-        // then
-        assertThat(chain.request).isNull()
-        assertThat(response.status).isEqualTo(404)
-        assertThat(response.getContentAsString(Charsets.UTF_8))
-            .isEqualTo("{\"code\":404,\"message\":\"유효하지 않은 엔드포인트입니다.\",\"data\":null}")
-    }
-
-    @Test
-    fun `퍼센트 인코딩된 내부 사용자 경로일 때__필터링하면__여전히 404다`() {
-        // given
-        val paths = arrayOf(
-            "/api/users/%69nternal/5/nickname",
-            "/api/v1/users/internal%2F".replace("%2F", "/") + "5",
-            "/api/v1/%75sers/internal/5",
-        )
-
-        for (path in paths) {
-            val request = MockHttpServletRequest("GET", path)
-            val response = MockHttpServletResponse()
-            val chain = MockFilterChain()
-
-            // when
-            LegacyApiPathFilter().doFilter(request, response, chain)
-
-            // then
-            assertThat(chain.request).`as`(path).isNull()
-            assertThat(response.status).isEqualTo(404)
-        }
-    }
-
-    @Test
-    fun `인코딩된 나머지 경로일 때__다시 쓰면__서블릿 경로는 디코딩되고 URI는 인코딩을 유지한다`() {
-        // given
-        val request = MockHttpServletRequest("GET", "/api/posts/read/a%20b")
-        val chain = MockFilterChain()
-
-        // when
-        LegacyApiPathFilter().doFilter(request, MockHttpServletResponse(), chain)
-
-        // then
-        val seen = chain.request as HttpServletRequest
-        assertThat(seen.requestURI).isEqualTo("/api/v1/posts/read/a%20b")
-        assertThat(seen.servletPath).isEqualTo("/api/v1/posts/read/a b")
     }
 
     // ---- lost-candidates limits ----
@@ -485,15 +332,6 @@ class GatewayFeaturesUnitTest {
         zeroTimeout.isInstanceOf(IllegalArgumentException::class.java)
     }
 
-    private data class Seen(
-        val uri: String?,
-        val servletPath: String?,
-        val pathInfo: String?,
-        val query: String?,
-        val original: String?,
-        val status: Int,
-    )
-
     companion object {
         private val DEFAULT_ORIGINS: String = GatewayCors.DEFAULT_ORIGIN_PATTERNS
         private const val TYPE = "multipart/form-data; boundary=x"
@@ -512,27 +350,6 @@ class GatewayFeaturesUnitTest {
                 request.addHeader("Access-Control-Request-Headers", headers)
             }
             return request
-        }
-
-        private fun legacy(method: String, path: String): Seen {
-            val request = MockHttpServletRequest(method, path)
-            request.queryString = "a=1"
-            request.servletPath = path
-            val response = MockHttpServletResponse()
-            val chain = MockFilterChain()
-            LegacyApiPathFilter().doFilter(request, response, chain)
-            val seen = chain.request as HttpServletRequest?
-            if (seen == null) {
-                return Seen(null, null, null, null, null, response.status)
-            }
-            return Seen(
-                seen.requestURI,
-                seen.servletPath,
-                seen.pathInfo,
-                seen.queryString,
-                seen.getAttribute(LegacyApiPathFilter.ORIGINAL_PATH_ATTRIBUTE) as String?,
-                response.status,
-            )
         }
 
         private fun search(contentType: String?, body: ByteArray?): MockHttpServletRequest {
