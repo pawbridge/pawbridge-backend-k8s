@@ -124,7 +124,9 @@ class PrivateNoteStreamRegistry internal constructor(
         val registration = opening.current
         val emitter: SseEmitter = registration.connection.emitter
         emitter.onCompletion { remove(registration) }
-        emitter.onTimeout { requestCompletion(registration) }
+        // Spring reports a timeout as an error unless the emitter completes inside this callback,
+        // so it must not be handed to the completion executor.
+        emitter.onTimeout { complete(registration) }
         emitter.onError { remove(registration) }
         opening.previous.forEach { requestCompletion(it) }
         // The initial event is buffered by Spring until the controller initializes the response.
@@ -263,18 +265,24 @@ class PrivateNoteStreamRegistry internal constructor(
             connection.completionQueued = true
         }
         try {
-            completions.execute {
-                try {
-                    connection.emitter.complete()
-                } finally {
-                    remove(registration)
-                }
-            }
+            completions.execute { complete(registration) }
         } catch (full: RejectedExecutionException) {
             synchronized(registryLock) {
                 connection.completionQueued = false
             }
             // Keep this closing connection tracked and counted until completion can be retried.
+        }
+    }
+
+    private fun complete(registration: Registration) {
+        val connection = registration.connection
+        connection.closing = true
+        try {
+            connection.emitter.complete()
+        } catch (recycled: IllegalStateException) {
+            // The container already finished this request (timeout or disconnect); nothing is left to close.
+        } finally {
+            remove(registration)
         }
     }
 
