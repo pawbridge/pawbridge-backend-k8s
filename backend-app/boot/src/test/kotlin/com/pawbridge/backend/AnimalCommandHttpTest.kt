@@ -4,6 +4,7 @@ import com.ninjasquad.springmockk.MockkBean
 import com.pawbridge.backend.animal.internal.command.infrastructure.dto.response.AnimalDetailResponse
 import com.pawbridge.backend.animal.internal.command.infrastructure.enums.Species
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalCommandService
+import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotDeletableException
 import com.pawbridge.backend.animal.internal.command.infrastructure.service.AnimalNotEditableException
 import com.pawbridge.backend.animal.internal.command.web.AnimalCommandController
 import com.pawbridge.backend.animal.internal.command.web.AnimalCommandExceptionHandler
@@ -18,6 +19,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
@@ -75,6 +77,21 @@ class AnimalCommandHttpTest {
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value(409))
             .andExpect(jsonPath("$.message").value("보호소가 직접 등록한 동물만 수정할 수 있습니다."))
+    }
+
+    @Test
+    fun `APMS 동물일 때__삭제를 보내면__409와 삭제 불가 안내를 준다`() {
+        // given
+        every { animals.delete(any(), any()) } throws AnimalNotDeletableException()
+
+        // when
+        val result = mvc.perform(delete(PATH).header("Authorization", token))
+
+        // then
+        result
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value(409))
+            .andExpect(jsonPath("$.message").value("보호소가 직접 등록한 동물만 삭제할 수 있습니다."))
     }
 
     @Test

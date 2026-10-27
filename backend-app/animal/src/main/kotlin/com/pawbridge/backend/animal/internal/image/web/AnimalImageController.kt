@@ -3,7 +3,6 @@ package com.pawbridge.backend.animal.internal.image.web
 import com.pawbridge.backend.animal.internal.image.infrastructure.AnimalImageService
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.annotation.AuthenticationPrincipal
-import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -40,19 +39,6 @@ class AnimalImageController(
         val response = HashMap<String, Any>()
         response["imageUrls"] = imageUrls
         response["count"] = imageUrls.size
-
-        return ResponseEntity.ok(response)
-    }
-
-    @DeleteMapping
-    fun deleteImage(
-        @AuthenticationPrincipal verifiedUserId: Long?,
-        @RequestParam("imageUrl") imageUrl: String,
-    ): ResponseEntity<Map<String, String>> {
-        images.deleteImage(verifiedUserId, imageUrl)
-
-        val response = HashMap<String, String>()
-        response["message"] = "이미지가 삭제되었습니다."
 
         return ResponseEntity.ok(response)
     }

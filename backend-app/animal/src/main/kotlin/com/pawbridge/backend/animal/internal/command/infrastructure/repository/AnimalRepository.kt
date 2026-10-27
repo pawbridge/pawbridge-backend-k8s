@@ -38,6 +38,17 @@ interface AnimalRepository : JpaRepository<Animal, Long> {
     @EntityGraph(attributePaths = ["shelter"])
     fun findWithShelterByIdIn(ids: List<Long>): List<Animal>
 
+    /** The photo addresses of one animal, read without a lock to find which requested addresses are new. */
+    @Query(
+        "SELECT new com.pawbridge.backend.animal.internal.command.infrastructure.repository.AnimalPhotoSlots(" +
+            "a.imageUrl, a.imageUrl2) FROM Animal a WHERE a.id = :id",
+    )
+    fun findPhotoSlots(@Param("id") id: Long?): AnimalPhotoSlots?
+
+    /** How many animals show this photo address in either photo slot. */
+    @Query("SELECT count(a) FROM Animal a WHERE a.imageUrl = :url OR a.imageUrl2 = :url")
+    fun countPhotoReferences(@Param("url") url: String): Long
+
     @Query("SELECT MIN(a.happenDate) FROM Animal a WHERE a.apiSource = :source")
     fun findEarliestHappenDate(@Param("source") source: ApiSource?): LocalDate?
 
