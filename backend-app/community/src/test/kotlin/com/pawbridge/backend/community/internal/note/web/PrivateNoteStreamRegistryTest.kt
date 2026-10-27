@@ -444,7 +444,7 @@ class PrivateNoteStreamRegistryTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["error", "timeout"])
-    fun `연결 끊김 또는 타임아웃 콜백이 있을 때__연결을 정리하면__그 연결의 슬롯만 풀고 대기 중인 쓰기는 억제한다`(
+    fun `연결 끊김 또는 타임아웃 콜백이 있을 때__연결을 정리하면__그 연결의 슬롯만 바로 풀고 대기 중인 쓰기는 억제한다`(
         callback: String,
     ) {
         // given
@@ -465,8 +465,7 @@ class PrivateNoteStreamRegistryTest {
                 closing.error.accept(IOException("synthetic-disconnect"))
             } else {
                 closing.timeout.run()
-                assertFull { f.streams.open(7, f.expiry()) }
-                f.completions.runAll()
+                assertThat(f.completions.tasks).isEmpty()
             }
             f.streams.open(7, f.expiry())
             f.writes.runAll()
@@ -474,6 +473,42 @@ class PrivateNoteStreamRegistryTest {
             // then
             assertThat(closing.sends).hasValue(1)
             assertThat(closing.completed).hasValue(if (callback == "error") 0 else 1)
+            assertFull { f.streams.open(7, f.expiry()) }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["timeout", "heartbeat"])
+    fun `컨테이너가 이미 응답을 회수했을 때__연결을 완료하면__예외를 밖으로 던지지 않고 슬롯을 푼다`(
+        path: String,
+    ) {
+        // given
+        val heartbeat = mockk<ScheduledExecutorService>()
+
+        every { heartbeat.scheduleAtFixedRate(any(), any(), any(), any()) } returns null
+        every { heartbeat.shutdownNow() } returns mutableListOf()
+        every { heartbeat.awaitTermination(any(), any()) } returns true
+        Fixture(heartbeat).use { f ->
+            f.streams.open(7, f.clock.instant().plusSeconds(1))
+            f.streams.open(7, f.expiry())
+            f.streams.open(7, f.expiry())
+            val closing = f.emitters.first()
+            closing.recycled = true
+
+            // when
+            val thrown = catchThrowable {
+                if (path == "timeout") {
+                    closing.timeout.run()
+                } else {
+                    f.clock.advance(2)
+                    f.streams.heartbeat()
+                    f.completions.runAll()
+                }
+            }
+
+            // then
+            assertThat(thrown).isNull()
+            assertThatCode { f.streams.open(7, f.expiry()) }.doesNotThrowAnyException()
             assertFull { f.streams.open(7, f.expiry()) }
         }
     }
@@ -608,6 +643,7 @@ class PrivateNoteStreamRegistryTest {
         lateinit var completion: Runnable
         lateinit var timeout: Runnable
         lateinit var error: Consumer<Throwable>
+        var recycled = false
 
         @Throws(IOException::class)
         override fun send(event: SseEmitter.SseEventBuilder) {
@@ -628,6 +664,9 @@ class PrivateNoteStreamRegistryTest {
         }
 
         override fun complete() {
+            if (recycled) {
+                throw IllegalStateException("The response object has been recycled")
+            }
             completed.incrementAndGet()
             completion.run()
         }
