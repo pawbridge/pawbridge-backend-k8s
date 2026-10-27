@@ -32,11 +32,15 @@ interface StoreMyPage {
     @JvmRecord
     data class Wishlist(
         val wishlistId: Long?,
+        val skuId: Long?,
+        val skuCode: String?,
         val productId: Long?,
         val productName: String?,
         val productDescription: String?,
         val productImageUrl: String?,
         val productStatus: String?,
+        val price: Long?,
+        val options: Map<String?, String?>?,
         val categoryId: Long?,
         val categoryName: String?,
         val createdAt: LocalDateTime?,
