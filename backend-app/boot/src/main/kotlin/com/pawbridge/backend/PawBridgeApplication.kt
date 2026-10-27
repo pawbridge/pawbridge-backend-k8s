@@ -54,6 +54,7 @@ import com.pawbridge.backend.boot.configuration.ShelterCommandConfiguration
 import com.pawbridge.backend.boot.configuration.ShelterDirectoryConfiguration
 import com.pawbridge.backend.boot.configuration.ShelterMembershipConfiguration
 import com.pawbridge.backend.boot.configuration.ShelterObservationConfiguration
+import com.pawbridge.backend.boot.configuration.ShutdownDiagnosticsConfiguration
 import com.pawbridge.backend.boot.configuration.SignupStatisticsReadConfiguration
 import com.pawbridge.backend.boot.configuration.SocialOAuthConfiguration
 import com.pawbridge.backend.boot.configuration.StoreCartConfiguration
@@ -113,6 +114,7 @@ import org.springframework.context.annotation.Import
     ManagementSecurityConfiguration::class,
     PaymentCompensationMetricsConfiguration::class,
     GatewayFeaturesConfiguration::class,
+    ShutdownDiagnosticsConfiguration::class,
     EmailVerificationConfiguration::class,
     LocalSignupConfiguration::class,
     PasswordResetConfiguration::class,

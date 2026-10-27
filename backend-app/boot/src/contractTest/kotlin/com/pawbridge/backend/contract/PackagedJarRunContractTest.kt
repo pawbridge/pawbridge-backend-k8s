@@ -204,6 +204,8 @@ class PackagedJarRunContractTest {
         assertThat(app.process.exitValue()).`as`("Exit code of a clean SIGTERM shutdown").isIn(0, 143)
         val log = app.output()
         assertThat(log).contains("Commencing graceful shutdown", "Graceful shutdown complete")
+        assertThat(log).`as`("The shutdown diagnostics read the embedded Tomcat's own async count")
+            .contains("Graceful shutdown waits for 0 tracked request(s), container async in progress=0")
         assertThat(log.split("pawbridge-db - Shutdown completed.")).`as`("One pool, closed once").hasSize(2)
         assertThat(waitForNoConnections()).`as`("Connections of the application role after the process ended").isZero()
         assertThat(app.log.length()).isLessThan(LOG_LIMIT_BYTES)
