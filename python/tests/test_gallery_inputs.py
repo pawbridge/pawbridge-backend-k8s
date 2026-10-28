@@ -7,7 +7,7 @@ import threading
 import unittest
 
 from PIL import Image, ImageOps
-from app.services.gallery.inputs import GalleryInputPrefetch
+from app.gallery.inputs import GalleryInputPrefetch
 
 
 class GalleryInputsTest(unittest.TestCase):

@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.services.chatbot.gemini_provider import GeminiChatbotProvider
-from app.services.chatbot.prompt_builder import build_prompt
-from app.services.chatbot.provider import ChatbotProviderUpstreamError
+from app.entrypoints.chatbot_api import app
+from app.chatbot.gemini_provider import GeminiChatbotProvider
+from app.chatbot.prompt_builder import build_prompt
+from app.chatbot.provider import ChatbotProviderUpstreamError
 
 
 class ChatbotApiTest(unittest.TestCase):
@@ -99,7 +99,7 @@ class ChatbotApiTest(unittest.TestCase):
                 clear=False,
             ),
             patch(
-                "app.services.chatbot.gemini_provider.GeminiChatbotProvider.generate_answer",
+                "app.chatbot.gemini_provider.GeminiChatbotProvider.generate_answer",
                 new=AsyncMock(return_value="Gemini answer"),
             ),
         ):

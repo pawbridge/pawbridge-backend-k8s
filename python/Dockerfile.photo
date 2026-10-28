@@ -12,4 +12,4 @@ RUN pip install --no-cache-dir -r requirements-photo.txt && pip check
 COPY app /app/app
 USER 65532:65532
 EXPOSE 8000
-CMD ["uvicorn", "app.photo_main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "4", "--backlog", "8", "--no-access-log"]
+CMD ["uvicorn", "app.entrypoints.photo_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "4", "--backlog", "8", "--no-access-log"]

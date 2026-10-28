@@ -9,10 +9,10 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from PIL import Image
-from app.services.gallery.pg_store import PostgresqlGalleryStore, GalleryUnavailable
-from app.services.gallery.builder import build_gallery, gallery_target, gallery_mapping, GalleryBuildCancelled
-from app.services.vision.sam3_focus import FOCUS_VERSION
-from app.services.vision.coat_color import VERSION as COLOR_VERSION
+from app.gallery.pg_store import PostgresqlGalleryStore, GalleryUnavailable
+from app.gallery.builder import build_gallery, gallery_target, gallery_mapping, GalleryBuildCancelled
+from app.vision.sam3_focus import FOCUS_VERSION
+from app.vision.coat_color import VERSION as COLOR_VERSION
 
 ALIAS = 'animals-lost-dinov3-sam3-pg-test'
 VECTOR = [1.] + [0.] * 1023
@@ -141,7 +141,7 @@ class PostgresqlGalleryTest(unittest.TestCase):
         import time
         from unittest.mock import patch
         from psycopg_pool import PoolTimeout
-        from app.services.gallery.storage import storage_session
+        from app.gallery.storage import storage_session
         port=os.environ['ANIMAL_PG_MIGRATION_TEST_PORT']
         env={'LOST_STORAGE_BACKEND':'postgresql','LOST_PG_POOL_MAX_SIZE':'1',
              'LOST_PG_DSN':f'host=127.0.0.1 port={port} dbname=pawbridge user=postgres password=local_pg_test_only'}
@@ -333,7 +333,7 @@ class PostgresqlGalleryTest(unittest.TestCase):
             self.assertEqual(encoder.calls,2);self.assertTrue(self.store.published(result))
 
     def test_incremental_builder_adds_one_animal_without_copying_unchanged_rows(self):
-        from app.services.gallery.retention import GalleryRetention
+        from app.gallery.retention import GalleryRetention
         payload=io.BytesIO()
         with Image.new('RGB',(8,8),'white') as image: image.save(payload,format='PNG')
         data=payload.getvalue(); digest=hashlib.sha256(data).hexdigest()
@@ -472,8 +472,8 @@ class PostgresqlGalleryTest(unittest.TestCase):
     def test_color_v3_refresh_reuses_vectors_resumes_and_can_restore_v2(self):
         from unittest.mock import patch
         import numpy as np
-        from app.services.vision.coat_color import describe, valid
-        from app.services.gallery.pg_store import ColorGalleryRefreshRequired
+        from app.vision.coat_color import describe, valid
+        from app.gallery.pg_store import ColorGalleryRefreshRequired
 
         old_version = 'foreground-lab32-joint8-v2'
         snapshot = 'd' * 64
@@ -490,8 +490,8 @@ class PostgresqlGalleryTest(unittest.TestCase):
         # A previous no-mask result remains null and requires no extra inference.
         legacy[-1].update(focus_status='original_no_confident_animal', coat_color=None)
         legacy[-1].pop('animal_vector')
-        with patch('app.services.vision.coat_color.VERSION', old_version), \
-                patch('app.services.gallery.builder.COLOR_VERSION', old_version):
+        with patch('app.vision.coat_color.VERSION', old_version), \
+                patch('app.gallery.builder.COLOR_VERSION', old_version):
             old_target = self.publish('d', legacy)
         old_hits = self.search(VECTOR)
         self.store.validate(ALIAS, FOCUS_VERSION)  # Color weight zero can serve the old generation.
@@ -582,15 +582,15 @@ class PostgresqlGalleryTest(unittest.TestCase):
 
     def test_color_rollback_reference_survives_two_new_publications_and_retention(self):
         from unittest.mock import patch
-        from app.services.gallery.retention import GalleryRetention
+        from app.gallery.retention import GalleryRetention
         old_version = 'foreground-lab32-joint8-v2'
         rollback_alias = 'animals-lost-dinov3-sam3-color-v2-rollback'
-        with patch('app.services.gallery.builder.COLOR_VERSION', old_version):
+        with patch('app.gallery.builder.COLOR_VERSION', old_version):
             old = self.publish('a', [dict(document(1), coat_color_version=old_version)])
         with self.store.connection() as conn:
             conn.execute('INSERT INTO lost_gallery_heads(alias,build_key) VALUES (%s,%s)', (rollback_alias, old))
         with tempfile.TemporaryDirectory() as directory:
-            with patch('app.services.gallery.builder.COLOR_VERSION', old_version):
+            with patch('app.gallery.builder.COLOR_VERSION', old_version):
                 retention = GalleryRetention(None, directory, ALIAS, store=self.store)
                 retention.prepare('a' * 64)
                 retention.published(old)
@@ -685,8 +685,8 @@ class PostgresqlGalleryTest(unittest.TestCase):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from unittest.mock import patch
-        from app.routers.recommendation import router
-        from app.services.search.lost_search import rank_candidates
+        from app.recommendation.router import router
+        from app.lost_search.service import rank_candidates
         self.seed_recommendation_animals([(900001, 'ADOPTED', 'DOG'), (900002, 'NOTICE', 'DOG'), (900003, 'ADOPTED', 'DOG')])
         self.publish('a', [document(900001), document(900002), document(900003)])
         app = FastAPI()
@@ -697,8 +697,8 @@ class PostgresqlGalleryTest(unittest.TestCase):
         env = {'INTERNAL_API_KEY': 'test-key', 'LOST_STORAGE_BACKEND': 'postgresql',
                'LOST_SEARCH_VISUAL_PROFILE': 'sam3-animal-focus', 'LOST_SEARCH_INDEX': ALIAS,
                'LOST_SEARCH_COAT_COLOR_WEIGHT': '0.1'}
-        with patch.dict(os.environ, env), patch('app.services.search.recommendation.get_postgresql_store', return_value=self.store), \
-                patch('app.services.search.recommendation.rank_candidates', side_effect=rank), TestClient(app) as client:
+        with patch.dict(os.environ, env), patch('app.recommendation.service.get_postgresql_store', return_value=self.store), \
+                patch('app.recommendation.service.rank_candidates', side_effect=rank), TestClient(app) as client:
             response = client.get('/internal/animals/900001/similar?species=DOG', headers={'X-Internal-Api-Key': 'test-key'})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json(), [900002])
