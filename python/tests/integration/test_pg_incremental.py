@@ -3,7 +3,7 @@ from contextlib import contextmanager
 import os
 import unittest
 
-from app.services.gallery.builder import GalleryBuildCancelled, gallery_mapping, gallery_target
+from app.gallery.builder import GalleryBuildCancelled, gallery_mapping, gallery_target
 import test_pg_gallery as gallery_fixture
 from test_pg_gallery import ALIAS, VECTOR, document
 

@@ -8,7 +8,7 @@ must upload and verify it before marking an APMS photo as archived.
 
 ```sh
 python -m pip install -r requirements-photo.txt
-uvicorn app.photo_main:app --host 127.0.0.1 --port 8000 --workers 1
+uvicorn app.entrypoints.photo_api:app --host 127.0.0.1 --port 8000 --workers 1
 # Test dependencies also include httpx==0.27.0.
 python -m unittest discover -s tests -p 'test_photo*.py'
 docker build -f Dockerfile.photo -t pawbridge-photo:local .

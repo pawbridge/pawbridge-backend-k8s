@@ -8,30 +8,29 @@ PawBridge 백엔드(`backend-app`)가 내부 API로 부르는 Python 서비스 �
 
 | 진입점 | 하는 일 | 운영 실행 위치 |
 | --- | --- | --- |
-| `app.lost_main:app` | 실종동물 사진 검색(`POST /internal/animals/lost-candidates`), 유사 동물 추천(`GET /internal/animals/{id}/similar`), 갤러리 자동 갱신 | Mac 네이티브 프로세스(launchd `kr.pawbridge.native`, MPS GPU). 백엔드는 `native-relay`로 보낸다 |
-| `app.main:app` | 동물 상담 챗봇(`POST /internal/chatbot/messages`, Gemini) | 컨테이너 `pawbridge-prod-python-api` |
-| `app.photo_main:app` | APMS 사진 압축(`POST /internal/photos/optimize`), [계약](PHOTO_SERVICE.md) | 컨테이너 `pawbridge-prod-photo` |
-| `app.gallery_main` | 스냅샷과 로컬 사진으로 갤러리를 수동 생성하는 명령줄 도구 | 필요할 때만 수동 실행 |
+| `app.entrypoints.vision_api:app` | 실종동물 사진 검색(`POST /internal/animals/lost-candidates`), 유사 동물 추천(`GET /internal/animals/{id}/similar`), 갤러리 자동 갱신 | Mac 네이티브 프로세스(launchd `kr.pawbridge.native`, MPS GPU). 백엔드는 `native-relay`로 보낸다 |
+| `app.entrypoints.chatbot_api:app` | 동물 상담 챗봇(`POST /internal/chatbot/messages`, Gemini) | 컨테이너 `pawbridge-prod-python-api` |
+| `app.entrypoints.photo_api:app` | APMS 사진 압축(`POST /internal/photos/optimize`), [계약](PHOTO_SERVICE.md) | 컨테이너 `pawbridge-prod-photo` |
+| `app.entrypoints.gallery_cli` | 스냅샷과 로컬 사진으로 갤러리를 수동 생성하는 명령줄 도구 | 필요할 때만 수동 실행 |
 
-`app.main`에도 실종동물 검색 경로가 등록돼 있지만, 운영에서는 백엔드가 이 요청을 네이티브 프로세스로 보낸다. 모든 내부 API는 `X-Internal-Api-Key`를 확인한다.
+`app.entrypoints.chatbot_api`에도 실종동물 검색 경로가 등록돼 있지만, 운영에서는 백엔드가 이 요청을 네이티브 프로세스로 보낸다. 모든 내부 API는 `X-Internal-Api-Key`를 확인한다.
 
 ```
 app/
-├── main.py, lost_main.py, photo_main.py, gallery_main.py   # 실행 진입점
-├── photo_optimizer.py  # 사진 압축 (사진 서비스 전용, Torch 없음)
-├── routers/            # HTTP 경로: chatbot, lost_search, recommendation
-└── services/           # 업무 로직
-    ├── chatbot/        # Gemini·stub 제공자, 프롬프트
-    ├── vision/         # 모델 추론: dinov3, sam3_focus, animal_focus, coat_color, gpu_device, inference_gate
-    ├── search/         # 실종 검색 순위(lost_search), 유사 동물 추천(recommendation)
-    └── gallery/        # 갤러리 빌드(builder)·자동 갱신(runtime, source, pages, inputs, prefetch)·보관(retention)
-                        # PostgreSQL 저장소(storage, pg_store, pg_incremental)
+├── entrypoints/        # 실행 진입점: chatbot_api, vision_api, photo_api, gallery_cli
+├── chatbot/            # 챗봇 경로(router)와 Gemini·stub 제공자, 프롬프트
+├── lost_search/        # 실종 사진 검색 경로(router)와 순위(service)
+├── recommendation/     # 유사 동물 추천 경로(router)와 순위(service)
+├── gallery/            # 갤러리 빌드(builder)·자동 갱신(runtime, source, pages, inputs, prefetch)·보관(retention)
+│                       # PostgreSQL 저장소(storage, pg_store, pg_incremental)
+├── vision/             # 모델 추론: dinov3, sam3_focus, animal_focus, coat_color, gpu_device, inference_gate
+└── photo/              # 사진 압축(optimizer, 사진 서비스 전용, Torch 없음)
 deploy/macos/           # 네이티브 실행본 설치 런북, SAM 3 패치·고정 목록
 scripts/                # SAM 3 MPS 준비 스크립트
 tests/                  # unittest. tests/integration은 PostgreSQL이 필요한 선택 시험
 ```
 
-## 실종동물 검색과 추천 (`app.lost_main`)
+## 실종동물 검색과 추천 (`app.entrypoints.vision_api`)
 
 | 설정 | 운영 값 | 설명 |
 | --- | --- | --- |
@@ -56,7 +55,7 @@ GPU당 프로세스 하나로 실행하고 `--reload`나 다중 worker를 쓰지
 - `v2` 공급 프로토콜은 페이지당 최대 100건·2MiB를 받고, 확인된 커서와 해시만 상태 파일에 남긴다. 서명 URL은 상태 파일에 기록하지 않는다.
 - 공개본과 직전본만 남기고, 상태 디렉터리의 기록에 있는 미공개 빌드만 정리한다.
 
-### 갤러리 수동 생성 (`app.gallery_main`)
+### 갤러리 수동 생성 (`app.entrypoints.gallery_cli`)
 
 APMS·R2 자격 증명을 가져오지 않는다. 입력은 수집 쪽에서 준비한 완전한 스냅샷과 로컬 사진 캐시(`<source_sha256>.image`)다. 같은 상태 디렉터리의 파일 잠금으로 검색 서버의 자동 갱신과 동시에 돌지 않게 막는다.
 
@@ -64,7 +63,7 @@ APMS·R2 자격 증명을 가져오지 않는다. 입력은 수집 쪽에서 준
 export LOST_SEARCH_VISUAL_PROFILE=sam3-animal-focus
 export LOST_SEARCH_INDEX=animals-lost-dinov3-sam3-gallery-v1
 # 가중치 경로, LOST_PG_DSN 등은 비밀 저장소에서 주입한다.
-python -m app.gallery_main --manifest /path/to/snapshot.json \
+python -m app.entrypoints.gallery_cli --manifest /path/to/snapshot.json \
   --photo-root /path/to/photos --state-dir /path/to/gallery-state
 # 결과를 확인한 뒤 실제로 작성·공개할 때만 --apply를 붙인다.
 ```
@@ -90,7 +89,7 @@ docker run --rm --network none --read-only --tmpfs /tmp -e PYTHONDONTWRITEBYTECO
 | --- | --- | --- |
 | `python-ai-service`(컨테이너 `pawbridge-prod-python-api`) | `python/Dockerfile` | `pawbridge-mac-python:<커밋 7자리>` |
 | `photo-service`(컨테이너 `pawbridge-prod-photo`) | `python/Dockerfile.photo` | `pawbridge-mac-photo:<커밋 7자리>` |
-| Mac 네이티브 실종동물 검색(launchd `kr.pawbridge.native`) | `app.lost_main`, `deploy/macos/` | 별도 실행본과 가상환경([macOS 런북](deploy/macos/README.md)) |
+| Mac 네이티브 실종동물 검색(launchd `kr.pawbridge.native`) | `app.entrypoints.vision_api`, `deploy/macos/` | 별도 실행본과 가상환경([macOS 런북](deploy/macos/README.md)) |
 
 컨테이너 서비스 교체 순서:
 
@@ -133,7 +132,7 @@ Mac 네이티브 실행본은 앱 소스만 바꿔서는 교체되지 않는다.
 - `min_score=1.6`: 코사인 유사도 0.6 미만 결과 제외 → 관련 없는 동물을 억지로 채우지 않음
 - `species` 필터: min_score만으로는 외형이 비슷한 이종 동물 혼재 방지 불충분 (고양이 검색 시 강아지 포함 문제 해결)
 
-두 규칙(같은 종만, 시각 점수 0.6 이상)은 현재 추천(`services/search/recommendation.py`)에도 이어집니다.
+두 규칙(같은 종만, 시각 점수 0.6 이상)은 현재 추천(`app/recommendation/service.py`)에도 이어집니다.
 
 ### L2 정규화
 

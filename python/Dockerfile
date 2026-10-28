@@ -12,4 +12,4 @@ RUN pip install --no-cache-dir -r requirements.txt && pip check
 COPY app /app/app
 USER 10001:10001
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "4", "--backlog", "8", "--no-access-log"]
+CMD ["uvicorn", "app.entrypoints.chatbot_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "4", "--backlog", "8", "--no-access-log"]

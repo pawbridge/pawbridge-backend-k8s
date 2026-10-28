@@ -1,6 +1,6 @@
 # Mac 네이티브 실종동물 검색 실행 소스
 
-이 디렉터리는 macOS arm64/Python 3.12에서 `app.lost_main:app`을 실행하기 위한
+이 디렉터리는 macOS arm64/Python 3.12에서 `app.entrypoints.vision_api:app`을 실행하기 위한
 의존성 핀과 SAM3 MPS 패치를 보관한다. 일반 Python API와 Photo는 별도 Docker
 서비스다. 실제 비밀값, 모델 가중치, 사진, 갤러리, 로그, 가상환경은 Git에 넣지 않는다.
 
@@ -15,6 +15,9 @@
   `scripts/environments/mac_native_service.py`, `mac_native_supervisor.py`,
   `mac_background_jobs.py`가 관리한다. 이 저장소의 앱 소스만 교체해도 이미 배포한
   실행본이 자동으로 바뀌지는 않는다.
+- 실행기는 앱 진입점 모듈 이름을 직접 지정한다. 2026-10-28 패키지 구조 정리로 진입점이
+  `app.lost_main:app`에서 `app.entrypoints.vision_api:app`으로 바뀌었으므로, 이 구조의
+  소스를 처음 배포할 때 실행기의 uvicorn 대상도 함께 바꾼다.
 - 시험 전용 `run_lost_mps.py`와 시험 alias/env 예시는 이 게시 범위에 포함하지 않는다.
 
 ## 독립 Python 환경 준비

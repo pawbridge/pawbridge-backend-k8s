@@ -1,11 +1,11 @@
 """In-memory stand-in for PostgresqlGalleryStore, limited to the full-build calls of build_gallery
 and the retention/refresh calls of GalleryRefresh. Signatures and return shapes follow
-app/services/pg_gallery_store.py; SQL transactions are replaced by dictionaries.
+app/gallery/pg_store.py; SQL transactions are replaced by dictionaries.
 """
 from copy import deepcopy
 
-from app.services.gallery.builder import CONTRACT, PREFIX, gallery_mapping
-from app.services.vision.sam3_focus import FOCUS_VERSION
+from app.gallery.builder import CONTRACT, PREFIX, gallery_mapping
+from app.vision.sam3_focus import FOCUS_VERSION
 import re
 
 
