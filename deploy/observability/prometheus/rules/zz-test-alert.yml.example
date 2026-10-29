@@ -1,0 +1,13 @@
+# 알림 파이프라인(Prometheus -> Grafana Alertmanager -> Slack) 종단 간 테스트용 규칙. 평소에는 로드되지 않는다 (*.yml 만 로드).
+# 사용: cp zz-test-alert.yml.example zz-test-alert.yml -> Prometheus reload(SIGHUP) -> Slack 도착 확인 -> 파일 삭제 후 reload.
+groups:
+  - name: pawbridge-test
+    rules:
+      - alert: PipelineTest
+        expr: vector(1)
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "알림 파이프라인 테스트"
+          description: "이 메시지가 Slack 에 보이면 Prometheus -> Grafana -> Slack 경로가 정상이다. 확인 후 테스트 규칙을 삭제할 것."

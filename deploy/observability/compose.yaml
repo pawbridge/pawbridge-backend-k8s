@@ -1,0 +1,181 @@
+# pawbridge-obs: PawBridge 운영 호스트(Mac mini)용 관측성 스택 (Prometheus + Loki + Alloy + Grafana).
+# 운영 앱 스택(pawbridge-prod)과 분리된 별도 compose 프로젝트다. 항상 프로젝트명을 명시해서 실행한다:
+#   docker compose -p pawbridge-obs --env-file .env up -d
+#
+# 네트워크 설계 (최소 노출 원칙):
+#   obs (이 프로젝트 전용, internal)   : prometheus / loki / alloy / grafana 사이의 내부 통신 전용.
+#                                        앱 컨테이너가 Loki push API나 Grafana에 닿지 못하게 분리한다.
+#   pawbridge-prod-private (external) : Prometheus만 붙는다. monolith:9464 를 scrape 하기 위해서다.
+#   pawbridge-prod-egress  (external) : Grafana만 붙는다. (1) 127.0.0.1:3000 포트 게시에는 internal 이 아닌
+#                                        네트워크가 필요하고, (2) Slack webhook 호출에 외부 접근이 필요하다.
+#   -> 호스트로 게시되는 포트는 Grafana 의 127.0.0.1:3000 하나뿐이다.
+#
+# 시크릿: ${OBS_SECRETS} 디렉터리의 파일을 compose secrets 로 /run/secrets/<name> 에 마운트한다.
+#   - grafana-admin-password : Grafana admin 초기 비밀번호 + Prometheus 가 Grafana Alertmanager 로 알림 전송 시 사용
+#   - slack-webhook          : Slack Incoming Webhook URL (Grafana contact point 가 $__file{} 로 읽음)
+name: pawbridge-obs
+
+x-common: &common
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  # ---------------------------------------------------------------- Prometheus
+  prometheus:
+    <<: *common
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996   # v3.5.0
+    container_name: pawbridge-obs-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d # 보존 15일
+      - --web.listen-address=:9090
+      # --web.enable-lifecycle 은 일부러 켜지 않는다 (인증 없는 reload/shutdown API 방지).
+      # 설정 반영: docker compose -p pawbridge-obs kill -s HUP prometheus
+    environment:
+      TZ: UTC
+      GOMEMLIMIT: 200MiB # mem_limit(256m) 보다 낮게 둬서 OOM kill 전에 GC 가 먼저 압박받게 한다.
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    secrets:
+      - grafana-admin-password # Grafana Alertmanager API basic_auth 용 (password_file)
+    networks:
+      - obs
+      - prod_private
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------------------------------------------------------------- Loki
+  loki:
+    <<: *common
+    image: grafana/loki:3.5.3@sha256:3165cecce301ce5b9b6e3530284b080934a05cd5cafac3d3d82edcb887b45ecd   # 3.5.3
+    container_name: pawbridge-obs-loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    environment:
+      TZ: UTC
+      GOMEMLIMIT: 200MiB
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    networks:
+      - obs
+    mem_limit: 256m
+    healthcheck:
+      # 이미지에 wget/curl 중 무엇이 있는지 버전마다 달라 둘 다 시도한다.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3100/ready || curl -fsS -o /dev/null http://127.0.0.1:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------- Alloy (Docker 로그 수집)
+  alloy:
+    <<: *common
+    image: grafana/alloy:v1.10.0@sha256:1bc130e909116a4bf950eb5187a346007d3b796f96832b529acb14a64e41230f   # v1.10.0
+    container_name: pawbridge-obs-alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --disable-reporting
+      - /etc/alloy/config.alloy
+    # Docker 소켓은 root:root(또는 root:docker) 권한이라 비루트로는 읽을 수 없다. 그래서 root 로 실행한다.
+    # 주의: 소켓을 :ro 로 마운트해도 소켓 "파일"만 읽기 전용일 뿐, 그 위의 Docker API 는 읽기/쓰기 모두 가능하다.
+    # 즉 이 컨테이너는 사실상 호스트 Docker 에 대한 root 권한과 같다. README 의 "보안 주의"와 후속 과제(socket proxy) 참고.
+    user: "0:0"
+    environment:
+      TZ: UTC
+      GOMEMLIMIT: 100MiB
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data # 로그 읽기 위치(positions) 보존: 재생성해도 중복/유실 최소화
+    networks:
+      - obs
+    mem_limit: 128m
+    # 이미지에 wget/curl 이 있다는 보장이 없어 healthcheck 를 두지 않는다. Prometheus 의 up{job="alloy"} 로 확인한다.
+
+  # ---------------------------------------------------------------- Grafana
+  grafana:
+    <<: *common
+    image: grafana/grafana:12.1.0@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f   # 12.1.0
+    container_name: pawbridge-obs-grafana
+    environment:
+      TZ: UTC
+      GOMEMLIMIT: 200MiB
+      GF_SERVER_ROOT_URL: http://localhost:3000
+      # 관리자 계정. 비밀번호는 파일에서 읽는다 (GF_<SECTION>_<KEY>__FILE 규칙).
+      # 주의: 이 값은 "최초 DB 생성 시"에만 적용된다. 이후 파일을 바꿔도 Grafana 비밀번호는 안 바뀐다 (README 참고).
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # 외부로 나가는 분석/업데이트 확인/뉴스 피드/플러그인 자동 설치 모두 끈다.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_ANALYTICS_FEEDBACK_LINKS_ENABLED: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      # Prometheus 가 grafana:3000/metrics 를 scrape 한다.
+      GF_METRICS_ENABLED: "true"
+      # Unified Alerting 은 기본 활성화. 규칙은 Prometheus 가 평가하고 Grafana 는 Alertmanager(라우팅/Slack) 역할만 한다.
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+    ports:
+      - "127.0.0.1:3000:3000" # 이 스택에서 호스트로 게시되는 유일한 포트
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    secrets:
+      - grafana-admin-password
+      - slack-webhook
+    networks:
+      - obs
+      - prod_egress
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health || curl -fsS -o /dev/null http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+secrets:
+  grafana-admin-password:
+    file: ${OBS_SECRETS:?OBS_SECRETS 가 비어 있음 (.env 확인)}/grafana-admin-password
+  slack-webhook:
+    file: ${OBS_SECRETS:?OBS_SECRETS 가 비어 있음 (.env 확인)}/slack-webhook
+
+volumes:
+  prometheus-data:
+    name: pawbridge-obs-prometheus
+  loki-data:
+    name: pawbridge-obs-loki
+  grafana-data:
+    name: pawbridge-obs-grafana
+  alloy-data: # 요청된 3개 외 추가 볼륨 (Alloy positions 보존용, 용량은 수 MB 이하)
+    name: pawbridge-obs-alloy
+
+networks:
+  obs:
+    name: pawbridge-obs_internal
+    internal: true # 외부 접근 불가. 스택 내부 통신 전용
+  prod_private:
+    external: true
+    name: pawbridge-prod-private
+  prod_egress:
+    external: true
+    name: pawbridge-prod-egress

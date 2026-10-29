@@ -1,0 +1,80 @@
+// Grafana Alloy: Docker 컨테이너 로그를 수집해 Loki 로 보낸다.
+// 대상: 이름이 "pawbridge-prod-" 로 시작하는 컨테이너만. (관측성 스택 자신 pawbridge-obs-* 와 다른 프로젝트는 제외)
+// Docker 소켓은 컨테이너 안에서 항상 /var/run/docker.sock 이다 (호스트 경로는 compose 의 DOCKER_SOCK 변수).
+
+// 1) 컨테이너 발견
+discovery.docker "prod" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+
+  // Docker 쪽 1차 필터. 컨테이너 이름은 내부적으로 "/pawbridge-prod-xxx" 형태다.
+  filter {
+    name   = "name"
+    values = ["^/?pawbridge-prod-"]
+  }
+}
+
+// 2) 라벨 정리: 안전망 keep 규칙 + 낮은 카디널리티 라벨만 만든다.
+discovery.relabel "prod" {
+  targets = discovery.docker.prod.targets
+
+  // 안전망: 위 Docker 필터가 부분일치로 동작하더라도 pawbridge-prod- 로 시작하는 것만 남긴다.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(pawbridge-prod-.+)"
+    action        = "keep"
+  }
+
+  // container="pawbridge-prod-monolith" (앞의 "/" 제거) -> 스트림을 컨테이너 이름으로 구분
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.+)"
+    target_label  = "container"
+    replacement   = "$1"
+  }
+
+  // compose 서비스명 / 프로젝트명 (있을 때만 채워진다)
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  // 고정 job 라벨
+  rule {
+    target_label = "job"
+    replacement  = "docker/pawbridge-prod"
+  }
+}
+
+// 3) Docker API 로 로그 tail
+loki.source.docker "prod" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.prod.output
+  forward_to       = [loki.process.prod.receiver]
+  refresh_interval = "5s"
+}
+
+// 4) 가공 단계. 현재는 통과만 시킨다.
+loki.process "prod" {
+  forward_to = [loki.write.default.receiver]
+
+  // 필요 시 Java 스택트레이스를 한 로그 레코드로 합치려면 아래 주석을 해제하고 앱의 실제 로그 포맷에 맞게 정규식을 조정한다.
+  // (예: 줄 시작이 "2026-10-23 12:34:56" 같은 타임스탬프인 경우)
+  // stage.multiline {
+  //   firstline     = "^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}"
+  //   max_wait_time = "3s"
+  //   max_lines     = 200
+  // }
+}
+
+// 5) Loki 로 전송 (internal obs 네트워크 안의 loki 서비스)
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

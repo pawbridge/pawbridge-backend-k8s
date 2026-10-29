@@ -1,0 +1,113 @@
+# WARNING 알림. 메트릭 이름은 Spring Boot Actuator + Micrometer(Prometheus registry) 기본값을 가정한다.
+# 메트릭이 없으면 해당 규칙은 조용히 "결과 없음"이 되므로, 배포 후 README 의 "규칙 검증" 절차로 실제 시계열 존재를 확인할 것.
+groups:
+  - name: pawbridge-warning
+    rules:
+      # 5xx 비율 > 1% (5분 지속). 요청이 거의 없을 때는 분모가 작아 민감할 수 있다.
+      - alert: High5xxRatio
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="pawbridge-monolith", status=~"5.."}[5m]))
+            /
+          sum(rate(http_server_requests_seconds_count{job="pawbridge-monolith"}[5m]))
+            > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx 비율 {{ $value | humanizePercentage }}"
+          description: "최근 5분 5xx 응답 비율이 1% 를 넘었다."
+
+      # p95 지연시간 > 1초 (10분 지속). 임계값 1s 와 지속 시간은 가정치이므로 운영하면서 조정한다.
+      # 필수 조건: 앱에서 management.metrics.distribution.percentiles-histogram.http.server.requests=true
+      #            (http_server_requests_seconds_bucket 이 있어야 한다). 없으면 이 규칙은 평가되지 않는다.
+      - alert: HighP95Latency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{job="pawbridge-monolith", uri!~"/actuator.*|/api/v1/notes/stream|/error"}[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP p95 지연 {{ $value | humanizeDuration }}"
+          description: "최근 5분 p95 응답 시간이 1초를 넘는 상태가 10분 지속됨."
+
+      # Hikari: 커넥션을 기다리는 스레드가 5분 이상 존재.
+      - alert: HikariPoolPending
+        expr: hikaricp_connections_pending{job="pawbridge-monolith"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hikari 풀 대기 스레드 {{ $value }}개 ({{ $labels.pool }})"
+          description: "커넥션 획득을 기다리는 스레드가 5분 이상 있다. 느린 쿼리/풀 크기 부족을 의심."
+
+      # Hikari: 사용 중 커넥션이 최대치에 도달 (사용자 명세 "active == max", 지속 시간 미지정이라 2분으로 둠).
+      - alert: HikariPoolSaturated
+        expr: hikaricp_connections_active{job="pawbridge-monolith"} >= hikaricp_connections_max{job="pawbridge-monolith"}
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hikari 풀 포화 ({{ $labels.pool }})"
+          description: "active 커넥션이 max 와 같은 상태가 2분 이상 지속됨."
+
+      # JVM heap 사용률 > 85% (10분 지속, 지속 시간은 가정치). 
+      # used 는 모든 heap 풀(Eden/Survivor/Old)의 합, max 는 max 가 정의된 풀(G1 Old Gen = -Xmx)의 합이다.
+      # GC 직전에는 일시적으로 높을 수 있어 10분 지속을 요구한다. 더 정확한 지표는 jvm_memory_usage_after_gc (활성화 시) 이다.
+      - alert: JvmHeapHigh
+        expr: |
+          sum by (instance) (jvm_memory_used_bytes{job="pawbridge-monolith", area="heap"})
+            /
+          sum by (instance) (jvm_memory_max_bytes{job="pawbridge-monolith", area="heap"} > 0)
+            > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM heap 사용률 {{ $value | humanizePercentage }}"
+          description: "heap 사용률이 85% 를 넘는 상태가 10분 지속됨. 메모리 누수/-Xmx 부족 가능성."
+
+      # logback ERROR: 최근 5분에 ERROR 로그가 1건이라도 있으면 경고.
+      # Loki ruler 대신 Micrometer 의 logback_events_total{level="error"} 카운터를 쓴다 (Loki 쪽 설정 불필요).
+      # 노이즈가 크면 임계값(> 0)을 올리거나 이 규칙을 끈다.
+      - alert: LogbackErrors
+        expr: increase(logback_events_total{job="pawbridge-monolith", level="error"}[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "ERROR 로그 {{ $value | printf \"%.0f\" }}건 / 5분"
+          description: "monolith 가 최근 5분 동안 ERROR 레벨 로그를 남겼다. Grafana 대시보드의 로그 패널에서 확인."
+
+      # monolith scrape 가 느리면(5초 초과) 앱이 과부하이거나 management 포트가 막히고 있다는 신호.
+      - alert: MonolithScrapeSlow
+        expr: scrape_duration_seconds{job="pawbridge-monolith"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "monolith /actuator/prometheus 응답 지연 {{ $value | humanizeDuration }}"
+          description: "scrape 소요 시간이 5분 연속 5초를 넘었다."
+
+      # 관측성 스택 구성요소 다운 (Prometheus 자신이 죽은 경우는 감지할 수 없다 -> README 후속 과제: heartbeat).
+      - alert: ObservabilityComponentDown
+        expr: up{job=~"loki|alloy|grafana"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "관측성 구성요소 다운: {{ $labels.job }}"
+          description: "{{ $labels.job }} scrape 가 5분 넘게 실패 중이다. 로그 수집/대시보드가 영향을 받을 수 있다."
+
+  - name: pawbridge-metric-health
+    rules:
+      # 결제 보상 게이지가 NaN이면 조회 실패(테이블 없음·권한 없음·DB 장애)라 PaymentCompensationOpen(> 0)이 영원히 울리지 않는다.
+      # NaN != NaN 이 참인 성질로 조회 실패 자체를 경고한다.
+      - alert: PaymentCompensationGaugeUnavailable
+        expr: pawbridge_payment_compensation_open{job="pawbridge-monolith"} != pawbridge_payment_compensation_open{job="pawbridge-monolith"}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "결제 보상 지표 조회 실패"
+          description: "pawbridge_payment_compensation_open 이 5분 넘게 NaN이다. 결제 보상 테이블/권한/DB 상태를 확인할 것. 이 동안 결제 보상 긴급 알림은 동작하지 않는다."
