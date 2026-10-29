@@ -44,10 +44,11 @@
      --allow-isolated-restore
    ```
 
+- `--app-password-directory`에는 백업에 기록된 로그인 역할마다 역할 이름과 같은 비밀번호 파일을 둔다
+  (현재 `pawbridge_app`, `pawbridge_vector`). 하나라도 없으면 복원 전에 거부한다. 복원 뒤에는 각 역할로
+  로그인해 원본에서 읽을 수 있던 테이블을 다시 조회한다.
 - 복원 폴더나 보고서가 이미 있으면 거부한다. 실패하면 새 대상으로 다시 시도한다.
 - 복원은 운영으로 자동 전환하지 않는다. 최종 판단은 `drill.py` 보고서로 한다.
-- **한계:** `drill.py`는 아직 MSA 시절 앱 계정 5개(`pawbridge_{animal,user,community,store,payment}_app`)의
-  비밀번호 파일을 요구한다. 모놀리스 계정 `pawbridge_app` 기준의 앱 조회 검증은 아직 없다.
 
 ## 로컬 검증
 
