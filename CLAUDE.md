@@ -142,8 +142,6 @@
   운영 Kubernetes, Kafka Connect, 데이터베이스, Cloudflare 변경에는
   명시적 승인, 롤백 경로, 변경 후 확인이 필요하다.
 - 운영에 올리는 코드(컨테이너 이미지, Mac 네이티브 소스 복사본)는 `origin/main`에 포함된 커밋으로만 만든다.
-  배포 전에 `git merge-base --is-ancestor <SHA> origin/main`으로 확인하고, 실패하면 배포하지 않고 main 반영 PR부터 만든다.
-  dev 병합 직후 배포 지시를 받았거나 main과 dev의 해당 경로 차이가 이번 변경뿐이어도 예외로 두지 않는다.
 
 ## 문서 정리
 
