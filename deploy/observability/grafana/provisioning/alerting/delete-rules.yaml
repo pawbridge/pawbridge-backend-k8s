@@ -1,0 +1,5 @@
+# Rules removed from the Prometheus rule files must be deleted explicitly; file provisioning does not prune.
+apiVersion: 1
+deleteRules:
+  - orgId: 1
+    uid: pb-pipelinetest

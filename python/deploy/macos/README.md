@@ -11,13 +11,10 @@
 - CUDA 또는 MPS 모델 오류를 CPU 추론으로 자동 재시도하지 않는다.
 - 검증한 Mac 설정은 CPU 스레드 2개, MPS allocator 상한 16 GiB, 모델 프로세스 1개다.
   이 상한은 예약 메모리나 서버 전체의 RAM 사용량을 뜻하지 않는다.
-- 실제 운영 진입점과 정상 종료·갤러리 예약은 인프라 저장소의
-  `scripts/environments/mac_native_service.py`, `mac_native_supervisor.py`,
+- 실제 운영 진입점과 정상 종료·갤러리 예약은 저장소 루트의
+  `deploy/scripts/mac_native_service.py`, `mac_native_supervisor.py`,
   `mac_background_jobs.py`가 관리한다. 이 저장소의 앱 소스만 교체해도 이미 배포한
   실행본이 자동으로 바뀌지는 않는다.
-- 실행기는 앱 진입점 모듈 이름을 직접 지정한다. 2026-10-28 패키지 구조 정리로 진입점이
-  `app.lost_main:app`에서 `app.entrypoints.vision_api:app`으로 바뀌었으므로, 이 구조의
-  소스를 처음 배포할 때 실행기의 uvicorn 대상도 함께 바꾼다.
 - 시험 전용 `run_lost_mps.py`와 시험 alias/env 예시는 이 게시 범위에 포함하지 않는다.
 
 ## 독립 Python 환경 준비
@@ -63,7 +60,7 @@ SAM3 원본과 패치 대상 코드의 이용 조건은 고정 원본의 [SAM Li
 ## 배포와 검증 경계
 
 PG·내부 API 인증과 모델·갤러리 경로는 저장소 밖의 제한된 설정 파일로 공급한다.
-인프라의 관리형 실행기가 torch import 전에 MPS fallback과 allocator 설정을 적용하고
+`deploy/scripts`의 관리형 실행기가 torch import 전에 MPS fallback과 allocator 설정을 적용하고
 루프백·단일 모델 프로세스로 시작한다. 실제 기동·중지·갤러리 게시와 별칭 전환은
 별도의 운영 배포 절차를 따른다.
 

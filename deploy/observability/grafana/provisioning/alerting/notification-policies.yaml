@@ -1,0 +1,16 @@
+# 알림 라우팅. 모든 알림은 하나의 contact point(pawbridge-slack)로 간다. severity 로 재전송 주기만 다르게 한다.
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: pawbridge-slack
+    group_by: ["alertname", "job"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 12h # warning 기본
+    routes:
+      - receiver: pawbridge-slack
+        object_matchers:
+          - ["severity", "=", "urgent"]
+        group_wait: 10s
+        repeat_interval: 1h # urgent 는 해소될 때까지 1시간마다 재알림

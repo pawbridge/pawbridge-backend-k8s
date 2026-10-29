@@ -1,0 +1,48 @@
+# Loki 단일 바이너리(monolithic) 모드 + 로컬 파일시스템 저장. 단일 노드/소규모 운영용 설정이다.
+auth_enabled: false # 멀티테넌시 미사용. 접근 제어는 네트워크(internal obs 네트워크)로 한다.
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: "2024-04-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 336h # 14일. 실제 삭제는 아래 compactor 가 수행한다.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 4
+  ingestion_burst_size_mb: 8
+  max_global_streams_per_user: 5000
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true # 이게 꺼져 있으면 retention_period 가 있어도 데이터가 지워지지 않는다.
+  delete_request_store: filesystem # retention_enabled 시 필수
+  compaction_interval: 10m
+  retention_delete_delay: 2h
+
+# 외부로 사용 통계 전송 비활성화
+analytics:
+  reporting_enabled: false
