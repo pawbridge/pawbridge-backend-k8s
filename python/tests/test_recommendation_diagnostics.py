@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from app.routers.recommendation import router
+from app.recommendation.router import router
 
 
 class RecommendationDiagnosticsTest(unittest.TestCase):
@@ -23,8 +23,8 @@ class RecommendationDiagnosticsTest(unittest.TestCase):
 
     def test_unready_gallery_logs_reason_without_querying_storage(self):
         self.app.state.gallery_refresh = SimpleNamespace(ready=False)
-        with patch('app.routers.recommendation.recommend_animals') as query:
-            with self.assertLogs('app.routers.recommendation', level='WARNING') as logs:
+        with patch('app.recommendation.router.recommend_animals') as query:
+            with self.assertLogs('app.recommendation.router', level='WARNING') as logs:
                 response = self.request()
         self.assertEqual(response.status_code, 503)
         query.assert_not_called()
@@ -34,8 +34,8 @@ class RecommendationDiagnosticsTest(unittest.TestCase):
 
     def test_database_failure_logs_type_without_message_or_traceback(self):
         failure = RuntimeError('private-database-details token=private-test-token')
-        with patch('app.routers.recommendation.recommend_animals', side_effect=failure):
-            with self.assertLogs('app.routers.recommendation', level='WARNING') as logs:
+        with patch('app.recommendation.router.recommend_animals', side_effect=failure):
+            with self.assertLogs('app.recommendation.router', level='WARNING') as logs:
                 response = self.request()
         self.assertEqual(response.status_code, 503)
         self.assertIn('animal_id=73', logs.output[0])
@@ -47,20 +47,20 @@ class RecommendationDiagnosticsTest(unittest.TestCase):
         self.assertIsNone(logs.records[0].exc_info)
 
     def test_success_keeps_candidate_order_and_emits_no_failure_log(self):
-        with patch('app.routers.recommendation.recommend_animals', return_value=[9, 4]):
-            with self.assertNoLogs('app.routers.recommendation', level='WARNING'):
+        with patch('app.recommendation.router.recommend_animals', return_value=[9, 4]):
+            with self.assertNoLogs('app.recommendation.router', level='WARNING'):
                 response = self.request()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [9, 4])
 
     def test_source_features_and_gallery_contract_failures_have_distinct_safe_reasons(self):
-        from app.services.gallery.pg_store import RecommendationGalleryUnavailable, RecommendationSourceUnavailable
+        from app.gallery.pg_store import RecommendationGalleryUnavailable, RecommendationSourceUnavailable
         for exception_type, reason in [(RecommendationSourceUnavailable, 'SOURCE_FEATURES_NOT_READY'),
                                        (RecommendationGalleryUnavailable, 'GALLERY_CONTRACT_UNAVAILABLE')]:
             with self.subTest(reason=reason):
-                with patch('app.routers.recommendation.recommend_animals',
+                with patch('app.recommendation.router.recommend_animals',
                            side_effect=exception_type('private-database-details')):
-                    with self.assertLogs('app.routers.recommendation', level='WARNING') as logs:
+                    with self.assertLogs('app.recommendation.router', level='WARNING') as logs:
                         response = self.request()
                 self.assertEqual(response.status_code, 503)
                 self.assertIn(f'reason={reason}', logs.output[0])
@@ -69,8 +69,8 @@ class RecommendationDiagnosticsTest(unittest.TestCase):
 
     def test_storage_guards_classify_missing_gallery_and_missing_source(self):
         from unittest.mock import Mock
-        from app.services.gallery.builder import CONTRACT
-        from app.services.gallery.pg_store import (PostgresqlGalleryStore,
+        from app.gallery.builder import CONTRACT
+        from app.gallery.pg_store import (PostgresqlGalleryStore,
             RecommendationGalleryUnavailable, RecommendationSourceUnavailable)
         store = PostgresqlGalleryStore(Mock())
         with patch.object(store, 'connection') as connection:

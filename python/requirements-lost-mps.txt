@@ -1,4 +1,4 @@
-# Native macOS arm64 / Python 3.12 runtime for app.lost_main (DINOv3 + SAM 3 + PostgreSQL gallery).
+# Native macOS arm64 / Python 3.12 runtime for app.entrypoints.vision_api (DINOv3 + SAM 3 + PostgreSQL gallery).
 # SAM3 must be installed separately from the hash-checked patched source.
 -c deploy/macos/runtime.constraints.txt
 torch==2.10.0

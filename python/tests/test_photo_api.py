@@ -8,8 +8,8 @@ from unittest.mock import patch
 import httpx
 from PIL import Image
 
-from app.photo_main import create_app
-from app.photo_optimizer import optimize_photo
+from app.entrypoints.photo_api import create_app
+from app.photo.optimizer import optimize_photo
 
 PATH = "/internal/photos/optimize"
 AUTH = {"X-Internal-API-Key": "test-key"}
@@ -58,7 +58,7 @@ class PhotoApiTests(unittest.IsolatedAsyncioTestCase):
             yield b"a" * 8
             yield b"b" * 8
             raise AssertionError("Oversized body must stop reading")
-        with patch("app.photo_main.MAX_INPUT_BYTES", 10):
+        with patch("app.entrypoints.photo_api.MAX_INPUT_BYTES", 10):
             response = await self.client.post(PATH, content=body(), headers=AUTH)
         self.assertEqual(response.status_code, 413)
         self.assertEqual((await self.client.post(PATH, content=self.photo, headers=AUTH)).status_code, 200)
@@ -67,7 +67,7 @@ class PhotoApiTests(unittest.IsolatedAsyncioTestCase):
         async def body():
             await asyncio.sleep(10)
             yield b""
-        with patch("app.photo_main.BODY_TIMEOUT_SECONDS", 0.01):
+        with patch("app.entrypoints.photo_api.BODY_TIMEOUT_SECONDS", 0.01):
             response = await self.client.post(PATH, content=body(), headers=AUTH)
         self.assertEqual(response.status_code, 408)
         self.assertEqual((await self.client.post(PATH, content=self.photo, headers=AUTH)).status_code, 200)
@@ -93,7 +93,7 @@ class PhotoApiTests(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("Busy request must not be buffered")
             yield b""
 
-        with patch("app.photo_main.optimize_photo", side_effect=blocking_optimizer):
+        with patch("app.entrypoints.photo_api.optimize_photo", side_effect=blocking_optimizer):
             first = asyncio.create_task(self.client.post(PATH, content=self.photo, headers=AUTH))
             try:
                 self.assertTrue(await asyncio.to_thread(started.wait, 2))
@@ -106,7 +106,7 @@ class PhotoApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await first).status_code, 200)
 
     async def test_encoder_failure_is_retryable_and_releases_capacity(self):
-        with patch("app.photo_main.optimize_photo", side_effect=OSError("private internal failure")):
+        with patch("app.entrypoints.photo_api.optimize_photo", side_effect=OSError("private internal failure")):
             response = await self.client.post(PATH, content=self.photo, headers=AUTH)
         self.assertEqual(response.status_code, 503)
         self.assertNotIn("private internal failure", response.text)
@@ -123,7 +123,7 @@ class PhotoApiTests(unittest.IsolatedAsyncioTestCase):
                 raise TimeoutError("test did not release worker")
             return expected
 
-        with patch("app.photo_main.optimize_photo", side_effect=blocking_optimizer):
+        with patch("app.entrypoints.photo_api.optimize_photo", side_effect=blocking_optimizer):
             first = asyncio.create_task(self.client.post(PATH, content=self.photo, headers=AUTH))
             try:
                 self.assertTrue(await asyncio.to_thread(started.wait, 2))
