@@ -1,0 +1,40 @@
+# URGENT 알림 (사용자 확정 3종). severity=urgent 는 Grafana notification policy 에서 더 짧은 repeat_interval 로 라우팅된다.
+groups:
+  - name: pawbridge-urgent
+    rules:
+      # 1) ServiceDown: monolith scrape 대상이 2분 연속 내려가 있음.
+      #    up==0 은 management 포트(9464)에 대한 HTTP GET /actuator/prometheus 가 실패(연결 거부/타임아웃/비 2xx)했다는 뜻이므로
+      #    "프로세스 다운 + management HTTP 응답 불가"를 함께 잡는 blackbox 없는 HTTP 헬스체크 역할도 한다.
+      #    한계: 공개 포트(8080)와 cloudflared 경로의 응답은 확인하지 못한다 (blackbox 는 후속 과제).
+      - alert: ServiceDown
+        expr: up{job="pawbridge-monolith"} == 0
+        for: 2m
+        labels:
+          severity: urgent
+        annotations:
+          summary: "monolith 다운 ({{ $labels.instance }})"
+          description: "pawbridge-monolith scrape 가 2분 넘게 실패 중이다. 컨테이너 상태/로그(Grafana Loki)를 확인할 것."
+
+      # 2) PaymentCompensationOpen: 미처리 결제 보상(compensation) 건이 1분 이상 남아 있음.
+      #    앱이 게이지 pawbridge_payment_compensation_open 을 내보내야 한다. 메트릭이 없으면 이 규칙은 조용히 평가 결과 없음이 된다.
+      - alert: PaymentCompensationOpen
+        expr: pawbridge_payment_compensation_open{job="pawbridge-monolith"} > 0
+        for: 1m
+        labels:
+          severity: urgent
+        annotations:
+          summary: "미처리 결제 보상 {{ $value }}건"
+          description: "pawbridge_payment_compensation_open > 0 이 1분 이상 지속됨. 결제 보상 처리 상태를 즉시 확인할 것."
+
+      # 3) CoreContainerDown: 지금 추가 이미지 없이 가능한 범위는 monolith 뿐이다 (ServiceDown 이 이미 커버).
+      #    postgres / redis / cloudflared 는 Prometheus 가 볼 수 있는 메트릭이 없어 직접 알림을 만들 수 없다 (README "한계" 참고).
+      #    대신 간접 신호 두 개를 urgent 로 둔다: DB 커넥션 획득 실패(Hikari timeout)가 계속 발생하는 경우.
+      #    (Hikari 가 DB 에 연결하지 못하면 풀 대기 후 timeout 이 증가한다. Postgres 다운/네트워크 단절의 가장 빠른 앱 측 신호.)
+      - alert: DatabaseConnectionTimeouts
+        expr: increase(hikaricp_connections_timeout_total{job="pawbridge-monolith"}[2m]) > 0
+        for: 2m
+        labels:
+          severity: urgent
+        annotations:
+          summary: "DB 커넥션 획득 timeout 지속 ({{ $labels.pool }})"
+          description: "2분 이상 Hikari connection timeout 이 발생 중이다. Postgres 다운/과부하/풀 고갈 가능성."

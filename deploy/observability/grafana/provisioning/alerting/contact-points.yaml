@@ -1,0 +1,19 @@
+# Slack contact point. Webhook URL 은 파일에서 읽는다:  $__file{/run/secrets/slack-webhook}
+#   - compose secrets 가 ${OBS_SECRETS}/slack-webhook 을 /run/secrets/slack-webhook 으로 마운트한다.
+#   - $__file{} / $__env{} 확장은 Grafana 프로비저닝 YAML 에서 지원된다 (setting.ExpandVar). 값 앞뒤 공백/개행은 제거된다.
+#   - Slack 의 url 은 secure 필드라 프로비저닝 시 암호화되어 DB 에 저장되고 UI 에서는 가려진다.
+# 검증: Grafana UI > Alerting > Contact points > pawbridge-slack > "Test". 값이 치환되지 않으면 README 의 대안($__env) 참고.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: pawbridge-slack
+    receivers:
+      - uid: pawbridge-slack
+        type: slack
+        disableResolveMessage: false
+        settings:
+          url: $__file{/run/secrets/slack-webhook}
+          username: PawBridge Alerts
+          title: '{{ template "pawbridge.title" . }}'
+          text: '{{ template "pawbridge.text" . }}'

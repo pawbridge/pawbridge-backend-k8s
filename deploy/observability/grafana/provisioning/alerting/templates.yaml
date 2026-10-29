@@ -1,0 +1,28 @@
+# Slack message templates: show the rule's own Korean summary/description and the real value (query B)
+# instead of Grafana's default "Value: A=1, B=..., C=1" dump.
+apiVersion: 1
+
+templates:
+  - orgId: 1
+    name: pawbridge-slack
+    template: |
+      {{ define "pawbridge.title" -}}
+      {{- if eq .Status "firing" -}}
+        {{- if eq .CommonLabels.severity "urgent" }}🔴 [긴급]{{ else }}🟡 [경고]{{ end -}}
+      {{- else -}}✅ [해소]{{- end }} {{ .CommonLabels.alertname }}
+      {{- if gt (len .Alerts.Firing) 1 }} ({{ len .Alerts.Firing }}건){{ end }}
+      {{- end }}
+
+      {{ define "pawbridge.text" -}}
+      {{- range .Alerts }}
+      *{{ or .Annotations.summary .Labels.alertname }}*
+      {{- if .Annotations.description }}
+      {{ .Annotations.description }}
+      {{- end }}
+      {{- if eq .Status "firing" }}
+      시작: {{ .StartsAt | tz "Asia/Seoul" | date "01-02 15:04:05" }}
+      {{- else }}
+      해소: {{ .EndsAt | tz "Asia/Seoul" | date "01-02 15:04:05" }} (시작 {{ .StartsAt | tz "Asia/Seoul" | date "15:04:05" }})
+      {{- end }}
+      {{- end }}
+      {{- end }}

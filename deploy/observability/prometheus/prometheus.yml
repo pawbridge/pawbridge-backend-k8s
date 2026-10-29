@@ -1,0 +1,66 @@
+# Prometheus 설정. 규칙(rule)은 Prometheus 가 평가하고, 알림 라우팅/Slack 전송은 Grafana 의 내장 Alertmanager 가 맡는다.
+#   Prometheus --(rules/*.yml 평가)--> firing alert --HTTP--> Grafana Alertmanager --> contact point(Slack)
+# 장점: 규칙이 표준 Prometheus 형식이라 promtool 로 검증 가능하고, Alertmanager 컨테이너를 따로 띄우지 않는다.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    env: prod
+    host: macmini
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# Notifications are evaluated and sent by Grafana-managed alert rules (grafana/provisioning/alerting/rules.yaml),
+# because Grafana's built-in Alertmanager rejects alerts pushed by Prometheus (HTTP 400). Kept for reference.
+# alerting:
+#   alertmanagers:
+#     - scheme: http
+#       # Grafana 내장 Alertmanager 의 Prometheus 호환 API. (Grafana 문서: "Prometheus 에서 Grafana Alertmanager 로 알림 전송")
+#       path_prefix: /api/alertmanager/grafana
+#       basic_auth:
+#         username: admin
+#         # compose secrets 로 마운트된 Grafana admin 비밀번호. 후속 과제: 전용 service account 토큰으로 교체(README).
+#         password_file: /run/secrets/grafana-admin-password
+#       static_configs:
+#         - targets: ["grafana:3000"]
+
+scrape_configs:
+  # --- 애플리케이션 -------------------------------------------------------
+  # 모듈러 모놀리스의 management 포트(9464). prod-private 네트워크의 "monolith" 이름으로 접근한다.
+  - job_name: pawbridge-monolith
+    metrics_path: /actuator/prometheus
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ["monolith:9464"]
+        labels:
+          service: monolith
+
+  # --- 관측성 스택 자체 ---------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: loki
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["loki:3100"]
+
+  - job_name: alloy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["alloy:12345"]
+
+  - job_name: grafana
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["grafana:3000"]
+
+  # --- 후속 과제 (현재 비활성) --------------------------------------------
+  # cloudflared 는 --metrics 0.0.0.0:2000 으로 실행하면 cloudflared_tunnel_ha_connections 등을 노출한다.
+  # 운영 compose 에서 해당 옵션을 켜고 prod-private 에 붙어 있을 때 아래 주석을 해제한다.
+  # - job_name: cloudflared
+  #   static_configs:
+  #     - targets: ["cloudflared:2000"]
+  #
+  # postgres / redis exporter 도 후속 과제 (README "범위 밖 / 후속 과제" 참고).
