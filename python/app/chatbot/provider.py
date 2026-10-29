@@ -1,5 +1,6 @@
-import os
 from abc import ABC, abstractmethod
+
+from app.settings import ChatbotSettings
 
 
 class ChatbotProvider(ABC):
@@ -27,7 +28,7 @@ class NotImplementedChatbotProvider(ChatbotProvider):
 
 
 def get_chatbot_provider() -> ChatbotProvider:
-    provider_name = os.getenv("LLM_PROVIDER", "stub").strip().lower() or "stub"
+    provider_name = ChatbotSettings.load().llm_provider.strip().lower() or "stub"
     if provider_name == "stub":
         from app.chatbot.stub_provider import StubChatbotProvider
 

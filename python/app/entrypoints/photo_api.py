@@ -2,18 +2,18 @@
 
 import asyncio
 import hmac
-import os
 
 import anyio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 
 from app.photo.optimizer import InvalidPhoto, MAX_INPUT_BYTES, PhotoTooLarge, optimize_photo
+from app.settings import InternalApiSettings
 
 BODY_TIMEOUT_SECONDS = 15
 
 
 def authenticate(x_internal_api_key: str | None = Header(None)):
-    expected = os.getenv("INTERNAL_API_KEY", "")
+    expected = InternalApiSettings.load().key
     if not expected:
         raise HTTPException(503, "Photo service is not configured")
     if not x_internal_api_key or not hmac.compare_digest(

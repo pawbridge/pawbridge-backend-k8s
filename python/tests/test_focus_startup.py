@@ -25,7 +25,8 @@ class FocusStartupTest(unittest.TestCase):
         metadata = gallery_mapping("a" * 64)["_meta"]
         stale_model = dict(metadata, model_version="old")
         encoder = types.SimpleNamespace(model_version=FOCUS_VERSION)
-        with patch.dict(os.environ, {"LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX}, clear=True):
+        with patch.dict(os.environ, {"LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX,
+                                      "LOST_SEARCH_COAT_COLOR_WEIGHT": "0"}, clear=True):
             for row in [None, (stale_model, True, 200, 200), (metadata, False, 200, 200), (metadata, True, 200, 0),
                         (metadata, True, 200, 199)]:
                 store, _ = store_with_head(row)
@@ -39,7 +40,8 @@ class FocusStartupTest(unittest.TestCase):
 
     def test_missing_published_gallery_is_reported_as_unavailable(self):
         store, _ = store_with_head(None)
-        with patch.dict(os.environ, {"LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX}, clear=True), \
+        with patch.dict(os.environ, {"LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX,
+                                      "LOST_SEARCH_COAT_COLOR_WEIGHT": "0"}, clear=True), \
                 patch("app.gallery.storage.get_postgresql_store", return_value=store):
             with self.assertRaises(GalleryUnavailable):
                 validate_focus_gallery(types.SimpleNamespace(model_version=FOCUS_VERSION))
@@ -51,7 +53,8 @@ class FocusStartupTest(unittest.TestCase):
         async def enter():
             async with lifespan(None):
                 self.fail("Invalid SAM 3 gallery must not become ready")
-        with patch.dict(os.environ, {"INTERNAL_API_KEY": "test-key", "LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX}), \
+        with patch.dict(os.environ, {"INTERNAL_API_KEY": "test-key", "LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX,
+                                      "LOST_SEARCH_COAT_COLOR_WEIGHT": "0"}), \
                 patch("app.gallery.storage.get_postgresql_store", return_value=Mock()), \
                 patch("app.entrypoints.vision_api.anyio.to_thread.run_sync", new_callable=AsyncMock, side_effect=[object(), RuntimeError("gallery mismatch")]) as run:
             with self.assertRaisesRegex(RuntimeError, "gallery mismatch"):
@@ -65,7 +68,8 @@ class FocusStartupTest(unittest.TestCase):
         async def enter():
             async with lifespan(None):
                 self.fail("A missing gallery must not become ready when refresh is disabled")
-        with patch.dict(os.environ, {"INTERNAL_API_KEY": "test-key", "LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX}, clear=True), \
+        with patch.dict(os.environ, {"INTERNAL_API_KEY": "test-key", "LOST_SEARCH_VISUAL_PROFILE": "sam3-animal-focus", "LOST_SEARCH_INDEX": INDEX,
+                                      "LOST_SEARCH_COAT_COLOR_WEIGHT": "0"}, clear=True), \
                 patch("app.gallery.storage.get_postgresql_store", return_value=Mock()), \
                 patch("app.entrypoints.vision_api.anyio.to_thread.run_sync", new_callable=AsyncMock,
                       side_effect=[object(), GalleryUnavailable("No published PostgreSQL gallery")]):

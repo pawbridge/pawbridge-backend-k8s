@@ -175,7 +175,9 @@ def retrieve(query, hits, **options):
     else:
         store.search.return_value = hits
     arguments = options.pop("arguments", ("DOG",))
-    with patch("app.vision.dinov3.get_encoder") as encoder, \
+    # The weight has no default; keep a caller's value and otherwise rank without color.
+    weight = {"LOST_SEARCH_COAT_COLOR_WEIGHT": os.environ.get("LOST_SEARCH_COAT_COLOR_WEIGHT", "0")}
+    with patch.dict(os.environ, weight), patch("app.vision.dinov3.get_encoder") as encoder, \
             patch("app.vision.dinov3.gallery_index", return_value="animals-lost-dinov3-large-v1"), \
             patch("app.gallery.storage.get_postgresql_store", return_value=store):
         encoder.return_value.encode_with_metadata.return_value = query

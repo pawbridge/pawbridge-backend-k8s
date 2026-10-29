@@ -1,6 +1,5 @@
 import asyncio
 import hmac
-import os
 from datetime import date
 from typing import Literal
 
@@ -11,6 +10,7 @@ from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.lost_search.service import MAX_IMAGE_BYTES, InvalidPhoto, search_photo
+from app.settings import InternalApiSettings
 
 router = APIRouter()
 _gate = asyncio.Lock()
@@ -31,7 +31,7 @@ class SearchConditions(BaseModel):
 
 
 def authenticate(x_internal_api_key: str | None = Header(None)):
-    expected = os.getenv("INTERNAL_API_KEY", "")
+    expected = InternalApiSettings.load().key
     if not expected:
         raise HTTPException(503, "내부 검색 설정을 확인해 주세요")
     if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key.encode(), expected.encode()):

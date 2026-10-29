@@ -6,10 +6,11 @@ or suspect masks retain the full image; inference/configuration failures surface
 from dataclasses import dataclass
 import hashlib
 import math
-import os
 from pathlib import Path
 
 from PIL import Image, ImageOps
+
+from app.settings import VisionSettings
 
 CHECKPOINT_SHA256 = "73cbd0190fcbe3ba339921fbce2c3a0b6bb9126c9a133c85e43a2a8e060a109e"
 FOCUS_VERSION = "dinov3-large-mrcnn73cbd019-dual-pad256-v3"
@@ -120,7 +121,10 @@ class AnimalFocus:
     def __init__(self):
         import torch
         from torchvision.models.detection import maskrcnn_resnet50_fpn_v2
-        checkpoint = Path(os.environ["ANIMAL_FOCUS_CHECKPOINT"])
+        checkpoint = VisionSettings.load().animal_focus_checkpoint
+        if not checkpoint:
+            raise RuntimeError("ANIMAL_FOCUS_CHECKPOINT is required")
+        checkpoint = Path(checkpoint)
         digest = hashlib.sha256()
         with checkpoint.open("rb") as source:
             for chunk in iter(lambda: source.read(1024*1024), b""):
