@@ -8,8 +8,8 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
-from app.routers import lost_search as api
-from app.services.search.lost_search import decode_photo, InvalidPhoto, rank_candidates, auxiliary_evidence
+from app.lost_search import router as api
+from app.lost_search.service import decode_photo, InvalidPhoto, rank_candidates, auxiliary_evidence
 
 
 def photo(format="PNG"):
@@ -64,7 +64,7 @@ class PhotoTest(unittest.TestCase):
             decode_photo(buffer.getvalue())
 
     def test_pixel_limit_checked_before_decode(self):
-        with patch("app.services.search.lost_search.MAX_PIXELS", 100):
+        with patch("app.lost_search.service.MAX_PIXELS", 100):
             with self.assertRaises(InvalidPhoto):
                 decode_photo(photo())
 
@@ -158,7 +158,7 @@ class LostApiTest(unittest.TestCase):
 
 
 def embedding(**changes):
-    from app.services.vision.dinov3 import AnimalEmbedding
+    from app.vision.dinov3 import AnimalEmbedding
     values = dict(vector=[.1, .2], model_version="test-model", focus_status="original_multiple_animals",
                   animal_vector=None, coat_color=None)
     return AnimalEmbedding(**{**values, **changes})
@@ -167,17 +167,17 @@ def embedding(**changes):
 def retrieve(query, hits, **options):
     """Run search_photo against a PostgreSQL store double; the encoder is never loaded."""
     from unittest.mock import create_autospec
-    from app.services.search.lost_search import search_photo
-    from app.services.gallery.pg_store import PostgresqlGalleryStore
+    from app.lost_search.service import search_photo
+    from app.gallery.pg_store import PostgresqlGalleryStore
     store = create_autospec(PostgresqlGalleryStore, instance=True)
     if isinstance(hits, Exception):
         store.search.side_effect = hits
     else:
         store.search.return_value = hits
     arguments = options.pop("arguments", ("DOG",))
-    with patch("app.services.vision.dinov3.get_encoder") as encoder, \
-            patch("app.services.vision.dinov3.gallery_index", return_value="animals-lost-dinov3-large-v1"), \
-            patch("app.services.gallery.storage.get_postgresql_store", return_value=store):
+    with patch("app.vision.dinov3.get_encoder") as encoder, \
+            patch("app.vision.dinov3.gallery_index", return_value="animals-lost-dinov3-large-v1"), \
+            patch("app.gallery.storage.get_postgresql_store", return_value=store):
         encoder.return_value.encode_with_metadata.return_value = query
         return store, encoder, search_photo(photo(), *arguments, **options)
 
@@ -207,8 +207,8 @@ class RetrievalContractTest(unittest.TestCase):
     def test_animal_channel_is_only_combined_when_the_gallery_document_has_it(self):
         from unittest.mock import MagicMock
         from types import SimpleNamespace
-        from app.services.search.lost_search import ANIMAL_REGION_WEIGHT
-        from app.services.gallery.pg_store import PostgresqlGalleryStore
+        from app.lost_search.service import ANIMAL_REGION_WEIGHT
+        from app.gallery.pg_store import PostgresqlGalleryStore
         connection = MagicMock()
         connection.execute.return_value.fetchone.return_value = ({"model_version": "dual-v2"}, True)
         connection.execute.return_value.fetchall.return_value = []
@@ -232,7 +232,7 @@ class RetrievalContractTest(unittest.TestCase):
                 self.assertIn("(d.status=ANY(%s) OR d.status IS NULL)", sql)
 
     def test_unavailable_gallery_is_failure_not_empty_candidates(self):
-        from app.services.gallery.pg_store import GalleryUnavailable
+        from app.gallery.pg_store import GalleryUnavailable
         with self.assertRaises(GalleryUnavailable):
             retrieve(embedding(), GalleryUnavailable("Matching published PostgreSQL gallery required"),
                      arguments=("CAT",))

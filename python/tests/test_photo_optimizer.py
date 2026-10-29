@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from PIL import Image, ImageOps
 
-from app.photo_optimizer import InvalidPhoto, PhotoTooLarge, optimize_photo
+from app.photo.optimizer import InvalidPhoto, PhotoTooLarge, optimize_photo
 
 
 def photo_bytes(mode="RGB", size=(180, 120), format="PNG", **options):
@@ -55,7 +55,7 @@ class PhotoOptimizerTests(unittest.TestCase):
     def test_equal_or_larger_output_keeps_exact_original_and_mime(self):
         original = photo_bytes()
         for encoded in (original, original + b"larger"):
-            with self.subTest(size=len(encoded)), patch("app.photo_optimizer._encode_webp", return_value=encoded):
+            with self.subTest(size=len(encoded)), patch("app.photo.optimizer._encode_webp", return_value=encoded):
                 result = optimize_photo(original)
                 self.assertEqual(result.data, original)
                 self.assertEqual(result.content_type, "image/png")
@@ -66,7 +66,7 @@ class PhotoOptimizerTests(unittest.TestCase):
         for orientation, size in ((1, (24, 16)), (6, (16, 24))):
             with self.subTest(orientation=orientation):
                 original = mpo_bytes(orientation=orientation)
-                with patch("app.photo_optimizer._encode_webp") as encode:
+                with patch("app.photo.optimizer._encode_webp") as encode:
                     result = optimize_photo(original)
                 encode.assert_not_called()
                 self.assertEqual(result.data, original)
@@ -92,7 +92,7 @@ class PhotoOptimizerTests(unittest.TestCase):
     def test_mpo_enforces_frame_and_cumulative_pixel_limits(self):
         original = mpo_bytes()
         for setting, limit in (("MAX_MPO_FRAMES", 1), ("MAX_PIXELS", 24 * 16)):
-            with self.subTest(setting=setting), patch("app.photo_optimizer." + setting, limit):
+            with self.subTest(setting=setting), patch("app.photo.optimizer." + setting, limit):
                 with self.assertRaises(PhotoTooLarge):
                     optimize_photo(original)
 
@@ -105,7 +105,7 @@ class PhotoOptimizerTests(unittest.TestCase):
 
     def test_existing_webp_is_not_recompressed(self):
         original = photo_bytes(format="WEBP")
-        with patch("app.photo_optimizer._encode_webp") as encode:
+        with patch("app.photo.optimizer._encode_webp") as encode:
             result = optimize_photo(original)
         encode.assert_not_called()
         self.assertEqual(result.data, original)
@@ -148,7 +148,7 @@ class PhotoOptimizerTests(unittest.TestCase):
         exif = Image.Exif()
         exif[274] = 6
         original = photo_bytes(exif=exif)
-        with patch("app.photo_optimizer._encode_webp", return_value=original):
+        with patch("app.photo.optimizer._encode_webp", return_value=original):
             result = optimize_photo(original)
         self.assertEqual(result.data, original)
         self.assertEqual((result.width, result.height), (120, 180))
@@ -177,16 +177,16 @@ class PhotoOptimizerTests(unittest.TestCase):
             optimize_photo(output.getvalue())
 
     def test_byte_and_pixel_caps_reject_before_encoding(self):
-        with patch("app.photo_optimizer.MAX_INPUT_BYTES", 2), self.assertRaises(PhotoTooLarge):
+        with patch("app.photo.optimizer.MAX_INPUT_BYTES", 2), self.assertRaises(PhotoTooLarge):
             optimize_photo(b"123")
         original = photo_bytes()
-        with patch("app.photo_optimizer.MAX_PIXELS", 100), patch("app.photo_optimizer._encode_webp") as encode:
+        with patch("app.photo.optimizer.MAX_PIXELS", 100), patch("app.photo.optimizer._encode_webp") as encode:
             with self.assertRaises(PhotoTooLarge):
                 optimize_photo(original)
             encode.assert_not_called()
 
     def test_encoder_failure_is_not_reported_as_successful_optimization(self):
-        with patch("app.photo_optimizer._encode_webp", side_effect=OSError("encoder failure")):
+        with patch("app.photo.optimizer._encode_webp", side_effect=OSError("encoder failure")):
             with self.assertRaises(OSError):
                 optimize_photo(photo_bytes())
 

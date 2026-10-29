@@ -15,8 +15,8 @@ except ModuleNotFoundError as error:
         raise
     torch = None
 from PIL import Image
-from app.services.vision.sam3_focus import prepare_prediction, load_mapped_checkpoint
-from app.services.vision.dinov3 import DinoV3Encoder, gallery_index
+from app.vision.sam3_focus import prepare_prediction, load_mapped_checkpoint
+from app.vision.dinov3 import DinoV3Encoder, gallery_index
 
 
 class Sam3ContractTest(unittest.TestCase):
@@ -42,7 +42,7 @@ class Sam3ContractTest(unittest.TestCase):
             result = prepare_prediction(image, [[10, 10, 110, 110]], mask, [.9])
             try:
                 self.assertEqual(result.status, "animal_mask")
-                from app.services.vision.coat_color import valid
+                from app.vision.coat_color import valid
                 self.assertTrue(valid(result.coat_color))
                 self.assertEqual(result.image.size, (256, 256))
                 self.assertEqual(result.image.getpixel((0, 0)), (124, 116, 104))
@@ -72,7 +72,7 @@ class Sam3ContractTest(unittest.TestCase):
                 self.assertEqual(result.status, "original_multiple_animals")
                 self.assertEqual(result.image.getpixel((0, 0)), (255, 0, 0))
                 self.assertEqual(result.coat_color["source"], "primary_mask")
-                from app.services.vision.coat_color import valid
+                from app.vision.coat_color import valid
                 self.assertTrue(valid(result.coat_color))
             finally:
                 result.image.close()
@@ -107,7 +107,7 @@ class Sam3ContractTest(unittest.TestCase):
     def test_gpu_oom_releases_lock_and_next_request_can_run(self):
         encoder = object.__new__(DinoV3Encoder)
         encoder.device = "cuda"
-        from app.services.vision.inference_gate import InferenceGate
+        from app.vision.inference_gate import InferenceGate
         encoder.gate = InferenceGate()
         with patch.object(encoder, "_encode_image", side_effect=[torch.cuda.OutOfMemoryError(), "ok"]), patch.object(torch.cuda, "empty_cache") as clear:
             with self.assertRaisesRegex(RuntimeError, "GPU memory exhausted"):
@@ -120,8 +120,8 @@ class Sam3ContractTest(unittest.TestCase):
     def test_color_only_backfill_shares_gate_and_does_not_encode_dino_vectors(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
-        from app.services.vision.animal_focus import FocusResult
-        from app.services.vision.inference_gate import InferenceGate
+        from app.vision.animal_focus import FocusResult
+        from app.vision.inference_gate import InferenceGate
         encoder = object.__new__(DinoV3Encoder)
         encoder.gate = InferenceGate()
         encoder.device = "cuda"
@@ -145,9 +145,9 @@ class Sam3ContractTest(unittest.TestCase):
     @unittest.skipIf(torch is None, "Requires the dedicated PyTorch runtime")
     def test_background_prepared_input_reaches_focus_inside_the_shared_gate(self):
         from types import SimpleNamespace
-        from app.services.vision.animal_focus import FocusResult
-        from app.services.vision.inference_gate import InferenceGate
-        from app.services.gallery.runtime import BackgroundEncoder
+        from app.vision.animal_focus import FocusResult
+        from app.vision.inference_gate import InferenceGate
+        from app.gallery.runtime import BackgroundEncoder
         encoder = object.__new__(DinoV3Encoder)
         encoder.model_version = "test"
         encoder.gate = InferenceGate()
@@ -179,7 +179,7 @@ class Sam3ThroughputTest(unittest.TestCase):
     def test_species_text_is_reused_without_reusing_or_mutating_image_state(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
-        from app.services.vision.sam3_focus import Sam3Focus
+        from app.vision.sam3_focus import Sam3Focus
         focus = object.__new__(Sam3Focus)
         focus._species_text = {}
         def encode(prompts, device):
@@ -204,7 +204,7 @@ class Sam3ThroughputTest(unittest.TestCase):
     def test_failed_text_encoding_is_not_cached_and_next_request_retries(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
-        from app.services.vision.sam3_focus import Sam3Focus
+        from app.vision.sam3_focus import Sam3Focus
         focus = object.__new__(Sam3Focus)
         focus._species_text = {}
         encode = Mock(side_effect=[RuntimeError("failed text"), {"language_features": torch.ones(1)}])

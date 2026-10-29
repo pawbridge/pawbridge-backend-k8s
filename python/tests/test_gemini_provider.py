@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import httpx
 
-from app.services.chatbot.gemini_provider import GeminiChatbotProvider
+from app.chatbot.gemini_provider import GeminiChatbotProvider
 
 
 class GeminiProviderTest(unittest.IsolatedAsyncioTestCase):
@@ -35,7 +35,7 @@ class GeminiProviderTest(unittest.IsolatedAsyncioTestCase):
             with (
                 self.subTest(model=expected_model),
                 patch.dict(os.environ, environment, clear=True),
-                patch("app.services.chatbot.gemini_provider.httpx.AsyncClient", return_value=client),
+                patch("app.chatbot.gemini_provider.httpx.AsyncClient", return_value=client),
             ):
                 answer = await GeminiChatbotProvider().generate_answer("test prompt")
 

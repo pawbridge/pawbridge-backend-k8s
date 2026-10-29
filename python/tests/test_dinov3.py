@@ -1,7 +1,7 @@
 import os
 import unittest
 from unittest.mock import patch
-from app.services.vision.dinov3 import gallery_index, validate_vector, visual_profile
+from app.vision.dinov3 import gallery_index, validate_vector, visual_profile
 
 
 class DinoV3ContractTest(unittest.TestCase):
@@ -40,8 +40,8 @@ class DualEmbeddingTest(unittest.TestCase):
     def test_full_photo_channel_is_identical_when_focus_succeeds_or_falls_back(self):
         from types import SimpleNamespace
         from PIL import Image
-        from app.services.vision.dinov3 import DinoV3Encoder
-        from app.services.vision.animal_focus import FocusResult, FOCUS_VERSION
+        from app.vision.dinov3 import DinoV3Encoder
+        from app.vision.animal_focus import FocusResult, FOCUS_VERSION
         full_views = []
         for status in ["animal_mask", "original_multiple_animals", "original_suspect_mask"]:
             with self.subTest(status=status), Image.new("RGB", (40, 80), "red") as image:

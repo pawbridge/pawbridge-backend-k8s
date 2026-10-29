@@ -9,9 +9,9 @@ from unittest.mock import Mock
 
 import httpx
 
-from app.services.gallery.pages import PagedGallerySource, PROTOCOL, INITIAL_CHAIN, advance, PAGE_BYTES
-from app.services.gallery.builder import build_gallery
-from app.services.vision.sam3_focus import FOCUS_VERSION
+from app.gallery.pages import PagedGallerySource, PROTOCOL, INITIAL_CHAIN, advance, PAGE_BYTES
+from app.gallery.builder import build_gallery
+from app.vision.sam3_focus import FOCUS_VERSION
 from tests.fake_gallery_store import FakeGalleryStore
 
 HOST = 'test.r2.cloudflarestorage.com'
