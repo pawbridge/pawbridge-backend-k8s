@@ -2,7 +2,8 @@
 from functools import lru_cache
 from itertools import product
 import math
-import os
+
+from app.settings import CoatColorSettings
 
 VERSION = "foreground-lab32-joint8-v3"
 MARGINAL_BINS = 32
@@ -169,11 +170,5 @@ def mismatch(first, second):
 
 
 def ranking_weight():
-    # Opt in only after offline evaluation and a complete gallery color backfill.
-    try:
-        weight = float(os.getenv("LOST_SEARCH_COAT_COLOR_WEIGHT", "0"))
-    except ValueError as error:
-        raise RuntimeError("Invalid coat-color ranking weight") from error
-    if not math.isfinite(weight) or not 0 <= weight <= .2:
-        raise RuntimeError("Coat-color ranking weight must be between 0 and 0.2")
-    return weight
+    # Every vision process states it explicitly; 0 keeps ranking color-blind.
+    return CoatColorSettings.load().ranking_weight

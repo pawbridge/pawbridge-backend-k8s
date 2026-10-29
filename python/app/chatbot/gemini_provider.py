@@ -1,4 +1,3 @@
-import os
 import logging
 
 import httpx
@@ -8,6 +7,7 @@ from app.chatbot.provider import (
     ChatbotProviderConfigurationError,
     ChatbotProviderUpstreamError,
 )
+from app.settings import ChatbotSettings
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -16,9 +16,10 @@ class GeminiChatbotProvider(ChatbotProvider):
     name = "gemini"
 
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        self.model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-3.5-flash-lite"
-        self.timeout_seconds = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "15"))
+        settings = ChatbotSettings.load()
+        self.api_key = settings.gemini_api_key.strip()
+        self.model = settings.gemini_model.strip() or ChatbotSettings.model_fields["gemini_model"].default
+        self.timeout_seconds = settings.gemini_timeout_seconds
 
     async def generate_answer(self, prompt: str) -> str:
         if not self.api_key:

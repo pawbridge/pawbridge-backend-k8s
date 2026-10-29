@@ -1,32 +1,27 @@
 """PostgreSQL gallery storage; import does not open a pool or contact a database."""
 from contextlib import contextmanager
-import os
 import threading
+
+from app.settings import PostgresSettings
 
 _lock = threading.Lock()
 _store = None
 
 
 def backend():
-    # Elasticsearch storage was removed; a leftover setting must fail instead of being ignored.
-    value = os.getenv('LOST_STORAGE_BACKEND', 'postgresql')
-    if value != 'postgresql':
-        raise RuntimeError('Only the PostgreSQL lost-search storage backend is supported')
-    return value
+    return PostgresSettings.load().backend
 
 
 def get_postgresql_store():
     global _store
-    backend()
+    settings = PostgresSettings.load()
     with _lock:
         if _store is None:
             from psycopg_pool import ConnectionPool
             from app.gallery.pg_store import PostgresqlGalleryStore
-            dsn = os.getenv('LOST_PG_DSN')
-            size = int(os.getenv('LOST_PG_POOL_MAX_SIZE', '2'))
-            if not dsn or not 1 <= size <= 4:
-                raise RuntimeError('PostgreSQL DSN and a pool limit between 1 and 4 are required')
-            pool = ConnectionPool(dsn, min_size=0, max_size=size, max_waiting=4, timeout=3,
+            if not settings.dsn:
+                raise RuntimeError('LOST_PG_DSN is required')
+            pool = ConnectionPool(settings.dsn, min_size=0, max_size=settings.pool_max_size, max_waiting=4, timeout=3,
                                   kwargs={'autocommit': True, 'connect_timeout': 3,
                                           'application_name': 'pawbridge-lost-vector'},
                                   max_idle=60, max_lifetime=600, reconnect_timeout=5,

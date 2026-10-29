@@ -2,10 +2,10 @@
 from dataclasses import dataclass
 import hashlib
 import math
-import os
-import re
 import threading
 from pathlib import Path
+
+from app.settings import VisionSettings
 
 MODEL_NAME = "vit_large_patch16_dinov3.lvd1689m"
 MODEL_VERSION = "dinov3-large-30c1109-avg-256-center-fp16-l2-v1"
@@ -16,10 +16,7 @@ _load_lock = threading.Lock()
 
 
 def visual_profile():
-    profile = os.getenv("LOST_SEARCH_VISUAL_PROFILE", "original")
-    if profile not in {"original", "animal-focus", "sam3-animal-focus"}:
-        raise RuntimeError("Unknown lost-search visual profile")
-    return profile
+    return VisionSettings.load().visual_profile
 
 
 @dataclass
@@ -32,10 +29,8 @@ class AnimalEmbedding:
 
 
 def gallery_index():
-    index = os.getenv("LOST_SEARCH_INDEX", "animals-lost-dinov3-large-v1")
-    if not re.fullmatch(r"animals-lost-dinov3-[a-z0-9][a-z0-9-]{0,80}", index):
-        raise RuntimeError("A separate DINOv3 gallery index is required")
-    profile = visual_profile()
+    settings = VisionSettings.load()
+    index, profile = settings.index, settings.visual_profile
     index_profile = ("sam3-animal-focus" if index.startswith("animals-lost-dinov3-sam3-")
                      else "animal-focus" if index.startswith("animals-lost-dinov3-focus-")
                      else "original")
@@ -60,7 +55,10 @@ class DinoV3Encoder:
             raise RuntimeError("The legacy animal-focus profile requires CUDA; select sam3-animal-focus for MPS")
         import torch
         import timm
-        checkpoint = Path(os.environ["DINOV3_CHECKPOINT"])
+        checkpoint = VisionSettings.load().dinov3_checkpoint
+        if not checkpoint:
+            raise RuntimeError("DINOV3_CHECKPOINT is required")
+        checkpoint = Path(checkpoint)
         with checkpoint.open("rb") as source:
             digest = hashlib.sha256()
             for chunk in iter(lambda: source.read(1024 * 1024), b""):
