@@ -40,7 +40,7 @@ class GpuDeviceTest(unittest.TestCase):
                 inference_device()
         for device in ("cpu", "auto", "typo"):
             with self.subTest(device=device), patch.dict(os.environ, {"LOST_SEARCH_DEVICE": device}):
-                with self.assertRaisesRegex(RuntimeError, "must be cuda or mps"):
+                with self.assertRaisesRegex(RuntimeError, "LOST_SEARCH_DEVICE"):
                     inference_device()
 
     def test_legacy_focus_cannot_accidentally_construct_a_cuda_model_on_mps(self):

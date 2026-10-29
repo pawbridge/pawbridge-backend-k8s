@@ -1,11 +1,11 @@
 """GPU search entry point for the native Mac MPS process."""
 from contextlib import asynccontextmanager, nullcontext
-import os
 import anyio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.lost_search.router import router
 from app.recommendation.router import router as recommendation_router
+from app.settings import GallerySyncSettings, InternalApiSettings, PostgresSettings
 from app.vision.dinov3 import get_encoder, gallery_index, visual_profile
 
 
@@ -18,23 +18,22 @@ def validate_focus_gallery(encoder):
 
 @asynccontextmanager
 async def lifespan(app):
-    if not os.getenv("INTERNAL_API_KEY"):
+    # Validate every setting before loading weights, so a missing value stops startup.
+    if not InternalApiSettings.load().key:
         raise RuntimeError("Internal authentication must be configured")
     gallery_index()
+    PostgresSettings.load()
+    sync = GallerySyncSettings.load()
     from app.vision.coat_color import ranking_weight
     if ranking_weight() and visual_profile() != "sam3-animal-focus":
         raise RuntimeError("Coat-color ranking requires the SAM 3 gallery")
-    enabled = os.getenv("LOST_GALLERY_SYNC_ENABLED", "false").lower() == "true"
-    state_dir = os.getenv("LOST_GALLERY_STATE_DIR")
+    enabled, state_dir = sync.enabled, sync.state_dir
     if enabled and (visual_profile() != "sam3-animal-focus" or not state_dir):
         raise RuntimeError("Automatic gallery refresh requires SAM 3 and a persistent state directory")
     from app.gallery.runtime import runtime_owner, GalleryRefresh
     from app.gallery.source import GallerySource
     from app.gallery.pages import PagedGallerySource
-    protocol = os.getenv('LOST_GALLERY_PROTOCOL', 'v1')
-    if protocol not in {'v1', 'v2'}:
-        raise RuntimeError('Gallery protocol must be v1 or v2')
-    source_class = PagedGallerySource if protocol == 'v2' else GallerySource
+    source_class = PagedGallerySource if sync.protocol == 'v2' else GallerySource
     from app.gallery.storage import storage_session
     from app.gallery.pg_store import ColorGalleryRefreshRequired, GalleryUnavailable
     if visual_profile() != 'sam3-animal-focus':
@@ -51,13 +50,10 @@ async def lifespan(app):
             ready = False
         refresh = None
         if enabled:
-            source = source_class(os.environ["LOST_GALLERY_SOURCE_URL"],
-                                   os.environ["LOST_GALLERY_SOURCE_KEY"],
-                                   os.environ["LOST_GALLERY_R2_HOST"], state_dir,
-                                   os.environ["LOST_GALLERY_PHOTO_ROOT"])
+            source = source_class(sync.source_url, sync.source_key, sync.r2_host, state_dir, sync.photo_root)
             try:
                 refresh = GalleryRefresh(store, encoder, source, gallery_index(), state_dir,
-                                         interval=int(os.getenv("LOST_GALLERY_INTERVAL_SECONDS", "900")), ready=ready)
+                                         interval=sync.interval_seconds, ready=ready)
                 app.state.gallery_refresh = refresh
                 refresh.start()
             except BaseException:

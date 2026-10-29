@@ -1,9 +1,9 @@
 """Pinned SAM 3 image-only segmentation; no model downloads or image synthesis."""
 from contextlib import nullcontext
 import hashlib
-import os
 from pathlib import Path
 
+from app.settings import VisionSettings
 from app.vision.animal_focus import FocusResult, prepare_focus, square_image
 
 CHECKPOINT_SHA256 = "9999e2341ceef5e136daa386eecb55cb414446a00ac2b55eb2dfd2f7c3cf8c9e"
@@ -72,7 +72,10 @@ class Sam3Focus:
         from sam3.model.sam3_image_processor import Sam3Processor
         if self.device == "cuda" and not torch.cuda.is_bf16_supported():
             raise RuntimeError("SAM 3 requires a BF16-capable CUDA GPU")
-        checkpoint = Path(os.environ["SAM3_CHECKPOINT"])
+        checkpoint = VisionSettings.load().sam3_checkpoint
+        if not checkpoint:
+            raise RuntimeError("SAM3_CHECKPOINT is required")
+        checkpoint = Path(checkpoint)
         digest = hashlib.sha256()
         with checkpoint.open("rb") as source:
             for chunk in iter(lambda: source.read(1024 * 1024), b""):

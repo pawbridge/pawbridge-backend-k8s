@@ -115,8 +115,10 @@ class CoatColorTest(unittest.TestCase):
         hits[0]["_source"].pop("coat_color")
         self.assertEqual([r["animalId"] for r in rank_candidates(hits, coat_color=black, color_weight=.12)], [1, 2])
 
-    def test_ranking_is_opt_in_and_invalid_weight_is_not_silently_enabled(self):
+    def test_ranking_weight_must_be_stated_and_invalid_weight_is_not_silently_enabled(self):
         with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "LOST_SEARCH_COAT_COLOR_WEIGHT"): ranking_weight()
+        with patch.dict(os.environ, {"LOST_SEARCH_COAT_COLOR_WEIGHT": "0"}):
             self.assertEqual(ranking_weight(), 0)
         for value in ("nan", "inf", "-0.1", "0.3", "typo"):
             with self.subTest(value=value), patch.dict(os.environ, {"LOST_SEARCH_COAT_COLOR_WEIGHT": value}):
