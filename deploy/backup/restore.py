@@ -27,7 +27,7 @@ def verify_inputs(directory):
 
 def verify_restored(target, manifest):
     with target.connect() as connection:
-        actual = database_proof(connection, manifest["content_proof"])
+        actual = database_proof(connection, manifest["content_proof"], "application_reads" in manifest["proof"])
     if actual != manifest["proof"]:
         raise BackupError("restored database content, application read permissions or extension proof differs")
     if role_signature(target) != manifest["roles_signature"]:
