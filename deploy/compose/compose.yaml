@@ -1,0 +1,251 @@
+# Mac 운영 Compose(`pawbridge-prod`). 비밀값과 Mac 경로, 고정 이미지 ID는 비공개 compose.env로 준다.
+# 형식은 compose.env.example 참고.
+x-hardened: &hardened
+  platform: linux/arm64
+  pull_policy: never
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  labels:
+    com.pawbridge.operating-owner: ${OPERATING_OWNER}
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: 10m, max-file: "3"}
+
+services:
+  postgres:
+    <<: *hardened
+    image: ${POSTGRES_IMAGE:?pinned image id}
+    container_name: ${OPERATING_PROJECT}-postgres
+    user: ${OPERATING_UID}:${OPERATING_GID}
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 60s
+    env_file: [{path: "${OPERATING_SECRETS}/postgres.env", format: raw}]
+    networks:
+      private: {}
+      backup-private: {ipv4_address: 10.203.254.2}
+    tmpfs: ["/tmp:rw,nosuid,size=64m", "/var/run/postgresql:rw,nosuid,size=8m,mode=0777"]
+    logging: *logging
+    volumes:
+      - {type: volume, source: postgres-data, target: /var/lib/postgresql/data, volume: {nocopy: true}}
+      - {type: bind, source: "${BACKGROUND_CONFIG}/pg_hba.conf", target: /etc/postgresql/pg_hba.conf, read_only: true, bind: {create_host_path: false}}
+    entrypoint: [postgres]
+    command: [-c, "listen_addresses=*", -c, wal_level=replica, -c, max_replication_slots=5, -c, max_wal_senders=8,
+              -c, max_slot_wal_keep_size=512MB, -c, shared_buffers=128MB, -c, max_connections=80, -c, work_mem=4MB,
+              -c, temp_file_limit=256MB, -c, autovacuum=on, -c, log_statement=none, -c, log_min_error_statement=panic,
+              -c, hba_file=/etc/postgresql/pg_hba.conf]
+    healthcheck:
+      test: [CMD, pg_isready, -U, postgres, -d, pawbridge]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  redis:
+    <<: *hardened
+    image: ${REDIS_IMAGE:?pinned image id}
+    container_name: ${OPERATING_PROJECT}-redis
+    user: ${OPERATING_UID}:${OPERATING_GID}
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 60s
+    env_file: [{path: "${OPERATING_SECRETS}/redis.env", format: raw}]
+    networks: [private]
+    tmpfs: ["/tmp:rw,nosuid,size=64m"]
+    logging: *logging
+    volumes:
+      - {type: volume, source: redis-data, target: /data, volume: {nocopy: true}}
+      # requirepass가 들어 있어 비공개 폴더에 둔다.
+      - {type: bind, source: "${OPERATING_SECRETS}/redis.conf", target: /redis.conf, read_only: true, bind: {create_host_path: false}}
+    entrypoint: [redis-server]
+    command: [/redis.conf]
+
+  # 실행 명령은 이미지 CMD를 따른다. 이미지만 되돌려도 그 이미지의 진입점으로 시작한다.
+  python-ai-service:
+    <<: *hardened
+    image: ${PYTHON_API_IMAGE:?pinned image id}
+    container_name: ${OPERATING_PROJECT}-python-api
+    user: ${OPERATING_UID}:${OPERATING_GID}
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    pids_limit: 256
+    stop_grace_period: 60s
+    environment:
+      LLM_PROVIDER: gemini
+      GEMINI_MODEL: gemini-3.5-flash-lite
+      LOST_STORAGE_BACKEND: postgresql
+      LOST_GALLERY_SYNC_ENABLED: "false"
+    # GEMINI_API_KEY, INTERNAL_API_KEY, LOST_PG_DSN
+    env_file: [{path: "${PYTHON_API_ENV_FILE:?private env file}", format: raw}]
+    networks: [private, egress]
+    tmpfs: ["/tmp:rw,nosuid,size=64m"]
+    logging: *logging
+
+  photo-service:
+    <<: *hardened
+    image: ${PHOTO_IMAGE:?pinned image id}
+    container_name: ${OPERATING_PROJECT}-photo
+    user: ${OPERATING_UID}:${OPERATING_GID}
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    pids_limit: 256
+    stop_grace_period: 60s
+    # INTERNAL_API_KEY
+    env_file: [{path: "${PHOTO_ENV_FILE:?private env file}", format: raw}]
+    networks: [private, egress]
+    tmpfs: ["/tmp:rw,nosuid,size=64m"]
+    logging: *logging
+
+  native-relay:
+    <<: *hardened
+    image: ${NGINX_IMAGE:?pinned image id}
+    container_name: ${OPERATING_PROJECT}-native-ai-relay
+    user: ${OPERATING_UID}:${OPERATING_GID}
+    mem_limit: 64m
+    memswap_limit: 64m
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 60s
+    env_file: [{path: "${OPERATING_SECRETS}/native-relay.env", format: raw}]
+    networks: [private, egress]
+    tmpfs: ["/tmp:rw,nosuid,size=64m"]
+    logging: *logging
+    volumes:
+      - {type: bind, source: "${OPERATING_STATE}/config/native-relay.conf", target: /etc/nginx/nginx.conf, read_only: true, bind: {create_host_path: false}}
+    entrypoint: [nginx]
+    command: [-g, "daemon off;"]
+
+  local-native-access:
+    <<: *hardened
+    image: ${NGINX_IMAGE:?pinned image id}
+    container_name: ${OPERATING_PROJECT}-native-db-gallery-bridge
+    user: ${OPERATING_UID}:${OPERATING_GID}
+    mem_limit: 64m
+    memswap_limit: 64m
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 60s
+    networks: [private, egress]
+    tmpfs: ["/tmp:rw,nosuid,size=64m"]
+    logging: *logging
+    volumes:
+      - {type: bind, source: "${BACKGROUND_CONFIG}/local-native-access.conf", target: /etc/nginx/nginx.conf, read_only: true, bind: {create_host_path: false}}
+    entrypoint: [nginx]
+    command: [-g, "daemon off;"]
+    ports: ["127.0.0.1:35436:5432", "127.0.0.1:35437:8080"]
+
+  backup:
+    <<: *hardened
+    image: ${BACKUP_IMAGE:?pinned image id}
+    container_name: ${OPERATING_PROJECT}-backup-scheduler
+    profiles: [background]
+    user: ${OPERATING_UID}:${OPERATING_GID}
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    pids_limit: 64
+    init: true
+    networks:
+      backup-private: {ipv4_address: 10.203.254.3}
+      egress: {}
+    tmpfs: ["/tmp:rw,nosuid,size=128m", "/var/lib/postgresql/data:rw,nosuid,size=1m"]
+    entrypoint: [/opt/backup-venv/bin/python]
+    command: [/opt/mac/mac_background_jobs.py, loop, /config/backup-job.json]
+    environment:
+      PGHOST: 10.203.254.2
+      PGPORT: "5432"
+      PGDATABASE: pawbridge
+      PGUSER: postgres
+      PGPASSWORD_FILE: /credentials/postgres-password
+      R2_ENDPOINT: ${R2_ENDPOINT:?private R2 endpoint}
+      R2_ACCESS_KEY_FILE: /credentials/r2-access
+      R2_SECRET_KEY_FILE: /credentials/r2-secret
+      AGE_RECIPIENT_FILE: /credentials/age-recipient
+      BACKUP_WORKDIR: /work
+      BACKUP_CONTENT_PROOF: "false"
+      BACKUP_TIMEOUT_SECONDS: "2400"
+      BACKUP_DATA_SCOPE: production
+      BACKUP_LIBRARY: /opt/backup
+    volumes:
+      # age 공개키, R2 키, postgres 비밀번호 파일만 둔다. 개인키는 두지 않는다.
+      - {type: bind, source: "${BACKUP_CREDENTIALS:?private credentials dir}", target: /credentials, read_only: true, bind: {create_host_path: false}}
+      - {type: bind, source: "${BACKUP_WORK:?backup work dir}", target: /work, bind: {create_host_path: false}}
+      - {type: bind, source: "${BACKGROUND_CONFIG}/backup-job.json", target: /config/backup-job.json, read_only: true, bind: {create_host_path: false}}
+      # origin/main의 deploy/scripts 사본
+      - {type: bind, source: "${MAC_SCRIPTS:?deploy/scripts copy}", target: /opt/mac, read_only: true, bind: {create_host_path: false}}
+    healthcheck:
+      test: [CMD, /opt/backup-venv/bin/python, /opt/mac/mac_background_jobs.py, health, /config/backup-job.json]
+      interval: 60s
+      timeout: 10s
+      retries: 1
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+
+  cloudflared:
+    image: cloudflare/cloudflared@sha256:4ecc4283c0f7cc127522e5ef261595cfe8571ee28f5c8d3751b24f52f9d04ebe
+    container_name: ${OPERATING_PROJECT}-cloudflared
+    profiles: [public-entry]
+    platform: linux/arm64
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: ${CLOUDFLARED_UID:?set host uid}:${CLOUDFLARED_GID:?set host gid}
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    stop_grace_period: 40s
+    command: [tunnel, --no-autoupdate, --metrics, 127.0.0.1:2000, --grace-period, 30s, run, --token-file, /run/secrets/tunnel-token]
+    networks: [egress]
+    logging: *logging
+    volumes:
+      - {type: bind, source: "${CLOUDFLARED_TOKEN_FILE:?set private token file}", target: /run/secrets/tunnel-token, read_only: true, bind: {create_host_path: false}}
+
+  monolith:
+    image: ${MONOLITH_IMAGE:?pawbridge-monolith:prod-<sha12>}
+    container_name: ${OPERATING_PROJECT}-monolith
+    restart: unless-stopped
+    read_only: false
+    cpus: 4
+    mem_limit: 2g
+    pids_limit: 512
+    stop_grace_period: 370s
+    env_file: [{path: "${MONOLITH_ENV_FILE:?monolith.standby.env or monolith.active.env}", format: raw, required: true}]
+    environment:
+      MALLOC_ARENA_MAX: "2"
+    networks:
+      private: {aliases: [monolith]}
+      egress: {aliases: [monolith]}
+    ports: [{host_ip: 127.0.0.1, published: "38400", target: 8080, protocol: tcp, mode: ingress}]
+    tmpfs: ["/tmp/pawbridge:uid=10001,gid=10001,mode=0700,size=512m"]
+    healthcheck:
+      test: [CMD, bash, -c, "exec 3<>/dev/tcp/127.0.0.1/9464 && printf 'GET /actuator/health/liveness HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 90s
+    logging:
+      driver: json-file
+      options: {max-size: 20m, max-file: "5"}
+
+networks:
+  private: {internal: true, name: "${OPERATING_PROJECT}-private"}
+  egress: {name: "${OPERATING_PROJECT}-egress"}
+  backup-private:
+    internal: true
+    name: ${OPERATING_PROJECT}-backup-private
+    ipam: {config: [{subnet: 10.203.254.0/29}]}
+
+volumes:
+  postgres-data: {external: true, name: "${OPERATING_PROJECT}-postgres-data"}
+  redis-data: {external: true, name: "${OPERATING_PROJECT}-redis-data"}

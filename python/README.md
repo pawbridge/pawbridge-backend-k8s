@@ -101,12 +101,12 @@ docker run --rm --network none --read-only --tmpfs /tmp -e PYTHONDONTWRITEBYTECO
    ```
    두 Dockerfile은 운영 중인 이미지와 같은 레시피다(기반 Python 이미지 digest 고정, `pip check`, 컨테이너 사용자 고정). 2026-10-27까지는 인프라 저장소의 `environments/mac/images/`에 있었다. 바뀐 서비스만 빌드한다. 빌드는 Python 패키지를 내려받는다. Docker Desktop 자격 증명 도우미를 못 찾으면 `PATH`에 `$HOME/.docker/bin`을 더한다.
 3. **새 이미지로 시험한다.** 위 "로컬 시험" 명령의 이미지 자리에 새 `pawbridge-mac-python` 태그를 넣어 실행한다.
-4. **교체한다.** 운영 compose 폴더(비밀 저장소 아래, 저장소에 두지 않음)에서 `compose.json`을 날짜 붙은 이름으로 백업하고, 해당 서비스의 `image` 값만 새 이미지 ID(`docker image inspect <태그> --format '{{.Id}}'`)로 바꾼 뒤 그 서비스만 다시 만든다.
+4. **교체한다.** 운영 compose 폴더([`deploy/compose`](../deploy/compose/README.md))에서 `compose.env`를 날짜 붙은 이름으로 백업하고, `PYTHON_API_IMAGE` 또는 `PHOTO_IMAGE` 한 줄만 새 이미지 ID(`docker image inspect <태그> --format '{{.Id}}'`)로 바꾼 뒤 그 서비스만 다시 만든다. 실행 명령은 이미지 CMD를 따른다.
    ```bash
-   docker compose -p pawbridge-prod -f compose.json --env-file compose.env up -d --no-deps python-ai-service
+   docker compose -p pawbridge-prod -f compose.yaml --env-file compose.env up -d --no-build --pull never --no-deps python-ai-service
    ```
 5. **확인한다.** 컨테이너가 재시작 없이 실행 중이고, 백엔드의 동물 추천·사진 기능이 정상 응답하며, 10분 동안 오류 로그와 운영 경고가 없는지 본다.
-6. **롤백한다.** 백업한 `compose.json`을 되돌리고 4의 명령을 다시 실행한다. 이전 이미지는 로컬에 남아 있다.
+6. **롤백한다.** 백업한 `compose.env`를 되돌리고 4의 명령을 다시 실행한다. 이전 이미지는 로컬에 남아 있다.
 
 Mac 네이티브 실행본은 앱 소스만 바꿔서는 교체되지 않는다. 새 실행본과 가상환경을 따로 준비하는 절차는 [macOS 런북](deploy/macos/README.md)을 따른다.
 
