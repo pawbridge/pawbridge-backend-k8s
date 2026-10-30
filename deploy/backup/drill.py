@@ -1,4 +1,4 @@
-"""원본 DB·업무 프로세스 없이 신규 PostgreSQL에 복원하고 재시작·5개 앱 역할 조회를 검사한다."""
+"""원본 DB·업무 프로세스 없이 신규 PostgreSQL에 복원하고 재시작·백업에 기록된 앱 역할 조회를 검사한다."""
 import argparse
 import dataclasses
 import json
@@ -11,8 +11,6 @@ import subprocess
 from backup import BackupError, Config, database_proof, emit
 from restore import restore_bundle, verify_restored
 
-SERVICES = ('animal', 'user', 'community', 'store', 'payment')
-
 
 def command(args, timeout=2400, **kwargs):
     result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, **kwargs)
@@ -21,14 +19,25 @@ def command(args, timeout=2400, **kwargs):
     return result.stdout
 
 
+def application_reads(proof):
+    """역할별로 다시 조회할 (스키마, 테이블). 2026-10-30 이전 백업은 MSA 역할 자기 스키마의 테이블 이름만 남겼다."""
+    if 'role_reads' in proof:
+        return {role: [tuple(table) for table in tables] for role, tables in proof['role_reads'].items()}
+    return {role: [(role.removesuffix('_app'), table) for table in tables]
+            for role, tables in proof['application_reads'].items()}
+
+
 def run_drill(bundle, identity, workdir, passwords, report):
     os.umask(0o077)
     root, passwords, report = Path(workdir), Path(passwords), Path(report)
     if root.exists() or report.exists():
         raise BackupError('drill requires a new work directory and report')
-    for service in SERVICES:
-        if not (passwords / ('pawbridge_' + service + '_app')).is_file():
-            raise BackupError('all five application credential files are required')
+    manifest = json.loads(command(['age','--decrypt','--identity',str(identity),str(Path(bundle)/'manifest.json.age')],timeout=90))
+    reads = application_reads(manifest['proof'])
+    if not any(reads.values()):
+        raise BackupError('backup recorded no application role with readable tables')
+    if any(not (passwords / role).is_file() for role in reads):
+        raise BackupError('a credential file is required for every application role in the backup')
     root.mkdir(mode=0o700)
     socket = root / 'socket'
     if len(str(socket).encode()) > 80:
@@ -50,20 +59,15 @@ def run_drill(bundle, identity, workdir, passwords, report):
         started = True
         evidence = restore_bundle(bundle, identity, target, root/'restore-stage.json')
         command(control+['-m','fast','restart'],timeout=90)
-        manifest = json.loads(command(['age','--decrypt','--identity',str(identity),str(Path(bundle)/'manifest.json.age')],timeout=90))
         verify_restored(target, manifest)
         applications = {}
-        for service in SERVICES:
-            schema = 'pawbridge_' + service
-            app = dataclasses.replace(target,user=schema+'_app',password_file=str(passwords/(schema+'_app')))
-            from psycopg import sql
+        from psycopg import sql
+        for role, tables in reads.items():
+            app = dataclasses.replace(target,user=role,password_file=str(passwords/role))
             with app.connect() as connection:
-                tables = manifest['proof']['application_reads'].get(schema+'_app', [])
-                if not tables:
-                    raise BackupError('original application has no verified readable tables')
-                for table in tables:
+                for schema, table in tables:
                     connection.execute(sql.SQL('SELECT 1 FROM ONLY {} LIMIT 1').format(sql.Identifier(schema,table))).fetchall()
-                applications[service] = {'readable_tables':len(tables)}
+                applications[role] = {'readable_tables':len(tables)}
         with target.connect() as connection:
             columns = connection.execute("""SELECT n.nspname,c.relname,a.attname FROM pg_attribute a
                 JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -77,7 +81,7 @@ def run_drill(bundle, identity, workdir, passwords, report):
                     connection.execute(sql.SQL('SELECT {} FROM {} ORDER BY {} <=> %s::vector LIMIT 1').format(identifier,qualified,identifier),(row[0],)).fetchone()
                     vector_checks += 1
         evidence.update(restart_verified=True,application_role_reads_verified=True,
-                        application_schemas=applications,vector_columns_queried=vector_checks)
+                        application_roles=applications,vector_columns_queried=vector_checks)
 
     finally:
         if started:

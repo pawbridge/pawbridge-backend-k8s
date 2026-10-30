@@ -202,7 +202,7 @@ def role_signature(cfg, exclude_roles=()):
     return hash_.hexdigest()
 
 
-def database_proof(connection, content=False):
+def database_proof(connection, content=False, legacy_reads=False):
     """동일 snapshot의 테이블 수·행 수. 첫 복원 시험에는 전행 content proof를 추가한다."""
     from psycopg import sql
     tables = connection.execute("""SELECT n.nspname,c.relname FROM pg_class c
@@ -227,7 +227,23 @@ def database_proof(connection, content=False):
             count = connection.execute(sql.SQL("SELECT count(*) FROM ONLY {}").format(qualified)).fetchone()[0]
             proof["tables"][name] = {"rows": count}
     # 앱이 원래 조회 가능한 테이블만 복원 시험 대상으로 삼는다. 관리자 전용 테이블 접근을 요구하지 않는다.
-    proof["application_reads"] = {}
+    if legacy_reads:
+        proof["application_reads"] = legacy_application_reads(connection)
+        return proof
+    proof["role_reads"] = {}
+    for (role,) in connection.execute(
+            "SELECT rolname FROM pg_roles WHERE rolcanlogin AND NOT rolsuper ORDER BY rolname").fetchall():
+        rows = connection.execute("""SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE c.relkind='r' AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+            AND has_schema_privilege(%s,n.oid,'USAGE') AND has_table_privilege(%s,c.oid,'SELECT')
+            ORDER BY n.nspname,c.relname""", (role, role)).fetchall()
+        proof["role_reads"][role] = [list(row) for row in rows]
+    return proof
+
+
+def legacy_application_reads(connection):
+    """2026-10-30 이전 백업의 기록 방식. MSA 역할별로 자기 스키마 안 테이블 이름만 남겼다."""
+    reads = {}
     for service in ("animal", "user", "community", "store", "payment"):
         schema = "pawbridge_" + service
         role = schema + "_app"
@@ -236,8 +252,8 @@ def database_proof(connection, content=False):
         rows = connection.execute("""SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE n.nspname=%s AND c.relkind='r' AND has_schema_privilege(%s,n.oid,'USAGE')
             AND has_table_privilege(%s,c.oid,'SELECT') ORDER BY c.relname""", (schema, role, role)).fetchall()
-        proof["application_reads"][role] = [row[0] for row in rows]
-    return proof
+        reads[role] = [row[0] for row in rows]
+    return reads
 
 
 def capture(cfg, recipient, directory, run):
