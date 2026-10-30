@@ -309,9 +309,9 @@ User 내부 `UserProfileQuery.require(id)`가 같은 reader의 3초 read-only �
    docker build --pull=false --build-arg GIT_SHA=$(git rev-parse HEAD) -t pawbridge-monolith:prod-$(git rev-parse --short=12 HEAD) .
    ```
    `Dockerfile`과 `.dockerignore`가 이 폴더에 있다. 빌드 맥락에는 `boot/build/libs/pawbridge-backend-app.jar`만 들어간다.
-3. **이미지를 교체한다.** 운영 compose 폴더(비밀 저장소 아래, 저장소에 두지 않음)에서 `compose.env`를 날짜 붙은 이름으로 백업하고 `MONOLITH_IMAGE` 한 줄만 새 태그로 바꾼 뒤 monolith만 다시 만든다.
+3. **이미지를 교체한다.** 운영 compose 폴더([`deploy/compose`](../deploy/compose/README.md))에서 `compose.env`를 날짜 붙은 이름으로 백업하고 `MONOLITH_IMAGE` 한 줄만 새 태그로 바꾼 뒤 monolith만 다시 만든다.
    ```bash
-   docker compose -p pawbridge-prod -f compose.json --env-file compose.env up -d --no-deps monolith
+   docker compose -p pawbridge-prod -f compose.yaml --env-file compose.env up -d --no-build --pull never --no-deps monolith
    ```
 4. **확인한다.** 컨테이너가 `healthy`가 되고, 공개 API(예: `GET /api/v1/posts/read`, `GET /api/v1/animals`)가 정상 응답하며, 10분 동안 ERROR 로그와 운영 경고가 없는지 본다.
 5. **롤백한다.** 문제가 있으면 백업한 `compose.env`를 되돌리고 3의 명령을 다시 실행한다. 이전 이미지는 로컬에 남아 있다. DB 마이그레이션을 함께 적용했다면 이전 이미지와 호환되는지 먼저 확인한다.
